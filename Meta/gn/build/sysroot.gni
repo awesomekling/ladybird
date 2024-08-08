@@ -1,4 +1,4 @@
 declare_args() {
-  # Path of sysroot to use.
+  # DeprecatedPath of sysroot to use.
   sysroot = ""
 }

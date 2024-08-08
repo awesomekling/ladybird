@@ -176,7 +176,7 @@ struct FillRectWithRoundedCorners {
 
 struct FillPathUsingColor {
     Gfx::IntRect path_bounding_rect;
-    Gfx::Path path;
+    Gfx::DeprecatedPath path;
     Color color;
     Gfx::WindingRule winding_rule;
     Gfx::FloatPoint aa_translation;
@@ -192,7 +192,7 @@ struct FillPathUsingColor {
 
 struct FillPathUsingPaintStyle {
     Gfx::IntRect path_bounding_rect;
-    Gfx::Path path;
+    Gfx::DeprecatedPath path;
     PaintStyle paint_style;
     Gfx::WindingRule winding_rule;
     float opacity;
@@ -209,7 +209,7 @@ struct FillPathUsingPaintStyle {
 
 struct StrokePathUsingColor {
     Gfx::IntRect path_bounding_rect;
-    Gfx::Path path;
+    Gfx::DeprecatedPath path;
     Color color;
     float thickness;
     Gfx::FloatPoint aa_translation;
@@ -225,7 +225,7 @@ struct StrokePathUsingColor {
 
 struct StrokePathUsingPaintStyle {
     Gfx::IntRect path_bounding_rect;
-    Gfx::Path path;
+    Gfx::DeprecatedPath path;
     PaintStyle paint_style;
     float thickness;
     float opacity = 1.0f;

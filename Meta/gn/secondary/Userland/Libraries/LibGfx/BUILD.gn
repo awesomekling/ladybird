@@ -80,7 +80,7 @@ shared_library("LibGfx") {
     "ImageFormats/WebPWriterLossless.cpp",
     "ImmutableBitmap.cpp",
     "Palette.cpp",
-    "Path.cpp",
+    "DeprecatedPath.cpp",
     "PathClipper.cpp",
     "Point.cpp",
     "Rect.cpp",

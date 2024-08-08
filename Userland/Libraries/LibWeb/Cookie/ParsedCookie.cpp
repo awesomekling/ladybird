@@ -140,7 +140,7 @@ void process_attribute(ParsedCookie& parsed_cookie, StringView attribute_name, S
         on_max_age_attribute(parsed_cookie, attribute_value);
     } else if (attribute_name.equals_ignoring_ascii_case("Domain"sv)) {
         on_domain_attribute(parsed_cookie, attribute_value);
-    } else if (attribute_name.equals_ignoring_ascii_case("Path"sv)) {
+    } else if (attribute_name.equals_ignoring_ascii_case("DeprecatedPath"sv)) {
         on_path_attribute(parsed_cookie, attribute_value);
     } else if (attribute_name.equals_ignoring_ascii_case("Secure"sv)) {
         on_secure_attribute(parsed_cookie);

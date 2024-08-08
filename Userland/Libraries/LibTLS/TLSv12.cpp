@@ -328,7 +328,7 @@ bool Context::verify_chain(StringView host) const
             return false;
         }
         if (parent_certificate.path_length_constraint.has_value() && cert_index > parent_certificate.path_length_constraint.value()) {
-            dbgln("verify_chain: Path length for certificate exceeded");
+            dbgln("verify_chain: DeprecatedPath length for certificate exceeded");
             return false;
         }
 
