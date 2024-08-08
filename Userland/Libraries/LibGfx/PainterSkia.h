@@ -17,6 +17,7 @@ public:
     explicit PainterSkia(NonnullRefPtr<Gfx::Bitmap>);
     virtual ~PainterSkia() override;
 
+    virtual void clear_rect(Gfx::FloatRect const&, Color) override;
     virtual void fill_rect(Gfx::FloatRect const&, Color) override;
     virtual void draw_bitmap(Gfx::FloatRect const& dst_rect, Gfx::Bitmap const& src_bitmap, Gfx::IntRect const& src_rect, Gfx::ScalingMode, float global_alpha) override;
     virtual void stroke_path(Gfx::DeprecatedPath const&, Gfx::Color, float thickness) override;

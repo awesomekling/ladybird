@@ -126,6 +126,14 @@ PainterSkia::PainterSkia(NonnullRefPtr<Gfx::Bitmap> target_bitmap)
 
 PainterSkia::~PainterSkia() = default;
 
+void PainterSkia::clear_rect(Gfx::FloatRect const& rect, Gfx::Color color)
+{
+    SkPaint paint;
+    paint.setColor(to_skia_color(color));
+    paint.setBlendMode(SkBlendMode::kClear);
+    impl().canvas()->drawRect(to_skia_rect(rect), paint);
+}
+
 void PainterSkia::fill_rect(Gfx::FloatRect const& rect, Color color)
 {
     SkPaint paint;

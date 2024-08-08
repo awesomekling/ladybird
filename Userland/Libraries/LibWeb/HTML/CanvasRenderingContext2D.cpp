@@ -99,7 +99,7 @@ void CanvasRenderingContext2D::clear_rect(float x, float y, float width, float h
 {
     if (auto* painter = this->painter()) {
         auto rect = Gfx::FloatRect(x, y, width, height);
-        painter->fill_rect(rect, Color::Transparent);
+        painter->clear_rect(rect, Color::Transparent);
         did_draw(rect);
     }
 }
