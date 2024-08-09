@@ -18,6 +18,7 @@
 #include <LibGfx/ImmutableBitmap.h>
 #include <LibGfx/PaintStyle.h>
 #include <LibGfx/Palette.h>
+#include <LibGfx/Path.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
 #include <LibGfx/ScalingMode.h>
@@ -176,7 +177,7 @@ struct FillRectWithRoundedCorners {
 
 struct FillPathUsingColor {
     Gfx::IntRect path_bounding_rect;
-    Gfx::DeprecatedPath path;
+    Gfx::Path path;
     Color color;
     Gfx::WindingRule winding_rule;
     Gfx::FloatPoint aa_translation;
@@ -192,7 +193,7 @@ struct FillPathUsingColor {
 
 struct FillPathUsingPaintStyle {
     Gfx::IntRect path_bounding_rect;
-    Gfx::DeprecatedPath path;
+    Gfx::Path path;
     PaintStyle paint_style;
     Gfx::WindingRule winding_rule;
     float opacity;
@@ -209,7 +210,7 @@ struct FillPathUsingPaintStyle {
 
 struct StrokePathUsingColor {
     Gfx::IntRect path_bounding_rect;
-    Gfx::DeprecatedPath path;
+    Gfx::Path path;
     Color color;
     float thickness;
     Gfx::FloatPoint aa_translation;
@@ -225,7 +226,7 @@ struct StrokePathUsingColor {
 
 struct StrokePathUsingPaintStyle {
     Gfx::IntRect path_bounding_rect;
-    Gfx::DeprecatedPath path;
+    Gfx::Path path;
     PaintStyle paint_style;
     float thickness;
     float opacity = 1.0f;

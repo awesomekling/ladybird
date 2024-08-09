@@ -128,6 +128,13 @@ void PathImplSkia::text(Utf8View string, Font const& font)
     SkTextUtils::GetPath(string.as_string().characters_without_null_termination(), string.as_string().length(), SkTextEncoding::kUTF8, last_point().x(), last_point().y(), verify_cast<ScaledFont>(font).skia_font(1), m_path.ptr());
 }
 
+NonnullOwnPtr<PathImpl> PathImplSkia::place_text_along(Utf8View text, Font const& font) const
+{
+    (void)text;
+    (void)font;
+    return clone();
+}
+
 void PathImplSkia::append_path(Gfx::Path const& other)
 {
     m_path->addPath(static_cast<PathImplSkia const&>(other.impl()).sk_path());
