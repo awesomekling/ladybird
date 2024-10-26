@@ -616,12 +616,6 @@ public:
         return {};
     }
 
-    ErrorOr<void> try_resize_and_keep_capacity(size_t new_size)
-    requires(!contains_reference)
-    {
-        return try_resize(new_size, true);
-    }
-
     void grow_capacity(size_t needed_capacity)
     {
         MUST(try_grow_capacity(needed_capacity));
@@ -660,7 +654,7 @@ public:
     void resize_and_keep_capacity(size_t new_size)
     requires(!contains_reference)
     {
-        MUST(try_resize_and_keep_capacity(new_size));
+        resize(new_size, true);
     }
 
     void shrink_to_fit()
