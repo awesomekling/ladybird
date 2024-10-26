@@ -132,7 +132,7 @@ ErrorOr<T> decode(Decoder& decoder)
     T vector;
 
     auto size = TRY(decoder.decode_size());
-    TRY(vector.try_ensure_capacity(size));
+    vector.ensure_capacity(size);
 
     for (size_t i = 0; i < size; ++i) {
         auto value = TRY(decoder.decode<typename T::ValueType>());

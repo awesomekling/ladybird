@@ -40,7 +40,7 @@ template<OneOf<Utf8View, Utf32View> UtfViewType>
 static ErrorOr<Utf16Data> to_utf16_slow(UtfViewType const& view, Endianness endianness)
 {
     Utf16Data utf16_data;
-    TRY(utf16_data.try_ensure_capacity(view.length()));
+    utf16_data.ensure_capacity(view.length());
 
     for (auto code_point : view)
         TRY(code_point_to_utf16(utf16_data, code_point, endianness));

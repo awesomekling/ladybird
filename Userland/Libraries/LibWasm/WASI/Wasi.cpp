@@ -228,7 +228,7 @@ template<typename T>
 ErrorOr<Vector<T>> copy_typed_array(Configuration& configuration, Pointer<T> source, Size count)
 {
     Vector<T> values;
-    TRY(values.try_ensure_capacity(count));
+    values.ensure_capacity(count);
     auto* memory = configuration.store().get(MemoryAddress { 0 });
     if (!memory)
         return Error::from_errno(ENOMEM);

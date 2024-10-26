@@ -219,7 +219,7 @@ JS::ThrowCompletionOr<NonnullOwnPtr<Wasm::ModuleInstance>> instantiate_module(JS
                                 return vm.throw_completion<JS::TypeError>(ByteString::formatted("Invalid number of return values for multi-value wasm return of {} objects", type.results().size()));
 
                             Vector<Wasm::Value> wasm_values;
-                            TRY_OR_THROW_OOM(vm, wasm_values.try_ensure_capacity(values.size()));
+                            wasm_values.ensure_capacity(values.size());
 
                             size_t i = 0;
                             for (auto& value : values)

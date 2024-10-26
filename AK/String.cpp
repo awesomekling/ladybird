@@ -297,7 +297,7 @@ ErrorOr<String> String::reverse() const
     auto code_point_length = code_points().length();
 
     Vector<u32> code_points;
-    TRY(code_points.try_ensure_capacity(code_point_length));
+    code_points.ensure_capacity(code_point_length);
 
     for (auto code_point : this->code_points())
         code_points.unchecked_append(code_point);

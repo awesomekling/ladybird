@@ -348,7 +348,7 @@ static ErrorOr<ByteBuffer> encode_multi_localized_unicode(MultiLocalizedUnicodeT
 
     size_t number_of_codepoints = 0;
     Vector<Utf16Data> utf16_strings;
-    TRY(utf16_strings.try_ensure_capacity(number_of_records));
+    utf16_strings.ensure_capacity(number_of_records);
     for (auto const& record : tag_data.records()) {
         TRY(utf16_strings.try_append(TRY(utf8_to_utf16(record.text))));
         number_of_codepoints += utf16_strings.last().size();
@@ -614,7 +614,7 @@ static ErrorOr<Optional<ByteBuffer>> encode_tag_data(TagData const& tag_data)
 static ErrorOr<Vector<ByteBuffer>> encode_tag_datas(Profile const& profile, HashMap<TagData*, size_t>& tag_data_map)
 {
     Vector<ByteBuffer> tag_data_bytes;
-    TRY(tag_data_bytes.try_ensure_capacity(profile.tag_count()));
+    tag_data_bytes.ensure_capacity(profile.tag_count());
 
     TRY(profile.try_for_each_tag([&](auto, auto tag_data) -> ErrorOr<void> {
         if (tag_data_map.contains(tag_data.ptr()))

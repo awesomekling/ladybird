@@ -18,7 +18,7 @@ MessageBuffer::MessageBuffer()
 
 ErrorOr<void> MessageBuffer::extend_data_capacity(size_t capacity)
 {
-    TRY(m_data.try_ensure_capacity(m_data.size() + capacity));
+    m_data.ensure_capacity(m_data.size() + capacity);
     return {};
 }
 

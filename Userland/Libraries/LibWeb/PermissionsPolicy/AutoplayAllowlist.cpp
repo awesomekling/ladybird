@@ -70,7 +70,7 @@ ErrorOr<void> AutoplayAllowlist::enable_for_origins(ReadonlySpan<String> origins
     m_allowlist = Patterns {};
 
     auto& allowlist = m_allowlist->get<Patterns>();
-    TRY(allowlist.try_ensure_capacity(origins.size()));
+    allowlist.ensure_capacity(origins.size());
 
     for (auto const& origin : origins) {
         URL::URL url { origin };

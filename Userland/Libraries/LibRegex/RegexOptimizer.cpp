@@ -1195,7 +1195,7 @@ void Optimizer::append_alternation(ByteCode& target, Span<ByteCode> alternatives
 
         HashMap<size_t, NonnullOwnPtr<RedBlackTree<u64, u64>>> instruction_positions;
         if (has_any_backwards_jump)
-            MUST(instruction_positions.try_ensure_capacity(alternatives.size()));
+            instruction_positions.ensure_capacity(alternatives.size());
 
         auto ip_mapping_for_alternative = [&](size_t i) -> RedBlackTree<u64, u64>& {
             return *instruction_positions.ensure(i, [] {

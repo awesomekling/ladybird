@@ -321,7 +321,7 @@ ThrowCompletionOr<Vector<String>> calendar_fields(VM& vm, Object& calendar, Vect
     // 2. If fields is undefined, return fieldNames.
     if (!fields) {
         Vector<String> result;
-        TRY_OR_THROW_OOM(vm, result.try_ensure_capacity(field_names.size()));
+        result.ensure_capacity(field_names.size());
         for (auto& value : field_names)
             result.unchecked_append(TRY_OR_THROW_OOM(vm, String::from_utf8(value)));
         return result;
@@ -337,7 +337,7 @@ ThrowCompletionOr<Vector<String>> calendar_fields(VM& vm, Object& calendar, Vect
     auto list = TRY(iterable_to_list_of_type(vm, fields_array, { OptionType::String }));
 
     Vector<String> result;
-    TRY_OR_THROW_OOM(vm, result.try_ensure_capacity(list.size()));
+    result.ensure_capacity(list.size());
     for (auto& value : list)
         result.unchecked_append(value.as_string().utf8_string());
     return result;

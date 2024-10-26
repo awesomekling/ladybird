@@ -19,7 +19,7 @@ ErrorOr<ByteBuffer> decode_all(ReadonlyBytes bytes, Optional<u64> expected_outpu
     ByteBuffer decoded_bytes;
 
     if (expected_output_size.has_value())
-        TRY(decoded_bytes.try_ensure_capacity(*expected_output_size));
+        decoded_bytes.ensure_capacity(*expected_output_size);
 
     while (memory_stream->remaining() > 0 && decoded_bytes.size() < expected_output_size.value_or(NumericLimits<u64>::max())) {
         auto const length = TRY(memory_stream->read_value<u8>());

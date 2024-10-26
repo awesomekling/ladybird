@@ -569,14 +569,20 @@ public:
         return {};
     }
 
-    ErrorOr<void> try_ensure_capacity(size_t needed_capacity)
+    void grow_capacity(size_t needed_capacity)
     {
         if (m_capacity >= needed_capacity)
-            return {};
+            return;
+        ensure_capacity(padded_capacity(needed_capacity));
+    }
+
+    void ensure_capacity(size_t needed_capacity)
+    {
+        if (m_capacity >= needed_capacity)
+            return;
         size_t new_capacity = kmalloc_good_size(needed_capacity * sizeof(StorageType)) / sizeof(StorageType);
         auto* new_buffer = static_cast<StorageType*>(kmalloc_array(new_capacity, sizeof(StorageType)));
-        if (new_buffer == nullptr)
-            return Error::from_errno(ENOMEM);
+        VERIFY(new_buffer);
 
         if constexpr (Traits<StorageType>::is_trivial()) {
             TypedTransfer<StorageType>::copy(new_buffer, data(), m_size);
@@ -590,19 +596,6 @@ public:
             kfree_sized(m_outline_buffer, m_capacity * sizeof(StorageType));
         m_outline_buffer = new_buffer;
         m_capacity = new_capacity;
-        return {};
-    }
-
-    void grow_capacity(size_t needed_capacity)
-    {
-        if (m_capacity >= needed_capacity)
-            return;
-        ensure_capacity(padded_capacity(needed_capacity));
-    }
-
-    void ensure_capacity(size_t needed_capacity)
-    {
-        MUST(try_ensure_capacity(needed_capacity));
     }
 
     void shrink(size_t new_size, bool keep_capacity = false)

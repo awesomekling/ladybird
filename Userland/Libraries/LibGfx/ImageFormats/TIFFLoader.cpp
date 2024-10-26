@@ -634,7 +634,7 @@ private:
 
         auto const read_every_values = [this, count]<typename T>() -> ErrorOr<Vector<Value>> {
             Vector<Value, 1> result {};
-            TRY(result.try_ensure_capacity(count));
+            result.ensure_capacity(count);
             if constexpr (IsSpecializationOf<T, Rational>) {
                 for (u32 i = 0; i < count; ++i)
                     result.empend(T { TRY(read_value<typename T::Type>()), TRY(read_value<typename T::Type>()) });

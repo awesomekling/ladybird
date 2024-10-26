@@ -60,7 +60,7 @@ should not be possible for the code inside the macro to fail or if a failure is 
 
 ErrorOr<void> insert_one_to_onehundred(Vector<int>& vector)
 {
-    TRY(vector.try_ensure_capacity(vector.size() + 100));
+    TRY(vector.ensure_capacity(vector.size() + 100));
 
     for (int i = 1; i <= 100; i++) {
         // We previously made sure that we allocated enough space, so the append operation shouldn't ever fail.

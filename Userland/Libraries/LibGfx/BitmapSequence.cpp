@@ -103,7 +103,7 @@ ErrorOr<Gfx::BitmapSequence> decode(Decoder& decoder)
 
     Gfx::BitmapSequence result = {};
     auto& bitmaps = result.bitmaps;
-    TRY(bitmaps.try_ensure_capacity(metadata_list.size()));
+    bitmaps.ensure_capacity(metadata_list.size());
 
     ReadonlyBytes bytes = ReadonlyBytes(collated_buffer.data<u8>(), collated_buffer.size());
     size_t bytes_read = 0;

@@ -166,7 +166,7 @@ ErrorOr<ColorPalette> median_cut(Bitmap const& bitmap, u16 palette_size)
         TRY(color_set.try_set(color));
 
     Vector<ARGB32> first_bucket;
-    TRY(first_bucket.try_ensure_capacity(color_set.size()));
+    first_bucket.ensure_capacity(color_set.size());
     for (auto const color : color_set)
         first_bucket.append(color);
 

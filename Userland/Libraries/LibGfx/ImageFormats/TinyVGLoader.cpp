@@ -134,7 +134,7 @@ static ErrorOr<Vector<Color>> decode_color_table(Stream& stream, ColorEncoding e
 
     static constexpr size_t MAX_INITIAL_COLOR_TABLE_SIZE = 65536;
     Vector<Color> color_table;
-    TRY(color_table.try_ensure_capacity(min(MAX_INITIAL_COLOR_TABLE_SIZE, color_count)));
+    color_table.ensure_capacity(min(MAX_INITIAL_COLOR_TABLE_SIZE, color_count));
     auto parse_color = [&]() -> ErrorOr<Color> {
         switch (encoding) {
         case ColorEncoding::RGBA8888: {
