@@ -334,12 +334,35 @@ public:
 
     void prepend(Vector&& other)
     {
-        MUST(try_prepend(move(other)));
+        if (other.is_empty())
+            return;
+
+        if (is_empty()) {
+            *this = move(other);
+            return;
+        }
+
+        auto other_size = other.size();
+        grow_capacity(size() + other_size);
+
+        for (size_t i = size() + other_size - 1; i >= other.size(); --i) {
+            new (slot(i)) StorageType(move(at(i - other_size)));
+            at(i - other_size).~StorageType();
+        }
+
+        Vector tmp = move(other);
+        TypedTransfer<StorageType>::move(slot(0), tmp.data(), tmp.size());
+        m_size += other_size;
     }
 
     void prepend(StorageType const* values, size_t count)
     {
-        MUST(try_prepend(values, count));
+        if (count == 0)
+            return;
+        grow_capacity(size() + count);
+        TypedTransfer<StorageType>::move(slot(count), slot(0), m_size);
+        TypedTransfer<StorageType>::copy(slot(0), values, count);
+        m_size += count;
     }
 
     // FIXME: What about assigning from a vector with lower inline capacity?
@@ -554,48 +577,6 @@ public:
             return {};
         TRY(try_grow_capacity(size() + count));
         TypedTransfer<StorageType>::copy(slot(m_size), values, count);
-        m_size += count;
-        return {};
-    }
-
-    template<typename U = T>
-    ErrorOr<void> try_prepend(U&& value)
-    requires(CanBePlacedInsideVector<U>)
-    {
-        return try_insert(0, forward<U>(value));
-    }
-
-    ErrorOr<void> try_prepend(Vector&& other)
-    {
-        if (other.is_empty())
-            return {};
-
-        if (is_empty()) {
-            *this = move(other);
-            return {};
-        }
-
-        auto other_size = other.size();
-        TRY(try_grow_capacity(size() + other_size));
-
-        for (size_t i = size() + other_size - 1; i >= other.size(); --i) {
-            new (slot(i)) StorageType(move(at(i - other_size)));
-            at(i - other_size).~StorageType();
-        }
-
-        Vector tmp = move(other);
-        TypedTransfer<StorageType>::move(slot(0), tmp.data(), tmp.size());
-        m_size += other_size;
-        return {};
-    }
-
-    ErrorOr<void> try_prepend(StorageType const* values, size_t count)
-    {
-        if (count == 0)
-            return {};
-        TRY(try_grow_capacity(size() + count));
-        TypedTransfer<StorageType>::move(slot(count), slot(0), m_size);
-        TypedTransfer<StorageType>::copy(slot(0), values, count);
         m_size += count;
         return {};
     }
