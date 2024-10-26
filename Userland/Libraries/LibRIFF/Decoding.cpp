@@ -22,7 +22,7 @@ ErrorOr<RIFF::OwnedList> RIFF::OwnedList::read_from_stream(Stream& stream)
     auto type = TRY(stream.read_value<ChunkID>());
     Vector<RIFF::OwnedChunk> chunks;
     while (!stream.is_eof())
-        TRY(chunks.try_append(TRY(stream.read_value<RIFF::OwnedChunk>())));
+        chunks.append(TRY(stream.read_value<RIFF::OwnedChunk>()));
 
     return RIFF::OwnedList { .type = type, .chunks = move(chunks) };
 }

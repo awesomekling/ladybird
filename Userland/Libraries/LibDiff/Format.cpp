@@ -131,8 +131,8 @@ static ErrorOr<SplitLines> split_hunk_into_old_and_new_lines(Hunk const& hunk)
             VERIFY(lines.new_lines.size() < hunk.location.new_range.number_of_lines);
 
             operation = Line::Operation::Context;
-            TRY(lines.new_lines.try_append(Line { operation, line.content }));
-            TRY(lines.old_lines.try_append(Line { operation, line.content }));
+            lines.new_lines.append(Line { operation, line.content });
+            lines.old_lines.append(Line { operation, line.content });
             new_lines_last_context = lines.new_lines.size();
             old_lines_last_context = lines.old_lines.size();
             break;
@@ -144,7 +144,7 @@ static ErrorOr<SplitLines> split_hunk_into_old_and_new_lines(Hunk const& hunk)
             else
                 operation = Line::Operation::Addition;
 
-            TRY(lines.new_lines.try_append(Line { operation, line.content }));
+            lines.new_lines.append(Line { operation, line.content });
             is_all_deletions = false;
             break;
         case Line::Operation::Removal:
@@ -155,7 +155,7 @@ static ErrorOr<SplitLines> split_hunk_into_old_and_new_lines(Hunk const& hunk)
             else
                 operation = Line::Operation::Removal;
 
-            TRY(lines.old_lines.try_append(Line { operation, line.content }));
+            lines.old_lines.append(Line { operation, line.content });
             is_all_insertions = false;
             break;
         default:

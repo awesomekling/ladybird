@@ -612,7 +612,7 @@ ErrorOr<Vector<Certificate>> DefaultRootCACertificates::parse_pem_root_certifica
         }
         auto certificate = certificate_result.release_value();
         if (certificate.is_certificate_authority && certificate.is_self_signed()) {
-            TRY(certificates.try_append(move(certificate)));
+            certificates.append(move(certificate));
         } else {
             dbgln("Skipped '{}' because it is not a valid root CA", TRY(certificate.subject.to_string()));
         }

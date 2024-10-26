@@ -521,7 +521,7 @@ WebIDL::ExceptionOr<void> serialize_reg_exp_object(JS::VM& vm, SerializationReco
     return {};
 }
 
-WebIDL::ExceptionOr<void> serialize_bytes(JS::VM& vm, Vector<u32>& vector, ReadonlyBytes bytes)
+WebIDL::ExceptionOr<void> serialize_bytes(JS::VM&, Vector<u32>& vector, ReadonlyBytes bytes)
 {
     // Append size of the buffer to the serialized structure.
     u64 const size = bytes.size();
@@ -537,7 +537,7 @@ WebIDL::ExceptionOr<void> serialize_bytes(JS::VM& vm, Vector<u32>& vector, Reado
             if (byte_position == size)
                 break;
         }
-        TRY_OR_THROW_OOM(vm, vector.try_append(combined_value));
+        vector.append(combined_value);
     }
     return {};
 }

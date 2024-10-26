@@ -371,7 +371,7 @@ void InspectorClient::load_cookies()
         json_cookie.set("lastAccessTime"sv, JsonValue { cookie.last_access_time.milliseconds_since_epoch() });
         json_cookie.set("expiryTime"sv, JsonValue { cookie.expiry_time.milliseconds_since_epoch() });
 
-        MUST(json_cookies.append(move(json_cookie)));
+        json_cookies.append(move(json_cookie));
     }
 
     StringBuilder builder;

@@ -115,15 +115,15 @@ ErrorOr<void> code_point_to_utf16(Utf16Data& string, u32 code_point, Endianness 
     VERIFY(is_unicode(code_point));
 
     if (code_point < first_supplementary_plane_code_point) {
-        TRY(string.try_append(host_code_unit(static_cast<u16>(code_point), endianness)));
+        string.append(host_code_unit(static_cast<u16>(code_point), endianness));
     } else {
         code_point -= first_supplementary_plane_code_point;
 
         auto code_unit = static_cast<u16>(high_surrogate_min | (code_point >> 10));
-        TRY(string.try_append(host_code_unit(code_unit, endianness)));
+        string.append(host_code_unit(code_unit, endianness));
 
         code_unit = static_cast<u16>(low_surrogate_min | (code_point & 0x3ff));
-        TRY(string.try_append(host_code_unit(code_unit, endianness)));
+        string.append(host_code_unit(code_unit, endianness));
     }
 
     return {};

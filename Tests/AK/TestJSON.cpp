@@ -488,7 +488,7 @@ TEST_CASE(json_array_must_append)
 TEST_CASE(json_array_try_append)
 {
     auto array = setup_json_array();
-    MUST(array.append(MUST(JsonValue::from_string("32"sv))));
+    array.append(MUST(JsonValue::from_string("32"sv)));
     EXPECT_EQ(array.size(), size_t { 6 });
     EXPECT_EQ(array.at(array.size() - 1).as_integer<u8>(), 32);
 }

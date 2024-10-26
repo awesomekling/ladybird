@@ -77,7 +77,7 @@ ErrorOr<Vector<ByteBuffer>> decode_pems(ReadonlyBytes data)
             if (lexer.consume_specific("-----END"sv)) {
                 state = Junk;
                 lexer.consume_line();
-                TRY(pems.try_append(decoded));
+                pems.append(decoded);
                 decoded.clear();
                 break;
             }

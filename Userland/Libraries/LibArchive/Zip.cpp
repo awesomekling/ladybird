@@ -138,7 +138,7 @@ ErrorOr<void> ZipOutputStream::add_member(ZipMember const& member)
     VERIFY(!m_finished);
     VERIFY(member.name.bytes_as_string_view().length() <= UINT16_MAX);
     VERIFY(member.compressed_data.size() <= UINT32_MAX);
-    TRY(m_members.try_append(member));
+    m_members.append(member);
 
     LocalFileHeader local_file_header {
         .minimum_version = minimum_version_needed(member.compression_method),

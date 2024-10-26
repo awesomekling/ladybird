@@ -288,21 +288,27 @@ public:
 
     ALWAYS_INLINE void append(T&& value)
     {
+        grow_capacity(size() + 1);
         if constexpr (contains_reference)
-            MUST(try_append(value));
+            new (slot(m_size)) StorageType(&value);
         else
-            MUST(try_append(move(value)));
+            new (slot(m_size)) StorageType(move(value));
+        ++m_size;
     }
 
     ALWAYS_INLINE void append(T const& value)
     requires(!contains_reference)
     {
-        MUST(try_append(T(value)));
+        append(T(value));
     }
 
     void append(StorageType const* values, size_t count)
     {
-        MUST(try_append(values, count));
+        if (count == 0)
+            return;
+        grow_capacity(size() + count);
+        TypedTransfer<StorageType>::copy(slot(m_size), values, count);
+        m_size += count;
     }
 
     template<typename U = T>
@@ -540,33 +546,6 @@ public:
         VERIFY(index < m_size);
         swap(raw_at(index), raw_at(m_size - 1));
         return take_last();
-    }
-
-    ErrorOr<void> try_append(T&& value)
-    {
-        grow_capacity(size() + 1);
-        if constexpr (contains_reference)
-            new (slot(m_size)) StorageType(&value);
-        else
-            new (slot(m_size)) StorageType(move(value));
-        ++m_size;
-        return {};
-    }
-
-    ErrorOr<void> try_append(T const& value)
-    requires(!contains_reference)
-    {
-        return try_append(T(value));
-    }
-
-    ErrorOr<void> try_append(StorageType const* values, size_t count)
-    {
-        if (count == 0)
-            return {};
-        grow_capacity(size() + count);
-        TypedTransfer<StorageType>::copy(slot(m_size), values, count);
-        m_size += count;
-        return {};
     }
 
     void grow_capacity(size_t needed_capacity)

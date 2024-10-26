@@ -192,13 +192,13 @@ ErrorOr<Vector<String>> String::split_limit(u32 separator, size_t limit, SplitBe
         if (code_point == separator) {
             size_t substring_length = code_points().iterator_offset(it) - substring_start;
             if (substring_length != 0 || keep_empty)
-                TRY(result.try_append(TRY(substring_from_byte_offset_with_shared_superstring(substring_start, substring_length))));
+                result.append(TRY(substring_from_byte_offset_with_shared_superstring(substring_start, substring_length)));
             substring_start = code_points().iterator_offset(it) + it.underlying_code_point_length_in_bytes();
         }
     }
     size_t tail_length = code_points().byte_length() - substring_start;
     if (tail_length != 0 || keep_empty)
-        TRY(result.try_append(TRY(substring_from_byte_offset_with_shared_superstring(substring_start, tail_length))));
+        result.append(TRY(substring_from_byte_offset_with_shared_superstring(substring_start, tail_length)));
     return result;
 }
 

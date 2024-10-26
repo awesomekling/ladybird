@@ -82,14 +82,13 @@ WebIDL::ExceptionOr<void> FormData::append(String const& name, JS::NonnullGCPtr<
 WebIDL::ExceptionOr<void> FormData::append_impl(String const& name, Variant<JS::NonnullGCPtr<FileAPI::Blob>, String> const& value, Optional<String> const& filename)
 {
     auto& realm = this->realm();
-    auto& vm = realm.vm();
 
     // 1. Let value be value if given; otherwise blobValue.
     // 2. Let entry be the result of creating an entry with name, value, and filename if given.
     auto entry = TRY(HTML::create_entry(realm, name, value, filename));
 
     // 3. Append entry to this’s entry list.
-    TRY_OR_THROW_OOM(vm, m_entry_list.try_append(move(entry)));
+    m_entry_list.append(move(entry));
     return {};
 }
 
@@ -123,7 +122,7 @@ WebIDL::ExceptionOr<Vector<FormDataEntryValue>> FormData::get_all(String const& 
     Vector<FormDataEntryValue> values;
     for (auto const& entry : m_entry_list) {
         if (entry.name == name)
-            TRY_OR_THROW_OOM(vm(), values.try_append(entry.value));
+            values.append(entry.value);
     }
     return values;
 }
@@ -156,7 +155,6 @@ WebIDL::ExceptionOr<void> FormData::set(String const& name, JS::NonnullGCPtr<Fil
 WebIDL::ExceptionOr<void> FormData::set_impl(String const& name, Variant<JS::NonnullGCPtr<FileAPI::Blob>, String> const& value, Optional<String> const& filename)
 {
     auto& realm = this->realm();
-    auto& vm = realm.vm();
 
     // 1. Let value be value if given; otherwise blobValue.
     // 2. Let entry be the result of creating an entry with name, value, and filename if given.
@@ -175,7 +173,7 @@ WebIDL::ExceptionOr<void> FormData::set_impl(String const& name, Variant<JS::Non
     }
     // 4. Otherwise, append entry to this’s entry list.
     else {
-        TRY_OR_THROW_OOM(vm, m_entry_list.try_append(move(entry)));
+        m_entry_list.append(move(entry));
     }
 
     return {};

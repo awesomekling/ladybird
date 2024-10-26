@@ -217,7 +217,7 @@ static ErrorOr<void> load_content_filters(StringView config_path)
             continue;
 
         auto pattern = TRY(String::from_utf8(line));
-        TRY(patterns.try_append(move(pattern)));
+        patterns.append(move(pattern));
     }
 
     auto& content_filter = Web::ContentFilter::the();
@@ -241,7 +241,7 @@ static ErrorOr<void> load_autoplay_allowlist(StringView config_path)
             continue;
 
         auto domain = TRY(String::from_utf8(line));
-        TRY(origins.try_append(move(domain)));
+        origins.append(move(domain));
     }
 
     auto& autoplay_allowlist = Web::PermissionsPolicy::AutoplayAllowlist::the();

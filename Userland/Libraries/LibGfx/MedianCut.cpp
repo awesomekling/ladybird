@@ -71,10 +71,10 @@ ErrorOr<void> split_bucket(Buckets& buckets, u32 index_to_split_at, u8 color_ind
     auto const span_to_move = to_split.span().slice(middle);
     // FIXME: Make Vector::extend() take a span
     for (u32 i = 0; i < span_to_move.size(); ++i)
-        TRY(new_bucket.try_append(span_to_move[i]));
+        new_bucket.append(span_to_move[i]);
     to_split.remove(middle, span_to_move.size());
 
-    TRY(buckets.try_append(move(new_bucket)));
+    buckets.append(move(new_bucket));
 
     return {};
 }
@@ -109,7 +109,7 @@ ErrorOr<Optional<IndexAndChannel>> find_largest_bucket(Buckets const& buckets)
 
         auto const stats = max_and_index(variances.span(), [](auto a, auto b) { return a > b; });
 
-        TRY(bucket_stats.try_append({ i, stats.maximum, static_cast<u8>(stats.index) }));
+        bucket_stats.append({ i, stats.maximum, static_cast<u8>(stats.index) });
     }
 
     if (bucket_stats.size() == 0)
@@ -149,7 +149,7 @@ ErrorOr<ColorPalette> color_palette_from_buckets(Buckets const& buckets)
             round_to<u32>(static_cast<double>(average_g) / bucket_size),
             round_to<u32>(static_cast<double>(average_b) / bucket_size));
 
-        TRY(palette.try_append(average_color));
+        palette.append(average_color);
         for (auto const color : bucket)
             TRY(conversion_table.try_set(Color::from_argb(color), { average_color, palette.size() - 1 }));
     }
@@ -171,7 +171,7 @@ ErrorOr<ColorPalette> median_cut(Bitmap const& bitmap, u16 palette_size)
         first_bucket.append(color);
 
     Buckets bucket_list;
-    TRY(bucket_list.try_append(first_bucket));
+    bucket_list.append(first_bucket);
 
     u16 old_bucket_size = 0;
     while (bucket_list.size() > old_bucket_size && bucket_list.size() < palette_size) {

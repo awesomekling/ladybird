@@ -170,7 +170,7 @@ ErrorOr<JsonValue> JsonParser::parse_array()
         if (peek() == ']')
             break;
         auto element = TRY(parse_helper());
-        TRY(array.append(move(element)));
+        array.append(move(element));
         ignore_while(is_space);
         if (peek() == ']')
             break;

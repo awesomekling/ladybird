@@ -19,7 +19,8 @@ TEST_CASE(test_utf8_decode)
 
     Vector<u32> processed_code_points;
     MUST(decoder.process(test_string, [&](u32 code_point) {
-        return processed_code_points.try_append(code_point);
+        processed_code_points.append(code_point);
+        return ErrorOr<void> {};
     }));
     EXPECT(processed_code_points.size() == 1);
     EXPECT(processed_code_points[0] == 0x1F600);
@@ -37,7 +38,8 @@ TEST_CASE(test_utf16be_decode)
 
     Vector<u32> processed_code_points;
     MUST(decoder.process(test_string, [&](u32 code_point) {
-        return processed_code_points.try_append(code_point);
+        processed_code_points.append(code_point);
+        return ErrorOr<void> {};
     }));
     EXPECT(processed_code_points.size() == 4);
     EXPECT(processed_code_points[0] == 0x73);
@@ -59,7 +61,8 @@ TEST_CASE(test_utf16le_decode)
 
     Vector<u32> processed_code_points;
     MUST(decoder.process(test_string, [&](u32 code_point) {
-        return processed_code_points.try_append(code_point);
+        processed_code_points.append(code_point);
+        return ErrorOr<void> {};
     }));
     EXPECT(processed_code_points.size() == 4);
     EXPECT(processed_code_points[0] == 0x73);

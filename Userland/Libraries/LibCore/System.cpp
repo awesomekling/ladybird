@@ -776,7 +776,7 @@ ErrorOr<AddressInfoVector> getaddrinfo(char const* nodename, char const* servnam
     Vector<struct addrinfo> addresses;
 
     for (auto* result = results; result != nullptr; result = result->ai_next)
-        TRY(addresses.try_append(*result));
+        addresses.append(*result);
 
     return AddressInfoVector { move(addresses), results };
 }

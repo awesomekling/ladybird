@@ -551,7 +551,7 @@ void ArgsParser::add_option(Vector<ByteString>& values, char const* help_string,
         short_name,
         value_name,
         [&values](StringView s) -> ErrorOr<bool> {
-            TRY_OR_ERROR_IF_NOT_OOM(values.try_append(s), s);
+            values.append(s);
             return true;
         },
         hide_mode
@@ -634,7 +634,7 @@ void ArgsParser::add_positional_argument(Vector<ByteString>& values, char const*
         required == Required::Yes ? 1 : 0,
         INT_MAX,
         [&values](StringView s) -> ErrorOr<bool> {
-            TRY_OR_ERROR_IF_NOT_OOM(values.try_append(s), s);
+            values.append(s);
             return true;
         }
     };
@@ -649,7 +649,7 @@ void ArgsParser::add_positional_argument(Vector<StringView>& values, char const*
         required == Required::Yes ? 1 : 0,
         INT_MAX,
         [&values](StringView s) -> ErrorOr<bool> {
-            TRY_OR_ERROR_IF_NOT_OOM(values.try_append(s), s);
+            values.append(s);
             return true;
         }
     };
@@ -664,7 +664,7 @@ void ArgsParser::add_positional_argument(Vector<String>& values, char const* hel
         required == Required::Yes ? 1 : 0,
         INT_MAX,
         [&values](StringView s) -> ErrorOr<bool> {
-            TRY_OR_ERROR_IF_NOT_OOM(values.try_append(TRY(String::from_utf8(s))), s);
+            values.append(TRY(String::from_utf8(s)));
             return true;
         }
     };

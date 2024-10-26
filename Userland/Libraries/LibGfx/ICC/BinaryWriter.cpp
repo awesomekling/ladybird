@@ -350,7 +350,7 @@ static ErrorOr<ByteBuffer> encode_multi_localized_unicode(MultiLocalizedUnicodeT
     Vector<Utf16Data> utf16_strings;
     utf16_strings.ensure_capacity(number_of_records);
     for (auto const& record : tag_data.records()) {
-        TRY(utf16_strings.try_append(TRY(utf8_to_utf16(record.text))));
+        utf16_strings.append(TRY(utf8_to_utf16(record.text)));
         number_of_codepoints += utf16_strings.last().size();
     }
 
@@ -724,7 +724,7 @@ ErrorOr<ByteBuffer> encode(Profile const& profile)
     size_t offset = sizeof(ICCHeader) + tag_table_size;
     Vector<size_t> offsets;
     for (auto const& bytes : tag_data_bytes) {
-        TRY(offsets.try_append(offset));
+        offsets.append(offset);
         offset += align_up_to(bytes.size(), 4);
     }
 

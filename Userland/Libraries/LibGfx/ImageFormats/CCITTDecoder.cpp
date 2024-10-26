@@ -297,7 +297,7 @@ ErrorOr<u32> read_run_length(BigEndianInputBitStream& input_bit_stream, Optional
         } else if (auto const maybe_terminal = get_terminal_code(current_color, potential_code, size); maybe_terminal.has_value()) {
             run_length += maybe_terminal->run_length;
             if (reference_line.has_value())
-                TRY(reference_line->try_append({ invert(current_color), column + run_length }));
+                reference_line->append({ invert(current_color), column + run_length });
             break;
         }
     }

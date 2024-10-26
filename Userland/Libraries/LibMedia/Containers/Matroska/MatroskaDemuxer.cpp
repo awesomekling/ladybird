@@ -55,7 +55,7 @@ DecoderErrorOr<Vector<Track>> MatroskaDemuxer::get_tracks_for_type(TrackType typ
             break;
         }
 
-        DECODER_TRY_ALLOC(tracks.try_append(track));
+        tracks.append(track);
         return IterationDecision::Continue;
     }));
 

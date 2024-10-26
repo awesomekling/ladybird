@@ -250,7 +250,7 @@ JsonArray translate_aria_names_to_enum(JsonArray const& names)
     names.for_each([&](JsonValue const& value) {
         VERIFY(value.is_string());
         auto name = value.as_string();
-        MUST(translated_names.append(aria_name_to_enum_name(name)));
+        translated_names.append(aria_name_to_enum_name(name));
     });
     return translated_names;
 }

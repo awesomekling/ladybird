@@ -24,14 +24,14 @@ ErrorOr<void> MessageBuffer::extend_data_capacity(size_t capacity)
 
 ErrorOr<void> MessageBuffer::append_data(u8 const* values, size_t count)
 {
-    TRY(m_data.try_append(values, count));
+    m_data.append(values, count);
     return {};
 }
 
 ErrorOr<void> MessageBuffer::append_file_descriptor(int fd)
 {
     auto auto_fd = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) AutoCloseFileDescriptor(fd)));
-    TRY(m_fds.try_append(move(auto_fd)));
+    m_fds.append(move(auto_fd));
     return {};
 }
 

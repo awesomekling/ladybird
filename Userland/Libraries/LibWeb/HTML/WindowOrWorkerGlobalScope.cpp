@@ -528,10 +528,10 @@ ErrorOr<Vector<JS::Handle<PerformanceTimeline::PerformanceEntry>>> WindowOrWorke
     if (type.has_value()) {
         auto maybe_tuple = map.get(type.value());
         if (maybe_tuple.has_value())
-            TRY(tuple_list.try_append(maybe_tuple.release_value()));
+            tuple_list.append(maybe_tuple.release_value());
     } else {
         for (auto const& it : map)
-            TRY(tuple_list.try_append(it.value));
+            tuple_list.append(it.value);
     }
 
     // 5. For each tuple in tuple list, run the following steps:

@@ -382,7 +382,7 @@ static ErrorOr<Vector<LutCurveType>> read_curves(ReadonlyBytes bytes, u32 offset
         // into that local table. Maybe there's a good reason why that wasn't done, and anyways, the spec is what it is.
         auto curve = TRY(read_curve(bytes, offset));
         offset += align_up_to(curve->size(), 4);
-        TRY(curves.try_append(move(curve)));
+        curves.append(move(curve));
     }
 
     return curves;

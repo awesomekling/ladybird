@@ -27,14 +27,14 @@ static ProfileHeader rgb_header()
 static ErrorOr<NonnullRefPtr<MultiLocalizedUnicodeTagData>> en_US(StringView text)
 {
     Vector<MultiLocalizedUnicodeTagData::Record> records;
-    TRY(records.try_append({ ('e' << 8) | 'n', ('U' << 8) | 'S', TRY(String::from_utf8(text)) }));
+    records.append({ ('e' << 8) | 'n', ('U' << 8) | 'S', TRY(String::from_utf8(text)) });
     return try_make_ref_counted<MultiLocalizedUnicodeTagData>(0, 0, records);
 }
 
 static ErrorOr<NonnullRefPtr<XYZTagData>> XYZ_data(XYZ xyz)
 {
     Vector<XYZ> xyzs;
-    TRY(xyzs.try_append(xyz));
+    xyzs.append(xyz);
     return try_make_ref_counted<XYZTagData>(0, 0, move(xyzs));
 }
 

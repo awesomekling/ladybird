@@ -82,7 +82,7 @@ ErrorOr<void> AutoplayAllowlist::enable_for_origins(ReadonlySpan<String> origins
             continue;
         }
 
-        TRY(allowlist.try_append(url.origin()));
+        allowlist.append(url.origin());
     }
 
     return {};

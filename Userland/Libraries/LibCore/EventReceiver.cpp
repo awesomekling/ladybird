@@ -61,7 +61,7 @@ ErrorOr<void> EventReceiver::try_add_child(EventReceiver& object)
 {
     // FIXME: Should we support reparenting objects?
     VERIFY(!object.parent() || object.parent() == this);
-    TRY(m_children.try_append(object));
+    m_children.append(object);
     object.m_parent = this;
     Core::ChildEvent child_event(Core::Event::ChildAdded, object);
     event(child_event);

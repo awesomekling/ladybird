@@ -55,19 +55,19 @@ struct Formatter<JS::PropertyDescriptor> : Formatter<StringView> {
     {
         Vector<String> parts;
         if (property_descriptor.value.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Value]]: {}", property_descriptor.value->to_string_without_side_effects()))));
+            parts.append(TRY(String::formatted("[[Value]]: {}", property_descriptor.value->to_string_without_side_effects())));
         if (property_descriptor.get.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Get]]: JS::Function* @ {:p}", property_descriptor.get->ptr()))));
+            parts.append(TRY(String::formatted("[[Get]]: JS::Function* @ {:p}", property_descriptor.get->ptr())));
         if (property_descriptor.set.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Set]]: JS::Function* @ {:p}", property_descriptor.set->ptr()))));
+            parts.append(TRY(String::formatted("[[Set]]: JS::Function* @ {:p}", property_descriptor.set->ptr())));
         if (property_descriptor.writable.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Writable]]: {}", *property_descriptor.writable))));
+            parts.append(TRY(String::formatted("[[Writable]]: {}", *property_descriptor.writable)));
         if (property_descriptor.enumerable.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Enumerable]]: {}", *property_descriptor.enumerable))));
+            parts.append(TRY(String::formatted("[[Enumerable]]: {}", *property_descriptor.enumerable)));
         if (property_descriptor.configurable.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Configurable]]: {}", *property_descriptor.configurable))));
+            parts.append(TRY(String::formatted("[[Configurable]]: {}", *property_descriptor.configurable)));
         if (property_descriptor.unimplemented.has_value())
-            TRY(parts.try_append(TRY(String::formatted("[[Unimplemented]]: {}", *property_descriptor.unimplemented))));
+            parts.append(TRY(String::formatted("[[Unimplemented]]: {}", *property_descriptor.unimplemented)));
         return Formatter<StringView>::format(builder, TRY(String::formatted("PropertyDescriptor {{ {} }}", TRY(String::join(", "sv, parts)))));
     }
 };

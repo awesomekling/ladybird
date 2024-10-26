@@ -212,7 +212,7 @@ static ErrorOr<Vector<T>> parse_comma_separated_numbers(StringView rect_string)
         auto part = parts[i].to_number<T>();
         if (!part.has_value())
             return Error::from_string_literal("comma-separated parts must be numbers");
-        TRY(part_numbers.try_append(part.value()));
+        part_numbers.append(part.value());
     }
     return part_numbers;
 }

@@ -391,7 +391,7 @@ ThrowCompletionOr<Value> Console::dir()
     // 2. Perform Printer("dir", « object », options).
     if (m_client) {
         MarkedVector<Value> printer_arguments { vm.heap() };
-        TRY_OR_THROW_OOM(vm, printer_arguments.try_append(object));
+        printer_arguments.append(object);
 
         return m_client->printer(LogLevel::Dir, move(printer_arguments));
     }

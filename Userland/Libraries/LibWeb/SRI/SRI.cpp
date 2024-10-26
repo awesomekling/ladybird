@@ -107,7 +107,7 @@ ErrorOr<Vector<Metadata>> parse_metadata(StringView metadata)
         };
 
         // 9. Append metadata to result.
-        TRY(result.try_append(move(metadata)));
+        result.append(move(metadata));
 
         return {};
     }));
@@ -127,7 +127,7 @@ ErrorOr<Vector<Metadata>> get_strongest_metadata_from_set(Vector<Metadata> const
     for (auto const& item : set) {
         // 1. If result is the empty set, add item to result and set strongest to item, skip to the next item.
         if (result.is_empty()) {
-            TRY(result.try_append(item));
+            result.append(item);
             strongest = item;
             continue;
         }
@@ -141,13 +141,13 @@ ErrorOr<Vector<Metadata>> get_strongest_metadata_from_set(Vector<Metadata> const
         // 4. If the result of getPrioritizedHashFunction(currentAlgorithm, newAlgorithm) is the empty string, add item to result.
         auto prioritized_hash_function = get_prioritized_hash_function(current_algorithm, new_algorithm);
         if (prioritized_hash_function.is_empty()) {
-            TRY(result.try_append(item));
+            result.append(item);
         }
         //    If the result is newAlgorithm, set strongest to item, set result to the empty set, and add item to result.
         else if (prioritized_hash_function == new_algorithm) {
             strongest = item;
             result.clear_with_capacity();
-            TRY(result.try_append(item));
+            result.append(item);
         }
     }
 

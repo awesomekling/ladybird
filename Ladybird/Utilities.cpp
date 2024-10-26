@@ -104,11 +104,11 @@ ErrorOr<Vector<ByteString>> get_paths_for_helper_process(StringView process_name
 
 #if !defined(AK_OS_MACOS)
     auto prefix = find_prefix(LexicalPath(application_path));
-    TRY(paths.try_append(LexicalPath::join(prefix.string(), libexec_path, process_name).string()));
-    TRY(paths.try_append(LexicalPath::join(prefix.string(), "bin"sv, process_name).string()));
+    paths.append(LexicalPath::join(prefix.string(), libexec_path, process_name).string());
+    paths.append(LexicalPath::join(prefix.string(), "bin"sv, process_name).string());
 #endif
-    TRY(paths.try_append(ByteString::formatted("{}/{}", application_path, process_name)));
-    TRY(paths.try_append(ByteString::formatted("./{}", process_name)));
+    paths.append(ByteString::formatted("{}/{}", application_path, process_name));
+    paths.append(ByteString::formatted("./{}", process_name));
     // NOTE: Add platform-specific paths here
     return paths;
 }

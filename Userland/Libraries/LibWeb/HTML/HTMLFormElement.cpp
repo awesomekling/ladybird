@@ -633,7 +633,7 @@ ErrorOr<String> HTMLFormElement::pick_an_encoding() const
         for (auto const& token : candidate_encoding_labels) {
             auto candidate_encoding = TextCodec::get_standardized_encoding(token);
             if (candidate_encoding.has_value())
-                TRY(candidate_encodings.try_append(candidate_encoding.value()));
+                candidate_encodings.append(candidate_encoding.value());
         }
 
         // 5. If candidate encodings is empty, return UTF-8.
@@ -675,7 +675,7 @@ static ErrorOr<Vector<DOMURL::QueryParam>> convert_to_list_of_name_value_pairs(V
         auto normalized_value = TRY(normalize_line_breaks(value));
 
         // 4. Append to list a new name-value pair whose name is name and whose value is value.
-        TRY(list.try_append(DOMURL::QueryParam { .name = move(name), .value = move(normalized_value) }));
+        list.append(DOMURL::QueryParam { .name = move(name), .value = move(normalized_value) });
     }
 
     // 3. Return list.

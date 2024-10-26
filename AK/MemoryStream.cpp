@@ -256,7 +256,7 @@ ErrorOr<Bytes> AllocatingMemoryStream::next_write_range()
     size_t const write_size = CHUNK_SIZE - m_write_offset % CHUNK_SIZE;
 
     if (chunk_index >= m_chunks.size())
-        TRY(m_chunks.try_append(TRY(Chunk::create_uninitialized(CHUNK_SIZE))));
+        m_chunks.append(TRY(Chunk::create_uninitialized(CHUNK_SIZE)));
 
     VERIFY(chunk_index < m_chunks.size());
 

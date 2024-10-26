@@ -149,7 +149,7 @@ public:
 
     ErrorOr<void> add_color_stop(ColorStop stop, bool sort = true)
     {
-        TRY(m_color_stops.try_append(stop));
+        m_color_stops.append(stop);
         if (sort)
             quick_sort(m_color_stops, [](auto& a, auto& b) { return a.position < b.position; });
         return {};

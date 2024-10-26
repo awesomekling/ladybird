@@ -64,7 +64,7 @@ public:
     void must_append(JsonValue value) { m_values.append(move(value)); }
 
     void clear() { m_values.clear(); }
-    ErrorOr<void> append(JsonValue value) { return m_values.try_append(move(value)); }
+    void append(JsonValue value) { m_values.append(move(value)); }
     void set(size_t index, JsonValue value) { m_values.at(index) = move(value); }
 
     template<typename Builder>

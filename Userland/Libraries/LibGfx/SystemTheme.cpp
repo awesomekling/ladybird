@@ -206,7 +206,7 @@ ErrorOr<Vector<SystemThemeMetaData>> list_installed_system_themes()
         auto theme_path = ByteString::formatted("/res/themes/{}", theme_name);
         auto config_file = TRY(Core::ConfigFile::open(theme_path));
         auto menu_name = config_file->read_entry("Menu", "Name", theme_name);
-        TRY(system_themes.try_append({ LexicalPath::title(theme_name), menu_name, theme_path }));
+        system_themes.append({ LexicalPath::title(theme_name), menu_name, theme_path });
     }
     quick_sort(system_themes, [](auto& a, auto& b) { return a.name < b.name; });
     return system_themes;

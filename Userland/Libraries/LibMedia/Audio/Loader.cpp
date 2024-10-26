@@ -95,11 +95,11 @@ LoaderSamples Loader::get_more_samples(size_t samples_to_read_from_input)
                 if (count < chunk.size()) {
                     auto remaining_samples_count = chunk.size() - count;
                     // We will always have an empty buffer at this point!
-                    TRY(m_buffer.try_append(chunk.span().offset(count), remaining_samples_count));
+                    m_buffer.append(chunk.span().offset(count), remaining_samples_count);
                 }
             } else {
                 // We're now past what the user requested. Transfer the entirety of the data into the buffer.
-                TRY(m_buffer.try_append(chunk.data(), chunk.size()));
+                m_buffer.append(chunk.data(), chunk.size());
             }
             sample_index += chunk.size();
         }

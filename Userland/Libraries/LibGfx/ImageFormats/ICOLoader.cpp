@@ -129,7 +129,7 @@ static ErrorOr<void> load_ico_directory(ICOLoadingContext& context)
             return Error::from_string_literal("ICO size too large");
         }
         dbgln_if(ICO_DEBUG, "load_ico_directory: index {} width: {} height: {} offset: {} size: {}", i, desc.width, desc.height, desc.offset, desc.size);
-        TRY(context.images.try_append(desc));
+        context.images.append(desc);
     }
     context.largest_index = find_largest_image(context);
     context.state = ICOLoadingContext::State::DirectoryDecoded;

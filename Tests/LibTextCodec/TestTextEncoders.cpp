@@ -16,7 +16,7 @@ TEST_CASE(test_utf8_encode)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 4);
     EXPECT(processed_bytes[0] == 0xF0);
@@ -36,7 +36,7 @@ TEST_CASE(test_euc_jp_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 5);
     EXPECT(processed_bytes[0] == 0x5C);
@@ -57,7 +57,7 @@ TEST_CASE(test_iso_2022_jp_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 14);
     EXPECT(processed_bytes[0] == 0x1B);
@@ -87,7 +87,7 @@ TEST_CASE(test_shift_jis_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 5);
     EXPECT(processed_bytes[0] == 0x5C);
@@ -107,7 +107,7 @@ TEST_CASE(test_euc_kr_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 4);
     EXPECT(processed_bytes[0] == 0x88);
@@ -126,7 +126,7 @@ TEST_CASE(test_big5_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 4);
     EXPECT(processed_bytes[0] == 0xA1);
@@ -145,7 +145,7 @@ TEST_CASE(test_gb18030_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.process(
         Utf8View(test_string),
-        [&](u8 byte) { return processed_bytes.try_append(byte); },
+        [&](u8 byte) { processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 4);
     EXPECT(processed_bytes[0] == 0xA2);
@@ -161,7 +161,7 @@ TEST_CASE(test_windows1252_encoder)
     Vector<u8> processed_bytes;
     MUST(encoder.value().process(
         Utf8View(test_string),
-        [&](u8 byte) { dbgln("{}", processed_bytes.size()); return processed_bytes.try_append(byte); },
+        [&](u8 byte) { dbgln("{}", processed_bytes.size()); processed_bytes.append(byte); return ErrorOr<void>{}; },
         [&](u32) -> ErrorOr<void> { EXPECT(false); return {}; }));
     EXPECT(processed_bytes.size() == 20);
     for (u8 i = 0; i < 15; i++) {

@@ -729,7 +729,7 @@ JS_DEFINE_NATIVE_FUNCTION(IteratorPrototype::to_array)
             return Array::create_from(realm, items);
 
         // c. Append value to items.
-        TRY_OR_THROW_OOM(vm, items.try_append(*value));
+        items.append(*value);
     }
 }
 

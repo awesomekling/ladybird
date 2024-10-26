@@ -645,10 +645,10 @@ ErrorOr<void> XzDecompressor::finish_current_block()
             return Error::from_string_literal("Uncompressed size of XZ block does not match the expected value");
     }
 
-    TRY(m_processed_blocks.try_append({
+    m_processed_blocks.append({
         .uncompressed_size = m_current_block_uncompressed_size,
         .unpadded_size = unpadded_size,
-    }));
+    });
 
     return {};
 }

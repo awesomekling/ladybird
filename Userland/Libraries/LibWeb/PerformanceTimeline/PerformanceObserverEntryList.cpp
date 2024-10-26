@@ -52,7 +52,7 @@ ErrorOr<Vector<JS::Handle<PerformanceTimeline::PerformanceEntry>>> filter_buffer
             continue;
 
         // 3. append entry to result.
-        TRY(result.try_append(entry));
+        result.append(entry);
     }
 
     // 3. Sort results's entries in chronological order with respect to startTime

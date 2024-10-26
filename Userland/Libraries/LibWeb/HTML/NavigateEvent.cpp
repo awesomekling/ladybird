@@ -90,7 +90,7 @@ WebIDL::ExceptionOr<void> NavigateEvent::intercept(NavigationInterceptOptions co
 
     // 6. If options["handler"] exists, then append it to this's navigation handler list.
     if (options.handler != nullptr)
-        TRY_OR_THROW_OOM(vm, m_navigation_handler_list.try_append(*options.handler));
+        m_navigation_handler_list.append(*options.handler);
 
     // 7. If options["focusReset"] exists, then:
     if (options.focus_reset.has_value()) {
