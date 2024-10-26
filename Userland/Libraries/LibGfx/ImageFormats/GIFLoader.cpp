@@ -282,7 +282,7 @@ static ErrorOr<void> load_gif_frame_descriptors(GIFLoadingContext& context)
                 if (sub_block_length == 0)
                     break;
 
-                TRY(sub_block.try_resize(sub_block.size() + sub_block_length));
+                sub_block.resize(sub_block.size() + sub_block_length);
                 TRY(context.stream.read_until_filled(sub_block.span().slice_from_end(sub_block_length)));
             }
 

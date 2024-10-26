@@ -34,7 +34,7 @@ ErrorOr<Vector<Hunk>> from_text(StringView old_text, StringView new_text, size_t
     };
 
     auto dp_matrix = Vector<Cell>();
-    TRY(dp_matrix.try_resize((old_lines.size() + 1) * (new_lines.size() + 1)));
+    dp_matrix.resize((old_lines.size() + 1) * (new_lines.size() + 1));
 
     auto dp = [&dp_matrix, width = old_lines.size() + 1](size_t i, size_t j) -> Cell& {
         return dp_matrix[i + width * j];

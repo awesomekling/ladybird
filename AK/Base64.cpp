@@ -57,7 +57,7 @@ static ErrorOr<ByteBuffer> decode_base64_impl(StringView input, simdutf::base64_
 static ErrorOr<String> encode_base64_impl(StringView input, simdutf::base64_options options)
 {
     Vector<u8> output;
-    TRY(output.try_resize(simdutf::base64_length_from_binary(input.length(), options)));
+    output.resize(simdutf::base64_length_from_binary(input.length(), options));
 
     simdutf::binary_to_base64(
         input.characters_without_null_termination(),

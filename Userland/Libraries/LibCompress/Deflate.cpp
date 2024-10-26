@@ -69,8 +69,8 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
         code.m_max_prefixed_code_length = 1;
 
         if (code.m_bit_codes.size() < static_cast<size_t>(last_non_zero + 1)) {
-            TRY(code.m_bit_codes.try_resize(last_non_zero + 1));
-            TRY(code.m_bit_code_lengths.try_resize(last_non_zero + 1));
+            code.m_bit_codes.resize(last_non_zero + 1);
+            code.m_bit_code_lengths.resize(last_non_zero + 1);
         }
         code.m_bit_codes[last_non_zero] = 0;
         code.m_bit_code_lengths[last_non_zero] = 1;
@@ -114,8 +114,8 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
             }
 
             if (code.m_bit_codes.size() < symbol + 1) {
-                TRY(code.m_bit_codes.try_resize(symbol + 1));
-                TRY(code.m_bit_code_lengths.try_resize(symbol + 1));
+                code.m_bit_codes.resize(symbol + 1);
+                code.m_bit_code_lengths.resize(symbol + 1);
             }
             code.m_bit_codes[symbol] = fast_reverse16(start_bit | next_code, code_length); // DEFLATE writes huffman encoded symbols as lsb-first
             code.m_bit_code_lengths[symbol] = code_length;

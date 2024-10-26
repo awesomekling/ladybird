@@ -600,22 +600,6 @@ public:
         return {};
     }
 
-    ErrorOr<void> try_resize(size_t new_size, bool keep_capacity = false)
-    requires(!contains_reference)
-    {
-        if (new_size <= size()) {
-            shrink(new_size, keep_capacity);
-            return {};
-        }
-
-        TRY(try_ensure_capacity(new_size));
-
-        for (size_t i = size(); i < new_size; ++i)
-            new (slot(i)) StorageType {};
-        m_size = new_size;
-        return {};
-    }
-
     void grow_capacity(size_t needed_capacity)
     {
         MUST(try_grow_capacity(needed_capacity));
@@ -648,7 +632,16 @@ public:
     void resize(size_t new_size, bool keep_capacity = false)
     requires(!contains_reference)
     {
-        MUST(try_resize(new_size, keep_capacity));
+        if (new_size <= size()) {
+            shrink(new_size, keep_capacity);
+            return;
+        }
+
+        ensure_capacity(new_size);
+
+        for (size_t i = size(); i < new_size; ++i)
+            new (slot(i)) StorageType {};
+        m_size = new_size;
     }
 
     void resize_and_keep_capacity(size_t new_size)

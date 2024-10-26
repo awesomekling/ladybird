@@ -318,9 +318,7 @@ def generate_getter(tag: Tag) -> str:
         else:
             container_type = f'Vector<{tag_final_type}>'
             container_initialization = fR"""{container_type} tmp{{}};
-        auto maybe_failure = tmp.try_resize(possible_value->size());
-        if (maybe_failure.is_error())
-            return OptionalNone {{}};
+        tmp.resize(possible_value->size());
         """
 
         return_type = container_type

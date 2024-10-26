@@ -406,8 +406,7 @@ public:
             return false;
         }
         auto previous_size = m_elements.size();
-        if (m_elements.try_resize(new_size).is_error())
-            return false;
+        m_elements.resize(new_size);
         for (size_t i = previous_size; i < m_elements.size(); ++i)
             m_elements[i] = fill_value;
 
@@ -461,8 +460,7 @@ public:
                 return false;
         }
         auto previous_size = m_size;
-        if (m_data.try_resize(new_size).is_error())
-            return false;
+        m_data.resize(new_size);
         m_size = new_size;
         // The spec requires that we zero out everything on grow
         __builtin_memset(m_data.offset_pointer(previous_size), 0, size_to_grow);

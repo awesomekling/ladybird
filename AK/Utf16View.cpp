@@ -65,7 +65,7 @@ ErrorOr<Utf16Data> utf8_to_utf16(Utf8View const& utf8_view, Endianness endiannes
     auto length = utf8_view.byte_length();
 
     Utf16Data utf16_data;
-    TRY(utf16_data.try_resize(simdutf::utf16_length_from_utf8(data, length)));
+    utf16_data.resize(simdutf::utf16_length_from_utf8(data, length));
 
     [[maybe_unused]] auto result = [&]() {
         switch (endianness) {
@@ -92,7 +92,7 @@ ErrorOr<Utf16Data> utf32_to_utf16(Utf32View const& utf32_view, Endianness endian
     auto length = utf32_view.length();
 
     Utf16Data utf16_data;
-    TRY(utf16_data.try_resize(simdutf::utf16_length_from_utf32(data, length)));
+    utf16_data.resize(simdutf::utf16_length_from_utf32(data, length));
 
     [[maybe_unused]] auto result = [&]() {
         switch (endianness) {

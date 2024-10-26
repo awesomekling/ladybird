@@ -88,7 +88,7 @@ ErrorOr<NonnullRefPtr<ChromaticityTagData>> ChromaticityTagData::from_bytes(Read
 
     auto* raw_xy_coordinates = bit_cast<BigEndian<u16Fixed16Number> const*>(bytes.data() + 12);
     Vector<xyCoordinate> xy_coordinates;
-    TRY(xy_coordinates.try_resize(number_of_device_channels));
+    xy_coordinates.resize(number_of_device_channels);
     for (size_t i = 0; i < number_of_device_channels; ++i) {
         xy_coordinates[i].x = U16Fixed16::create_raw(raw_xy_coordinates[2 * i]);
         xy_coordinates[i].y = U16Fixed16::create_raw(raw_xy_coordinates[2 * i + 1]);
@@ -139,7 +139,7 @@ ErrorOr<CurveData> curve_data_from_bytes(ReadonlyBytes bytes)
 
     auto* raw_values = bit_cast<BigEndian<u16> const*>(bytes.data() + 12);
     Vector<u16> values;
-    TRY(values.try_resize(count));
+    values.resize(count);
 
     for (u32 i = 0; i < count; ++i)
         values[i] = raw_values[i];
@@ -283,7 +283,7 @@ static ErrorOr<CLUTData> read_clut_data(ReadonlyBytes bytes, AdvancedLUTHeader c
 
     // "Number of grid points in each dimension. Only the first i entries are used, where i is the number of input channels."
     Vector<u8, 4> number_of_grid_points_in_dimension;
-    TRY(number_of_grid_points_in_dimension.try_resize(header.number_of_input_channels));
+    number_of_grid_points_in_dimension.resize(header.number_of_input_channels);
     for (size_t i = 0; i < header.number_of_input_channels; ++i)
         number_of_grid_points_in_dimension[i] = clut_header.number_of_grid_points_in_dimension[i];
 
@@ -314,7 +314,7 @@ static ErrorOr<CLUTData> read_clut_data(ReadonlyBytes bytes, AdvancedLUTHeader c
     if (clut_header.precision_of_data_elements == 1) {
         auto* raw_values = bytes.data() + header.offset_to_clut + sizeof(CLUTHeader);
         Vector<u8> values;
-        TRY(values.try_resize(clut_size));
+        values.resize(clut_size);
         for (u32 i = 0; i < clut_size; ++i)
             values[i] = raw_values[i];
         return CLUTData { move(number_of_grid_points_in_dimension), move(values) };
@@ -323,7 +323,7 @@ static ErrorOr<CLUTData> read_clut_data(ReadonlyBytes bytes, AdvancedLUTHeader c
     VERIFY(clut_header.precision_of_data_elements == 2);
     auto* raw_values = bit_cast<BigEndian<u16> const*>(bytes.data() + header.offset_to_clut + sizeof(CLUTHeader));
     Vector<u16> values;
-    TRY(values.try_resize(clut_size));
+    values.resize(clut_size);
     for (u32 i = 0; i < clut_size; ++i)
         values[i] = raw_values[i];
     return CLUTData { move(number_of_grid_points_in_dimension), move(values) };
@@ -702,7 +702,7 @@ ErrorOr<NonnullRefPtr<MultiLocalizedUnicodeTagData>> MultiLocalizedUnicodeTagDat
         return Error::from_string_literal("ICC::Profile: multiLocalizedUnicodeType not enough data for records");
 
     Vector<Record> records;
-    TRY(records.try_resize(number_of_records));
+    records.resize(number_of_records);
 
     // "For the definition of language codes and country codes, see respectively
     //  ISO 639-1 and ISO 3166-1. The Unicode strings in storage should be encoded as 16-bit big-endian, UTF-16BE,
@@ -792,9 +792,9 @@ ErrorOr<NonnullRefPtr<NamedColor2TagData>> NamedColor2TagData::from_bytes(Readon
     Vector<XYZOrLAB> pcs_coordinates;
     Vector<u16> device_coordinates;
 
-    TRY(root_names.try_resize(header.count_of_named_colors));
-    TRY(pcs_coordinates.try_resize(header.count_of_named_colors));
-    TRY(device_coordinates.try_resize(header.count_of_named_colors * header.number_of_device_coordinates_of_each_named_color));
+    root_names.resize(header.count_of_named_colors);
+    pcs_coordinates.resize(header.count_of_named_colors);
+    device_coordinates.resize(header.count_of_named_colors * header.number_of_device_coordinates_of_each_named_color);
 
     for (size_t i = 0; i < header.count_of_named_colors; ++i) {
         u8 const* root_name = bytes.data() + 8 + sizeof(NamedColorHeader) + i * record_byte_size.value();
@@ -892,7 +892,7 @@ ErrorOr<NonnullRefPtr<S15Fixed16ArrayTagData>> S15Fixed16ArrayTagData::from_byte
     size_t count = byte_size / sizeof(s15Fixed16Number);
     auto* raw_values = bit_cast<BigEndian<s15Fixed16Number> const*>(bytes.data() + 8);
     Vector<S15Fixed16, 9> values;
-    TRY(values.try_resize(count));
+    values.resize(count);
     for (size_t i = 0; i < count; ++i)
         values[i] = S15Fixed16::create_raw(raw_values[i]);
 
@@ -1235,7 +1235,7 @@ ErrorOr<NonnullRefPtr<XYZTagData>> XYZTagData::from_bytes(ReadonlyBytes bytes, u
     size_t xyz_count = byte_size / sizeof(XYZNumber);
     auto* raw_xyzs = bit_cast<XYZNumber const*>(bytes.data() + 8);
     Vector<XYZ, 1> xyzs;
-    TRY(xyzs.try_resize(xyz_count));
+    xyzs.resize(xyz_count);
     for (size_t i = 0; i < xyz_count; ++i)
         xyzs[i] = (XYZ)raw_xyzs[i];
 
