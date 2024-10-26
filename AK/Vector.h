@@ -268,12 +268,22 @@ public:
 
     void extend(Vector&& other)
     {
-        MUST(try_extend(move(other)));
+        if (is_empty() && capacity() <= other.capacity()) {
+            *this = move(other);
+            return;
+        }
+        auto other_size = other.size();
+        Vector tmp = move(other);
+        grow_capacity(size() + other_size);
+        TypedTransfer<StorageType>::move(data() + m_size, tmp.data(), other_size);
+        m_size += other_size;
     }
 
     void extend(Vector const& other)
     {
-        MUST(try_extend(other));
+        grow_capacity(size() + other.size());
+        TypedTransfer<StorageType>::copy(data() + m_size, other.data(), other.size());
+        m_size += other.m_size;
     }
 
     ALWAYS_INLINE void append(T&& value)
@@ -530,28 +540,6 @@ public:
         VERIFY(index < m_size);
         swap(raw_at(index), raw_at(m_size - 1));
         return take_last();
-    }
-
-    ErrorOr<void> try_extend(Vector&& other)
-    {
-        if (is_empty() && capacity() <= other.capacity()) {
-            *this = move(other);
-            return {};
-        }
-        auto other_size = other.size();
-        Vector tmp = move(other);
-        TRY(try_grow_capacity(size() + other_size));
-        TypedTransfer<StorageType>::move(data() + m_size, tmp.data(), other_size);
-        m_size += other_size;
-        return {};
-    }
-
-    ErrorOr<void> try_extend(Vector const& other)
-    {
-        TRY(try_grow_capacity(size() + other.size()));
-        TypedTransfer<StorageType>::copy(data() + m_size, other.data(), other.size());
-        m_size += other.m_size;
-        return {};
     }
 
     ErrorOr<void> try_append(T&& value)

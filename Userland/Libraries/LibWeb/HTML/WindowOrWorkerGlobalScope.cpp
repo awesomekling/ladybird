@@ -547,7 +547,7 @@ ErrorOr<Vector<JS::Handle<PerformanceTimeline::PerformanceEntry>>> WindowOrWorke
         auto entries = TRY(filter_buffer_by_name_and_type(buffer, name, type));
 
         // 4. For each entry in entries, append entry to result.
-        TRY(result.try_extend(entries));
+        result.extend(entries);
     }
 
     // 6. Sort results's entries in chronological order with respect to startTime

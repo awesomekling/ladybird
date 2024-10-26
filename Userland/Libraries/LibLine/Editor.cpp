@@ -277,9 +277,8 @@ bool Editor::load_history(ByteString const& path)
     auto history_or_error = try_load_history(path);
     if (history_or_error.is_error())
         return false;
-    auto maybe_error = m_history.try_extend(history_or_error.release_value());
-    auto okay = !maybe_error.is_error();
-    return okay;
+    m_history.extend(history_or_error.release_value());
+    return true;
 }
 
 template<typename It0, typename It1, typename OutputT, typename LessThan>

@@ -69,7 +69,7 @@ ErrorOr<void> split_bucket(Buckets& buckets, u32 index_to_split_at, u8 color_ind
     auto const middle = to_split.size() / 2;
 
     auto const span_to_move = to_split.span().slice(middle);
-    // FIXME: Make Vector::try_extend() take a span
+    // FIXME: Make Vector::extend() take a span
     for (u32 i = 0; i < span_to_move.size(); ++i)
         TRY(new_bucket.try_append(span_to_move[i]));
     to_split.remove(middle, span_to_move.size());
