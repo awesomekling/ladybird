@@ -3909,7 +3909,7 @@ void Document::queue_intersection_observer_task()
 
         // 2. Let notify list be a list of all IntersectionObservers whose root is in the DOM tree of document.
         Vector<JS::Handle<IntersectionObserver::IntersectionObserver>> notify_list;
-        notify_list.try_ensure_capacity(m_intersection_observers.size()).release_value_but_fixme_should_propagate_errors();
+        notify_list.ensure_capacity(m_intersection_observers.size());
         for (auto& observer : m_intersection_observers) {
             notify_list.append(JS::make_handle(observer));
         }
