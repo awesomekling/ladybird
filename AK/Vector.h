@@ -544,7 +544,7 @@ public:
 
     ErrorOr<void> try_append(T&& value)
     {
-        TRY(try_grow_capacity(size() + 1));
+        grow_capacity(size() + 1);
         if constexpr (contains_reference)
             new (slot(m_size)) StorageType(&value);
         else
@@ -563,17 +563,10 @@ public:
     {
         if (count == 0)
             return {};
-        TRY(try_grow_capacity(size() + count));
+        grow_capacity(size() + count);
         TypedTransfer<StorageType>::copy(slot(m_size), values, count);
         m_size += count;
         return {};
-    }
-
-    ErrorOr<void> try_grow_capacity(size_t needed_capacity)
-    {
-        if (m_capacity >= needed_capacity)
-            return {};
-        return try_ensure_capacity(padded_capacity(needed_capacity));
     }
 
     ErrorOr<void> try_ensure_capacity(size_t needed_capacity)
@@ -602,7 +595,9 @@ public:
 
     void grow_capacity(size_t needed_capacity)
     {
-        MUST(try_grow_capacity(needed_capacity));
+        if (m_capacity >= needed_capacity)
+            return;
+        ensure_capacity(padded_capacity(needed_capacity));
     }
 
     void ensure_capacity(size_t needed_capacity)
