@@ -180,7 +180,7 @@ public:
             typename MapType<ValueType, NonnullOwnPtr<Trie>, ValueTraits>::ConstIteratorType end;
         };
         Vector<State> state;
-        TRY(state.try_empend(false, m_children.begin(), m_children.end()));
+        state.empend(false, m_children.begin(), m_children.end());
 
         auto invoke = [&](auto& current_node) -> ErrorOr<IterationDecision> {
             if constexpr (VoidFunction<Fn, BaseType const&>) {
@@ -249,7 +249,7 @@ private:
 
         current_node = &*(*current_state.it).value;
 
-        TRY(state.try_empend(false, current_node->m_children.begin(), current_node->m_children.end()));
+        state.empend(false, current_node->m_children.begin(), current_node->m_children.end());
         return {};
     }
 

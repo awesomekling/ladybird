@@ -294,7 +294,9 @@ public:
     void empend(Args&&... args)
     requires(!contains_reference)
     {
-        MUST(try_empend(forward<Args>(args)...));
+        grow_capacity(m_size + 1);
+        new (slot(m_size)) StorageType { forward<Args>(args)... };
+        ++m_size;
     }
 
     template<typename U = T>
@@ -570,16 +572,6 @@ public:
         TRY(try_grow_capacity(size() + count));
         TypedTransfer<StorageType>::copy(slot(m_size), values, count);
         m_size += count;
-        return {};
-    }
-
-    template<class... Args>
-    ErrorOr<void> try_empend(Args&&... args)
-    requires(!contains_reference)
-    {
-        TRY(try_grow_capacity(m_size + 1));
-        new (slot(m_size)) StorageType { forward<Args>(args)... };
-        ++m_size;
         return {};
     }
 

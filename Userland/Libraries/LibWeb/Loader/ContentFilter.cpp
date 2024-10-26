@@ -38,7 +38,7 @@ ErrorOr<void> ContentFilter::set_patterns(ReadonlySpan<String> patterns)
     m_patterns.clear_with_capacity();
 
     for (auto const& pattern : patterns) {
-        TRY(m_patterns.try_empend(pattern));
+        m_patterns.empend(pattern);
     }
 
     return {};

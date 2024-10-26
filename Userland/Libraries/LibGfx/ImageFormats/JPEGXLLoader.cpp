@@ -150,7 +150,7 @@ private:
                 return Error::from_string_literal("JPEGXLImageDecoderPlugin: Decoder is in an unexpected state.");
 
             auto bitmap = TRY(Bitmap::create(Gfx::BitmapFormat::RGBA8888, m_size));
-            TRY(m_frame_descriptors.try_empend(bitmap, static_cast<int>(duration)));
+            m_frame_descriptors.empend(bitmap, static_cast<int>(duration));
 
             JxlPixelFormat format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
 

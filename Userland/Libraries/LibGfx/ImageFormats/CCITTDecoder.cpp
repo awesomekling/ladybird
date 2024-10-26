@@ -460,7 +460,7 @@ ErrorOr<CCITTStatus> decode_single_ccitt_2d_line(BigEndianInputBitStream& input_
         current_color = invert(current_color);
         remainder_from_pass_mode = 0;
 
-        TRY(status.current_line.try_empend(current_color, column));
+        status.current_line.empend(current_color, column);
         return {};
     };
 
@@ -624,7 +624,7 @@ ErrorOr<ByteBuffer> decode_ccitt_group4(ReadonlyBytes bytes, u32 image_width, u3
     // T.6 2.2.1 Principle of the coding scheme
     // The reference line for the first coding line in a page is an imaginary white line.
     CCITTStatus status;
-    TRY(status.current_line.try_empend(ccitt_black, image_width));
+    status.current_line.empend(ccitt_black, image_width);
 
     u32 i {};
     while (!status.has_reached_eol && (image_height == 0 || i < image_height)) {
