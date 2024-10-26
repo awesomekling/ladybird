@@ -230,14 +230,40 @@ public:
     void insert(size_t index, U&& value)
     requires(CanBePlacedInsideVector<U>)
     {
-        MUST(try_insert<U>(index, forward<U>(value)));
+        VERIFY(index < size());
+        if (index == size())
+            return append(forward<U>(value));
+        grow_capacity(size() + 1);
+        ++m_size;
+        if constexpr (Traits<StorageType>::is_trivial()) {
+            TypedTransfer<StorageType>::move(slot(index + 1), slot(index), m_size - index - 1);
+        } else {
+            for (size_t i = size() - 1; i > index; --i) {
+                new (slot(i)) StorageType(move(at(i - 1)));
+                at(i - 1).~StorageType();
+            }
+        }
+        if constexpr (contains_reference)
+            new (slot(index)) StorageType(&value);
+        else
+            new (slot(index)) StorageType(forward<U>(value));
     }
 
     template<typename TUnaryPredicate, typename U = T>
     void insert_before_matching(U&& value, TUnaryPredicate const& predicate, size_t first_index = 0, size_t* inserted_index = nullptr)
     requires(CanBePlacedInsideVector<U>)
     {
-        MUST(try_insert_before_matching(forward<U>(value), predicate, first_index, inserted_index));
+        for (size_t i = first_index; i < size(); ++i) {
+            if (predicate(at(i))) {
+                insert(i, forward<U>(value));
+                if (inserted_index)
+                    *inserted_index = i;
+                return;
+            }
+        }
+        append(forward<U>(value));
+        if (inserted_index)
+            *inserted_index = size() - 1;
     }
 
     void extend(Vector&& other)
@@ -303,7 +329,7 @@ public:
     void prepend(U&& value)
     requires(CanBePlacedInsideVector<U>)
     {
-        MUST(try_insert(0, forward<U>(value)));
+        insert(0, forward<U>(value));
     }
 
     void prepend(Vector&& other)
@@ -481,49 +507,6 @@ public:
         VERIFY(index < m_size);
         swap(raw_at(index), raw_at(m_size - 1));
         return take_last();
-    }
-
-    template<typename U = T>
-    ErrorOr<void> try_insert(size_t index, U&& value)
-    requires(CanBePlacedInsideVector<U>)
-    {
-        if (index > size())
-            return Error::from_errno(EINVAL);
-        if (index == size())
-            return try_append(forward<U>(value));
-        TRY(try_grow_capacity(size() + 1));
-        ++m_size;
-        if constexpr (Traits<StorageType>::is_trivial()) {
-            TypedTransfer<StorageType>::move(slot(index + 1), slot(index), m_size - index - 1);
-        } else {
-            for (size_t i = size() - 1; i > index; --i) {
-                new (slot(i)) StorageType(move(at(i - 1)));
-                at(i - 1).~StorageType();
-            }
-        }
-        if constexpr (contains_reference)
-            new (slot(index)) StorageType(&value);
-        else
-            new (slot(index)) StorageType(forward<U>(value));
-        return {};
-    }
-
-    template<typename TUnaryPredicate, typename U = T>
-    ErrorOr<void> try_insert_before_matching(U&& value, TUnaryPredicate const& predicate, size_t first_index = 0, size_t* inserted_index = nullptr)
-    requires(CanBePlacedInsideVector<U>)
-    {
-        for (size_t i = first_index; i < size(); ++i) {
-            if (predicate(at(i))) {
-                TRY(try_insert(i, forward<U>(value)));
-                if (inserted_index)
-                    *inserted_index = i;
-                return {};
-            }
-        }
-        TRY(try_append(forward<U>(value)));
-        if (inserted_index)
-            *inserted_index = size() - 1;
-        return {};
     }
 
     ErrorOr<void> try_extend(Vector&& other)
