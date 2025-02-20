@@ -1892,7 +1892,7 @@ void Navigable::reload(UserNavigationInvolvement user_involvement)
     // 3. Append the following session history traversal steps to traversable:
     traversable->append_session_history_traversal_steps(GC::create_function(heap(), [traversable, user_involvement] {
         // 1. Apply the reload history step to traversable given userInvolvement.
-        traversable->apply_the_reload_history_step(user_involvement);
+        traversable->apply_the_reload_history_step(user_involvement, {});
     }));
 }
 
@@ -2044,7 +2044,7 @@ void finalize_a_cross_document_navigation(GC::Ref<Navigable> navigable, HistoryH
     }
 
     // 10. Apply the push/replace history step targetStep to traversable given historyHandling and userInvolvement.
-    traversable->apply_the_push_or_replace_history_step(target_step, history_handling, user_involvement, TraversableNavigable::SynchronousNavigation::No);
+    traversable->apply_the_push_or_replace_history_step(target_step, history_handling, user_involvement, TraversableNavigable::SynchronousNavigation::No, {});
 
     // AD-HOC: If we're inside a navigable container, let's trigger a relayout in the container document.
     //         This allows size negotiation between the containing document and SVG documents to happen.

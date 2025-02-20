@@ -60,14 +60,14 @@ public:
         Applied,
     };
 
-    HistoryStepResult apply_the_traverse_history_step(int, Optional<SourceSnapshotParams>, GC::Ptr<Navigable>, UserNavigationInvolvement);
-    HistoryStepResult apply_the_reload_history_step(UserNavigationInvolvement);
+    void apply_the_traverse_history_step(int, Optional<SourceSnapshotParams>, GC::Ptr<Navigable>, UserNavigationInvolvement, GC::Ptr<GC::Function<void(HistoryStepResult)>> continuation);
+    void apply_the_reload_history_step(UserNavigationInvolvement, GC::Ptr<GC::Function<void(HistoryStepResult)>> continuation);
     enum class SynchronousNavigation : bool {
         Yes,
         No,
     };
-    HistoryStepResult apply_the_push_or_replace_history_step(int step, HistoryHandlingBehavior history_handling, UserNavigationInvolvement, SynchronousNavigation);
-    HistoryStepResult update_for_navigable_creation_or_destruction();
+    void apply_the_push_or_replace_history_step(int step, HistoryHandlingBehavior history_handling, UserNavigationInvolvement, SynchronousNavigation, GC::Ptr<GC::Function<void(HistoryStepResult)>> continuation);
+    void update_for_navigable_creation_or_destruction(GC::Ptr<GC::Function<void(HistoryStepResult)>> continuation);
 
     int get_the_used_step(int step) const;
     Vector<GC::Root<Navigable>> get_all_navigables_whose_current_session_history_entry_will_change_or_reload(int) const;
@@ -122,14 +122,15 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // FIXME: Fix spec typo cancelation --> cancellation
-    HistoryStepResult apply_the_history_step(
+    void apply_the_history_step(
         int step,
         bool check_for_cancelation,
         Optional<SourceSnapshotParams>,
         GC::Ptr<Navigable> initiator_to_check,
         UserNavigationInvolvement user_involvement,
         Optional<Bindings::NavigationType> navigation_type,
-        SynchronousNavigation);
+        SynchronousNavigation,
+        GC::Ptr<GC::Function<void(HistoryStepResult)>> continuation);
 
     CheckIfUnloadingIsCanceledResult check_if_unloading_is_canceled(Vector<GC::Root<Navigable>> navigables_that_need_before_unload, GC::Ptr<TraversableNavigable> traversable, Optional<int> target_step, Optional<UserNavigationInvolvement> user_involvement_for_navigate_events);
 

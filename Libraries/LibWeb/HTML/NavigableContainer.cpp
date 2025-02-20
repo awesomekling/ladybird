@@ -61,6 +61,8 @@ GC::Ptr<NavigableContainer> NavigableContainer::navigable_container_with_content
 // https://html.spec.whatwg.org/multipage/document-sequences.html#create-a-new-child-navigable
 WebIDL::ExceptionOr<void> NavigableContainer::create_new_child_navigable(GC::Ptr<GC::Function<void()>> after_session_history_update)
 {
+    auto& vm = this->vm();
+
     // 1. Let parentNavigable be element's node navigable.
     auto parent_navigable = navigable();
 
@@ -98,7 +100,7 @@ WebIDL::ExceptionOr<void> NavigableContainer::create_new_child_navigable(GC::Ptr
     GC::Ref<Navigable> navigable = *heap().allocate<Navigable>(page);
 
     // 8. Initialize the navigable navigable given documentState and parentNavigable.
-    TRY_OR_THROW_OOM(vm(), navigable->initialize_navigable(document_state, parent_navigable));
+    TRY_OR_THROW_OOM(vm, navigable->initialize_navigable(document_state, parent_navigable));
 
     // 9. Set element's content navigable to navigable.
     m_content_navigable = navigable;
@@ -113,7 +115,7 @@ WebIDL::ExceptionOr<void> NavigableContainer::create_new_child_navigable(GC::Ptr
     document->update_the_visibility_state(traversable->system_visibility_state());
 
     // 12. Append the following session history traversal steps to traversable:
-    traversable->append_session_history_traversal_steps(GC::create_function(heap(), [traversable, navigable, parent_navigable, history_entry, after_session_history_update] {
+    traversable->append_session_history_traversal_steps(GC::create_function(heap(), [&vm, traversable, navigable, parent_navigable, history_entry, after_session_history_update] {
         // 1. Let parentDocState be parentNavigable's active session history entry's document state.
         auto parent_doc_state = parent_navigable->active_session_history_entry()->document_state();
 
@@ -138,11 +140,11 @@ WebIDL::ExceptionOr<void> NavigableContainer::create_new_child_navigable(GC::Ptr
         parent_doc_state->nested_histories().append(move(nested_history));
 
         // 7. Update for navigable creation/destruction given traversable
-        traversable->update_for_navigable_creation_or_destruction();
-
-        if (after_session_history_update) {
-            after_session_history_update->function()();
-        }
+        traversable->update_for_navigable_creation_or_destruction(GC::create_function(vm.heap(), [after_session_history_update](TraversableNavigable::HistoryStepResult) {
+            if (after_session_history_update) {
+                after_session_history_update->function()();
+            }
+        }));
     }));
 
     return {};
@@ -302,7 +304,7 @@ void NavigableContainer::destroy_the_child_navigable()
         // 9. Append the following session history traversal steps to traversable:
         traversable->append_session_history_traversal_steps(GC::create_function(heap(), [traversable] {
             // 1. Update for navigable creation/destruction given traversable.
-            traversable->update_for_navigable_creation_or_destruction();
+            traversable->update_for_navigable_creation_or_destruction({});
         }));
     }));
 }
