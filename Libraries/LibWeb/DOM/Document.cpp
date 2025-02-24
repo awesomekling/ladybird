@@ -3827,7 +3827,8 @@ Vector<GC::Root<HTML::Navigable>> Document::inclusive_ancestor_navigables()
     auto navigables = ancestor_navigables();
 
     // 2. Append document's node navigable to navigables.
-    navigables.append(*navigable());
+    if (auto navigable = this->navigable())
+        navigables.append(*navigable);
 
     // 3. Return navigables.
     return navigables;

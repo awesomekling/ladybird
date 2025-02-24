@@ -52,6 +52,11 @@ void EventLoop::visit_edges(Visitor& visitor)
     visitor.visit(m_backup_incumbent_realm_stack);
     visitor.visit(m_rendering_task_function);
     visitor.visit(m_system_event_loop_timer);
+
+    for (auto& it : m_wait_until_and_continue_tasks) {
+        visitor.visit(it.condition);
+        visitor.visit(it.continuation);
+    }
 }
 
 void EventLoop::schedule()
@@ -112,6 +117,12 @@ void EventLoop::spin_until(GC::Ref<GC::Function<bool()>> goal_condition)
     // NOTE: This is achieved by returning from the function.
 }
 
+void EventLoop::async_wait_for_condition_then_continue(GC::Ref<GC::Function<bool()>> goal_condition, GC::Ref<GC::Function<void()>> continuation)
+{
+    m_wait_until_and_continue_tasks.append({ goal_condition, continuation });
+    schedule();
+}
+
 void EventLoop::spin_processing_tasks_with_source_until(Task::Source source, GC::Ref<GC::Function<bool()>> goal_condition)
 {
     auto& vm = this->vm();
@@ -155,6 +166,8 @@ void EventLoop::process()
 {
     if (m_skip_event_loop_processing_steps)
         return;
+
+    process_async_wait_for_condition_then_continue_tasks();
 
     // 1. Let oldestTask and taskStartTime be null.
     GC::Ptr<Task> oldest_task;
@@ -215,6 +228,8 @@ void EventLoop::process()
             win->start_an_idle_period();
         }
     }
+
+    process_async_wait_for_condition_then_continue_tasks();
 
     // If there are eligible tasks in the queue, schedule a new round of processing. :^)
     if (m_task_queue->has_runnable_tasks() || (!m_microtask_queue->is_empty() && !m_performing_a_microtask_checkpoint)) {
@@ -746,6 +761,24 @@ void EventLoop::unpause(Badge<PauseHandle>, JS::Object const& global, HighResolu
 
     // FIXME: 5. Record pause duration given the duration from timeBeforePause to the current high resolution time given global.
     [[maybe_unused]] auto pause_duration = HighResolutionTime::current_high_resolution_time(global) - time_before_pause;
+}
+
+void EventLoop::process_async_wait_for_condition_then_continue_tasks()
+{
+    GC::ConservativeVector<WaitUntilAndContinueTask> tasks(heap());
+    tasks.ensure_capacity(m_wait_until_and_continue_tasks.size());
+    for (auto& task : m_wait_until_and_continue_tasks) {
+        tasks.append(task);
+    }
+    m_wait_until_and_continue_tasks.clear();
+
+    for (auto& task : tasks) {
+        if (task.condition->function()()) {
+            task.continuation->function()();
+        } else {
+            m_wait_until_and_continue_tasks.append(task);
+        }
+    }
 }
 
 }

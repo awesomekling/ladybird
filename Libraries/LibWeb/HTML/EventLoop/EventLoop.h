@@ -55,6 +55,9 @@ public:
 
     void spin_until(GC::Ref<GC::Function<bool()>> goal_condition);
     void spin_processing_tasks_with_source_until(Task::Source, GC::Ref<GC::Function<bool()>> goal_condition);
+
+    void async_wait_for_condition_then_continue(GC::Ref<GC::Function<bool()>> goal_condition, GC::Ref<GC::Function<void()>> continuation);
+
     void process();
     void queue_task_to_update_the_rendering();
 
@@ -98,6 +101,8 @@ private:
     void process_input_events() const;
     void update_the_rendering();
 
+    void process_async_wait_for_condition_then_continue_tasks();
+
     Type m_type { Type::Window };
 
     GC::Ptr<TaskQueue> m_task_queue;
@@ -136,6 +141,12 @@ private:
     bool m_is_running_rendering_task { false };
 
     GC::Ptr<GC::Function<void()>> m_rendering_task_function;
+
+    struct WaitUntilAndContinueTask {
+        GC::Ref<GC::Function<bool()>> condition;
+        GC::Ref<GC::Function<void()>> continuation;
+    };
+    Vector<WaitUntilAndContinueTask> m_wait_until_and_continue_tasks;
 };
 
 EventLoop& main_thread_event_loop();
