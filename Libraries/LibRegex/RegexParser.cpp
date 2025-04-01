@@ -981,7 +981,7 @@ bool ECMA262Parser::parse_pattern(ByteCode& stack, size_t& match_length_minimum,
     return parse_disjunction(stack, match_length_minimum, flags);
 }
 
-bool ECMA262Parser::has_duplicate_in_current_alternative(ByteString const& name)
+bool ECMA262Parser::has_duplicate_in_current_alternative(FlyString const& name)
 {
     auto it = m_parser_state.named_capture_groups.find(name);
     if (it == m_parser_state.named_capture_groups.end())
@@ -2502,7 +2502,7 @@ bool ECMA262Parser::parse_unicode_property_escape(PropertyEscape& property, bool
         [](Empty&) -> bool { VERIFY_NOT_REACHED(); });
 }
 
-ByteString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_bracket)
+FlyString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_bracket)
 {
     static constexpr u32 const REPLACEMENT_CHARACTER = 0xFFFD;
     constexpr u32 const ZERO_WIDTH_NON_JOINER { 0x200C };
@@ -2603,7 +2603,7 @@ ByteString ECMA262Parser::read_capture_group_specifier(bool take_starting_angle_
         builder.append_code_point(code_point);
     }
 
-    auto name = builder.to_byte_string();
+    auto name = MUST(builder.to_string());
     if (!hit_end || name.is_empty())
         set_error(Error::InvalidNameForCaptureGroup);
 
@@ -2719,7 +2719,7 @@ bool ECMA262Parser::parse_capture_group(ByteCode& stack, size_t& match_length_mi
 
             stack.insert_bytecode_group_capture_left(group_index);
             stack.extend(move(capture_group_bytecode));
-            stack.insert_bytecode_group_capture_right(group_index, name.view());
+            stack.insert_bytecode_group_capture_right(group_index, name.bytes_as_string_view());
 
             match_length_minimum += length;
 
