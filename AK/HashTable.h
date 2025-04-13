@@ -121,7 +121,6 @@ template<typename T, typename TraitsForT, bool IsOrdered>
 class HashTable {
     static constexpr size_t grow_capacity_at_least = 8;
     static constexpr size_t grow_at_load_factor_percent = 80;
-    static constexpr size_t grow_capacity_increase_percent = 60;
 
     struct Bucket {
         BucketState state;
@@ -231,13 +230,28 @@ public:
         MUST(try_set_from(from_array));
     }
 
+    static constexpr u64 round_up_to_next_power_of_two(u64 x)
+    {
+        if (x <= 1)
+            return 1;
+
+        --x;
+        x |= x >> 1;
+        x |= x >> 2;
+        x |= x >> 4;
+        x |= x >> 8;
+        x |= x >> 16;
+        x |= x >> 32;
+        return x + 1;
+    }
+
     ErrorOr<void> try_ensure_capacity(size_t capacity)
     {
         // The user usually expects "capacity" to mean the number of values that can be stored in a
         // container without it needing to reallocate. Our definition of "capacity" is the number of
         // buckets we can store, but we reallocate earlier because of `grow_at_load_factor_percent`.
         // This calculates the required internal capacity to store `capacity` number of values.
-        size_t required_capacity = capacity * 100 / grow_at_load_factor_percent + 1;
+        size_t required_capacity = round_up_to_next_power_of_two(capacity);
         if (required_capacity <= m_capacity)
             return {};
         return try_rehash(required_capacity);
@@ -360,7 +374,7 @@ public:
     ErrorOr<HashSetResult> try_set(U&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace)
     {
         if (should_grow())
-            TRY(try_rehash(m_capacity * (100 + grow_capacity_increase_percent) / 100));
+            TRY(try_rehash(m_capacity * 2));
 
         return write_value(forward<U>(value), existing_entry_behavior);
     }
@@ -523,9 +537,8 @@ private:
 
     ErrorOr<void> try_rehash(size_t new_capacity)
     {
-        new_capacity = max(new_capacity, m_capacity + grow_capacity_at_least);
-        new_capacity = kmalloc_good_size(size_in_bytes(new_capacity)) / sizeof(BucketType);
         VERIFY(new_capacity >= size());
+        new_capacity = max(new_capacity, 16);
 
         auto* old_buckets = m_buckets;
         auto old_buckets_size = size_in_bytes(m_capacity);
@@ -564,7 +577,7 @@ private:
         if (is_empty())
             return nullptr;
 
-        hash %= m_capacity;
+        hash &= m_capacity - 1;
         for (;;) {
             auto* bucket = &m_buckets[hash];
             if (bucket->state == BucketState::Free)
@@ -581,7 +594,7 @@ private:
         VERIFY(bucket.state != BucketState::Free);
 
         if (bucket.state == BucketState::CalculateLength) {
-            size_t ideal_bucket_index = TraitsForT::hash(*bucket.slot()) % m_capacity;
+            size_t ideal_bucket_index = TraitsForT::hash(*bucket.slot()) & (m_capacity - 1);
 
             VERIFY(&bucket >= m_buckets);
             size_t actual_bucket_index = &bucket - m_buckets;
@@ -644,7 +657,7 @@ private:
             }
         };
 
-        auto bucket_index = TraitsForT::hash(value) % m_capacity;
+        auto bucket_index = TraitsForT::hash(value) & (m_capacity - 1);
         size_t probe_length = 0;
         for (;;) {
             auto* bucket = &m_buckets[bucket_index];
