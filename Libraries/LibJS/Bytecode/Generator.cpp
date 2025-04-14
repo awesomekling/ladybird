@@ -297,6 +297,11 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
     Vector<UnlinkedExceptionHandlers> unlinked_exception_handlers;
 
     HashMap<size_t, SourceRecord> source_map;
+    size_t source_map_entry_count = 0;
+    for (auto& block : generator.m_root_basic_blocks) {
+        source_map_entry_count += block->source_map().size();
+    }
+    source_map.ensure_capacity(source_map_entry_count);
 
     Optional<ScopedOperand> undefined_constant;
 
