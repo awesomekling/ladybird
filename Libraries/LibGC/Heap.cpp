@@ -526,72 +526,46 @@ private:
     Vector<Ref<Cell>> m_deque;
 };
 
-class ParallelMarkingContext : public Cell::Visitor {
+class MarkingThread : public Cell::Visitor {
 public:
-    ParallelMarkingContext(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
+    MarkingThread(Heap& heap, size_t index, Span<WorkStealingDeque> all_queues, HashTable<HeapBlock*>& live_blocks, FlatPtr min_addr, FlatPtr max_addr)
         : m_heap(heap)
+        , m_thread_index(index)
+        , m_all_queues(all_queues)
+        , m_my_queue(all_queues[index])
+        , m_all_live_heap_blocks(live_blocks)
+        , m_min_block_address(min_addr)
+        , m_max_block_address(max_addr)
     {
-        m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
-        m_heap.for_each_block([&](auto& block) {
-            m_all_live_heap_blocks.set(&block);
-            return IterationDecision::Continue;
-        });
+    }
 
-        m_remaining_workers = m_thread_count;
-
-        size_t round_robin = 0;
-        for (auto* root : roots.keys()) {
-            if (!root->is_marked() && root->try_mark())
-                m_thread_deques[round_robin++ % m_thread_count].push(*root);
-        }
+    void push_initial(Ref<Cell> cell)
+    {
+        m_my_queue.push(move(cell));
     }
 
     void run()
     {
-        for (size_t i = 0; i < m_thread_count; ++i) {
-            size_t thread_index = i;
-            s_marker_pool->submit_work([this, thread_index] {
-                worker_loop(thread_index);
-                if (--m_remaining_workers == 0)
-                    m_done_condvar.signal();
-            });
-        }
-
-        Threading::MutexLocker locker(m_done_mutex);
-        m_done_condvar.wait_while([&] { return m_remaining_workers != 0; });
-    }
-
-    void worker_loop(size_t thread_index)
-    {
-        auto& deque = m_thread_deques[thread_index];
-
         for (;;) {
-            Ptr<Cell> maybe_cell = deque.pop();
+            auto maybe_cell = m_my_queue.pop();
             if (!maybe_cell) {
-                for (size_t i = 0; i < m_thread_count; ++i) {
-                    if (i == thread_index)
-                        continue;
-                    maybe_cell = m_thread_deques[i].steal();
-                    if (maybe_cell)
-                        break;
-                }
+                maybe_cell = steal();
+                if (!maybe_cell)
+                    break;
             }
-
-            if (!maybe_cell)
-                break;
-
+            ++m_processed;
             maybe_cell->visit_edges(*this);
         }
     }
+
+    size_t processed_count() const { return m_processed; }
 
     virtual void visit_impl(Cell& cell) override
     {
         if (cell.is_marked())
             return;
-        if (cell.try_mark()) {
-            // Prefer thread-local push (naively to thread 0 for now)
-            m_thread_deques[m_thread_index].push(cell);
-        }
+        if (cell.try_mark())
+            m_my_queue.push(cell);
     }
 
     virtual void visit_possible_values(ReadonlyBytes bytes) override
@@ -603,25 +577,87 @@ public:
 
         for_each_cell_among_possible_pointers(m_all_live_heap_blocks, possible_pointers, [&](Cell* cell, FlatPtr) {
             if (!cell->is_marked() && cell->state() == Cell::State::Live && cell->try_mark())
-                m_thread_deques[0].push(*cell); // Naive affinity to thread 0
+                m_my_queue.push(*cell);
         });
     }
 
 private:
+    Ptr<Cell> steal()
+    {
+        for (size_t i = 0; i < m_all_queues.size(); ++i) {
+            if (i == m_thread_index)
+                continue;
+            if (auto maybe = m_all_queues[i].steal())
+                return maybe;
+        }
+        return {};
+    }
+
     Heap& m_heap;
+    size_t m_thread_index;
+    Span<WorkStealingDeque> m_all_queues;
+    WorkStealingDeque& m_my_queue;
+    HashTable<HeapBlock*>& m_all_live_heap_blocks;
     FlatPtr m_min_block_address;
     FlatPtr m_max_block_address;
-    HashTable<HeapBlock*> m_all_live_heap_blocks;
+    size_t m_processed { 0 };
+};
 
-    size_t m_thread_index { 0 };
+class ParallelMarkingContext {
+public:
+    ParallelMarkingContext(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
+        : m_heap(heap)
+    {
+        m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
+        m_heap.for_each_block([&](auto& block) {
+            m_all_live_heap_blocks.set(&block);
+            return IterationDecision::Continue;
+        });
+
+        for (size_t i = 0; i < m_thread_count; ++i)
+            m_markers.append(make<MarkingThread>(m_heap, i, m_thread_deques, m_all_live_heap_blocks, m_min_block_address, m_max_block_address));
+
+        size_t rr = 0;
+        for (auto* root : roots.keys()) {
+            if (!root->is_marked() && root->try_mark())
+                m_markers[rr++ % m_thread_count]->push_initial(*root);
+        }
+    }
+
+    void run()
+    {
+        m_remaining_workers = m_thread_count;
+
+        for (size_t i = 0; i < m_thread_count; ++i) {
+            s_marker_pool->submit_work([this, i] {
+                m_markers[i]->run();
+                if (--m_remaining_workers == 0)
+                    m_done_condvar.signal();
+            });
+        }
+
+        Threading::MutexLocker locker(m_done_mutex);
+        m_done_condvar.wait_while([&] { return m_remaining_workers != 0; });
+    }
+
+    auto& first_marker()
+    {
+        return *m_markers[0];
+    }
+
+private:
+    Heap& m_heap;
     static constexpr size_t m_thread_count { 4 };
     Array<WorkStealingDeque, m_thread_count> m_thread_deques;
+    Vector<NonnullOwnPtr<MarkingThread>> m_markers;
+    HashTable<HeapBlock*> m_all_live_heap_blocks;
+    FlatPtr m_min_block_address;
+    FlatPtr m_max_block_address;
 
     Threading::Mutex m_done_mutex;
     Threading::ConditionVariable m_done_condvar { m_done_mutex };
     AK::Atomic<size_t> m_remaining_workers;
 };
-
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
 {
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
@@ -635,7 +671,7 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
     for_each_block([&](auto& block) {
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
             if (!cell->is_marked() && cell_must_survive_garbage_collection(*cell))
-                cell->visit_edges(context);
+                cell->visit_edges(context.first_marker());
         });
         return IterationDecision::Continue;
     });
