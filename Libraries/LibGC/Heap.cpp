@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2023, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -12,6 +12,7 @@
 #include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <AK/Platform.h>
+#include <AK/Queue.h>
 #include <AK/StackInfo.h>
 #include <AK/TemporaryChange.h>
 #include <LibCore/ElapsedTimer.h>
@@ -20,11 +21,74 @@
 #include <LibGC/HeapBlock.h>
 #include <LibGC/NanBoxedValue.h>
 #include <LibGC/Root.h>
+#include <LibThreading/ConditionVariable.h>
+#include <LibThreading/Mutex.h>
+#include <LibThreading/Thread.h>
 #include <setjmp.h>
 
 #ifdef HAS_ADDRESS_SANITIZER
 #    include <sanitizer/asan_interface.h>
 #endif
+
+namespace AK {
+
+class Spinlock {
+public:
+    Spinlock() = default;
+
+    ALWAYS_INLINE void lock()
+    {
+        for (;;) {
+            // Try to acquire the lock (expected = false → desired = true)
+            if (!m_locked.exchange(true, AK::MemoryOrder::memory_order_acquire))
+                return;
+
+            // Spin while locked, with pause to reduce contention
+            while (m_locked.load(AK::MemoryOrder::memory_order_relaxed))
+                cpu_relax();
+        }
+    }
+
+    ALWAYS_INLINE void unlock()
+    {
+        m_locked.store(false, AK::MemoryOrder::memory_order_release);
+    }
+
+private:
+    static ALWAYS_INLINE void cpu_relax()
+    {
+#if defined(__x86_64__) || defined(__i386__)
+        asm volatile("pause");
+#elif defined(__aarch64__)
+        asm volatile("yield");
+#else
+        // Generic fallback: do nothing
+#endif
+    }
+    AK::Atomic<bool> m_locked { false };
+};
+
+class [[nodiscard]] SpinlockLocker {
+public:
+    explicit SpinlockLocker(Spinlock& lock)
+        : m_lock(lock)
+    {
+        m_lock.lock();
+    }
+
+    ~SpinlockLocker()
+    {
+        m_lock.unlock();
+    }
+
+    SpinlockLocker(SpinlockLocker const&) = delete;
+    SpinlockLocker& operator=(SpinlockLocker const&) = delete;
+
+private:
+    Spinlock& m_lock;
+};
+
+} // namespace AK
 
 namespace GC {
 
@@ -239,6 +303,7 @@ AK::JsonObject Heap::dump_graph()
 
 void Heap::collect_garbage(CollectionType collection_type, bool print_report)
 {
+    //    print_report = true;
     VERIFY(!m_collecting_garbage);
 
     {
@@ -359,10 +424,76 @@ NO_SANITIZE_ADDRESS void Heap::gather_conservative_roots(HashMap<Cell*, HeapRoot
         }
     });
 }
-
-class MarkingVisitor final : public Cell::Visitor {
+class WorkQueue {
 public:
-    explicit MarkingVisitor(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
+    void enqueue(Ref<Cell> cell)
+    {
+        AK::SpinlockLocker locker(m_lock);
+        m_queue.append(move(cell));
+    }
+
+    Ptr<Cell> dequeue()
+    {
+        AK::SpinlockLocker locker(m_lock);
+        if (m_queue.is_empty())
+            return nullptr;
+        return m_queue.take_last();
+    }
+
+private:
+    AK::Spinlock m_lock;
+    Vector<Ref<Cell>> m_queue;
+};
+
+class PersistentMarkerThreadPool {
+public:
+    PersistentMarkerThreadPool()
+    {
+        for (size_t i = 0; i < m_thread_count; ++i) {
+            auto thread = Threading::Thread::construct([this]() -> intptr_t {
+                run();
+                return 0;
+            });
+            m_threads.append(thread);
+            thread->start();
+        }
+    }
+
+    void submit_work(AK::Function<void()> work)
+    {
+        {
+            Threading::MutexLocker locker(m_mutex);
+            m_pending_work.enqueue(move(work));
+        }
+        m_condvar.signal();
+    }
+
+    void run()
+    {
+        for (;;) {
+            AK::Function<void()> job;
+            {
+                Threading::MutexLocker locker(m_mutex);
+                m_condvar.wait_while([&]() { return m_pending_work.is_empty(); });
+                job = m_pending_work.dequeue();
+            }
+            job();
+        }
+    }
+
+private:
+    static constexpr size_t m_thread_count { 4 };
+    Vector<NonnullRefPtr<Threading::Thread>> m_threads;
+    Threading::Mutex m_mutex;
+    Threading::ConditionVariable m_condvar { m_mutex };
+    Queue<AK::Function<void()>> m_pending_work;
+};
+
+static NeverDestroyed<PersistentMarkerThreadPool> s_marker_pool;
+
+class ParallelMarkingContext : public Cell::Visitor {
+public:
+    ParallelMarkingContext(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
         : m_heap(heap)
     {
         m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
@@ -372,68 +503,80 @@ public:
         });
 
         for (auto* root : roots.keys()) {
-            visit(root);
+            if (!root->is_marked() && root->try_mark()) {
+                m_work_queue.enqueue(*root);
+            }
         }
+    }
+
+    void run()
+    {
+        m_remaining_workers = m_thread_count;
+
+        for (size_t i = 0; i < m_thread_count; ++i) {
+            s_marker_pool->submit_work([this] {
+                while (true) {
+                    auto maybe_cell = m_work_queue.dequeue();
+                    if (!maybe_cell)
+                        break;
+                    maybe_cell->visit_edges(*this);
+                }
+                if (--m_remaining_workers == 0)
+                    m_done_condvar.signal();
+            });
+        }
+
+        Threading::MutexLocker locker(m_done_mutex);
+        m_done_condvar.wait_while([&] { return m_remaining_workers != 0; });
     }
 
     virtual void visit_impl(Cell& cell) override
     {
         if (cell.is_marked())
             return;
-        dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
-
-        cell.set_marked(true);
-        m_work_queue.append(cell);
+        if (cell.try_mark())
+            m_work_queue.enqueue(cell);
     }
 
     virtual void visit_possible_values(ReadonlyBytes bytes) override
     {
         HashMap<FlatPtr, HeapRoot> possible_pointers;
-
-        auto* raw_pointer_sized_values = reinterpret_cast<FlatPtr const*>(bytes.data());
+        auto* raw = reinterpret_cast<FlatPtr const*>(bytes.data());
         for (size_t i = 0; i < (bytes.size() / sizeof(FlatPtr)); ++i)
-            add_possible_value(possible_pointers, raw_pointer_sized_values[i], HeapRoot { .type = HeapRoot::Type::HeapFunctionCapturedPointer }, m_min_block_address, m_max_block_address);
+            add_possible_value(possible_pointers, raw[i], HeapRoot { .type = HeapRoot::Type::HeapFunctionCapturedPointer }, m_min_block_address, m_max_block_address);
 
         for_each_cell_among_possible_pointers(m_all_live_heap_blocks, possible_pointers, [&](Cell* cell, FlatPtr) {
-            if (cell->is_marked())
-                return;
-            if (cell->state() != Cell::State::Live)
-                return;
-            cell->set_marked(true);
-            m_work_queue.append(*cell);
+            if (!cell->is_marked() && cell->state() == Cell::State::Live && cell->try_mark())
+                m_work_queue.enqueue(*cell);
         });
-    }
-
-    void mark_all_live_cells()
-    {
-        while (!m_work_queue.is_empty()) {
-            m_work_queue.take_last()->visit_edges(*this);
-        }
     }
 
 private:
     Heap& m_heap;
-    Vector<Ref<Cell>> m_work_queue;
+    WorkQueue m_work_queue;
     HashTable<HeapBlock*> m_all_live_heap_blocks;
     FlatPtr m_min_block_address;
     FlatPtr m_max_block_address;
+    Threading::Mutex m_done_mutex;
+    Threading::ConditionVariable m_done_condvar { m_done_mutex };
+    AK::Atomic<size_t> m_remaining_workers;
+    static constexpr size_t m_thread_count { 4 };
 };
 
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
 {
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
 
-    MarkingVisitor visitor(*this, roots);
-
-    visitor.mark_all_live_cells();
+    ParallelMarkingContext context(*this, roots);
+    context.run();
 
     for (auto& inverse_root : m_uprooted_cells)
-        inverse_root->set_marked(false);
+        inverse_root->clear_mark();
 
     for_each_block([&](auto& block) {
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
             if (!cell->is_marked() && cell_must_survive_garbage_collection(*cell))
-                cell->visit_edges(visitor);
+                cell->visit_edges(context);
         });
         return IterationDecision::Continue;
     });
@@ -480,7 +623,7 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
                 ++collected_cells;
                 collected_cell_bytes += block.cell_size();
             } else {
-                cell->set_marked(false);
+                cell->clear_mark();
                 block_has_live_cells = true;
                 ++live_cells;
                 live_cell_bytes += block.cell_size();
@@ -555,5 +698,4 @@ void Heap::uproot_cell(Cell* cell)
 {
     m_uprooted_cells.append(cell);
 }
-
 }

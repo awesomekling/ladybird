@@ -1,11 +1,12 @@
 /*
- * Copyright (c) 2020-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/Atomic.h>
 #include <AK/Badge.h>
 #include <AK/Format.h>
 #include <AK/Forward.h>
@@ -44,8 +45,13 @@ class Cell {
 public:
     virtual ~Cell() = default;
 
-    bool is_marked() const { return m_mark; }
-    void set_marked(bool b) { m_mark = b; }
+    bool is_marked() const { return m_marked.load(AK::MemoryOrder::memory_order_relaxed); }
+    bool try_mark()
+    {
+        bool expected = false;
+        return m_marked.compare_exchange_strong(expected, true, AK::MemoryOrder::memory_order_relaxed);
+    }
+    void clear_mark() { m_marked.store(false, AK::MemoryOrder::memory_order_relaxed); }
 
     enum class State : bool {
         Live,
@@ -188,7 +194,7 @@ protected:
     void set_overrides_must_survive_garbage_collection(bool b) { m_overrides_must_survive_garbage_collection = b; }
 
 private:
-    bool m_mark { false };
+    AK::Atomic<bool> m_marked { false };
     bool m_overrides_must_survive_garbage_collection { false };
     State m_state { State::Live };
 } SWIFT_UNSAFE_REFERENCE;

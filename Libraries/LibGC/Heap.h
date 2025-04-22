@@ -80,6 +80,7 @@ public:
 
 private:
     friend class MarkingVisitor;
+    friend class ParallelMarkingContext;
     friend class GraphConstructorVisitor;
     friend class DeferGC;
     friend class ForeignCell;

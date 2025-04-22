@@ -12,7 +12,7 @@ set(SOURCES
 )
 
 serenity_lib(LibGC gc)
-target_link_libraries(LibGC PRIVATE LibCore)
+target_link_libraries(LibGC PRIVATE LibCore LibThreading)
 
 if (ENABLE_SWIFT)
     generate_clang_module_map(LibGC)
