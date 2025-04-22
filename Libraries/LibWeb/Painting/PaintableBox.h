@@ -245,6 +245,10 @@ public:
     void set_used_values_for_grid_template_rows(RefPtr<CSS::GridTrackSizeListStyleValue const> style_value) { m_used_values_for_grid_template_rows = move(style_value); }
     RefPtr<CSS::GridTrackSizeListStyleValue const> const& used_values_for_grid_template_rows() const { return m_used_values_for_grid_template_rows; }
 
+    [[nodiscard]] ClipFrame* clip_frame() { return m_clip_frame.ptr(); }
+    [[nodiscard]] ClipFrame const* clip_frame() const { return m_clip_frame.ptr(); }
+    void set_clip_frame(RefPtr<ClipFrame> clip_frame) { m_clip_frame = move(clip_frame); }
+
 protected:
     explicit PaintableBox(Layout::Box const&);
     explicit PaintableBox(Layout::InlineNode const&);
@@ -313,6 +317,8 @@ private:
     RefPtr<CSS::GridTrackSizeListStyleValue const> m_used_values_for_grid_template_rows;
 
     BoxModelMetrics m_box_model;
+
+    RefPtr<ClipFrame> m_clip_frame;
 };
 
 class PaintableWithLines : public PaintableBox {

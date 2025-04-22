@@ -124,23 +124,29 @@ void ViewportPaintable::assign_scroll_frames()
 
 void ViewportPaintable::assign_clip_frames()
 {
-    for_each_in_subtree_of_type<PaintableBox>([&](auto const& paintable_box) {
+    struct PaintableBoxAndClipFrame {
+        PaintableBox const& paintable_box;
+        ClipFrame& clip_frame;
+    };
+    Vector<PaintableBoxAndClipFrame> clip_frames;
+    for_each_in_subtree_of_type<PaintableBox>([&](auto& paintable_box) {
         auto overflow_x = paintable_box.computed_values().overflow_x();
         auto overflow_y = paintable_box.computed_values().overflow_y();
         auto has_hidden_overflow = overflow_x != CSS::Overflow::Visible && overflow_y != CSS::Overflow::Visible;
         if (has_hidden_overflow || paintable_box.get_clip_rect().has_value()) {
-            auto clip_frame = adopt_ref(*new ClipFrame());
-            clip_state.set(paintable_box, move(clip_frame));
+            auto clip_frame = adopt_ref(*new ClipFrame);
+            clip_frames.append({ paintable_box, clip_frame });
+            paintable_box.set_clip_frame(move(clip_frame));
         }
         return TraversalDecision::Continue;
     });
 
     for_each_in_subtree([&](auto const& paintable) {
         for (auto block = paintable.containing_block(); !block->is_viewport(); block = block->containing_block()) {
-            if (auto clip_frame = clip_state.get(block); clip_frame.has_value()) {
+            if (auto const* clip_frame = block->clip_frame()) {
                 if (paintable.is_paintable_box()) {
                     auto const& paintable_box = static_cast<PaintableBox const&>(paintable);
-                    const_cast<PaintableBox&>(paintable_box).set_enclosing_clip_frame(clip_frame.value());
+                    const_cast<PaintableBox&>(paintable_box).set_enclosing_clip_frame(clip_frame);
                 }
                 break;
             }
@@ -151,9 +157,7 @@ void ViewportPaintable::assign_clip_frames()
         return TraversalDecision::Continue;
     });
 
-    for (auto& it : clip_state) {
-        auto const& paintable_box = *it.key;
-        auto& clip_frame = *it.value;
+    for (auto& [paintable_box, clip_frame] : clip_frames) {
         for (auto const* block = &paintable_box.layout_node_with_style_and_box_metrics(); !block->is_viewport(); block = block->containing_block()) {
             auto const& paintable = block->first_paintable();
             if (!paintable->is_paintable_box()) {
@@ -341,12 +345,6 @@ void ViewportPaintable::recompute_selection_states(DOM::Range& range)
 bool ViewportPaintable::handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigned, unsigned, int, int)
 {
     return false;
-}
-
-void ViewportPaintable::visit_edges(Visitor& visitor)
-{
-    Base::visit_edges(visitor);
-    visitor.visit(clip_state);
 }
 
 }
