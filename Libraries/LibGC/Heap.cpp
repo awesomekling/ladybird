@@ -7,6 +7,7 @@
 
 #include <AK/Badge.h>
 #include <AK/Debug.h>
+#include <AK/Deque.h>
 #include <AK/Function.h>
 #include <AK/HashTable.h>
 #include <AK/JsonArray.h>
@@ -491,7 +492,7 @@ private:
 
 static NeverDestroyed<PersistentMarkerThreadPool> s_marker_pool;
 
-class WorkStealingDeque {
+class alignas(64) WorkStealingDeque {
 public:
     void push(Ref<Cell> cell)
     {
@@ -509,6 +510,8 @@ public:
 
     Ptr<Cell> steal()
     {
+        if (m_deque.is_empty())
+            return {};
         AK::SpinlockLocker locker(m_lock);
         if (m_deque.is_empty())
             return {};
@@ -523,7 +526,7 @@ public:
 
 private:
     mutable AK::Spinlock m_lock;
-    Vector<Ref<Cell>> m_deque;
+    AK::Deque<Ref<Cell>> m_deque;
 };
 
 class MarkingThread : public Cell::Visitor {
@@ -562,8 +565,6 @@ public:
 
     virtual void visit_impl(Cell& cell) override
     {
-        if (cell.is_marked())
-            return;
         if (cell.try_mark())
             m_my_queue.push(cell);
     }
@@ -660,6 +661,14 @@ private:
 };
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
 {
+    auto tmr = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
+    ScopeGuard g = [&] {
+        static i64 total = 0;
+        auto local = tmr.elapsed_time().to_microseconds();
+        total += local;
+        dbgln("MARK {} (total {})", local, total);
+    };
+
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
 
     ParallelMarkingContext context(*this, roots);
