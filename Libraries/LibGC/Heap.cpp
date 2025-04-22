@@ -55,7 +55,6 @@ public:
         m_locked.store(false, AK::MemoryOrder::memory_order_release);
     }
 
-private:
     static ALWAYS_INLINE void cpu_relax()
     {
 #if defined(__x86_64__) || defined(__i386__)
@@ -66,6 +65,8 @@ private:
         // Generic fallback: do nothing
 #endif
     }
+
+private:
     AK::Atomic<bool> m_locked { false };
 };
 
@@ -494,40 +495,85 @@ private:
 static NeverDestroyed<PersistentMarkerThreadPool> s_marker_pool;
 
 class alignas(64) WorkStealingDeque {
+    static constexpr size_t kCapacity = 8192; // must be power of two
+
 public:
+    WorkStealingDeque()
+    {
+        for (auto& slot : m_buffer)
+            slot.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
+    }
+
     void push(Ref<Cell> cell)
     {
-        AK::SpinlockLocker locker(m_lock);
-        m_deque.append(move(cell));
+        for (;;) {
+            size_t b = m_bottom.load(AK::MemoryOrder::memory_order_relaxed);
+            size_t t = m_top.load(AK::MemoryOrder::memory_order_acquire);
+
+            if (b - t < kCapacity) {
+                m_buffer[b & (kCapacity - 1)].store(cell.ptr(), AK::MemoryOrder::memory_order_relaxed);
+                __atomic_thread_fence(__ATOMIC_RELEASE);
+                m_bottom.store(b + 1, AK::MemoryOrder::memory_order_relaxed);
+                return;
+            }
+
+            // If full, back off briefly (pause or yield)
+            AK::Spinlock::cpu_relax(); // reuse your pause/yield logic
+        }
     }
 
     Ptr<Cell> pop()
     {
-        AK::SpinlockLocker locker(m_lock);
-        if (m_deque.is_empty())
+        size_t b = m_bottom.load(AK::MemoryOrder::memory_order_relaxed) - 1;
+        m_bottom.store(b, AK::MemoryOrder::memory_order_relaxed);
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        size_t t = m_top.load(AK::MemoryOrder::memory_order_relaxed);
+
+        if (t > b) {
+            m_bottom.store(t, AK::MemoryOrder::memory_order_relaxed);
             return nullptr;
-        return m_deque.take_last();
+        }
+
+        auto* cell = m_buffer[b & (kCapacity - 1)].load(AK::MemoryOrder::memory_order_relaxed);
+
+        if (t == b) {
+            if (!m_top.compare_exchange_strong(t, t + 1, AK::MemoryOrder::memory_order_seq_cst)) {
+                cell = nullptr;
+            }
+            m_bottom.store(t + 1, AK::MemoryOrder::memory_order_relaxed);
+        }
+
+        return cell;
     }
 
     Ptr<Cell> steal()
     {
-        if (m_deque.is_empty())
-            return {};
-        AK::SpinlockLocker locker(m_lock);
-        if (m_deque.is_empty())
-            return {};
-        return m_deque.take_first();
+        size_t t = m_top.load(AK::MemoryOrder::memory_order_acquire);
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        size_t b = m_bottom.load(AK::MemoryOrder::memory_order_acquire);
+
+        if (t >= b)
+            return nullptr;
+
+        auto* cell = m_buffer[t & (kCapacity - 1)].load(AK::MemoryOrder::memory_order_relaxed);
+
+        if (!m_top.compare_exchange_strong(t, t + 1, AK::MemoryOrder::memory_order_seq_cst))
+            return nullptr;
+
+        return cell;
     }
 
     bool is_empty() const
     {
-        AK::SpinlockLocker locker(m_lock);
-        return m_deque.is_empty();
+        size_t t = m_top.load(AK::MemoryOrder::memory_order_acquire);
+        size_t b = m_bottom.load(AK::MemoryOrder::memory_order_acquire);
+        return t >= b;
     }
 
 private:
-    mutable AK::Spinlock m_lock;
-    AK::Deque<Ref<Cell>> m_deque;
+    Array<AK::Atomic<Cell*>, kCapacity> m_buffer;
+    AK::Atomic<size_t> m_top { 0 };
+    AK::Atomic<size_t> m_bottom { 0 };
 };
 
 class MarkingThread : public Cell::Visitor {
@@ -661,7 +707,7 @@ private:
 };
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
 {
-#if 0
+#if 1
     auto tmr = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     ScopeGuard g = [&] {
         static i64 total = 0;
