@@ -446,6 +446,8 @@ private:
     Vector<Ref<Cell>> m_queue;
 };
 
+static constexpr size_t m_thread_count { 8 };
+
 class PersistentMarkerThreadPool {
 public:
     PersistentMarkerThreadPool()
@@ -483,7 +485,6 @@ public:
     }
 
 private:
-    static constexpr size_t m_thread_count { 4 };
     Vector<NonnullRefPtr<Threading::Thread>> m_threads;
     Threading::Mutex m_mutex;
     Threading::ConditionVariable m_condvar { m_mutex };
@@ -648,7 +649,6 @@ public:
 
 private:
     Heap& m_heap;
-    static constexpr size_t m_thread_count { 4 };
     Array<WorkStealingDeque, m_thread_count> m_thread_deques;
     Vector<NonnullOwnPtr<MarkingThread>> m_markers;
     HashTable<HeapBlock*> m_all_live_heap_blocks;
@@ -661,6 +661,7 @@ private:
 };
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
 {
+#if 0
     auto tmr = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     ScopeGuard g = [&] {
         static i64 total = 0;
@@ -668,6 +669,7 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
         total += local;
         dbgln("MARK {} (total {})", local, total);
     };
+#endif
 
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
 
