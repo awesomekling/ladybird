@@ -491,6 +491,41 @@ private:
 
 static NeverDestroyed<PersistentMarkerThreadPool> s_marker_pool;
 
+class WorkStealingDeque {
+public:
+    void push(Ref<Cell> cell)
+    {
+        AK::SpinlockLocker locker(m_lock);
+        m_deque.append(move(cell));
+    }
+
+    Ptr<Cell> pop()
+    {
+        AK::SpinlockLocker locker(m_lock);
+        if (m_deque.is_empty())
+            return nullptr;
+        return m_deque.take_last();
+    }
+
+    Ptr<Cell> steal()
+    {
+        AK::SpinlockLocker locker(m_lock);
+        if (m_deque.is_empty())
+            return {};
+        return m_deque.take_first();
+    }
+
+    bool is_empty() const
+    {
+        AK::SpinlockLocker locker(m_lock);
+        return m_deque.is_empty();
+    }
+
+private:
+    mutable AK::Spinlock m_lock;
+    Vector<Ref<Cell>> m_deque;
+};
+
 class ParallelMarkingContext : public Cell::Visitor {
 public:
     ParallelMarkingContext(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
@@ -502,25 +537,21 @@ public:
             return IterationDecision::Continue;
         });
 
+        m_remaining_workers = m_thread_count;
+
+        size_t round_robin = 0;
         for (auto* root : roots.keys()) {
-            if (!root->is_marked() && root->try_mark()) {
-                m_work_queue.enqueue(*root);
-            }
+            if (!root->is_marked() && root->try_mark())
+                m_thread_deques[round_robin++ % m_thread_count].push(*root);
         }
     }
 
     void run()
     {
-        m_remaining_workers = m_thread_count;
-
         for (size_t i = 0; i < m_thread_count; ++i) {
-            s_marker_pool->submit_work([this] {
-                while (true) {
-                    auto maybe_cell = m_work_queue.dequeue();
-                    if (!maybe_cell)
-                        break;
-                    maybe_cell->visit_edges(*this);
-                }
+            size_t thread_index = i;
+            s_marker_pool->submit_work([this, thread_index] {
+                worker_loop(thread_index);
                 if (--m_remaining_workers == 0)
                     m_done_condvar.signal();
             });
@@ -530,12 +561,37 @@ public:
         m_done_condvar.wait_while([&] { return m_remaining_workers != 0; });
     }
 
+    void worker_loop(size_t thread_index)
+    {
+        auto& deque = m_thread_deques[thread_index];
+
+        for (;;) {
+            Ptr<Cell> maybe_cell = deque.pop();
+            if (!maybe_cell) {
+                for (size_t i = 0; i < m_thread_count; ++i) {
+                    if (i == thread_index)
+                        continue;
+                    maybe_cell = m_thread_deques[i].steal();
+                    if (maybe_cell)
+                        break;
+                }
+            }
+
+            if (!maybe_cell)
+                break;
+
+            maybe_cell->visit_edges(*this);
+        }
+    }
+
     virtual void visit_impl(Cell& cell) override
     {
         if (cell.is_marked())
             return;
-        if (cell.try_mark())
-            m_work_queue.enqueue(cell);
+        if (cell.try_mark()) {
+            // Prefer thread-local push (naively to thread 0 for now)
+            m_thread_deques[m_thread_index].push(cell);
+        }
     }
 
     virtual void visit_possible_values(ReadonlyBytes bytes) override
@@ -547,20 +603,23 @@ public:
 
         for_each_cell_among_possible_pointers(m_all_live_heap_blocks, possible_pointers, [&](Cell* cell, FlatPtr) {
             if (!cell->is_marked() && cell->state() == Cell::State::Live && cell->try_mark())
-                m_work_queue.enqueue(*cell);
+                m_thread_deques[0].push(*cell); // Naive affinity to thread 0
         });
     }
 
 private:
     Heap& m_heap;
-    WorkQueue m_work_queue;
-    HashTable<HeapBlock*> m_all_live_heap_blocks;
     FlatPtr m_min_block_address;
     FlatPtr m_max_block_address;
+    HashTable<HeapBlock*> m_all_live_heap_blocks;
+
+    size_t m_thread_index { 0 };
+    static constexpr size_t m_thread_count { 4 };
+    Array<WorkStealingDeque, m_thread_count> m_thread_deques;
+
     Threading::Mutex m_done_mutex;
     Threading::ConditionVariable m_done_condvar { m_done_mutex };
     AK::Atomic<size_t> m_remaining_workers;
-    static constexpr size_t m_thread_count { 4 };
 };
 
 void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots)
