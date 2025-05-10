@@ -656,7 +656,7 @@ WebIDL::ExceptionOr<void> Node::ensure_pre_insertion_validity(GC::Ref<Node> node
 void Node::insert_before(GC::Ref<Node> node, GC::Ptr<Node> child, bool suppress_observers)
 {
     // 1. Let nodes be node’s children, if node is a DocumentFragment node; otherwise « node ».
-    Vector<GC::Root<Node>> nodes;
+    NodeVector nodes;
     if (is<DocumentFragment>(*node))
         nodes = node->children_as_vector();
     else
@@ -1075,7 +1075,7 @@ WebIDL::ExceptionOr<GC::Ref<Node>> Node::replace_child(GC::Ref<Node> node, GC::R
     GC::Ptr<Node> previous_sibling = child->previous_sibling();
 
     // 10. Let removedNodes be the empty set.
-    Vector<GC::Root<Node>> removed_nodes;
+    NodeVector removed_nodes;
 
     // 11. If child’s parent is non-null, then:
     // NOTE: The above can only be false if child is node.
@@ -1088,7 +1088,7 @@ WebIDL::ExceptionOr<GC::Ref<Node>> Node::replace_child(GC::Ref<Node> node, GC::R
     }
 
     // 12. Let nodes be node’s children if node is a DocumentFragment node; otherwise « node ».
-    Vector<GC::Root<Node>> nodes;
+    NodeVector nodes;
     if (is<DocumentFragment>(*node))
         nodes = node->children_as_vector();
     else
@@ -1701,9 +1701,9 @@ GC::Ref<NodeList> Node::child_nodes()
     return *m_child_nodes;
 }
 
-Vector<GC::Root<Node>> Node::children_as_vector() const
+NodeVector Node::children_as_vector() const
 {
-    Vector<GC::Root<Node>> nodes;
+    NodeVector nodes;
 
     for_each_child([&](auto& child) {
         nodes.append(GC::make_root(child));
@@ -2005,7 +2005,7 @@ void Node::replace_all(GC::Ptr<Node> node)
     auto removed_nodes = children_as_vector();
 
     // 2. Let addedNodes be the empty set.
-    Vector<GC::Root<Node>> added_nodes;
+    NodeVector added_nodes;
 
     // 3. If node is a DocumentFragment node, then set addedNodes to node’s children.
     if (node && is<DocumentFragment>(*node)) {
@@ -2451,7 +2451,7 @@ Painting::PaintableBox* Node::paintable_box()
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-record
-void Node::queue_mutation_record(FlyString const& type, Optional<FlyString> const& attribute_name, Optional<FlyString> const& attribute_namespace, Optional<String> const& old_value, Vector<GC::Root<Node>> added_nodes, Vector<GC::Root<Node>> removed_nodes, Node* previous_sibling, Node* next_sibling)
+void Node::queue_mutation_record(FlyString const& type, Optional<FlyString> const& attribute_name, Optional<FlyString> const& attribute_namespace, Optional<String> const& old_value, NodeVector added_nodes, NodeVector removed_nodes, Node* previous_sibling, Node* next_sibling)
 {
     auto& document = this->document();
     auto& page = document.page();
@@ -2533,7 +2533,7 @@ void Node::queue_mutation_record(FlyString const& type, Optional<FlyString> cons
 }
 
 // https://dom.spec.whatwg.org/#queue-a-tree-mutation-record
-void Node::queue_tree_mutation_record(Vector<GC::Root<Node>> added_nodes, Vector<GC::Root<Node>> removed_nodes, Node* previous_sibling, Node* next_sibling)
+void Node::queue_tree_mutation_record(NodeVector added_nodes, NodeVector removed_nodes, Node* previous_sibling, Node* next_sibling)
 {
     // 1. Assert: either addedNodes or removedNodes is not empty.
     VERIFY(added_nodes.size() > 0 || removed_nodes.size() > 0);

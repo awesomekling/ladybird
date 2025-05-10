@@ -132,6 +132,8 @@ enum class SetNeedsLayoutTreeUpdateReason {
 
 [[nodiscard]] StringView to_string(SetNeedsLayoutTreeUpdateReason);
 
+using NodeVector = Vector<GC::Root<Node>, 16>;
+
 class Node : public EventTarget
     , public TreeNode<Node> {
     WEB_PLATFORM_OBJECT(Node, EventTarget);
@@ -248,7 +250,7 @@ public:
     // NOTE: This is intended for the JS bindings.
     bool has_child_nodes() const { return has_children(); }
     GC::Ref<NodeList> child_nodes();
-    Vector<GC::Root<Node>> children_as_vector() const;
+    NodeVector children_as_vector() const;
 
     virtual FlyString node_name() const = 0;
 
@@ -410,7 +412,7 @@ public:
 
     void add_registered_observer(RegisteredObserver&);
 
-    void queue_mutation_record(FlyString const& type, Optional<FlyString> const& attribute_name, Optional<FlyString> const& attribute_namespace, Optional<String> const& old_value, Vector<GC::Root<Node>> added_nodes, Vector<GC::Root<Node>> removed_nodes, Node* previous_sibling, Node* next_sibling);
+    void queue_mutation_record(FlyString const& type, Optional<FlyString> const& attribute_name, Optional<FlyString> const& attribute_namespace, Optional<String> const& old_value, NodeVector added_nodes, NodeVector removed_nodes, Node* previous_sibling, Node* next_sibling);
 
     // https://dom.spec.whatwg.org/#concept-shadow-including-inclusive-descendant
     template<typename Callback>
@@ -594,7 +596,7 @@ protected:
     ErrorOr<String> name_or_description(NameOrDescription, Document const&, HashTable<UniqueNodeID>&, IsDescendant = IsDescendant::No, ShouldComputeRole = ShouldComputeRole::Yes) const;
 
 private:
-    void queue_tree_mutation_record(Vector<GC::Root<Node>> added_nodes, Vector<GC::Root<Node>> removed_nodes, Node* previous_sibling, Node* next_sibling);
+    void queue_tree_mutation_record(NodeVector added_nodes, NodeVector removed_nodes, Node* previous_sibling, Node* next_sibling);
 
     void live_range_pre_remove();
 
