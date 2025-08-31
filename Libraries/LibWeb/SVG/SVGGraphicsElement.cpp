@@ -42,9 +42,12 @@ void SVGGraphicsElement::attribute_changed(FlyString const& name, Optional<Strin
     Base::attribute_changed(name, old_value, value, namespace_);
 
     if (name == "transform"sv) {
+        auto old_transform = m_transform;
         auto transform_list = AttributeParser::parse_transform(value.value_or(String {}));
         if (transform_list.has_value())
             m_transform = transform_from_transform_list(*transform_list);
+        if (old_transform == m_transform)
+            return;
         set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::SVGGraphicsElementTransformChange);
     }
 }

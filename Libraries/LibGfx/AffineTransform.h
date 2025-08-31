@@ -25,6 +25,9 @@ public:
     {
     }
 
+    [[nodiscard]] bool operator==(AffineTransform const&) const = default;
+    [[nodiscard]] bool operator!=(AffineTransform const&) const = default;
+
     [[nodiscard]] bool is_identity() const
     {
         return m_values[0] == 1 && m_values[1] == 0 && m_values[2] == 0 && m_values[3] == 1 && m_values[4] == 0 && m_values[5] == 0;
