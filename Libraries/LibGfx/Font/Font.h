@@ -63,6 +63,10 @@ public:
     u16 weight() const { return m_typeface->weight(); }
     bool contains_glyph(u32 code_point) const { return m_typeface->glyph_id_for_code_point(code_point) > 0; }
     float glyph_width(u32 code_point) const;
+
+    // Width of the 0x20 ' ' (space) character.
+    [[nodiscard]] float space_width() const { return m_space_width; }
+
     u32 glyph_id_for_code_point(u32 code_point) const { return m_typeface->glyph_id_for_code_point(code_point); }
     float preferred_line_height() const { return metrics().height() + metrics().line_gap; }
     int x_height() const { return m_point_height; } // FIXME: Read from font
@@ -94,6 +98,9 @@ private:
     FontPixelMetrics m_pixel_metrics;
 
     float m_pixel_size { 0.0f };
+
+    // Cached for fast lookup.
+    float m_space_width { 0.0f };
 };
 
 }

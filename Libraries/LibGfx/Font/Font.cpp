@@ -46,6 +46,8 @@ Font::Font(NonnullRefPtr<Typeface const> typeface, float point_width, float poin
     metrics.line_gap = skMetrics.fLeading;
 
     m_pixel_metrics = metrics;
+
+    m_space_width = measure_text_width(Utf8View(" "sv), *this, {});
 }
 
 ScaledFontMetrics Font::metrics() const
@@ -67,6 +69,8 @@ float Font::width(Utf16View const& view) const { return measure_text_width(view,
 
 float Font::glyph_width(u32 code_point) const
 {
+    if (code_point == ' ')
+        return m_space_width;
     auto string = String::from_code_point(code_point);
     return measure_text_width(Utf8View(string), *this, {});
 }
