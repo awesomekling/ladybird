@@ -2513,7 +2513,14 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
 
 GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties) const
 {
-    auto computed_style = document().heap().allocate<CSS::ComputedProperties>();
+    // OPTIMIZATION: Reuse the existing ComputedProperties object if possible, to avoid GC churn.
+    auto computed_style = [&] -> GC::Ref<ComputedProperties> {
+        if (auto old_computed_properties = const_cast<CSS::ComputedProperties*>(abstract_element.computed_properties().ptr())) {
+            old_computed_properties->reset();
+            return *old_computed_properties;
+        }
+        return document().heap().allocate<CSS::ComputedProperties>();
+    }();
 
     auto new_font_size = recascade_font_size_if_needed(abstract_element, cascaded_properties);
     if (new_font_size)

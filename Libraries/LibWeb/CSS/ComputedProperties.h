@@ -34,12 +34,14 @@ public:
 
     virtual ~ComputedProperties() override;
 
+    void reset();
+
     template<typename Callback>
     inline void for_each_property(Callback callback) const
     {
-        for (size_t i = 0; i < m_property_values.size(); ++i) {
-            if (m_property_values[i])
-                callback(static_cast<PropertyID>(i + to_underlying(first_longhand_property_id)), *m_property_values[i]);
+        for (size_t i = 0; i < m_data.property_values.size(); ++i) {
+            if (m_data.property_values[i])
+                callback(static_cast<PropertyID>(i + to_underlying(first_longhand_property_id)), *m_data.property_values[i]);
         }
     }
 
@@ -48,7 +50,7 @@ public:
         Yes
     };
 
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_animated_property_values; }
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_data.animated_property_values; }
     void reset_animated_properties(Badge<Animations::KeyframeEffect>);
 
     bool is_property_important(PropertyID property_id) const;
@@ -68,11 +70,11 @@ public:
     StyleValue const& property(PropertyID, WithAnimationsApplied = WithAnimationsApplied::Yes) const;
     void revert_property(PropertyID, ComputedProperties const& style_for_revert);
 
-    GC::Ptr<CSSStyleDeclaration const> animation_name_source() const { return m_animation_name_source; }
-    void set_animation_name_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_animation_name_source = declaration; }
+    GC::Ptr<CSSStyleDeclaration const> animation_name_source() const { return m_data.animation_name_source; }
+    void set_animation_name_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_data.animation_name_source = declaration; }
 
-    GC::Ptr<CSSStyleDeclaration const> transition_property_source() const { return m_transition_property_source; }
-    void set_transition_property_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_transition_property_source = declaration; }
+    GC::Ptr<CSSStyleDeclaration const> transition_property_source() const { return m_data.transition_property_source; }
+    void set_transition_property_source(GC::Ptr<CSSStyleDeclaration const> declaration) { m_data.transition_property_source = declaration; }
 
     Size size_value(PropertyID) const;
     [[nodiscard]] Variant<LengthPercentage, NormalGap> gap_value(PropertyID) const;
@@ -211,28 +213,28 @@ public:
 
     Gfx::FontCascadeList const& computed_font_list() const
     {
-        VERIFY(m_font_list);
-        return *m_font_list;
+        VERIFY(m_data.font_list);
+        return *m_data.font_list;
     }
 
     Gfx::Font const& first_available_computed_font() const
     {
-        VERIFY(m_first_available_computed_font);
-        return *m_first_available_computed_font;
+        VERIFY(m_data.first_available_computed_font);
+        return *m_data.first_available_computed_font;
     }
 
     void set_computed_font_list(NonnullRefPtr<Gfx::FontCascadeList const> font_list)
     {
-        m_font_list = move(font_list);
+        m_data.font_list = move(font_list);
         // https://drafts.csswg.org/css-fonts/#first-available-font
         // First font for which the character U+0020 (space) is not excluded by a unicode-range
-        m_first_available_computed_font = m_font_list->font_for_code_point(' ');
+        m_data.first_available_computed_font = m_data.font_list->font_for_code_point(' ');
     }
 
     [[nodiscard]] CSSPixels compute_line_height(CSSPixelRect const& viewport_rect, Length::FontMetrics const& font_metrics, Length::FontMetrics const& root_font_metrics) const;
 
-    [[nodiscard]] CSSPixels line_height() const { return *m_line_height; }
-    void set_line_height(Badge<StyleComputer> const&, CSSPixels line_height) { m_line_height = line_height; }
+    [[nodiscard]] CSSPixels line_height() const { return *m_data.line_height; }
+    void set_line_height(Badge<StyleComputer> const&, CSSPixels line_height) { m_data.line_height = line_height; }
     [[nodiscard]] CSSPixels font_size() const;
 
     bool operator==(ComputedProperties const&) const;
@@ -241,7 +243,7 @@ public:
     Optional<int> z_index() const;
 
     void set_math_depth(int math_depth);
-    int math_depth() const { return m_math_depth; }
+    int math_depth() const { return m_data.math_depth; }
 
     QuotesData quotes() const;
     Vector<CounterData> counter_data(PropertyID) const;
@@ -253,12 +255,12 @@ public:
 
     bool has_attempted_match_against_pseudo_class(PseudoClass pseudo_class) const
     {
-        return m_attempted_pseudo_class_matches.get(pseudo_class);
+        return m_data.attempted_pseudo_class_matches.get(pseudo_class);
     }
 
     void set_attempted_pseudo_class_matches(PseudoClassBitmap const& results)
     {
-        m_attempted_pseudo_class_matches = results;
+        m_data.attempted_pseudo_class_matches = results;
     }
 
 private:
@@ -269,23 +271,25 @@ private:
     Overflow overflow(PropertyID) const;
     Vector<ShadowData> shadow(PropertyID, Layout::Node const&) const;
 
-    GC::Ptr<CSSStyleDeclaration const> m_animation_name_source;
-    GC::Ptr<CSSStyleDeclaration const> m_transition_property_source;
+    struct {
+        GC::Ptr<CSSStyleDeclaration const> animation_name_source;
+        GC::Ptr<CSSStyleDeclaration const> transition_property_source;
 
-    Array<RefPtr<StyleValue const>, number_of_longhand_properties> m_property_values;
-    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_important {};
-    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_inherited {};
-    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_animated_property_inherited {};
+        Array<RefPtr<StyleValue const>, number_of_longhand_properties> property_values;
+        Array<u8, ceil_div(number_of_longhand_properties, 8uz)> property_important {};
+        Array<u8, ceil_div(number_of_longhand_properties, 8uz)> property_inherited {};
+        Array<u8, ceil_div(number_of_longhand_properties, 8uz)> animated_property_inherited {};
 
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_animated_property_values;
+        HashMap<PropertyID, NonnullRefPtr<StyleValue const>> animated_property_values;
 
-    int m_math_depth { InitialValues::math_depth() };
-    RefPtr<Gfx::FontCascadeList const> m_font_list;
-    RefPtr<Gfx::Font const> m_first_available_computed_font;
+        int math_depth { InitialValues::math_depth() };
+        RefPtr<Gfx::FontCascadeList const> font_list;
+        RefPtr<Gfx::Font const> first_available_computed_font;
 
-    Optional<CSSPixels> m_line_height;
+        Optional<CSSPixels> line_height;
 
-    PseudoClassBitmap m_attempted_pseudo_class_matches;
+        PseudoClassBitmap attempted_pseudo_class_matches;
+    } m_data;
 };
 
 }
