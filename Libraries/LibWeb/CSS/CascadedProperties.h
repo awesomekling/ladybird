@@ -35,6 +35,8 @@ public:
 
     void resolve_unresolved_properties(DOM::AbstractElement);
 
+    void reset() { m_properties.clear(); }
+
 private:
     CascadedProperties();
 

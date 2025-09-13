@@ -1546,7 +1546,15 @@ StyleComputer::MatchingRuleSet StyleComputer::build_matching_rule_set(DOM::Abstr
 // https://drafts.csswg.org/css-cascade-5/#layering
 GC::Ref<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, bool did_match_any_pseudo_element_rules, ComputeStyleMode mode, MatchingRuleSet const& matching_rule_set, Optional<LogicalAliasMappingContext> logical_alias_mapping_context, ReadonlySpan<PropertyID> properties_to_cascade) const
 {
-    auto cascaded_properties = m_document->heap().allocate<CascadedProperties>();
+    // OPTIMIZATION: Reuse the existing CascadedProperties object if possible, to avoid GC churn.
+    GC::Ref<CascadedProperties> cascaded_properties = [&] {
+        if (auto old_cascaded_properties = abstract_element.cascaded_properties()) {
+            old_cascaded_properties->reset();
+            return old_cascaded_properties.as_nonnull();
+        }
+        return m_document->heap().allocate<CascadedProperties>();
+    }();
+
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
         if (!did_match_any_pseudo_element_rules)
             return cascaded_properties;
