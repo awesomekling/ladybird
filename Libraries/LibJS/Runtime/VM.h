@@ -66,6 +66,31 @@ public:
 
     void dump_backtrace() const;
 
+    [[nodiscard]] void* stack_base() { return m_stack_base; }
+    [[nodiscard]] void const* stack_base() const { return m_stack_base; }
+
+    [[nodiscard]] void* stack_pointer() { return m_stack_pointer; }
+    [[nodiscard]] void const* stack_pointer() const { return m_stack_pointer; }
+
+    [[nodiscard]] ThrowCompletionOr<void*> stack_alloc(size_t size)
+    {
+        // Check for stack overflow
+        if (m_stack_pointer + size > m_stack_base + m_stack_size) [[unlikely]] {
+            return throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
+        }
+        auto* ptr = m_stack_pointer;
+        m_stack_pointer += size;
+        return ptr;
+    }
+    void stack_free(size_t size)
+    {
+        // Check for stack underflow
+        VERIFY(m_stack_pointer - size >= m_stack_base);
+        m_stack_pointer -= size;
+    }
+
+    [[nodiscard]] size_t stack_size() const { return m_stack_size; }
+
     void gather_roots(HashMap<GC::Cell*, GC::HeapRoot>&);
 
 #define __JS_ENUMERATE(SymbolName, snake_name)             \
@@ -363,6 +388,10 @@ private:
     OwnPtr<Agent> m_agent;
 
     OwnPtr<Bytecode::Interpreter> m_bytecode_interpreter;
+
+    u8* m_stack_base { nullptr };
+    u8* m_stack_pointer { nullptr };
+    size_t m_stack_size { 0 };
 
     bool m_dynamic_imports_allowed { false };
 };

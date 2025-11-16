@@ -80,6 +80,13 @@ VM::VM(ErrorMessages error_messages)
     s_the = this;
     m_bytecode_interpreter = make<Bytecode::Interpreter>();
 
+    // Allocate a fixed-size stack for ExecutionContext storage.
+    m_stack_size = 4 * MiB;
+    m_stack_base = new u8[m_stack_size];
+    m_stack_pointer = m_stack_base;
+
+    m_bytecode_interpreter = make<Bytecode::Interpreter>();
+
     m_empty_string = m_heap.allocate<PrimitiveString>(String {});
 
     cached_strings = {
@@ -227,6 +234,8 @@ VM::~VM()
 {
     --s_vm_count;
     VERIFY(s_vm_count == 0);
+
+    delete[] m_stack_base;
 }
 
 Utf16String const& VM::error_message(ErrorMessage type) const
