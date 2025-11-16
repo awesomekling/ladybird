@@ -102,29 +102,34 @@ JS::Promise* JavaScriptModuleScript::run(PreventErrorReporting)
         VERIFY(record);
 
         // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
-        JS::ExecutionContext* module_execution_context = nullptr;
-        ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_execution_context, 0, 0);
-        module_execution_context->realm = &realm;
-        module_execution_context->script_or_module = GC::Ref<JS::Module> { *record };
-        vm().push_execution_context(*module_execution_context);
+        MUST([&]() -> JS::ThrowCompletionOr<void> {
+            JS::ExecutionContext* module_execution_context = nullptr;
 
-        // 2. Set evaluationPromise to record.Evaluate().
-        auto elevation_promise_or_error = record->evaluate(vm());
+            ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK(vm(), module_execution_context, 0, 0);
+            module_execution_context->realm = &realm;
+            module_execution_context->script_or_module = GC::Ref<JS::Module> { *record };
+            vm().push_execution_context(*module_execution_context);
 
-        // NOTE: This step will recursively evaluate all of the module's dependencies.
-        // If Evaluate fails to complete as a result of the user agent aborting the running script,
-        // then set evaluationPromise to a promise rejected with a new "QuotaExceededError" DOMException.
-        if (elevation_promise_or_error.is_error()) {
-            auto promise = JS::Promise::create(realm);
-            promise->reject(WebIDL::QuotaExceededError::create(realm, "Failed to evaluate module script"_utf16).ptr());
+            // 2. Set evaluationPromise to record.Evaluate().
+            auto elevation_promise_or_error = record->evaluate(vm());
 
-            evaluation_promise = promise;
-        } else {
-            evaluation_promise = elevation_promise_or_error.value();
-        }
+            // NOTE: This step will recursively evaluate all of the module's dependencies.
+            // If Evaluate fails to complete as a result of the user agent aborting the running script,
+            // then set evaluationPromise to a promise rejected with a new "QuotaExceededError" DOMException.
+            if (elevation_promise_or_error.is_error()) {
+                auto promise = JS::Promise::create(realm);
+                promise->reject(WebIDL::QuotaExceededError::create(realm, "Failed to evaluate module script"_utf16).ptr());
 
-        // NON-STANDARD: Pop the execution context mentioned above.
-        vm().pop_execution_context();
+                evaluation_promise = promise;
+            } else {
+                evaluation_promise = elevation_promise_or_error.value();
+            }
+
+            // NON-STANDARD: Pop the execution context mentioned above.
+            vm().pop_execution_context();
+
+            return {};
+        }());
     }
 
     // FIXME: 7. If preventErrorReporting is false, then upon rejection of evaluationPromise with reason, report the exception given by reason for script.

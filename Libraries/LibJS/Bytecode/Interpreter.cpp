@@ -151,7 +151,7 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
 
     // 2. Let scriptContext be a new ECMAScript code execution context.
     ExecutionContext* script_context = nullptr;
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(script_context, registers_and_constants_and_locals_count, 0);
+    ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK(vm, script_context, registers_and_constants_and_locals_count, 0);
 
     // 3. Set the Function of scriptContext to null.
     // NOTE: This was done during execution context construction.
@@ -2435,6 +2435,7 @@ static ThrowCompletionOr<void> execute_call(
     Optional<StringTableIndex> const expression_string,
     Strict strict)
 {
+    auto& vm = interpreter.vm();
     TRY(throw_if_needed_for_call(interpreter, callee, call_type, expression_string));
 
     auto& function = callee.as_function();
@@ -2443,7 +2444,7 @@ static ThrowCompletionOr<void> execute_call(
     size_t registers_and_constants_and_locals_count = 0;
     size_t argument_count = arguments.size();
     TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(arguments.size(), argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK_WITHOUT_CLEARING_ARGS(vm, callee_context, registers_and_constants_and_locals_count, max(arguments.size(), argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -2504,6 +2505,7 @@ static ThrowCompletionOr<void> call_with_argument_array(
     Optional<StringTableIndex> const expression_string,
     Strict strict)
 {
+    auto& vm = interpreter.vm();
     TRY(throw_if_needed_for_call(interpreter, callee, call_type, expression_string));
 
     auto& function = callee.as_function();
@@ -2515,7 +2517,7 @@ static ThrowCompletionOr<void> call_with_argument_array(
     size_t argument_count = argument_array_length;
     size_t registers_and_constants_and_locals_count = 0;
     TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK_WITHOUT_CLEARING_ARGS(vm, callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -2595,7 +2597,7 @@ ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Inter
     size_t argument_count = argument_array_length;
     size_t registers_and_constants_and_locals_count = 0;
     TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK_WITHOUT_CLEARING_ARGS(callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK_WITHOUT_CLEARING_ARGS(vm, callee_context, registers_and_constants_and_locals_count, max(argument_array_length, argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
