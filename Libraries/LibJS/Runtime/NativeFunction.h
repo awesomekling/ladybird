@@ -55,7 +55,7 @@ public:
     virtual bool function_environment_needed() const { return false; }
     virtual size_t function_environment_bindings_count() const { return 0; }
 
-    virtual ThrowCompletionOr<void> get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count) override;
+    virtual ThrowCompletionOr<void> get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count, bool* can_fast_call) override;
 
 protected:
     NativeFunction(Utf16FlyString name, Object& prototype);

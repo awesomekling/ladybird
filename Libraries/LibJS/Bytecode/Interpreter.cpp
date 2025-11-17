@@ -24,12 +24,15 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/AsyncFromSyncIterator.h>
 #include <LibJS/Runtime/AsyncFromSyncIteratorPrototype.h>
+#include <LibJS/Runtime/AsyncFunctionDriverWrapper.h>
+#include <LibJS/Runtime/AsyncGenerator.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/CompletionCell.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Environment.h>
 #include <LibJS/Runtime/FunctionEnvironment.h>
+#include <LibJS/Runtime/GeneratorObject.h>
 #include <LibJS/Runtime/GeneratorResult.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
@@ -48,7 +51,40 @@
 
 namespace JS::Bytecode {
 
+#define ALLOCATE_EXECUTION_CONTEXT_WITHOUT_CLEARING_ARGS(vm,                       \
+    execution_context,                                                             \
+    registers_and_constants_and_locals_count,                                      \
+    arguments_count)                                                               \
+    auto execution_context_size = sizeof(JS::ExecutionContext)                     \
+        + (((registers_and_constants_and_locals_count) + (arguments_count))        \
+            * sizeof(JS::Value));                                                  \
+                                                                                   \
+    void* execution_context_memory = MUST(vm.stack_alloc(execution_context_size)); \
+                                                                                   \
+    execution_context = new (execution_context_memory)                             \
+        JS::ExecutionContext((registers_and_constants_and_locals_count), (arguments_count));
+
 bool g_dump_bytecode = false;
+
+static inline Completion throw_type_error_for_callee(Bytecode::Interpreter& interpreter, Value callee, StringView callee_type, Optional<StringTableIndex> const& expression_string)
+{
+    auto& vm = interpreter.vm();
+
+    if (expression_string.has_value())
+        return vm.throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee.to_string_without_side_effects(), callee_type, interpreter.current_executable().get_string(*expression_string));
+
+    return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee.to_string_without_side_effects(), callee_type);
+}
+
+inline ThrowCompletionOr<void> throw_if_needed_for_call(Interpreter& interpreter, Value callee, Op::CallType call_type, Optional<StringTableIndex> const& expression_string)
+{
+    if ((call_type == Op::CallType::Call || call_type == Op::CallType::DirectEval)
+        && !callee.is_function())
+        return throw_type_error_for_callee(interpreter, callee, "function"sv, expression_string);
+    if (call_type == Op::CallType::Construct && !callee.is_constructor())
+        return throw_type_error_for_callee(interpreter, callee, "constructor"sv, expression_string);
+    return {};
+}
 
 ALWAYS_INLINE static ThrowCompletionOr<bool> loosely_inequals(VM& vm, Value src1, Value src2)
 {
@@ -90,6 +126,48 @@ Interpreter::Interpreter() = default;
 
 Interpreter::~Interpreter() = default;
 
+static ALWAYS_INLINE Value transform_return_value_if_needed(ExecutionContext& context, ECMAScriptFunctionObject& function, Value result)
+{
+    if (function.kind() == FunctionKind::Normal) [[likely]]
+        return result;
+
+    if (function.kind() == FunctionKind::AsyncGenerator)
+        return AsyncGenerator::create(*context.realm, result, GC::Ref { function }, context.copy());
+
+    auto generator_object = GeneratorObject::create(*context.realm, result, GC::Ref { function }, context.copy());
+
+    if (function.kind() == FunctionKind::Async)
+        return AsyncFunctionDriverWrapper::create(*context.realm, generator_object);
+
+    ASSERT(function.kind() == FunctionKind::Generator);
+    return generator_object;
+}
+
+ALWAYS_INLINE Interpreter::ReturnAction Interpreter::do_return(Value value)
+{
+    if (value.is_special_empty_value()) [[unlikely]]
+        value = js_undefined();
+
+    auto& outgoing_context = running_execution_context();
+
+    if (outgoing_context.is_fast_call) [[likely]] {
+        auto& function = static_cast<ECMAScriptFunctionObject&>(*outgoing_context.function);
+        value = transform_return_value_if_needed(outgoing_context, function, value);
+
+        auto return_slot = outgoing_context.return_slot.value();
+
+        vm().stack_free(outgoing_context.return_stack_size());
+        vm().pop_execution_context();
+        m_running_execution_context = &vm().running_execution_context();
+
+        set(return_slot, value);
+        return ReturnAction::ReturnToBytecode;
+    }
+    reg(Register::return_value()) = value;
+    reg(Register::exception()) = js_special_empty_value();
+    return ReturnAction::ReturnToNative;
+}
+
 ALWAYS_INLINE Value Interpreter::get(Operand op) const
 {
     return m_running_execution_context->registers_and_constants_and_locals_and_arguments()[op.raw()];
@@ -102,8 +180,6 @@ ALWAYS_INLINE void Interpreter::set(Operand op, Value value)
 
 ALWAYS_INLINE Value Interpreter::do_yield(Value value, Optional<Label> continuation)
 {
-    // FIXME: If we get a pointer, which is not accurately representable as a double
-    //        will cause this to explode
     auto continuation_value = continuation.has_value() ? Value(continuation->address()) : js_null();
     return vm().heap().allocate<GeneratorResult>(value, continuation_value, false).ptr();
 }
@@ -258,11 +334,20 @@ void Interpreter::run_bytecode(size_t entry_point)
         return;
     }
 
-    ExecutionContext* running_execution_context = &this->running_execution_context();
-    Executable* executable = &current_executable();
-    u8 const* bytecode = executable->bytecode.data();
+    ExecutionContext*& running_execution_context = m_running_execution_context;
+    Executable* executable = nullptr;
+    u8 const* bytecode = nullptr;
+    u32* program_counter = nullptr;
 
-    u32* program_counter = &running_execution_context->program_counter;
+    auto update_locals = [&] {
+        m_running_execution_context = &vm().running_execution_context();
+        executable = m_running_execution_context->executable;
+        bytecode = executable->bytecode.data();
+        program_counter = &m_running_execution_context->program_counter;
+    };
+
+    update_locals();
+
     *program_counter = entry_point;
 
     // Declare a lookup table for computed goto with each of the `handle_*` labels
@@ -275,14 +360,48 @@ void Interpreter::run_bytecode(size_t entry_point)
     };
 #undef SET_UP_LABEL
 
+#define DISPATCH_INSTRUCTION_AT_PROGRAM_COUNTER                                                                                          \
+    do {                                                                                                                                 \
+        goto* bytecode_dispatch_table[static_cast<size_t>((*reinterpret_cast<Instruction const*>(&bytecode[*program_counter])).type())]; \
+    } while (0)
+
+#define ADVANCE_PROGRAM_COUNTER(name)                 \
+    do {                                              \
+        if constexpr (Op::name::IsVariableLength)     \
+            *program_counter += instruction.length(); \
+        else                                          \
+            *program_counter += sizeof(Op::name);     \
+    } while (0)
+
 #define DISPATCH_NEXT(name)                                                                          \
+    ADVANCE_PROGRAM_COUNTER(name);                                                                   \
     do {                                                                                             \
-        if constexpr (Op::name::IsVariableLength)                                                    \
-            *program_counter += instruction.length();                                                \
-        else                                                                                         \
-            *program_counter += sizeof(Op::name);                                                    \
         auto& next_instruction = *reinterpret_cast<Instruction const*>(&bytecode[*program_counter]); \
         goto* bytecode_dispatch_table[static_cast<size_t>(next_instruction.type())];                 \
+    } while (0)
+
+#define UPDATE_LOCALS_AND_RESTART \
+    do {                          \
+        update_locals();          \
+        goto start;               \
+    } while (0)
+
+#define RETURN_WITH_VALUE(value)                                           \
+    do {                                                                   \
+        if (do_return(value) == ReturnAction::ReturnToNative) [[unlikely]] \
+            return;                                                        \
+        UPDATE_LOCALS_AND_RESTART;                                         \
+    } while (0)
+#define EXIT_FROM_EXECUTABLE(context)                    \
+    do {                                                 \
+        if (!(context).is_fast_call) [[unlikely]]        \
+            return;                                      \
+        auto the_exception = reg(Register::exception()); \
+        vm().stack_free((context).return_stack_size());  \
+        vm().pop_execution_context();                    \
+        update_locals();                                 \
+        reg(Register::exception()) = the_exception;      \
+        goto exit_from_executable;                       \
     } while (0)
 
     for (;;) {
@@ -301,8 +420,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             auto value = get(instruction.value());
             if (value.is_special_empty_value())
                 value = js_undefined();
-            reg(Register::return_value()) = value;
-            return;
+            RETURN_WITH_VALUE(value);
         }
 
         handle_Jump: {
@@ -366,7 +484,7 @@ void Interpreter::run_bytecode(size_t entry_point)
         auto result = op_snake_case(vm(), get(instruction.lhs()), get(instruction.rhs()));                               \
         if (result.is_error()) [[unlikely]] {                                                                            \
             if (handle_exception(*program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
-                return;                                                                                                  \
+                EXIT_FROM_EXECUTABLE(*running_execution_context);                                                        \
             goto start;                                                                                                  \
         }                                                                                                                \
         if (result.value())                                                                                              \
@@ -399,11 +517,14 @@ void Interpreter::run_bytecode(size_t entry_point)
             auto& instruction = *reinterpret_cast<Op::ContinuePendingUnwind const*>(&bytecode[*program_counter]);
             if (auto exception = reg(Register::exception()); !exception.is_special_empty_value()) {
                 if (handle_exception(*program_counter, exception) == HandleExceptionResponse::ExitFromExecutable)
-                    return;
+                    EXIT_FROM_EXECUTABLE(*running_execution_context);
                 goto start;
             }
             if (!saved_return_value().is_special_empty_value()) {
-                do_return(saved_return_value());
+
+                reg(Register::return_value()) = saved_return_value();
+                reg(Register::exception()) = js_special_empty_value();
+
                 if (auto handlers = executable->exception_handlers_for_offset(*program_counter); handlers.has_value()) {
                     if (auto finalizer = handlers.value().finalizer_offset; finalizer.has_value()) {
                         auto& unwind_contexts = running_execution_context->ensure_rare_data()->unwind_contexts;
@@ -413,10 +534,10 @@ void Interpreter::run_bytecode(size_t entry_point)
                         reg(Register::return_value()) = js_undefined();
                         *program_counter = finalizer.value();
                         // the unwind_context will be pop'ed when entering the finally block
-                        goto start;
+                        UPDATE_LOCALS_AND_RESTART;
                     }
                 }
-                return;
+                RETURN_WITH_VALUE(saved_return_value());
             }
             auto const old_scheduled_jump = running_execution_context->ensure_rare_data()->previously_scheduled_jumps.take_last();
             if (m_running_execution_context->scheduled_jump.has_value()) {
@@ -448,7 +569,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             auto result = instruction.execute_impl(*this);                                                                   \
             if (result.is_error()) [[unlikely]] {                                                                            \
                 if (handle_exception(*program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
-                    return;                                                                                                  \
+                    EXIT_FROM_EXECUTABLE(*running_execution_context);                                                        \
                 goto start;                                                                                                  \
             }                                                                                                                \
         }                                                                                                                    \
@@ -463,6 +584,95 @@ void Interpreter::run_bytecode(size_t entry_point)
         DISPATCH_NEXT(name);                                                                 \
     }
 
+        handle_Call: {
+            ThrowCompletionOr<void> result;
+            auto& instruction = *reinterpret_cast<Op::Call const*>(&bytecode[*program_counter]);
+            {
+                auto callee = get(instruction.callee());
+                {
+                    if (!callee.is_function()) [[unlikely]] {
+                        result = throw_type_error_for_callee(*this, callee, "function"sv, instruction.expression_string());
+                        goto common_exception;
+                    }
+                }
+
+                auto& function = callee.as_function();
+
+                size_t registers_and_constants_and_locals_count = 0;
+                auto arguments = instruction.arguments();
+                size_t argument_count = arguments.size();
+                bool can_fast_call = false;
+                {
+                    result = function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count, &can_fast_call);
+                    if (result.is_error()) [[unlikely]] {
+                        goto common_exception;
+                        ;
+                    }
+                }
+                auto arguments_count = max(arguments.size(), argument_count);
+                auto execution_context_size = sizeof(JS::ExecutionContext)
+                    + (((registers_and_constants_and_locals_count) + (arguments_count))
+                        * sizeof(JS::Value));
+
+                auto stack_alloc_result = vm().stack_alloc(execution_context_size);
+                if (stack_alloc_result.is_error()) [[unlikely]] {
+                    result = stack_alloc_result.release_error();
+                    goto common_exception;
+                }
+
+                auto* callee_context = new (stack_alloc_result.value())
+                    JS::ExecutionContext((registers_and_constants_and_locals_count), (arguments_count));
+
+                auto* callee_context_argument_values = callee_context->arguments.data();
+                auto const callee_context_argument_count = callee_context->arguments.size();
+                auto const insn_argument_count = arguments.size();
+
+                for (size_t i = 0; i < insn_argument_count; ++i)
+                    callee_context_argument_values[i] = get(arguments[i]);
+                for (size_t i = insn_argument_count; i < callee_context_argument_count; ++i)
+                    callee_context_argument_values[i] = js_undefined();
+                callee_context->passed_argument_count = insn_argument_count;
+
+                if (can_fast_call) {
+                    function.prepare_fast_call(*callee_context, get(instruction.this_value()), instruction.dst());
+                    ADVANCE_PROGRAM_COUNTER(Call);
+                    UPDATE_LOCALS_AND_RESTART;
+                }
+
+                auto call_result = function.internal_call(*callee_context, get(instruction.this_value()));
+                vm().stack_free(execution_context_size);
+
+                if (call_result.is_error()) [[unlikely]] {
+                    result = call_result.release_error();
+                    goto common_exception;
+                }
+
+                set(instruction.dst(), call_result.value());
+                DISPATCH_NEXT(Call);
+            }
+        common_exception: {
+            if (handle_exception(*program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable)
+                EXIT_FROM_EXECUTABLE(*running_execution_context);
+            goto start;
+        }
+        }
+
+#define HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(name)                                                                         \
+    handle_##name:                                                                                                           \
+    {                                                                                                                        \
+        auto& instruction = *reinterpret_cast<Op::name const*>(&bytecode[*program_counter]);                                 \
+        {                                                                                                                    \
+            auto result = instruction.execute_impl(*this);                                                                   \
+            if (result.is_error()) [[unlikely]] {                                                                            \
+                if (handle_exception(*program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
+                    EXIT_FROM_EXECUTABLE(*running_execution_context);                                                        \
+                DISPATCH_INSTRUCTION_AT_PROGRAM_COUNTER;                                                                     \
+            }                                                                                                                \
+            ADVANCE_PROGRAM_COUNTER(name);                                                                                   \
+            UPDATE_LOCALS_AND_RESTART;                                                                                       \
+        }                                                                                                                    \
+    }
+
             HANDLE_INSTRUCTION(Add);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(AddPrivateName);
             HANDLE_INSTRUCTION(ArrayAppend);
@@ -471,11 +681,13 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(BitwiseNot);
             HANDLE_INSTRUCTION(BitwiseOr);
             HANDLE_INSTRUCTION(BitwiseXor);
-            HANDLE_INSTRUCTION(Call);
-            HANDLE_INSTRUCTION(CallBuiltin);
+
+            // HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(Call);
+            HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(CallBuiltin);
+            HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(CallDirectEval);
+
             HANDLE_INSTRUCTION(CallConstruct);
             HANDLE_INSTRUCTION(CallConstructWithArgumentArray);
-            HANDLE_INSTRUCTION(CallDirectEval);
             HANDLE_INSTRUCTION(CallDirectEvalWithArgumentArray);
             HANDLE_INSTRUCTION(CallWithArgumentArray);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(Catch);
@@ -603,27 +815,38 @@ void Interpreter::run_bytecode(size_t entry_point)
 
         handle_Await: {
             auto& instruction = *reinterpret_cast<Op::Await const*>(&bytecode[*program_counter]);
-            instruction.execute_impl(*this);
-            return;
+            auto yielded_value = get(instruction.argument()).is_special_empty_value() ? js_undefined() : get(instruction.argument());
+            auto continuation_value = Value(instruction.continuation_label().address());
+            auto result = vm().heap().allocate<GeneratorResult>(yielded_value, continuation_value, true);
+            RETURN_WITH_VALUE(result);
         }
 
         handle_Return: {
             auto& instruction = *reinterpret_cast<Op::Return const*>(&bytecode[*program_counter]);
-            instruction.execute_impl(*this);
-            return;
+            auto value = get(instruction.value());
+            RETURN_WITH_VALUE(value);
         }
 
         handle_Yield: {
             auto& instruction = *reinterpret_cast<Op::Yield const*>(&bytecode[*program_counter]);
-            instruction.execute_impl(*this);
+            auto yielded_value = get(instruction.value()).is_special_empty_value() ? js_undefined() : get(instruction.value());
             // Note: A `yield` statement will not go through a finally statement,
             //       hence we need to set a flag to not do so,
             //       but we generate a Yield Operation in the case of returns in
             //       generators as well, so we need to check if it will actually
             //       continue or is a `return` in disguise
-            return;
+            auto value = do_yield(yielded_value, instruction.continuation_label());
+            RETURN_WITH_VALUE(value);
         }
         }
+    exit_from_executable: {
+        auto exception = reg(Register::exception());
+        if (!exception.is_special_empty_value()) [[unlikely]] {
+            if (handle_exception(*program_counter, exception) == HandleExceptionResponse::ExitFromExecutable)
+                EXIT_FROM_EXECUTABLE(*running_execution_context);
+        }
+        DISPATCH_INSTRUCTION_AT_PROGRAM_COUNTER;
+    }
     }
 }
 
@@ -760,7 +983,7 @@ ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM& vm, GC::Ref<SharedF
 // NOTE: This function assumes that the index is valid within the TypedArray,
 //       and that the TypedArray is not detached.
 template<typename T>
-inline Value fast_typed_array_get_element(TypedArrayBase& typed_array, u32 index)
+ALWAYS_INLINE Value fast_typed_array_get_element(TypedArrayBase& typed_array, u32 index)
 {
     Checked<u32> offset_into_array_buffer = index;
     offset_into_array_buffer *= sizeof(T);
@@ -778,7 +1001,7 @@ inline Value fast_typed_array_get_element(TypedArrayBase& typed_array, u32 index
 // NOTE: This function assumes that the index is valid within the TypedArray,
 //       and that the TypedArray is not detached.
 template<typename T>
-inline void fast_typed_array_set_element(TypedArrayBase& typed_array, u32 index, T value)
+ALWAYS_INLINE void fast_typed_array_set_element(TypedArrayBase& typed_array, u32 index, T value)
 {
     Checked<u32> offset_into_array_buffer = index;
     offset_into_array_buffer *= sizeof(T);
@@ -984,24 +1207,22 @@ inline ThrowCompletionOr<Value> get_global(Interpreter& interpreter, IdentifierT
     return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, identifier);
 }
 
-static COLD Completion throw_type_error_for_callee(Bytecode::Interpreter& interpreter, Value callee, StringView callee_type, Optional<StringTableIndex> const expression_string)
+inline ThrowCompletionOr<Value> perform_call(Interpreter& interpreter, Value this_value, Op::CallType call_type, Value callee, ReadonlySpan<Value> argument_values, Strict strict)
 {
     auto& vm = interpreter.vm();
+    auto& function = callee.as_function();
+    Value return_value;
+    if (call_type == Op::CallType::DirectEval) {
+        if (callee == interpreter.realm().intrinsics().eval_function())
+            return_value = TRY(perform_eval(vm, !argument_values.is_empty() ? argument_values[0] : js_undefined(), strict == Strict::Yes ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct));
+        else
+            return_value = TRY(JS::call(vm, function, this_value, argument_values));
+    } else if (call_type == Op::CallType::Call)
+        return_value = TRY(JS::call(vm, function, this_value, argument_values));
+    else
+        return_value = TRY(construct(vm, function, argument_values));
 
-    if (expression_string.has_value())
-        return vm.throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee, callee_type, interpreter.current_executable().get_string(*expression_string));
-
-    return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee, callee_type);
-}
-
-inline ThrowCompletionOr<void> throw_if_needed_for_call(Interpreter& interpreter, Value callee, Op::CallType call_type, Optional<StringTableIndex> const expression_string)
-{
-    if ((call_type == Op::CallType::Call || call_type == Op::CallType::DirectEval)
-        && !callee.is_function()) [[unlikely]]
-        return throw_type_error_for_callee(interpreter, callee, "function"sv, expression_string);
-    if (call_type == Op::CallType::Construct && !callee.is_constructor()) [[unlikely]]
-        return throw_type_error_for_callee(interpreter, callee, "constructor"sv, expression_string);
-    return {};
+    return return_value;
 }
 
 // 15.2.5 Runtime Semantics: InstantiateOrdinaryFunctionExpression, https://tc39.es/ecma262/#sec-runtime-semantics-instantiateordinaryfunctionexpression
@@ -2426,7 +2647,7 @@ static ThrowCompletionOr<Value> dispatch_builtin_call(Bytecode::Interpreter& int
 }
 
 template<CallType call_type>
-static ThrowCompletionOr<void> execute_call(
+ALWAYS_INLINE static ThrowCompletionOr<void> execute_call(
     Bytecode::Interpreter& interpreter,
     Value callee,
     Value this_value,
@@ -2435,7 +2656,6 @@ static ThrowCompletionOr<void> execute_call(
     Optional<StringTableIndex> const expression_string,
     Strict strict)
 {
-    auto& vm = interpreter.vm();
     TRY(throw_if_needed_for_call(interpreter, callee, call_type, expression_string));
 
     auto& function = callee.as_function();
@@ -2443,8 +2663,10 @@ static ThrowCompletionOr<void> execute_call(
     ExecutionContext* callee_context = nullptr;
     size_t registers_and_constants_and_locals_count = 0;
     size_t argument_count = arguments.size();
-    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
-    ALLOCATE_EXECUTION_CONTEXT_ON_VM_STACK_WITHOUT_CLEARING_ARGS(vm, callee_context, registers_and_constants_and_locals_count, max(arguments.size(), argument_count));
+    bool can_fast_call = false;
+    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count, &can_fast_call));
+    auto& vm = interpreter.vm();
+    ALLOCATE_EXECUTION_CONTEXT_WITHOUT_CLEARING_ARGS(vm, callee_context, registers_and_constants_and_locals_count, max(arguments.size(), argument_count));
 
     auto* callee_context_argument_values = callee_context->arguments.data();
     auto const callee_context_argument_count = callee_context->arguments.size();
@@ -2456,7 +2678,18 @@ static ThrowCompletionOr<void> execute_call(
         callee_context_argument_values[i] = js_undefined();
     callee_context->passed_argument_count = insn_argument_count;
 
-    Value retval;
+    if constexpr (call_type == CallType::Call) {
+        if (can_fast_call) {
+            function.prepare_fast_call(*callee_context, this_value, dst);
+            return {};
+        }
+    }
+
+    ScopeGuard execution_context_deallocation_guard = [&] {
+        vm.stack_free(execution_context_size);
+    };
+
+    Value retval = js_special_empty_value();
     if (call_type == CallType::DirectEval && callee == interpreter.realm().intrinsics().eval_function()) {
         retval = TRY(perform_eval(interpreter.vm(), !callee_context->arguments.is_empty() ? callee_context->arguments[0] : js_undefined(), strict == Strict::Yes ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct));
     } else if (call_type == CallType::Construct) {
@@ -2473,7 +2706,7 @@ ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) c
     return execute_call<CallType::Call>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
 }
 
-NEVER_INLINE ThrowCompletionOr<void> CallConstruct::execute_impl(Bytecode::Interpreter& interpreter) const
+ThrowCompletionOr<void> CallConstruct::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return execute_call<CallType::Construct>(interpreter, interpreter.get(m_callee), js_undefined(), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
 }
@@ -2535,7 +2768,6 @@ static ThrowCompletionOr<void> call_with_argument_array(
 
     Value retval;
     if (call_type == CallType::DirectEval && callee == interpreter.realm().intrinsics().eval_function()) {
-        auto& vm = interpreter.vm();
         retval = TRY(perform_eval(vm, !callee_context->arguments.is_empty() ? callee_context->arguments[0] : js_undefined(), strict == Strict::Yes ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct));
     } else if (call_type == CallType::Construct) {
         retval = TRY(function.internal_construct(*callee_context, function));
@@ -2644,11 +2876,6 @@ ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Inter
 void NewFunction::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.set(dst(), new_function(interpreter, m_function_node, m_lhs_name, m_home_object));
-}
-
-void Return::execute_impl(Bytecode::Interpreter& interpreter) const
-{
-    interpreter.do_return(interpreter.get(m_value));
 }
 
 ThrowCompletionOr<void> Increment::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -2777,27 +3004,10 @@ void LeaveUnwindContext::execute_impl(Bytecode::Interpreter& interpreter) const
     interpreter.leave_unwind_context();
 }
 
-void Yield::execute_impl(Bytecode::Interpreter& interpreter) const
-{
-    auto yielded_value = interpreter.get(m_value).is_special_empty_value() ? js_undefined() : interpreter.get(m_value);
-    interpreter.do_return(
-        interpreter.do_yield(yielded_value, m_continuation_label));
-}
-
 void PrepareYield::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto value = interpreter.get(m_value).is_special_empty_value() ? js_undefined() : interpreter.get(m_value);
     interpreter.set(m_dest, interpreter.do_yield(value, {}));
-}
-
-void Await::execute_impl(Bytecode::Interpreter& interpreter) const
-{
-    auto yielded_value = interpreter.get(m_argument).is_special_empty_value() ? js_undefined() : interpreter.get(m_argument);
-    // FIXME: If we get a pointer, which is not accurately representable as a double
-    //        will cause this to explode
-    auto continuation_value = Value(m_continuation_label.address());
-    auto result = interpreter.vm().heap().allocate<GeneratorResult>(yielded_value, continuation_value, true);
-    interpreter.do_return(result);
 }
 
 ThrowCompletionOr<void> GetByValue::execute_impl(Bytecode::Interpreter& interpreter) const

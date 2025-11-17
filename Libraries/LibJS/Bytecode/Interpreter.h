@@ -57,13 +57,13 @@ public:
     void set(Operand, Value);
 
     Value do_yield(Value value, Optional<Label> continuation);
-    void do_return(Value value)
-    {
-        if (value.is_special_empty_value())
-            value = js_undefined();
-        reg(Register::return_value()) = value;
-        reg(Register::exception()) = js_special_empty_value();
-    }
+
+    enum class ReturnAction {
+        ReturnToNative = 0,
+        ReturnToBytecode,
+    };
+
+    [[nodiscard]] ReturnAction do_return(Value);
 
     void enter_unwind_context();
     void leave_unwind_context();

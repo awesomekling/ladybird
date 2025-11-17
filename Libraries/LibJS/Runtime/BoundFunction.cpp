@@ -7,6 +7,7 @@
 
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/BoundFunction.h>
+#include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/GlobalObject.h>
 
 namespace JS {
@@ -108,7 +109,7 @@ void BoundFunction::visit_edges(Visitor& visitor)
     visitor.visit(m_bound_arguments);
 }
 
-ThrowCompletionOr<void> BoundFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count)
+ThrowCompletionOr<void> BoundFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count, [[maybe_unused]] bool* can_fast_call)
 {
     TRY(m_bound_target_function->get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
     argument_count += m_bound_arguments.size();

@@ -155,12 +155,12 @@ public:
         return {};
     }
 
-    void push_execution_context(ExecutionContext& context)
+    ALWAYS_INLINE void push_execution_context(ExecutionContext& context)
     {
         m_execution_context_stack.append(&context);
     }
 
-    void pop_execution_context()
+    ALWAYS_INLINE void pop_execution_context()
     {
         m_execution_context_stack.take_last();
     }

@@ -77,7 +77,7 @@ ThrowCompletionOr<Value> WrappedFunction::internal_call(ExecutionContext& callee
     return result;
 }
 
-ThrowCompletionOr<void> WrappedFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count)
+ThrowCompletionOr<void> WrappedFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count, [[maybe_unused]] bool* can_fast_call)
 {
     return m_wrapped_target_function->get_stack_frame_size(registers_and_constants_and_locals_count, argument_count);
 }

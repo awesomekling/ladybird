@@ -131,14 +131,20 @@ public:
 
     u32 passed_argument_count { 0 };
 
-private:
-    friend class Bytecode::Interpreter;
+    bool is_fast_call { false };
+    Optional<Bytecode::Operand> return_slot;
+
+    size_t return_stack_size() const
+    {
+        return sizeof(ExecutionContext) + (registers_and_constants_and_locals_and_arguments_count * sizeof(Value));
+    }
 
     Value* registers_and_constants_and_locals_and_arguments()
     {
         return reinterpret_cast<Value*>(reinterpret_cast<uintptr_t>(this) + sizeof(ExecutionContext));
     }
 
+private:
     u32 registers_and_constants_and_locals_and_arguments_count { 0 };
 };
 

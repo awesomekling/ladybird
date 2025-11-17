@@ -150,7 +150,7 @@ ThrowCompletionOr<Value> NativeFunction::internal_call(ExecutionContext& callee_
     // </8.> --------------------------------------------------------------------------
 
     // 9. Push calleeContext onto the execution context stack; calleeContext is now the running execution context.
-    TRY(vm.push_execution_context(callee_context, {}));
+    vm.push_execution_context(callee_context);
 
     // 10. Let result be the Completion Record that is the result of evaluating F in a manner that conforms to the specification of F. thisArgument is the this value, argumentsList provides the named parameters, and the NewTarget value is undefined.
     auto result = call();
@@ -235,7 +235,7 @@ Utf16String NativeFunction::name_for_call_stack() const
     return m_name.to_utf16_string();
 }
 
-ThrowCompletionOr<void> NativeFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count)
+ThrowCompletionOr<void> NativeFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count, [[maybe_unused]] bool* can_fast_call)
 {
     // NB: Native functions don't have bytecode VM registers, but they do track the `this` value, so make sure we allocate that register slot.
     registers_and_constants_and_locals_count = Bytecode::Register::this_value().index() + 1;

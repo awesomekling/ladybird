@@ -210,7 +210,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
-ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count)
+ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, size_t& argument_count, bool* can_fast_call)
 {
     auto& executable = shared_data().m_executable;
     if (!executable) {
@@ -222,6 +222,11 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
     }
     registers_and_constants_and_locals_count = executable->registers_and_constants_and_locals_count;
     argument_count = max(argument_count, formal_parameters().size());
+
+    if (can_fast_call) {
+        // NOTE: We don't support fast-call of class constructors since they immediately and unconditionally throw anyway.
+        *can_fast_call = !is_class_constructor();
+    }
     return {};
 }
 
@@ -268,6 +273,32 @@ FLATTEN ThrowCompletionOr<Value> ECMAScriptFunctionObject::internal_call(Executi
     // 9. Assert: result is a throw completion.
     // 10. Return ? result.
     return result;
+}
+
+FLATTEN void ECMAScriptFunctionObject::prepare_fast_call(ExecutionContext& callee_context, Value this_argument, Bytecode::Operand dst)
+{
+    auto& vm = this->vm();
+    ASSERT(bytecode_executable());
+    prepare_for_ordinary_call(vm, callee_context, nullptr);
+    ASSERT(&vm.running_execution_context() == &callee_context);
+
+    if (uses_this())
+        ordinary_call_bind_this(vm, callee_context, this_argument);
+
+    auto& executable = *bytecode_executable();
+    callee_context.is_fast_call = true;
+    callee_context.return_slot = dst;
+    callee_context.executable = executable;
+    callee_context.program_counter = 0;
+
+    callee_context.global_object = callee_context.realm->global_object();
+    callee_context.global_declarative_environment = callee_context.realm->global_environment().declarative_record();
+    callee_context.identifier_table = executable.identifier_table->identifiers().data();
+
+    auto* registers_and_constants_and_locals_and_arguments = callee_context.registers_and_constants_and_locals_and_arguments();
+    for (size_t i = 0; i < executable.constants.size(); ++i) {
+        registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants[i];
+    }
 }
 
 // 10.2.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-ecmascript-function-objects-construct-argumentslist-newtarget

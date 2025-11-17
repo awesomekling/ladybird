@@ -9,6 +9,7 @@
 
 #include <AK/Optional.h>
 #include <AK/StringView.h>
+#include <LibJS/Bytecode/Operand.h>
 #include <LibJS/LocalVariable.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/PrivateEnvironment.h>
@@ -24,7 +25,7 @@ public:
 
     // Table 5: Additional Essential Internal Methods of Function Objects, https://tc39.es/ecma262/#table-additional-essential-internal-methods-of-function-objects
 
-    virtual ThrowCompletionOr<void> get_stack_frame_size([[maybe_unused]] size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count) { return {}; }
+    virtual ThrowCompletionOr<void> get_stack_frame_size([[maybe_unused]] size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count, [[maybe_unused]] bool* can_fast_call = nullptr) { return {}; }
     virtual ThrowCompletionOr<Value> internal_call(ExecutionContext&, Value this_argument) = 0;
     virtual ThrowCompletionOr<GC::Ref<Object>> internal_construct(ExecutionContext&, [[maybe_unused]] FunctionObject& new_target) { VERIFY_NOT_REACHED(); }
 
@@ -43,6 +44,8 @@ public:
     virtual FunctionParameters const& formal_parameters() const { VERIFY_NOT_REACHED(); }
 
     virtual Utf16String name_for_call_stack() const = 0;
+
+    virtual void prepare_fast_call(ExecutionContext&, [[maybe_unused]] Value this_argument, [[maybe_unused]] Bytecode::Operand dst) { VERIFY_NOT_REACHED(); }
 
     template<typename T>
     bool fast_is() const = delete;
