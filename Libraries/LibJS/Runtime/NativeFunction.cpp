@@ -126,7 +126,7 @@ ThrowCompletionOr<Value> NativeFunction::internal_call(ExecutionContext& callee_
     // Note: This is already the default value.
 
     // 8. Perform any necessary implementation-defined initialization of calleeContext.
-    callee_context.this_value = this_argument;
+    callee_context.this_value() = this_argument;
 
     if (function_environment_needed()) {
         // 7. Let localEnv be NewFunctionEnvironment(F, newTarget).
@@ -233,6 +233,13 @@ bool NativeFunction::is_strict_mode() const
 Utf16String NativeFunction::name_for_call_stack() const
 {
     return m_name.to_utf16_string();
+}
+
+ThrowCompletionOr<void> NativeFunction::get_stack_frame_size(size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count)
+{
+    // NB: Native functions don't have bytecode VM registers, but they do track the `this` value, so make sure we allocate that register slot.
+    registers_and_constants_and_locals_count = Bytecode::Register::this_value().index() + 1;
+    return {};
 }
 
 }

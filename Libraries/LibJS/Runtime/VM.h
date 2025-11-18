@@ -185,7 +185,7 @@ public:
 
     Value this_value() const
     {
-        return running_execution_context().this_value.value();
+        return running_execution_context().this_value();
     }
 
     ThrowCompletionOr<Value> resolve_this_binding();

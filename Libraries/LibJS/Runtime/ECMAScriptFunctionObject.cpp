@@ -489,7 +489,7 @@ void ECMAScriptFunctionObject::ordinary_call_bind_this(VM& vm, ExecutionContext&
     // 7. Assert: localEnv is a function Environment Record.
     // 8. Assert: The next step never returns an abrupt completion because localEnv.[[ThisBindingStatus]] is not initialized.
     // 9. Perform ! localEnv.BindThisValue(thisValue).
-    callee_context.this_value = this_value;
+    callee_context.this_value() = this_value;
     if (function_environment_needed())
         MUST(as<FunctionEnvironment>(*local_env).bind_this_value(vm, this_value));
 
@@ -578,7 +578,7 @@ void async_block_start(VM& vm, T const& async_body, PromiseCapability const& pro
         return;
 
     // 5. Resume the suspended evaluation of asyncContext. Let result be the value returned by the resumed computation.
-    auto result = call(vm, *closure, *async_context.this_value);
+    auto result = call(vm, *closure, async_context.this_value());
 
     // 6. Assert: When we return here, asyncContext has already been removed from the execution context stack and runningContext is the currently running execution context.
     VERIFY(&vm.running_execution_context() == &running_context);

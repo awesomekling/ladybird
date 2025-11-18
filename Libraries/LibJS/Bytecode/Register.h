@@ -19,24 +19,22 @@ public:
         return Register(accumulator_index);
     }
 
-    constexpr static u32 saved_return_value_index = 1;
+    static constexpr Register this_value()
+    {
+        constexpr u32 this_value_index = 1;
+        return Register(this_value_index);
+    }
 
     static constexpr Register saved_return_value()
     {
+        constexpr static u32 saved_return_value_index = 2;
         return Register(saved_return_value_index);
     }
 
-    static constexpr u32 exception_index = 2;
-
     static constexpr Register exception()
     {
+        static constexpr u32 exception_index = 3;
         return Register(exception_index);
-    }
-
-    static constexpr Register this_value()
-    {
-        constexpr u32 this_value_index = 3;
-        return Register(this_value_index);
     }
 
     static constexpr Register return_value()

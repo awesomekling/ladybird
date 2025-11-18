@@ -10,6 +10,7 @@
 #pragma once
 
 #include <LibJS/Bytecode/BasicBlock.h>
+#include <LibJS/Bytecode/Register.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Module.h>
@@ -100,7 +101,8 @@ public:
     // FIXME: Move this out of LibJS (e.g. by using the CustomData concept), as it's used exclusively by LibWeb.
     u32 skip_when_determining_incumbent_counter { 0 };
 
-    Optional<Value> this_value;
+    [[nodiscard]] Value& this_value() { return registers_and_constants_and_locals_and_arguments()[Bytecode::Register::this_value().index()]; }
+    [[nodiscard]] Value this_value() const { return registers_and_constants_and_locals_and_arguments()[Bytecode::Register::this_value().index()]; }
 
     GC::Ptr<Bytecode::Executable> executable;
 

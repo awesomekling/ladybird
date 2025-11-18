@@ -652,13 +652,6 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
 
     ASSERT(executable.registers_and_constants_and_locals_count <= context.registers_and_constants_and_locals_and_arguments_span().size());
 
-    // NOTE: We only copy the `this` value from ExecutionContext if it's not already set.
-    //       If we are re-entering an async/generator context, the `this` value
-    //       may have already been cached by a ResolveThisBinding instruction,
-    //       and subsequent instructions expect this value to be set.
-    if (reg(Register::this_value()).is_special_empty_value())
-        reg(Register::this_value()) = context.this_value.value_or(js_special_empty_value());
-
     auto* registers_and_constants_and_locals_and_arguments = context.registers_and_constants_and_locals_and_arguments();
     for (size_t i = 0; i < executable.constants.size(); ++i) {
         registers_and_constants_and_locals_and_arguments[executable.number_of_registers + i] = executable.constants.data()[i];
@@ -2352,7 +2345,7 @@ ThrowCompletionOr<void> ResolveThisBinding::execute_impl(Bytecode::Interpreter& 
     //               resolved once and then saved for subsequent use.
     auto& running_execution_context = interpreter.running_execution_context();
     if (auto function = running_execution_context.function; function && is<ECMAScriptFunctionObject>(*function) && !static_cast<ECMAScriptFunctionObject&>(*function).allocates_function_environment()) {
-        cached_this_value = running_execution_context.this_value.value();
+        // Do nothing, `this` was already cached when calling the function.
     } else {
         auto& vm = interpreter.vm();
         cached_this_value = TRY(vm.resolve_this_binding());
