@@ -5,7 +5,6 @@
  */
 
 #include <AK/HashTable.h>
-#include <AK/Singleton.h>
 #include <AK/Utf16FlyString.h>
 
 namespace AK {
@@ -17,7 +16,10 @@ struct Utf16FlyStringTableHashTraits : public Traits<Detail::Utf16StringData con
 
 static auto& all_utf16_fly_strings()
 {
-    static Singleton<HashTable<Detail::Utf16StringData const*, Utf16FlyStringTableHashTraits>> table;
+    static HashTable<Detail::Utf16StringData const*, Utf16FlyStringTableHashTraits>* table = nullptr;
+    if (!table) [[unlikely]] {
+        table = new HashTable<Detail::Utf16StringData const*, Utf16FlyStringTableHashTraits>();
+    }
     return *table;
 }
 
