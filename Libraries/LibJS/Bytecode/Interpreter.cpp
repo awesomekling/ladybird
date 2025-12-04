@@ -1296,10 +1296,10 @@ inline Value new_function(Interpreter& interpreter, FunctionNode const& function
     Value value;
 
     if (!function_node.has_name()) {
-        Utf16FlyString name;
         if (lhs_name.has_value())
-            name = interpreter.get_identifier(lhs_name.value());
-        value = instantiate_ordinary_function_expression(interpreter, function_node, name);
+            value = instantiate_ordinary_function_expression(interpreter, function_node, interpreter.get_identifier(lhs_name.value()));
+        else
+            value = instantiate_ordinary_function_expression(interpreter, function_node, {});
     } else {
         value = ECMAScriptFunctionObject::create_from_function_node(
             function_node,
