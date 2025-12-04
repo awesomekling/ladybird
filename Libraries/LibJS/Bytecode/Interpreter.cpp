@@ -1750,7 +1750,7 @@ ThrowCompletionOr<void> Add::execute_impl(Bytecode::Interpreter& interpreter) co
 
     if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
         if (lhs.is_int32() && rhs.is_int32()) {
-            if (!Checked<i32>::addition_would_overflow(lhs.as_i32(), rhs.as_i32())) {
+            if (!Checked<i32>::addition_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() + rhs.as_i32()));
                 return {};
             }
@@ -1774,7 +1774,7 @@ ThrowCompletionOr<void> Mul::execute_impl(Bytecode::Interpreter& interpreter) co
 
     if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
         if (lhs.is_int32() && rhs.is_int32()) {
-            if (!Checked<i32>::multiplication_would_overflow(lhs.as_i32(), rhs.as_i32())) {
+            if (!Checked<i32>::multiplication_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() * rhs.as_i32()));
                 return {};
             }
@@ -1813,7 +1813,7 @@ ThrowCompletionOr<void> Sub::execute_impl(Bytecode::Interpreter& interpreter) co
 
     if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
         if (lhs.is_int32() && rhs.is_int32()) {
-            if (!Checked<i32>::subtraction_would_overflow(lhs.as_i32(), rhs.as_i32())) {
+            if (!Checked<i32>::subtraction_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() - rhs.as_i32()));
                 return {};
             }
