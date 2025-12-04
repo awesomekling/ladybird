@@ -591,7 +591,6 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(StrictlyInequals);
             HANDLE_INSTRUCTION(Sub);
             HANDLE_INSTRUCTION(SuperCallWithArgumentArray);
-            HANDLE_INSTRUCTION(Throw);
             HANDLE_INSTRUCTION(ThrowIfNotObject);
             HANDLE_INSTRUCTION(ThrowIfNullish);
             HANDLE_INSTRUCTION(ThrowIfTDZ);
@@ -603,6 +602,14 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(UnaryMinus);
             HANDLE_INSTRUCTION(UnaryPlus);
             HANDLE_INSTRUCTION(UnsignedRightShift);
+
+        handle_Throw: {
+            auto& instruction = *reinterpret_cast<Op::Throw const*>(instruction_pointer);
+            auto result = instruction.execute_impl(*this);
+            if (handle_exception(instruction_pointer, result.error_value()) == HandleExceptionResponse::ExitFromExecutable)
+                return;
+            goto start;
+        }
 
         handle_Await: {
             auto& instruction = *reinterpret_cast<Op::Await const*>(instruction_pointer);
