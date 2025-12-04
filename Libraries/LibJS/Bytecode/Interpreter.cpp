@@ -1264,7 +1264,7 @@ inline ThrowCompletionOr<void> throw_if_needed_for_call(Interpreter& interpreter
 }
 
 // 15.2.5 Runtime Semantics: InstantiateOrdinaryFunctionExpression, https://tc39.es/ecma262/#sec-runtime-semantics-instantiateordinaryfunctionexpression
-static Value instantiate_ordinary_function_expression(Interpreter& interpreter, FunctionNode const& function_node, Utf16FlyString given_name)
+static Value instantiate_ordinary_function_expression(Interpreter& interpreter, FunctionNode const& function_node, Utf16FlyString const& given_name)
 {
     auto own_name = function_node.name();
     auto has_own_name = !own_name.is_empty();
@@ -2563,7 +2563,7 @@ ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpreter& interpr
         auto& vm = interpreter.vm();                                                                             \
         auto value = interpreter.get(m_src);                                                                     \
         auto base = interpreter.get(m_base);                                                                     \
-        auto base_identifier = interpreter.get_identifier(m_base_identifier);                                    \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
         PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };         \
         auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
         TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
@@ -2578,7 +2578,7 @@ JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID)
         auto& vm = interpreter.vm();                                                                             \
         auto value = interpreter.get(m_src);                                                                     \
         auto base = interpreter.get(m_base);                                                                     \
-        auto base_identifier = interpreter.get_identifier(m_base_identifier);                                    \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
         PropertyKey name { m_property };                                                                         \
         auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
         TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
@@ -2620,7 +2620,7 @@ ThrowCompletionOr<void> PutPrivateById::execute_impl(Bytecode::Interpreter& inte
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
     auto object = TRY(interpreter.get(m_base).to_object(vm));
-    auto name = interpreter.get_identifier(m_property);
+    auto const& name = interpreter.get_identifier(m_property);
     auto private_reference = make_private_reference(vm, object, name);
     TRY(private_reference.put_value(vm, value));
     return {};
@@ -3126,7 +3126,7 @@ ThrowCompletionOr<void> GetByValueWithThis::execute_impl(Bytecode::Interpreter& 
         auto& vm = interpreter.vm();                                                                   \
         auto value = interpreter.get(m_src);                                                           \
         auto base = interpreter.get(m_base);                                                           \
-        auto base_identifier = interpreter.get_identifier(m_base_identifier);                          \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                   \
         auto property = interpreter.get(m_property);                                                   \
         TRY(put_by_value<PutKind::kind>(vm, base, base_identifier, property, value, strict()));        \
         return {};                                                                                     \
@@ -3180,7 +3180,7 @@ ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpr
 ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
-    auto identifier = interpreter.get_identifier(m_property);
+    auto const& identifier = interpreter.get_identifier(m_property);
     auto method = TRY(interpreter.get(m_object).get_method(vm, identifier));
     interpreter.set(dst(), method ?: js_undefined());
     return {};
