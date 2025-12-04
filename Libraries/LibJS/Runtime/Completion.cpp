@@ -139,7 +139,7 @@ static void log_exception(Value value)
 }
 
 // 6.2.4.2 ThrowCompletion ( value ), https://tc39.es/ecma262/#sec-throwcompletion
-Completion throw_completion(Value value)
+NEVER_INLINE Completion throw_completion(Value value)
 {
     if (g_log_all_js_exceptions)
         log_exception(value);
