@@ -90,7 +90,7 @@ void Executable::visit_edges(Visitor& visitor)
     visitor.visit(constants);
 }
 
-Optional<Executable::ExceptionHandlers const&> Executable::exception_handlers_for_offset(size_t offset) const
+NEVER_INLINE Optional<Executable::ExceptionHandlers const&> Executable::exception_handlers_for_offset(size_t offset) const
 {
     for (auto& handlers : exception_handlers) {
         if (handlers.start_offset <= offset && offset < handlers.end_offset)
