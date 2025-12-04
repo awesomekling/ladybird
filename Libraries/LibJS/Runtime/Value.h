@@ -402,6 +402,11 @@ public:
     bool is_double() const { return (m_value.encoded & GC::CANON_NAN_BITS) != GC::CANON_NAN_BITS || (m_value.encoded == GC::CANON_NAN_BITS); }
     bool is_int32() const { return m_value.tag == INT32_TAG; }
 
+    [[nodiscard]] bool is_number_but_not_nan() const
+    {
+        return m_value.tag == INT32_TAG || (m_value.encoded & GC::CANON_NAN_BITS) != GC::CANON_NAN_BITS;
+    }
+
     i32 as_i32() const
     {
         ASSERT(is_int32());
