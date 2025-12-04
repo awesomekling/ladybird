@@ -93,7 +93,8 @@ public:
     GC::Ptr<DeclarativeEnvironment> global_declarative_environment;
     Utf16FlyString const* identifier_table { nullptr };
 
-    u32 program_counter { 0 };
+    [[nodiscard]] u32 program_counter() const { return executable ? static_cast<u32>(instruction_pointer - executable->bytecode.data()) : 0; }
+    u8 const* instruction_pointer { nullptr };
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#skip-when-determining-incumbent-counter
     // FIXME: Move this out of LibJS (e.g. by using the CustomData concept), as it's used exclusively by LibWeb.

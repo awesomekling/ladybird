@@ -489,7 +489,7 @@ void VM::dump_backtrace() const
         auto& frame = m_execution_context_stack[i];
 
         if (frame->executable) {
-            auto source_range = frame->executable->source_range_at(frame->program_counter).realize();
+            auto source_range = frame->executable->source_range_at(frame->program_counter()).realize();
             dbgln("-> {} @ {}:{},{}", frame->function ? frame->function->name_for_call_stack() : ""_utf16, source_range.filename(), source_range.start.line, source_range.start.column);
         } else {
             dbgln("-> {}", frame->function ? frame->function->name_for_call_stack() : ""_utf16);
@@ -765,10 +765,10 @@ static GC::Ptr<CachedSourceRange> get_source_range(ExecutionContext* context)
 
     if (!context->rare_data()
         || !context->rare_data()->cached_source_range
-        || context->rare_data()->cached_source_range->program_counter != context->program_counter) {
-        auto unrealized_source_range = context->executable->source_range_at(context->program_counter);
+        || context->rare_data()->cached_source_range->program_counter != context->program_counter()) {
+        auto unrealized_source_range = context->executable->source_range_at(context->program_counter());
         context->ensure_rare_data()->cached_source_range = context->executable->heap().allocate<CachedSourceRange>(
-            context->program_counter,
+            context->program_counter(),
             move(unrealized_source_range));
     }
     return context->rare_data()->cached_source_range;

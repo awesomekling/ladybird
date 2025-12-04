@@ -111,7 +111,7 @@ NonnullOwnPtr<ExecutionContext> ExecutionContext::copy() const
     copy->lexical_environment = lexical_environment;
     copy->variable_environment = variable_environment;
     copy->private_environment = private_environment;
-    copy->program_counter = program_counter;
+    copy->instruction_pointer = instruction_pointer;
     copy->this_value = this_value;
     copy->executable = executable;
     copy->passed_argument_count = passed_argument_count;

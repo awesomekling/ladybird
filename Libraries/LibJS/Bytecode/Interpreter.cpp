@@ -230,11 +230,12 @@ ThrowCompletionOr<Value> Interpreter::run(SourceTextModule& module)
     return js_undefined();
 }
 
-NEVER_INLINE Interpreter::HandleExceptionResponse Interpreter::handle_exception(u32& program_counter, Value exception)
+NEVER_INLINE Interpreter::HandleExceptionResponse Interpreter::handle_exception(u8 const*& instruction_pointer, Value exception)
 {
     reg(Register::exception()) = exception;
+    auto* bytecode = m_running_execution_context->executable->bytecode.data();
     m_running_execution_context->scheduled_jump = {};
-    auto handlers = current_executable().exception_handlers_for_offset(program_counter);
+    auto handlers = current_executable().exception_handlers_for_offset(instruction_pointer - bytecode);
     if (!handlers.has_value()) {
         return HandleExceptionResponse::ExitFromExecutable;
     }
@@ -246,11 +247,11 @@ NEVER_INLINE Interpreter::HandleExceptionResponse Interpreter::handle_exception(
     VERIFY(unwind_context.executable == &current_executable());
 
     if (handler.has_value()) {
-        program_counter = handler.value();
+        instruction_pointer = bytecode + handler.value();
         return HandleExceptionResponse::ContinueInThisExecutable;
     }
     if (finalizer.has_value()) {
-        program_counter = finalizer.value();
+        instruction_pointer = bytecode + finalizer.value();
         return HandleExceptionResponse::ContinueInThisExecutable;
     }
     VERIFY_NOT_REACHED();
@@ -267,8 +268,8 @@ void Interpreter::run_bytecode(size_t entry_point)
     auto& executable = current_executable();
     auto const* bytecode = executable.bytecode.data();
 
-    u32& program_counter = running_execution_context.program_counter;
-    program_counter = entry_point;
+    u8 const*& instruction_pointer = running_execution_context.instruction_pointer;
+    instruction_pointer = bytecode + entry_point;
 
     // Declare a lookup table for computed goto with each of the `handle_*` labels
     // to avoid the overhead of a switch statement.
@@ -280,29 +281,29 @@ void Interpreter::run_bytecode(size_t entry_point)
     };
 #undef SET_UP_LABEL
 
-#define DISPATCH_NEXT(name)                                                                         \
-    do {                                                                                            \
-        if constexpr (Op::name::IsVariableLength)                                                   \
-            program_counter += instruction.length();                                                \
-        else                                                                                        \
-            program_counter += sizeof(Op::name);                                                    \
-        auto& next_instruction = *reinterpret_cast<Instruction const*>(&bytecode[program_counter]); \
-        goto* bytecode_dispatch_table[static_cast<size_t>(next_instruction.type())];                \
+#define DISPATCH_NEXT(name)                                                                  \
+    do {                                                                                     \
+        if constexpr (Op::name::IsVariableLength)                                            \
+            instruction_pointer += instruction.length();                                     \
+        else                                                                                 \
+            instruction_pointer += sizeof(Op::name);                                         \
+        auto& next_instruction = *reinterpret_cast<Instruction const*>(instruction_pointer); \
+        goto* bytecode_dispatch_table[static_cast<size_t>(next_instruction.type())];         \
     } while (0)
 
     for (;;) {
     start:
         for (;;) {
-            goto* bytecode_dispatch_table[static_cast<size_t>((*reinterpret_cast<Instruction const*>(&bytecode[program_counter])).type())];
+            goto* bytecode_dispatch_table[static_cast<size_t>((*reinterpret_cast<Instruction const*>(instruction_pointer)).type())];
 
         handle_Mov: {
-            auto& instruction = *reinterpret_cast<Op::Mov const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::Mov const*>(instruction_pointer);
             set(instruction.dst(), get(instruction.src()));
             DISPATCH_NEXT(Mov);
         }
 
         handle_End: {
-            auto& instruction = *reinterpret_cast<Op::End const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::End const*>(instruction_pointer);
             auto value = get(instruction.value());
             if (value.is_special_empty_value())
                 value = js_undefined();
@@ -311,112 +312,112 @@ void Interpreter::run_bytecode(size_t entry_point)
         }
 
         handle_Jump: {
-            auto& instruction = *reinterpret_cast<Op::Jump const*>(&bytecode[program_counter]);
-            program_counter = instruction.target().address();
+            auto& instruction = *reinterpret_cast<Op::Jump const*>(instruction_pointer);
+            instruction_pointer = bytecode + instruction.target().address();
             goto start;
         }
 
         handle_JumpIf: {
-            auto& instruction = *reinterpret_cast<Op::JumpIf const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::JumpIf const*>(instruction_pointer);
             if (get(instruction.condition()).to_boolean())
-                program_counter = instruction.true_target().address();
+                instruction_pointer = bytecode + instruction.true_target().address();
             else
-                program_counter = instruction.false_target().address();
+                instruction_pointer = bytecode + instruction.false_target().address();
             goto start;
         }
 
         handle_JumpTrue: {
-            auto& instruction = *reinterpret_cast<Op::JumpTrue const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::JumpTrue const*>(instruction_pointer);
             if (get(instruction.condition()).to_boolean()) {
-                program_counter = instruction.target().address();
+                instruction_pointer = bytecode + instruction.target().address();
                 goto start;
             }
             DISPATCH_NEXT(JumpTrue);
         }
 
         handle_JumpFalse: {
-            auto& instruction = *reinterpret_cast<Op::JumpFalse const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::JumpFalse const*>(instruction_pointer);
             if (!get(instruction.condition()).to_boolean()) {
-                program_counter = instruction.target().address();
+                instruction_pointer = bytecode + instruction.target().address();
                 goto start;
             }
             DISPATCH_NEXT(JumpFalse);
         }
 
         handle_JumpNullish: {
-            auto& instruction = *reinterpret_cast<Op::JumpNullish const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::JumpNullish const*>(instruction_pointer);
             if (get(instruction.condition()).is_nullish())
-                program_counter = instruction.true_target().address();
+                instruction_pointer = bytecode + instruction.true_target().address();
             else
-                program_counter = instruction.false_target().address();
+                instruction_pointer = bytecode + instruction.false_target().address();
             goto start;
         }
 
-#define HANDLE_COMPARISON_OP(op_TitleCase, op_snake_case, numeric_operator)                                             \
-    handle_Jump##op_TitleCase:                                                                                          \
-    {                                                                                                                   \
-        auto& instruction = *reinterpret_cast<Op::Jump##op_TitleCase const*>(&bytecode[program_counter]);               \
-        auto lhs = get(instruction.lhs());                                                                              \
-        auto rhs = get(instruction.rhs());                                                                              \
-        if (lhs.is_number() && rhs.is_number()) {                                                                       \
-            bool result;                                                                                                \
-            if (lhs.is_int32() && rhs.is_int32()) {                                                                     \
-                result = lhs.as_i32() numeric_operator rhs.as_i32();                                                    \
-            } else {                                                                                                    \
-                result = lhs.as_double() numeric_operator rhs.as_double();                                              \
-            }                                                                                                           \
-            program_counter = result ? instruction.true_target().address() : instruction.false_target().address();      \
-            goto start;                                                                                                 \
-        }                                                                                                               \
-        auto result = op_snake_case(vm(), get(instruction.lhs()), get(instruction.rhs()));                              \
-        if (result.is_error()) [[unlikely]] {                                                                           \
-            if (handle_exception(program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
-                return;                                                                                                 \
-            goto start;                                                                                                 \
-        }                                                                                                               \
-        if (result.value())                                                                                             \
-            program_counter = instruction.true_target().address();                                                      \
-        else                                                                                                            \
-            program_counter = instruction.false_target().address();                                                     \
-        goto start;                                                                                                     \
+#define HANDLE_COMPARISON_OP(op_TitleCase, op_snake_case, numeric_operator)                                                         \
+    handle_Jump##op_TitleCase:                                                                                                      \
+    {                                                                                                                               \
+        auto& instruction = *reinterpret_cast<Op::Jump##op_TitleCase const*>(instruction_pointer);                                  \
+        auto lhs = get(instruction.lhs());                                                                                          \
+        auto rhs = get(instruction.rhs());                                                                                          \
+        if (lhs.is_number() && rhs.is_number()) {                                                                                   \
+            bool result;                                                                                                            \
+            if (lhs.is_int32() && rhs.is_int32()) {                                                                                 \
+                result = lhs.as_i32() numeric_operator rhs.as_i32();                                                                \
+            } else {                                                                                                                \
+                result = lhs.as_double() numeric_operator rhs.as_double();                                                          \
+            }                                                                                                                       \
+            instruction_pointer = bytecode + (result ? instruction.true_target().address() : instruction.false_target().address()); \
+            goto start;                                                                                                             \
+        }                                                                                                                           \
+        auto result = op_snake_case(vm(), get(instruction.lhs()), get(instruction.rhs()));                                          \
+        if (result.is_error()) [[unlikely]] {                                                                                       \
+            if (handle_exception(instruction_pointer, result.error_value()) == HandleExceptionResponse::ExitFromExecutable)         \
+                return;                                                                                                             \
+            goto start;                                                                                                             \
+        }                                                                                                                           \
+        if (result.value())                                                                                                         \
+            instruction_pointer = bytecode + instruction.true_target().address();                                                   \
+        else                                                                                                                        \
+            instruction_pointer = bytecode + instruction.false_target().address();                                                  \
+        goto start;                                                                                                                 \
     }
 
             JS_ENUMERATE_COMPARISON_OPS(HANDLE_COMPARISON_OP)
 #undef HANDLE_COMPARISON_OP
 
         handle_JumpUndefined: {
-            auto& instruction = *reinterpret_cast<Op::JumpUndefined const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::JumpUndefined const*>(instruction_pointer);
             if (get(instruction.condition()).is_undefined())
-                program_counter = instruction.true_target().address();
+                instruction_pointer = bytecode + instruction.true_target().address();
             else
-                program_counter = instruction.false_target().address();
+                instruction_pointer = bytecode + instruction.false_target().address();
             goto start;
         }
 
         handle_EnterUnwindContext: {
-            auto& instruction = *reinterpret_cast<Op::EnterUnwindContext const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::EnterUnwindContext const*>(instruction_pointer);
             enter_unwind_context();
-            program_counter = instruction.entry_point().address();
+            instruction_pointer = bytecode + instruction.entry_point().address();
             goto start;
         }
 
         handle_ContinuePendingUnwind: {
-            auto& instruction = *reinterpret_cast<Op::ContinuePendingUnwind const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::ContinuePendingUnwind const*>(instruction_pointer);
             if (auto exception = reg(Register::exception()); !exception.is_special_empty_value()) {
-                if (handle_exception(program_counter, exception) == HandleExceptionResponse::ExitFromExecutable)
+                if (handle_exception(instruction_pointer, exception) == HandleExceptionResponse::ExitFromExecutable)
                     return;
                 goto start;
             }
             if (!saved_return_value().is_special_empty_value()) {
                 do_return(saved_return_value());
-                if (auto handlers = executable.exception_handlers_for_offset(program_counter); handlers.has_value()) {
+                if (auto handlers = executable.exception_handlers_for_offset(instruction_pointer - bytecode); handlers.has_value()) {
                     if (auto finalizer = handlers.value().finalizer_offset; finalizer.has_value()) {
                         auto& unwind_contexts = running_execution_context.ensure_rare_data()->unwind_contexts;
                         auto& unwind_context = unwind_contexts.last();
                         VERIFY(unwind_context.executable == &current_executable());
                         reg(Register::saved_return_value()) = reg(Register::return_value());
                         reg(Register::return_value()) = js_undefined();
-                        program_counter = finalizer.value();
+                        instruction_pointer = bytecode + finalizer.value();
                         // the unwind_context will be pop'ed when entering the finally block
                         goto start;
                     }
@@ -425,10 +426,10 @@ void Interpreter::run_bytecode(size_t entry_point)
             }
             auto const old_scheduled_jump = running_execution_context.ensure_rare_data()->previously_scheduled_jumps.take_last();
             if (m_running_execution_context->scheduled_jump.has_value()) {
-                program_counter = m_running_execution_context->scheduled_jump.value();
+                instruction_pointer = bytecode + m_running_execution_context->scheduled_jump.value();
                 m_running_execution_context->scheduled_jump = {};
             } else {
-                program_counter = instruction.resume_target().address();
+                instruction_pointer = bytecode + instruction.resume_target().address();
                 // set the scheduled jump to the old value if we continue
                 // where we left it
                 m_running_execution_context->scheduled_jump = old_scheduled_jump;
@@ -437,35 +438,35 @@ void Interpreter::run_bytecode(size_t entry_point)
         }
 
         handle_ScheduleJump: {
-            auto& instruction = *reinterpret_cast<Op::ScheduleJump const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::ScheduleJump const*>(instruction_pointer);
             m_running_execution_context->scheduled_jump = instruction.target().address();
-            auto finalizer = executable.exception_handlers_for_offset(program_counter).value().finalizer_offset;
+            auto finalizer = executable.exception_handlers_for_offset(instruction_pointer - bytecode).value().finalizer_offset;
             VERIFY(finalizer.has_value());
-            program_counter = finalizer.value();
+            instruction_pointer = bytecode + finalizer.value();
             goto start;
         }
 
-#define HANDLE_INSTRUCTION(name)                                                                                            \
-    handle_##name:                                                                                                          \
-    {                                                                                                                       \
-        auto& instruction = *reinterpret_cast<Op::name const*>(&bytecode[program_counter]);                                 \
-        {                                                                                                                   \
-            auto result = instruction.execute_impl(*this);                                                                  \
-            if (result.is_error()) [[unlikely]] {                                                                           \
-                if (handle_exception(program_counter, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
-                    return;                                                                                                 \
-                goto start;                                                                                                 \
-            }                                                                                                               \
-        }                                                                                                                   \
-        DISPATCH_NEXT(name);                                                                                                \
+#define HANDLE_INSTRUCTION(name)                                                                                                \
+    handle_##name:                                                                                                              \
+    {                                                                                                                           \
+        auto& instruction = *reinterpret_cast<Op::name const*>(instruction_pointer);                                            \
+        {                                                                                                                       \
+            auto result = instruction.execute_impl(*this);                                                                      \
+            if (result.is_error()) [[unlikely]] {                                                                               \
+                if (handle_exception(instruction_pointer, result.error_value()) == HandleExceptionResponse::ExitFromExecutable) \
+                    return;                                                                                                     \
+                goto start;                                                                                                     \
+            }                                                                                                                   \
+        }                                                                                                                       \
+        DISPATCH_NEXT(name);                                                                                                    \
     }
 
-#define HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(name)                                    \
-    handle_##name:                                                                          \
-    {                                                                                       \
-        auto& instruction = *reinterpret_cast<Op::name const*>(&bytecode[program_counter]); \
-        instruction.execute_impl(*this);                                                    \
-        DISPATCH_NEXT(name);                                                                \
+#define HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(name)                             \
+    handle_##name:                                                                   \
+    {                                                                                \
+        auto& instruction = *reinterpret_cast<Op::name const*>(instruction_pointer); \
+        instruction.execute_impl(*this);                                             \
+        DISPATCH_NEXT(name);                                                         \
     }
 
             HANDLE_INSTRUCTION(Add);
@@ -604,19 +605,19 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(UnsignedRightShift);
 
         handle_Await: {
-            auto& instruction = *reinterpret_cast<Op::Await const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::Await const*>(instruction_pointer);
             instruction.execute_impl(*this);
             return;
         }
 
         handle_Return: {
-            auto& instruction = *reinterpret_cast<Op::Return const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::Return const*>(instruction_pointer);
             instruction.execute_impl(*this);
             return;
         }
 
         handle_Yield: {
-            auto& instruction = *reinterpret_cast<Op::Yield const*>(&bytecode[program_counter]);
+            auto& instruction = *reinterpret_cast<Op::Yield const*>(instruction_pointer);
             instruction.execute_impl(*this);
             // Note: A `yield` statement will not go through a finally statement,
             //       hence we need to set a flag to not do so,

@@ -94,7 +94,7 @@ private:
         ExitFromExecutable,
         ContinueInThisExecutable,
     };
-    [[nodiscard]] HandleExceptionResponse handle_exception(u32& program_counter, Value exception);
+    [[nodiscard]] HandleExceptionResponse handle_exception(u8 const*& program_counter, Value exception);
 
     VM& m_vm;
     ExecutionContext* m_running_execution_context { nullptr };

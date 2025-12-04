@@ -54,7 +54,7 @@ ErrorInformation extract_error_information(JS::VM& vm, JS::Value exception)
         for (ssize_t i = vm.execution_context_stack().size() - 1; i >= 0; --i) {
             auto& frame = vm.execution_context_stack()[i];
             if (frame->executable) {
-                auto source_range = frame->executable->source_range_at(frame->program_counter).realize();
+                auto source_range = frame->executable->source_range_at(frame->program_counter()).realize();
                 attributes.filename = MUST(String::from_byte_string(source_range.filename()));
                 attributes.lineno = source_range.start.line;
                 attributes.colno = source_range.start.column;
