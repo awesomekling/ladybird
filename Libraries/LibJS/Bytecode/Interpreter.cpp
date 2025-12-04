@@ -3021,7 +3021,7 @@ ThrowCompletionOr<void> ThrowIfNotObject::execute_impl(Bytecode::Interpreter& in
 {
     auto& vm = interpreter.vm();
     auto src = interpreter.get(m_src);
-    if (!src.is_object())
+    if (!src.is_object()) [[unlikely]]
         return vm.throw_completion<TypeError>(ErrorType::NotAnObject, src.to_string_without_side_effects());
     return {};
 }
@@ -3030,7 +3030,7 @@ ThrowCompletionOr<void> ThrowIfNullish::execute_impl(Bytecode::Interpreter& inte
 {
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
-    if (value.is_nullish())
+    if (value.is_nullish()) [[unlikely]]
         return vm.throw_completion<TypeError>(ErrorType::NotObjectCoercible, value.to_string_without_side_effects());
     return {};
 }
@@ -3039,7 +3039,7 @@ ThrowCompletionOr<void> ThrowIfTDZ::execute_impl(Bytecode::Interpreter& interpre
 {
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
-    if (value.is_special_empty_value())
+    if (value.is_special_empty_value()) [[unlikely]]
         return vm.throw_completion<ReferenceError>(ErrorType::BindingNotInitialized, value.to_string_without_side_effects());
     return {};
 }
