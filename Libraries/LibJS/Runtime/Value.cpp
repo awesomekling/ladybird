@@ -1358,7 +1358,7 @@ ThrowCompletionOr<GC::Ptr<FunctionObject>> Value::get_method(VM& vm, PropertyKey
 
 // 13.10 Relational Operators, https://tc39.es/ecma262/#sec-relational-operators
 // RelationalExpression : RelationalExpression > ShiftExpression
-ThrowCompletionOr<bool> greater_than(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<bool> greater_than(VM& vm, Value lhs, Value rhs)
 {
     // 1. Let lref be ? Evaluation of RelationalExpression.
     // 2. Let lval be ? GetValue(lref).
@@ -1377,7 +1377,7 @@ ThrowCompletionOr<bool> greater_than(VM& vm, Value lhs, Value rhs)
 
 // 13.10 Relational Operators, https://tc39.es/ecma262/#sec-relational-operators
 // RelationalExpression : RelationalExpression >= ShiftExpression
-ThrowCompletionOr<bool> greater_than_equals(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<bool> greater_than_equals(VM& vm, Value lhs, Value rhs)
 {
     // 1. Let lref be ? Evaluation of RelationalExpression.
     // 2. Let lval be ? GetValue(lref).
@@ -1415,7 +1415,7 @@ ThrowCompletionOr<bool> less_than(VM& vm, Value lhs, Value rhs)
 
 // 13.10 Relational Operators, https://tc39.es/ecma262/#sec-relational-operators
 // RelationalExpression : RelationalExpression <= ShiftExpression
-ThrowCompletionOr<bool> less_than_equals(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<bool> less_than_equals(VM& vm, Value lhs, Value rhs)
 {
     // 1. Let lref be ? Evaluation of RelationalExpression.
     // 2. Let lval be ? GetValue(lref).
@@ -1434,7 +1434,7 @@ ThrowCompletionOr<bool> less_than_equals(VM& vm, Value lhs, Value rhs)
 
 // 13.12 Binary Bitwise Operators, https://tc39.es/ecma262/#sec-binary-bitwise-operators
 // BitwiseANDExpression : BitwiseANDExpression & EqualityExpression
-ThrowCompletionOr<Value> bitwise_and(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> bitwise_and(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1467,7 +1467,7 @@ ThrowCompletionOr<Value> bitwise_and(VM& vm, Value lhs, Value rhs)
 
 // 13.12 Binary Bitwise Operators, https://tc39.es/ecma262/#sec-binary-bitwise-operators
 // BitwiseORExpression : BitwiseORExpression | BitwiseXORExpression
-ThrowCompletionOr<Value> bitwise_or(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> bitwise_or(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1504,7 +1504,7 @@ ThrowCompletionOr<Value> bitwise_or(VM& vm, Value lhs, Value rhs)
 
 // 13.12 Binary Bitwise Operators, https://tc39.es/ecma262/#sec-binary-bitwise-operators
 // BitwiseXORExpression : BitwiseXORExpression ^ BitwiseANDExpression
-ThrowCompletionOr<Value> bitwise_xor(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> bitwise_xor(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1541,7 +1541,7 @@ ThrowCompletionOr<Value> bitwise_xor(VM& vm, Value lhs, Value rhs)
 
 // 13.5.6 Bitwise NOT Operator ( ~ ), https://tc39.es/ecma262/#sec-bitwise-not-operator
 // UnaryExpression : ~ UnaryExpression
-ThrowCompletionOr<Value> bitwise_not(VM& vm, Value lhs)
+NEVER_INLINE ThrowCompletionOr<Value> bitwise_not(VM& vm, Value lhs)
 {
     // 1. Let expr be ? Evaluation of UnaryExpression.
     // NOTE: This is handled in the AST or Bytecode interpreter.
@@ -1574,7 +1574,7 @@ ThrowCompletionOr<Value> bitwise_not(VM& vm, Value lhs)
 
 // 13.5.4 Unary + Operator, https://tc39.es/ecma262/#sec-unary-plus-operator
 // UnaryExpression : + UnaryExpression
-ThrowCompletionOr<Value> unary_plus(VM& vm, Value lhs)
+NEVER_INLINE ThrowCompletionOr<Value> unary_plus(VM& vm, Value lhs)
 {
     // 1. Let expr be ? Evaluation of UnaryExpression.
     // NOTE: This is handled in the AST or Bytecode interpreter.
@@ -1585,7 +1585,7 @@ ThrowCompletionOr<Value> unary_plus(VM& vm, Value lhs)
 
 // 13.5.5 Unary - Operator, https://tc39.es/ecma262/#sec-unary-minus-operator
 // UnaryExpression : - UnaryExpression
-ThrowCompletionOr<Value> unary_minus(VM& vm, Value lhs)
+NEVER_INLINE ThrowCompletionOr<Value> unary_minus(VM& vm, Value lhs)
 {
     // 1. Let expr be ? Evaluation of UnaryExpression.
     // NOTE: This is handled in the AST or Bytecode interpreter.
@@ -1625,7 +1625,7 @@ ThrowCompletionOr<Value> unary_minus(VM& vm, Value lhs)
 
 // 13.9.1 The Left Shift Operator ( << ), https://tc39.es/ecma262/#sec-left-shift-operator
 // ShiftExpression : ShiftExpression << AdditiveExpression
-ThrowCompletionOr<Value> left_shift(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> left_shift(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1693,7 +1693,7 @@ ThrowCompletionOr<Value> left_shift(VM& vm, Value lhs, Value rhs)
 
 // 13.9.2 The Signed Right Shift Operator ( >> ), https://tc39.es/ecma262/#sec-signed-right-shift-operator
 // ShiftExpression : ShiftExpression >> AdditiveExpression
-ThrowCompletionOr<Value> right_shift(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> right_shift(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1744,7 +1744,7 @@ ThrowCompletionOr<Value> right_shift(VM& vm, Value lhs, Value rhs)
 
 // 13.9.3 The Unsigned Right Shift Operator ( >>> ), https://tc39.es/ecma262/#sec-unsigned-right-shift-operator
 // ShiftExpression : ShiftExpression >>> AdditiveExpression
-ThrowCompletionOr<Value> unsigned_right_shift(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> unsigned_right_shift(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 5-6. N/A.
@@ -1792,7 +1792,7 @@ ThrowCompletionOr<Value> unsigned_right_shift(VM& vm, Value lhs, Value rhs)
 
 // 13.8.1 The Addition Operator ( + ), https://tc39.es/ecma262/#sec-addition-operator-plus
 // AdditiveExpression : AdditiveExpression + MultiplicativeExpression
-ThrowCompletionOr<Value> add(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> add(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
 
@@ -1851,7 +1851,7 @@ ThrowCompletionOr<Value> add(VM& vm, Value lhs, Value rhs)
 
 // 13.8.2 The Subtraction Operator ( - ), https://tc39.es/ecma262/#sec-subtraction-operator-minus
 // AdditiveExpression : AdditiveExpression - MultiplicativeExpression
-ThrowCompletionOr<Value> sub(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> sub(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1886,7 +1886,7 @@ ThrowCompletionOr<Value> sub(VM& vm, Value lhs, Value rhs)
 
 // 13.7 Multiplicative Operators, https://tc39.es/ecma262/#sec-multiplicative-operators
 // MultiplicativeExpression : MultiplicativeExpression MultiplicativeOperator ExponentiationExpression
-ThrowCompletionOr<Value> mul(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> mul(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1920,7 +1920,7 @@ ThrowCompletionOr<Value> mul(VM& vm, Value lhs, Value rhs)
 
 // 13.7 Multiplicative Operators, https://tc39.es/ecma262/#sec-multiplicative-operators
 // MultiplicativeExpression : MultiplicativeExpression MultiplicativeOperator ExponentiationExpression
-ThrowCompletionOr<Value> div(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> div(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -1956,7 +1956,7 @@ ThrowCompletionOr<Value> div(VM& vm, Value lhs, Value rhs)
 
 // 13.7 Multiplicative Operators, https://tc39.es/ecma262/#sec-multiplicative-operators
 // MultiplicativeExpression : MultiplicativeExpression MultiplicativeOperator ExponentiationExpression
-ThrowCompletionOr<Value> mod(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> mod(VM& vm, Value lhs, Value rhs)
 {
     // 13.15.3 ApplyStringOrNumericBinaryOperator ( lval, opText, rval ), https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator
     // 1-2, 6. N/A.
@@ -2103,7 +2103,7 @@ static Value exp_double(Value base, Value exponent)
 
 // 13.6 Exponentiation Operator, https://tc39.es/ecma262/#sec-exp-operator
 // ExponentiationExpression : UpdateExpression ** ExponentiationExpression
-ThrowCompletionOr<Value> exp(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<Value> exp(VM& vm, Value lhs, Value rhs)
 {
     // 3. Let lnum be ? ToNumeric(lval).
     auto lhs_numeric = TRY(lhs.to_numeric(vm));
@@ -2334,7 +2334,7 @@ bool is_strictly_equal(Value lhs, Value rhs)
 }
 
 // 7.2.14 IsLooselyEqual ( x, y ), https://tc39.es/ecma262/#sec-islooselyequal
-ThrowCompletionOr<bool> is_loosely_equal(VM& vm, Value lhs, Value rhs)
+NEVER_INLINE ThrowCompletionOr<bool> is_loosely_equal(VM& vm, Value lhs, Value rhs)
 {
     // 1. If Type(x) is the same as Type(y), then
     if (same_type_for_equality(lhs, rhs)) {
@@ -2438,7 +2438,7 @@ ThrowCompletionOr<bool> is_loosely_equal(VM& vm, Value lhs, Value rhs)
 }
 
 // 7.2.13 IsLessThan ( x, y, LeftFirst ), https://tc39.es/ecma262/#sec-islessthan
-ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left_first)
+NEVER_INLINE ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left_first)
 {
     Value x_primitive;
     Value y_primitive;
