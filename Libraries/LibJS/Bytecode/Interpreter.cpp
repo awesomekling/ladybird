@@ -359,7 +359,7 @@ void Interpreter::run_bytecode(size_t entry_point)
         auto& instruction = *reinterpret_cast<Op::Jump##op_TitleCase const*>(instruction_pointer);                                  \
         auto lhs = get(instruction.lhs());                                                                                          \
         auto rhs = get(instruction.rhs());                                                                                          \
-        if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {                                                           \
+        if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {                                                \
             bool result;                                                                                                            \
             if (lhs.is_int32() && rhs.is_int32()) {                                                                                 \
                 result = lhs.as_i32() numeric_operator rhs.as_i32();                                                                \
@@ -1748,7 +1748,7 @@ ThrowCompletionOr<void> Add::execute_impl(Bytecode::Interpreter& interpreter) co
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
 
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             if (!Checked<i32>::addition_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() + rhs.as_i32()));
@@ -1772,7 +1772,7 @@ ThrowCompletionOr<void> Mul::execute_impl(Bytecode::Interpreter& interpreter) co
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
 
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             if (!Checked<i32>::multiplication_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() * rhs.as_i32()));
@@ -1811,7 +1811,7 @@ ThrowCompletionOr<void> Sub::execute_impl(Bytecode::Interpreter& interpreter) co
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
 
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             if (!Checked<i32>::subtraction_would_overflow(lhs.as_i32(), rhs.as_i32())) [[likely]] {
                 interpreter.set(m_dst, Value(lhs.as_i32() - rhs.as_i32()));
@@ -1915,7 +1915,7 @@ ThrowCompletionOr<void> LessThan::execute_impl(Bytecode::Interpreter& interprete
     auto& vm = interpreter.vm();
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             interpreter.set(m_dst, Value(lhs.as_i32() < rhs.as_i32()));
             return {};
@@ -1932,7 +1932,7 @@ ThrowCompletionOr<void> LessThanEquals::execute_impl(Bytecode::Interpreter& inte
     auto& vm = interpreter.vm();
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             interpreter.set(m_dst, Value(lhs.as_i32() <= rhs.as_i32()));
             return {};
@@ -1949,7 +1949,7 @@ ThrowCompletionOr<void> GreaterThan::execute_impl(Bytecode::Interpreter& interpr
     auto& vm = interpreter.vm();
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             interpreter.set(m_dst, Value(lhs.as_i32() > rhs.as_i32()));
             return {};
@@ -1966,7 +1966,7 @@ ThrowCompletionOr<void> GreaterThanEquals::execute_impl(Bytecode::Interpreter& i
     auto& vm = interpreter.vm();
     auto const lhs = interpreter.get(m_lhs);
     auto const rhs = interpreter.get(m_rhs);
-    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) {
+    if (lhs.is_number_but_not_nan() && rhs.is_number_but_not_nan()) [[likely]] {
         if (lhs.is_int32() && rhs.is_int32()) {
             interpreter.set(m_dst, Value(lhs.as_i32() >= rhs.as_i32()));
             return {};
