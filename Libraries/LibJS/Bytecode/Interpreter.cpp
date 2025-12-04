@@ -2024,7 +2024,7 @@ void NewPrimitiveArray::execute_impl(Bytecode::Interpreter& interpreter) const
     interpreter.set(dst(), array);
 }
 
-ThrowCompletionOr<void> NewArrayWithLength::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> NewArrayWithLength::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto length = static_cast<u64>(interpreter.get(m_array_length).as_double());
     auto array = TRY(Array::create(interpreter.realm(), length));
@@ -2032,18 +2032,18 @@ ThrowCompletionOr<void> NewArrayWithLength::execute_impl(Bytecode::Interpreter& 
     return {};
 }
 
-void AddPrivateName::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void AddPrivateName::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto const& name = interpreter.get_identifier(m_name);
     interpreter.vm().running_execution_context().private_environment->add_private_name(name);
 }
 
-ThrowCompletionOr<void> ArrayAppend::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> ArrayAppend::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return append(interpreter.vm(), interpreter.get(dst()), interpreter.get(src()), m_is_spread);
 }
 
-ThrowCompletionOr<void> ImportCall::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> ImportCall::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto specifier = interpreter.get(m_specifier);
@@ -2052,7 +2052,7 @@ ThrowCompletionOr<void> ImportCall::execute_impl(Bytecode::Interpreter& interpre
     return {};
 }
 
-ThrowCompletionOr<void> IteratorToArray::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> IteratorToArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& iterator_object = interpreter.get(m_iterator_object).as_object();
@@ -2100,14 +2100,14 @@ void NewRegExp::execute_impl(Bytecode::Interpreter& interpreter) const
             interpreter.current_executable().get_string(m_flags_index)));
 }
 
-void NewTypeError::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void NewTypeError::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& realm = *vm.current_realm();
     interpreter.set(dst(), TypeError::create(realm, interpreter.current_executable().get_string(m_error_string)));
 }
 
-ThrowCompletionOr<void> CopyObjectExcludingProperties::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CopyObjectExcludingProperties::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& realm = *vm.current_realm();
@@ -2127,7 +2127,7 @@ ThrowCompletionOr<void> CopyObjectExcludingProperties::execute_impl(Bytecode::In
     return {};
 }
 
-ThrowCompletionOr<void> ConcatString::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> ConcatString::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto string = TRY(interpreter.get(src()).to_primitive_string(vm));
@@ -2294,7 +2294,7 @@ ThrowCompletionOr<void> SetGlobal::execute_impl(Bytecode::Interpreter& interpret
     return {};
 }
 
-ThrowCompletionOr<void> DeleteVariable::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> DeleteVariable::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto const& string = interpreter.get_identifier(m_identifier);
@@ -2318,7 +2318,7 @@ void CreateLexicalEnvironment::execute_impl(Bytecode::Interpreter& interpreter) 
         interpreter.set(*m_dst, running_execution_context.lexical_environment);
 }
 
-void CreatePrivateEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void CreatePrivateEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& running_execution_context = interpreter.vm().running_execution_context();
     auto outer_private_environment = running_execution_context.private_environment;
@@ -2334,14 +2334,14 @@ void CreateVariableEnvironment::execute_impl(Bytecode::Interpreter& interpreter)
     running_execution_context.lexical_environment = var_environment;
 }
 
-ThrowCompletionOr<void> EnterObjectEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> EnterObjectEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto object = TRY(interpreter.get(m_object).to_object(interpreter.vm()));
     interpreter.enter_object_environment(*object);
     return {};
 }
 
-void Catch::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void Catch::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.catch_exception(dst());
 }
@@ -2516,7 +2516,7 @@ ThrowCompletionOr<void> HasPrivateId::execute_impl(Bytecode::Interpreter& interp
     return {};
 }
 
-ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
@@ -2599,7 +2599,7 @@ ThrowCompletionOr<void> PutPrivateById::execute_impl(Bytecode::Interpreter& inte
     return {};
 }
 
-ThrowCompletionOr<void> DeleteById::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> DeleteById::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto const& identifier = interpreter.get_identifier(m_property);
@@ -2608,7 +2608,7 @@ ThrowCompletionOr<void> DeleteById::execute_impl(Bytecode::Interpreter& interpre
     return {};
 }
 
-ThrowCompletionOr<void> DeleteByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> DeleteByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto base_value = interpreter.get(m_base);
@@ -2636,7 +2636,7 @@ ThrowCompletionOr<void> ResolveThisBinding::execute_impl(Bytecode::Interpreter& 
 }
 
 // https://tc39.es/ecma262/#sec-makesuperpropertyreference
-ThrowCompletionOr<void> ResolveSuperBase::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> ResolveSuperBase::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
 
@@ -2652,12 +2652,12 @@ ThrowCompletionOr<void> ResolveSuperBase::execute_impl(Bytecode::Interpreter& in
     return {};
 }
 
-void GetNewTarget::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void GetNewTarget::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.set(dst(), interpreter.vm().get_new_target());
 }
 
-void GetImportMeta::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void GetImportMeta::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.set(dst(), interpreter.vm().get_import_meta());
 }
@@ -2756,7 +2756,7 @@ NEVER_INLINE ThrowCompletionOr<void> CallConstruct::execute_impl(Bytecode::Inter
     return execute_call<CallType::Construct>(interpreter, interpreter.get(m_callee), js_undefined(), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
 }
 
-ThrowCompletionOr<void> CallDirectEval::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CallDirectEval::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return execute_call<CallType::DirectEval>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
 }
@@ -2824,23 +2824,23 @@ static ThrowCompletionOr<void> call_with_argument_array(
     return {};
 }
 
-ThrowCompletionOr<void> CallWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CallWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return call_with_argument_array<CallType::Call>(interpreter, interpreter.get(callee()), interpreter.get(this_value()), interpreter.get(arguments()), dst(), expression_string(), strict());
 }
 
-ThrowCompletionOr<void> CallDirectEvalWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CallDirectEvalWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return call_with_argument_array<CallType::DirectEval>(interpreter, interpreter.get(callee()), interpreter.get(this_value()), interpreter.get(arguments()), dst(), expression_string(), strict());
 }
 
-ThrowCompletionOr<void> CallConstructWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CallConstructWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return call_with_argument_array<CallType::Construct>(interpreter, interpreter.get(callee()), js_undefined(), interpreter.get(arguments()), dst(), expression_string(), strict());
 }
 
 // 13.3.7.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
-ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
 
@@ -3005,7 +3005,7 @@ ThrowCompletionOr<void> PostfixDecrement::execute_impl(Bytecode::Interpreter& in
     return {};
 }
 
-ThrowCompletionOr<void> Throw::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> Throw::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     return throw_completion(interpreter.get(src()));
 }
@@ -3043,7 +3043,7 @@ void LeaveLexicalEnvironment::execute_impl(Bytecode::Interpreter& interpreter) c
     running_execution_context.lexical_environment = running_execution_context.rare_data()->saved_lexical_environments.take_last();
 }
 
-void LeavePrivateEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void LeavePrivateEnvironment::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& running_execution_context = interpreter.vm().running_execution_context();
     running_execution_context.private_environment = running_execution_context.private_environment->outer_environment();
@@ -3067,7 +3067,7 @@ void PrepareYield::execute_impl(Bytecode::Interpreter& interpreter) const
     interpreter.set(m_dest, interpreter.do_yield(value, {}));
 }
 
-void Await::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void Await::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto yielded_value = interpreter.get(m_argument).is_special_empty_value() ? js_undefined() : interpreter.get(m_argument);
     // FIXME: If we get a pointer, which is not accurately representable as a double
@@ -3121,7 +3121,7 @@ JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_VALUE)
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_VALUE_WITH_THIS)
 
-ThrowCompletionOr<void> DeleteByValue::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> DeleteByValue::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto property_key = TRY(interpreter.get(m_property).to_property_key(vm));
@@ -3130,7 +3130,7 @@ ThrowCompletionOr<void> DeleteByValue::execute_impl(Bytecode::Interpreter& inter
     return {};
 }
 
-ThrowCompletionOr<void> DeleteByValueWithThis::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> DeleteByValueWithThis::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto property_key_value = interpreter.get(m_property);
@@ -3140,7 +3140,7 @@ ThrowCompletionOr<void> DeleteByValueWithThis::execute_impl(Bytecode::Interprete
     return {};
 }
 
-ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto iterator_record = TRY(get_iterator_impl(vm, interpreter.get(iterable()), m_hint));
@@ -3150,7 +3150,7 @@ ThrowCompletionOr<void> GetIterator::execute_impl(Bytecode::Interpreter& interpr
     return {};
 }
 
-ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto const& identifier = interpreter.get_identifier(m_property);
@@ -3159,7 +3159,7 @@ ThrowCompletionOr<void> GetMethod::execute_impl(Bytecode::Interpreter& interpret
     return {};
 }
 
-ThrowCompletionOr<void> GetObjectPropertyIterator::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> GetObjectPropertyIterator::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto iterator_record = TRY(get_object_property_iterator(interpreter, interpreter.get(m_object)));
     interpreter.set(m_dst_iterator_object, iterator_record.iterator);
@@ -3168,7 +3168,7 @@ ThrowCompletionOr<void> GetObjectPropertyIterator::execute_impl(Bytecode::Interp
     return {};
 }
 
-ThrowCompletionOr<void> IteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> IteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& iterator_object = interpreter.get(m_iterator_object).as_object();
@@ -3181,7 +3181,7 @@ ThrowCompletionOr<void> IteratorClose::execute_impl(Bytecode::Interpreter& inter
     return {};
 }
 
-ThrowCompletionOr<void> AsyncIteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> AsyncIteratorClose::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& iterator_object = interpreter.get(m_iterator_object).as_object();
@@ -3194,7 +3194,7 @@ ThrowCompletionOr<void> AsyncIteratorClose::execute_impl(Bytecode::Interpreter& 
     return {};
 }
 
-ThrowCompletionOr<void> IteratorNext::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> IteratorNext::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& iterator_object = interpreter.get(m_iterator_object).as_object();
@@ -3207,7 +3207,7 @@ ThrowCompletionOr<void> IteratorNext::execute_impl(Bytecode::Interpreter& interp
     return {};
 }
 
-ThrowCompletionOr<void> IteratorNextUnpack::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> IteratorNextUnpack::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& iterator_object = interpreter.get(m_iterator_object).as_object();
@@ -3227,7 +3227,7 @@ ThrowCompletionOr<void> IteratorNextUnpack::execute_impl(Bytecode::Interpreter& 
     return {};
 }
 
-ThrowCompletionOr<void> NewClass::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> NewClass::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     Value super_class;
     if (m_super_class.has_value())
@@ -3342,7 +3342,7 @@ ThrowCompletionOr<void> ToLength::execute_impl(Bytecode::Interpreter& interprete
     return {};
 }
 
-void CreateAsyncFromSyncIterator::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE void CreateAsyncFromSyncIterator::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     auto& realm = interpreter.realm();
