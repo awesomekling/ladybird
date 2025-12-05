@@ -1967,7 +1967,7 @@ ThrowCompletionOr<void> GreaterThanEquals::execute_impl(Bytecode::Interpreter& i
     return {};
 }
 
-void Typeof::execute_impl(Interpreter& interpreter) const
+NEVER_INLINE void Typeof::execute_impl(Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
     interpreter.set(dst(), interpreter.get(src()).typeof_(vm));
@@ -3242,7 +3242,7 @@ NEVER_INLINE ThrowCompletionOr<void> NewClass::execute_impl(Bytecode::Interprete
 }
 
 // 13.5.3.1 Runtime Semantics: Evaluation, https://tc39.es/ecma262/#sec-typeof-operator-runtime-semantics-evaluation
-ThrowCompletionOr<void> TypeofBinding::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> TypeofBinding::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto& vm = interpreter.vm();
 
