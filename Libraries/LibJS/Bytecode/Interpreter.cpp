@@ -2511,7 +2511,16 @@ NEVER_INLINE ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpr
     return {};
 }
 
+#define PUT_KIND_INLINING_ATTRIBUTE(kind) PUT_KIND_INLINING_ATTRIBUTE_##kind
+
+#define PUT_KIND_INLINING_ATTRIBUTE_Normal
+#define PUT_KIND_INLINING_ATTRIBUTE_Getter NEVER_INLINE
+#define PUT_KIND_INLINING_ATTRIBUTE_Setter NEVER_INLINE
+#define PUT_KIND_INLINING_ATTRIBUTE_Prototype NEVER_INLINE
+#define PUT_KIND_INLINING_ATTRIBUTE_Own NEVER_INLINE
+
 #define DEFINE_PUT_KIND_BY_ID(kind)                                                                              \
+    PUT_KIND_INLINING_ATTRIBUTE(kind)                                                                            \
     ThrowCompletionOr<void> Put##kind##ById::execute_impl(Bytecode::Interpreter& interpreter) const              \
     {                                                                                                            \
         auto& vm = interpreter.vm();                                                                             \
@@ -2527,6 +2536,7 @@ NEVER_INLINE ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpr
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID)
 
 #define DEFINE_PUT_KIND_BY_NUMERIC_ID(kind)                                                                      \
+    PUT_KIND_INLINING_ATTRIBUTE(kind)                                                                            \
     ThrowCompletionOr<void> Put##kind##ByNumericId::execute_impl(Bytecode::Interpreter& interpreter) const       \
     {                                                                                                            \
         auto& vm = interpreter.vm();                                                                             \
@@ -2542,6 +2552,7 @@ JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID)
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID)
 
 #define DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS(kind)                                                                        \
+    PUT_KIND_INLINING_ATTRIBUTE(kind)                                                                                        \
     ThrowCompletionOr<void> Put##kind##ByNumericIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const           \
     {                                                                                                                        \
         auto& vm = interpreter.vm();                                                                                         \
@@ -2556,6 +2567,7 @@ JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID)
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS)
 
 #define DEFINE_PUT_KIND_BY_ID_WITH_THIS(kind)                                                                                \
+    PUT_KIND_INLINING_ATTRIBUTE(kind)                                                                                        \
     ThrowCompletionOr<void> Put##kind##ByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                  \
     {                                                                                                                        \
         auto& vm = interpreter.vm();                                                                                         \
