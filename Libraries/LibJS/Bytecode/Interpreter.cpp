@@ -1022,7 +1022,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
 {
     // Better error message than to_object would give
     if (strict == Strict::Yes && base.is_nullish()) [[unlikely]]
-        return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base);
 
     // a. Let baseObj be ? ToObject(V.[[Base]]).
     auto maybe_object = base.to_object(vm);
@@ -1199,8 +1199,8 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
 
         if (!succeeded && strict == Strict::Yes) [[unlikely]] {
             if (base.is_object())
-                return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base.to_string_without_side_effects());
-            return vm.throw_completion<TypeError>(ErrorType::ReferencePrimitiveSetProperty, name, base.typeof_(vm)->utf8_string(), base.to_string_without_side_effects());
+                return vm.throw_completion<TypeError>(ErrorType::ReferenceNullishSetProperty, name, base);
+            return vm.throw_completion<TypeError>(ErrorType::ReferencePrimitiveSetProperty, name, base.typeof_(vm)->utf8_string(), base);
         }
         break;
     }
@@ -1221,9 +1221,9 @@ static inline Completion throw_type_error_for_callee(Bytecode::Interpreter& inte
     auto& vm = interpreter.vm();
 
     if (expression_string.has_value())
-        return vm.throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee.to_string_without_side_effects(), callee_type, interpreter.current_executable().get_string(*expression_string));
+        return vm.throw_completion<TypeError>(ErrorType::IsNotAEvaluatedFrom, callee, callee_type, interpreter.current_executable().get_string(*expression_string));
 
-    return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee.to_string_without_side_effects(), callee_type);
+    return vm.throw_completion<TypeError>(ErrorType::IsNotA, callee, callee_type);
 }
 
 inline ThrowCompletionOr<void> throw_if_needed_for_call(Interpreter& interpreter, Value callee, Op::CallType call_type, Optional<StringTableIndex> const expression_string)
@@ -2996,7 +2996,7 @@ ThrowCompletionOr<void> ThrowIfNotObject::execute_impl(Bytecode::Interpreter& in
     auto& vm = interpreter.vm();
     auto src = interpreter.get(m_src);
     if (!src.is_object()) [[unlikely]]
-        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, src.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotAnObject, src);
     return {};
 }
 
@@ -3005,7 +3005,7 @@ ThrowCompletionOr<void> ThrowIfNullish::execute_impl(Bytecode::Interpreter& inte
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
     if (value.is_nullish()) [[unlikely]]
-        return vm.throw_completion<TypeError>(ErrorType::NotObjectCoercible, value.to_string_without_side_effects());
+        return vm.throw_completion<TypeError>(ErrorType::NotObjectCoercible, value);
     return {};
 }
 
@@ -3014,7 +3014,7 @@ ThrowCompletionOr<void> ThrowIfTDZ::execute_impl(Bytecode::Interpreter& interpre
     auto& vm = interpreter.vm();
     auto value = interpreter.get(m_src);
     if (value.is_special_empty_value()) [[unlikely]]
-        return vm.throw_completion<ReferenceError>(ErrorType::BindingNotInitialized, value.to_string_without_side_effects());
+        return vm.throw_completion<ReferenceError>(ErrorType::BindingNotInitialized, value);
     return {};
 }
 
