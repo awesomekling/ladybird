@@ -257,6 +257,27 @@ NEVER_INLINE Interpreter::HandleExceptionResponse Interpreter::handle_exception(
     VERIFY_NOT_REACHED();
 }
 
+#define HANDLE_COMPARISON_OP_SLOW(op_TitleCase, op_snake_case, numeric_operator)                                                                     \
+    NEVER_INLINE static bool handle_Jump##op_TitleCase##_slow(Interpreter& interpreter, Op::Jump##op_TitleCase const& instruction)                   \
+    {                                                                                                                                                \
+        u8 const* bytecode = interpreter.running_execution_context().executable->bytecode.data();                                                    \
+        u8 const*& instruction_pointer = interpreter.running_execution_context().instruction_pointer;                                                \
+        auto result = op_snake_case(interpreter.vm(), interpreter.get(instruction.lhs()), interpreter.get(instruction.rhs()));                       \
+        if (result.is_error()) [[unlikely]] {                                                                                                        \
+            if (interpreter.handle_exception(instruction_pointer, result.error_value()) == Interpreter::HandleExceptionResponse::ExitFromExecutable) \
+                return true;                                                                                                                         \
+            return false;                                                                                                                            \
+        }                                                                                                                                            \
+        if (result.value())                                                                                                                          \
+            instruction_pointer = bytecode + instruction.true_target().address();                                                                    \
+        else                                                                                                                                         \
+            instruction_pointer = bytecode + instruction.false_target().address();                                                                   \
+        return false;                                                                                                                                \
+    }
+
+JS_ENUMERATE_COMPARISON_OPS(HANDLE_COMPARISON_OP_SLOW)
+#undef HANDLE_COMPARISON_OP
+
 void Interpreter::run_bytecode(size_t entry_point)
 {
     if (vm().did_reach_stack_space_limit()) [[unlikely]] {
@@ -369,16 +390,9 @@ void Interpreter::run_bytecode(size_t entry_point)
             instruction_pointer = bytecode + (result ? instruction.true_target().address() : instruction.false_target().address()); \
             goto start;                                                                                                             \
         }                                                                                                                           \
-        auto result = op_snake_case(vm(), get(instruction.lhs()), get(instruction.rhs()));                                          \
-        if (result.is_error()) [[unlikely]] {                                                                                       \
-            if (handle_exception(instruction_pointer, result.error_value()) == HandleExceptionResponse::ExitFromExecutable)         \
-                return;                                                                                                             \
-            goto start;                                                                                                             \
+        if (handle_Jump##op_TitleCase##_slow(*this, instruction)) [[unlikely]] {                                                    \
+            return;                                                                                                                 \
         }                                                                                                                           \
-        if (result.value())                                                                                                         \
-            instruction_pointer = bytecode + instruction.true_target().address();                                                   \
-        else                                                                                                                        \
-            instruction_pointer = bytecode + instruction.false_target().address();                                                  \
         goto start;                                                                                                                 \
     }
 

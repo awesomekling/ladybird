@@ -87,14 +87,14 @@ public:
         return get_identifier(*index);
     }
 
-private:
-    void run_bytecode(size_t entry_point);
-
     enum class HandleExceptionResponse {
         ExitFromExecutable,
         ContinueInThisExecutable,
     };
     [[nodiscard]] HandleExceptionResponse handle_exception(u8 const*& program_counter, Value exception);
+
+private:
+    void run_bytecode(size_t entry_point);
 
     VM& m_vm;
     ExecutionContext* m_running_execution_context { nullptr };
