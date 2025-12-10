@@ -1011,7 +1011,12 @@ inline ThrowCompletionOr<Value> get_global(Interpreter& interpreter, IdentifierT
     return vm.throw_completion<ReferenceError>(ErrorType::UnknownIdentifier, identifier);
 }
 
-template<PutKind kind>
+enum class HasPropertyCache {
+    No,
+    Yes,
+};
+
+template<PutKind kind, HasPropertyCache has_property_cache>
 ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value, Value value, Optional<Utf16FlyString const&> const base_identifier, PropertyKey name, Strict strict, PropertyLookupCache* caches = nullptr)
 {
     // Better error message than to_object would give
@@ -1046,7 +1051,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
     case PutKind::Normal: {
         auto this_value_object = MUST(this_value.to_object(vm));
         auto& from_shape = this_value_object->shape();
-        if (caches) [[likely]] {
+        if constexpr (has_property_cache == HasPropertyCache::Yes) {
             for (auto& cache : caches->entries) {
                 switch (cache.type) {
                 case PropertyLookupCache::Entry::Type::Empty:
@@ -1140,54 +1145,58 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
             return caches->entries[0];
         };
 
-        if (succeeded && caches && cacheable_metadata.type == CacheableSetPropertyMetadata::Type::AddOwnProperty) {
-            auto& cache = get_cache_slot();
-            cache.type = PropertyLookupCache::Entry::Type::AddOwnProperty;
-            cache.from_shape = from_shape;
-            cache.property_offset = cacheable_metadata.property_offset.value();
-            cache.shape = &object->shape();
-            if (cacheable_metadata.prototype) {
-                cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
-            }
-            if (cache.shape->is_dictionary()) {
-                cache.shape_dictionary_generation = cache.shape->dictionary_generation();
+        if constexpr (has_property_cache == HasPropertyCache::Yes) {
+            if (succeeded && cacheable_metadata.type == CacheableSetPropertyMetadata::Type::AddOwnProperty) {
+                auto& cache = get_cache_slot();
+                cache.type = PropertyLookupCache::Entry::Type::AddOwnProperty;
+                cache.from_shape = from_shape;
+                cache.property_offset = cacheable_metadata.property_offset.value();
+                cache.shape = &object->shape();
+                if (cacheable_metadata.prototype) {
+                    cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
+                }
+                if (cache.shape->is_dictionary()) {
+                    cache.shape_dictionary_generation = cache.shape->dictionary_generation();
+                }
             }
         }
 
-        // If internal_set() caused object's shape change, we can no longer be sure
-        // that collected metadata is valid, e.g. if setter in prototype chain added
-        // property with the same name into the object itself.
-        if (succeeded && caches && &from_shape == &object->shape()) {
-            auto& cache = get_cache_slot();
-            switch (cacheable_metadata.type) {
-            case CacheableSetPropertyMetadata::Type::AddOwnProperty:
-                // Something went wrong if we ended up here, because cacheable addition of a new property should've changed the shape.
-                VERIFY_NOT_REACHED();
-                break;
-            case CacheableSetPropertyMetadata::Type::ChangeOwnProperty:
-                cache.type = PropertyLookupCache::Entry::Type::ChangeOwnProperty;
-                cache.shape = object->shape();
-                cache.property_offset = cacheable_metadata.property_offset.value();
+        if constexpr (has_property_cache == HasPropertyCache::Yes) {
+            // If internal_set() caused object's shape change, we can no longer be sure
+            // that collected metadata is valid, e.g. if setter in prototype chain added
+            // property with the same name into the object itself.
+            if (succeeded && &from_shape == &object->shape()) {
+                auto& cache = get_cache_slot();
+                switch (cacheable_metadata.type) {
+                case CacheableSetPropertyMetadata::Type::AddOwnProperty:
+                    // Something went wrong if we ended up here, because cacheable addition of a new property should've changed the shape.
+                    VERIFY_NOT_REACHED();
+                    break;
+                case CacheableSetPropertyMetadata::Type::ChangeOwnProperty:
+                    cache.type = PropertyLookupCache::Entry::Type::ChangeOwnProperty;
+                    cache.shape = object->shape();
+                    cache.property_offset = cacheable_metadata.property_offset.value();
 
-                if (cache.shape->is_dictionary()) {
-                    cache.shape_dictionary_generation = cache.shape->dictionary_generation();
-                }
-                break;
-            case CacheableSetPropertyMetadata::Type::ChangePropertyInPrototypeChain:
-                cache.type = PropertyLookupCache::Entry::Type::ChangePropertyInPrototypeChain;
-                cache.shape = object->shape();
-                cache.property_offset = cacheable_metadata.property_offset.value();
-                cache.prototype = *cacheable_metadata.prototype;
-                cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
+                    if (cache.shape->is_dictionary()) {
+                        cache.shape_dictionary_generation = cache.shape->dictionary_generation();
+                    }
+                    break;
+                case CacheableSetPropertyMetadata::Type::ChangePropertyInPrototypeChain:
+                    cache.type = PropertyLookupCache::Entry::Type::ChangePropertyInPrototypeChain;
+                    cache.shape = object->shape();
+                    cache.property_offset = cacheable_metadata.property_offset.value();
+                    cache.prototype = *cacheable_metadata.prototype;
+                    cache.prototype_chain_validity = *cacheable_metadata.prototype->shape().prototype_chain_validity();
 
-                if (cache.shape->is_dictionary()) {
-                    cache.shape_dictionary_generation = cache.shape->dictionary_generation();
+                    if (cache.shape->is_dictionary()) {
+                        cache.shape_dictionary_generation = cache.shape->dictionary_generation();
+                    }
+                    break;
+                case CacheableSetPropertyMetadata::Type::NotCacheable:
+                    break;
+                default:
+                    VERIFY_NOT_REACHED();
                 }
-                break;
-            case CacheableSetPropertyMetadata::Type::NotCacheable:
-                break;
-            default:
-                VERIFY_NOT_REACHED();
             }
         }
 
@@ -1397,7 +1406,7 @@ inline ThrowCompletionOr<void> put_by_value(VM& vm, Value base, Optional<Utf16Fl
     }
 
     auto property_key = TRY(property_key_value.to_property_key(vm));
-    TRY(put_by_property_key<kind>(vm, base, base, value, base_identifier, property_key, strict));
+    TRY(put_by_property_key<kind, HasPropertyCache::No>(vm, base, base, value, base_identifier, property_key, strict));
     return {};
 }
 
@@ -2505,60 +2514,60 @@ ThrowCompletionOr<void> PutBySpread::execute_impl(Bytecode::Interpreter& interpr
     return {};
 }
 
-#define DEFINE_PUT_KIND_BY_ID(kind)                                                                              \
-    ThrowCompletionOr<void> Put##kind##ById::execute_impl(Bytecode::Interpreter& interpreter) const              \
-    {                                                                                                            \
-        auto& vm = interpreter.vm();                                                                             \
-        auto value = interpreter.get(m_src);                                                                     \
-        auto base = interpreter.get(m_base);                                                                     \
-        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
-        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };         \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
-        return {};                                                                                               \
+#define DEFINE_PUT_KIND_BY_ID(kind)                                                                                                     \
+    ThrowCompletionOr<void> Put##kind##ById::execute_impl(Bytecode::Interpreter& interpreter) const                                     \
+    {                                                                                                                                   \
+        auto& vm = interpreter.vm();                                                                                                    \
+        auto value = interpreter.get(m_src);                                                                                            \
+        auto base = interpreter.get(m_base);                                                                                            \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                                                    \
+        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };                                \
+        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                           \
+        TRY(put_by_property_key<PutKind::kind, HasPropertyCache::Yes>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
+        return {};                                                                                                                      \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID)
 
-#define DEFINE_PUT_KIND_BY_NUMERIC_ID(kind)                                                                      \
-    ThrowCompletionOr<void> Put##kind##ByNumericId::execute_impl(Bytecode::Interpreter& interpreter) const       \
-    {                                                                                                            \
-        auto& vm = interpreter.vm();                                                                             \
-        auto value = interpreter.get(m_src);                                                                     \
-        auto base = interpreter.get(m_base);                                                                     \
-        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                             \
-        PropertyKey name { m_property };                                                                         \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                    \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
-        return {};                                                                                               \
+#define DEFINE_PUT_KIND_BY_NUMERIC_ID(kind)                                                                                             \
+    ThrowCompletionOr<void> Put##kind##ByNumericId::execute_impl(Bytecode::Interpreter& interpreter) const                              \
+    {                                                                                                                                   \
+        auto& vm = interpreter.vm();                                                                                                    \
+        auto value = interpreter.get(m_src);                                                                                            \
+        auto base = interpreter.get(m_base);                                                                                            \
+        auto const& base_identifier = interpreter.get_identifier(m_base_identifier);                                                    \
+        PropertyKey name { m_property };                                                                                                \
+        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                           \
+        TRY(put_by_property_key<PutKind::kind, HasPropertyCache::Yes>(vm, base, base, value, base_identifier, name, strict(), &cache)); \
+        return {};                                                                                                                      \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID)
 
-#define DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS(kind)                                                                        \
-    ThrowCompletionOr<void> Put##kind##ByNumericIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const           \
-    {                                                                                                                        \
-        auto& vm = interpreter.vm();                                                                                         \
-        auto value = interpreter.get(m_src);                                                                                 \
-        auto base = interpreter.get(m_base);                                                                                 \
-        PropertyKey name { m_property };                                                                                     \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
-        return {};                                                                                                           \
+#define DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS(kind)                                                                                               \
+    ThrowCompletionOr<void> Put##kind##ByNumericIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                                  \
+    {                                                                                                                                               \
+        auto& vm = interpreter.vm();                                                                                                                \
+        auto value = interpreter.get(m_src);                                                                                                        \
+        auto base = interpreter.get(m_base);                                                                                                        \
+        PropertyKey name { m_property };                                                                                                            \
+        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                                       \
+        TRY(put_by_property_key<PutKind::kind, HasPropertyCache::Yes>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
+        return {};                                                                                                                                  \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_NUMERIC_ID_WITH_THIS)
 
-#define DEFINE_PUT_KIND_BY_ID_WITH_THIS(kind)                                                                                \
-    ThrowCompletionOr<void> Put##kind##ByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                  \
-    {                                                                                                                        \
-        auto& vm = interpreter.vm();                                                                                         \
-        auto value = interpreter.get(m_src);                                                                                 \
-        auto base = interpreter.get(m_base);                                                                                 \
-        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };                     \
-        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
-        return {};                                                                                                           \
+#define DEFINE_PUT_KIND_BY_ID_WITH_THIS(kind)                                                                                                       \
+    ThrowCompletionOr<void> Put##kind##ByIdWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                                         \
+    {                                                                                                                                               \
+        auto& vm = interpreter.vm();                                                                                                                \
+        auto value = interpreter.get(m_src);                                                                                                        \
+        auto base = interpreter.get(m_base);                                                                                                        \
+        PropertyKey name { interpreter.get_identifier(m_property), PropertyKey::StringMayBeNumber::No };                                            \
+        auto& cache = interpreter.current_executable().property_lookup_caches[m_cache_index];                                                       \
+        TRY(put_by_property_key<PutKind::kind, HasPropertyCache::Yes>(vm, base, interpreter.get(m_this_value), value, {}, name, strict(), &cache)); \
+        return {};                                                                                                                                  \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_ID_WITH_THIS)
@@ -3082,16 +3091,16 @@ ThrowCompletionOr<void> GetByValueWithThis::execute_impl(Bytecode::Interpreter& 
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_VALUE)
 
-#define DEFINE_PUT_KIND_BY_VALUE_WITH_THIS(kind)                                                               \
-    ThrowCompletionOr<void> Put##kind##ByValueWithThis::execute_impl(Bytecode::Interpreter& interpreter) const \
-    {                                                                                                          \
-        auto& vm = interpreter.vm();                                                                           \
-        auto value = interpreter.get(m_src);                                                                   \
-        auto base = interpreter.get(m_base);                                                                   \
-        auto this_value = interpreter.get(m_this_value);                                                       \
-        auto property_key = TRY(interpreter.get(m_property).to_property_key(vm));                              \
-        TRY(put_by_property_key<PutKind::kind>(vm, base, this_value, value, {}, property_key, strict()));      \
-        return {};                                                                                             \
+#define DEFINE_PUT_KIND_BY_VALUE_WITH_THIS(kind)                                                                                \
+    ThrowCompletionOr<void> Put##kind##ByValueWithThis::execute_impl(Bytecode::Interpreter& interpreter) const                  \
+    {                                                                                                                           \
+        auto& vm = interpreter.vm();                                                                                            \
+        auto value = interpreter.get(m_src);                                                                                    \
+        auto base = interpreter.get(m_base);                                                                                    \
+        auto this_value = interpreter.get(m_this_value);                                                                        \
+        auto property_key = TRY(interpreter.get(m_property).to_property_key(vm));                                               \
+        TRY(put_by_property_key<PutKind::kind, HasPropertyCache::No>(vm, base, this_value, value, {}, property_key, strict())); \
+        return {};                                                                                                              \
     }
 
 JS_ENUMERATE_PUT_KINDS(DEFINE_PUT_KIND_BY_VALUE_WITH_THIS)
