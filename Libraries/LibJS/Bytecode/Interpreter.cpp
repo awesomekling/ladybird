@@ -339,12 +339,13 @@ void Interpreter::run_bytecode(size_t entry_point)
     u8 const* bytecode = nullptr;
     u32* program_counter = nullptr;
 
-    auto update_locals = [&] {
-        m_running_execution_context = &vm().running_execution_context();
-        executable = m_running_execution_context->executable;
-        bytecode = executable->bytecode.data();
-        program_counter = &m_running_execution_context->program_counter;
-    };
+#define update_locals()                                                  \
+    do {                                                                 \
+        m_running_execution_context = &vm().running_execution_context(); \
+        executable = m_running_execution_context->executable;            \
+        bytecode = executable->bytecode.data();                          \
+        program_counter = &m_running_execution_context->program_counter; \
+    } while (0)
 
     update_locals();
 
@@ -584,6 +585,7 @@ void Interpreter::run_bytecode(size_t entry_point)
         DISPATCH_NEXT(name);                                                                 \
     }
 
+#if 0
         handle_Call: {
             ThrowCompletionOr<void> result;
             auto& instruction = *reinterpret_cast<Op::Call const*>(&bytecode[*program_counter]);
@@ -656,6 +658,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             goto start;
         }
         }
+#endif
 
 #define HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(name)                                                                         \
     handle_##name:                                                                                                           \
@@ -682,7 +685,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(BitwiseOr);
             HANDLE_INSTRUCTION(BitwiseXor);
 
-            // HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(Call);
+            HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(Call);
             HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(CallBuiltin);
             HANDLE_POTENTIAL_FAST_CALL_INSTRUCTION(CallDirectEval);
 

@@ -294,6 +294,7 @@ FLATTEN void ECMAScriptFunctionObject::prepare_fast_call(ExecutionContext& calle
     callee_context.global_object = callee_context.realm->global_object();
     callee_context.global_declarative_environment = callee_context.realm->global_environment().declarative_record();
     callee_context.identifier_table = executable.identifier_table->identifiers().data();
+    callee_context.property_key_table = executable.property_key_table->property_keys().data();
 
     auto* registers_and_constants_and_locals_and_arguments = callee_context.registers_and_constants_and_locals_and_arguments();
     for (size_t i = 0; i < executable.constants.size(); ++i) {
