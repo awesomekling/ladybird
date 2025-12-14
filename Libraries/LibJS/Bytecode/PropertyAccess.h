@@ -94,10 +94,11 @@ ALWAYS_INLINE ThrowCompletionOr<Value> get_by_id(VM& vm, GetBaseIdentifier get_b
 
     for (auto& cache_entry : cache.entries) {
         auto cached_prototype = cache_entry.prototype.ptr();
+        auto cached_shape = cache_entry.shape.ptr();
         if (cached_prototype) {
             // OPTIMIZATION: If the prototype chain hasn't been mutated in a way that would invalidate the cache, we can use it.
             bool can_use_cache = [&]() -> bool {
-                if (&shape != cache_entry.shape) [[unlikely]]
+                if (&shape != cached_shape) [[unlikely]]
                     return false;
 
                 if (shape.is_dictionary()) {
@@ -120,7 +121,7 @@ ALWAYS_INLINE ThrowCompletionOr<Value> get_by_id(VM& vm, GetBaseIdentifier get_b
                     return TRY(call(vm, value.as_accessor().getter(), this_value));
                 return value;
             }
-        } else if (&shape == cache_entry.shape) {
+        } else if (&shape == cached_shape) {
             // OPTIMIZATION: If the shape of the object hasn't changed, we can use the cached property offset.
             bool can_use_cache = true;
             if (shape.is_dictionary()) {
