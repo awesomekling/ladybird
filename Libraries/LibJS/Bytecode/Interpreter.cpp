@@ -406,9 +406,7 @@ void Interpreter::run_bytecode(size_t entry_point)
                 do_return(saved_return_value());
                 if (auto handlers = executable.exception_handlers_for_offset(program_counter); handlers.has_value()) {
                     if (auto finalizer = handlers.value().finalizer_offset; finalizer.has_value()) {
-                        auto& unwind_contexts = running_execution_context.ensure_rare_data()->unwind_contexts;
-                        auto& unwind_context = unwind_contexts.last();
-                        VERIFY(unwind_context.executable == &current_executable());
+                        ASSERT(unwind_contexts.last().executable == &current_executable());
                         reg(Register::saved_return_value()) = reg(Register::return_value());
                         reg(Register::return_value()) = js_undefined();
                         program_counter = finalizer.value();
@@ -435,7 +433,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             auto& instruction = *reinterpret_cast<Op::ScheduleJump const*>(&bytecode[program_counter]);
             m_running_execution_context->scheduled_jump = instruction.target().address();
             auto finalizer = executable.exception_handlers_for_offset(program_counter).value().finalizer_offset;
-            VERIFY(finalizer.has_value());
+            ASSERT(finalizer.has_value());
             program_counter = finalizer.value();
             goto start;
         }
@@ -708,7 +706,7 @@ void Interpreter::catch_exception(Operand dst)
     set(dst, reg(Register::exception()));
     reg(Register::exception()) = js_special_empty_value();
     auto& context = running_execution_context().rare_data()->unwind_contexts.last();
-    VERIFY(!context.handler_called);
+    ASSERT(!context.handler_called);
     VERIFY(context.executable == &current_executable());
     context.handler_called = true;
     running_execution_context().lexical_environment = context.lexical_environment;
@@ -1253,7 +1251,7 @@ inline Value new_regexp(VM& vm, Regex<ECMA262> const& regex, Utf16String pattern
 inline ThrowCompletionOr<void> create_variable(VM& vm, Utf16FlyString const& name, Op::EnvironmentMode mode, bool is_global, bool is_immutable, bool is_strict)
 {
     if (mode == Op::EnvironmentMode::Lexical) {
-        VERIFY(!is_global);
+        ASSERT(!is_global);
 
         // Note: This is papering over an issue where "FunctionDeclarationInstantiation" creates these bindings for us.
         //       Instead of crashing in there, we'll just raise an exception here.
@@ -2264,7 +2262,7 @@ ThrowCompletionOr<void> HasPrivateId::execute_impl(Bytecode::Interpreter& interp
         return vm.throw_completion<TypeError>(ErrorType::InOperatorWithObject);
 
     auto private_environment = interpreter.running_execution_context().private_environment;
-    VERIFY(private_environment);
+    ASSERT(private_environment);
     auto private_name = private_environment->resolve_private_identifier(interpreter.get_identifier(m_property));
     interpreter.set(dst(), Value(base.as_object().private_element_find(private_name) != nullptr));
     return {};
@@ -2369,7 +2367,7 @@ ThrowCompletionOr<void> ResolveSuperBase::execute_impl(Bytecode::Interpreter& in
     auto& env = as<FunctionEnvironment>(*get_this_environment(vm));
 
     // 2. Assert: env.HasSuperBinding() is true.
-    VERIFY(env.has_super_binding());
+    ASSERT(env.has_super_binding());
 
     // 3. Let baseValue be ? env.GetSuperBase().
     interpreter.set(dst(), TRY(env.get_super_base()));
@@ -2423,13 +2421,13 @@ static ThrowCompletionOr<Value> dispatch_builtin_call(Bytecode::Interpreter& int
     case Builtin::MapIteratorPrototypeNext:
     case Builtin::SetIteratorPrototypeNext:
     case Builtin::StringIteratorPrototypeNext:
-        VERIFY_NOT_REACHED();
+        ASSERT_NOT_REACHED();
     case Builtin::OrdinaryHasInstance:
-        VERIFY_NOT_REACHED();
+        ASSERT_NOT_REACHED();
     case Bytecode::Builtin::__Count:
-        VERIFY_NOT_REACHED();
+        ASSERT_NOT_REACHED();
     }
-    VERIFY_NOT_REACHED();
+    ASSERT_NOT_REACHED();
 }
 
 template<CallType call_type>
@@ -2576,7 +2574,7 @@ ThrowCompletionOr<void> SuperCallWithArgumentArray::execute_impl(Bytecode::Inter
     auto new_target = vm.get_new_target();
 
     // 2. Assert: Type(newTarget) is Object.
-    VERIFY(new_target.is_object());
+    ASSERT(new_target.is_object());
 
     // 3. Let func be GetSuperConstructor().
     auto* func = get_super_constructor(vm);

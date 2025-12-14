@@ -102,7 +102,7 @@ ALWAYS_INLINE ThrowCompletionOr<Value> get_by_id(VM& vm, GetBaseIdentifier get_b
                     return false;
 
                 if (shape.is_dictionary()) {
-                    VERIFY(cache_entry.shape_dictionary_generation.has_value());
+                    ASSERT(cache_entry.shape_dictionary_generation.has_value());
                     if (shape.dictionary_generation() != cache_entry.shape_dictionary_generation.value()) [[unlikely]] {
                         return false;
                     }
@@ -125,7 +125,7 @@ ALWAYS_INLINE ThrowCompletionOr<Value> get_by_id(VM& vm, GetBaseIdentifier get_b
             // OPTIMIZATION: If the shape of the object hasn't changed, we can use the cached property offset.
             bool can_use_cache = true;
             if (shape.is_dictionary()) {
-                VERIFY(cache_entry.shape_dictionary_generation.has_value());
+                ASSERT(cache_entry.shape_dictionary_generation.has_value());
                 if (shape.dictionary_generation() != cache_entry.shape_dictionary_generation.value()) [[unlikely]] {
                     can_use_cache = false;
                 }
@@ -216,7 +216,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
 
     if constexpr (kind == PutKind::Getter || kind == PutKind::Setter) {
         // The generator should only pass us functions for getters and setters.
-        VERIFY(value.is_function());
+        ASSERT(value.is_function());
     }
     switch (kind) {
     case PutKind::Getter: {
@@ -252,7 +252,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
                             return false;
 
                         if (cached_shape->is_dictionary()) {
-                            VERIFY(cache.shape_dictionary_generation.has_value());
+                            ASSERT(cache.shape_dictionary_generation.has_value());
                             if (object->shape().dictionary_generation() != cache.shape_dictionary_generation.value()) [[unlikely]]
                                 return false;
                         }
@@ -279,7 +279,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
                         break;
 
                     if (cached_shape->is_dictionary()) {
-                        VERIFY(cache.shape_dictionary_generation.has_value());
+                        ASSERT(cache.shape_dictionary_generation.has_value());
                         if (cached_shape->dictionary_generation() != cache.shape_dictionary_generation.value())
                             break;
                     }
@@ -302,7 +302,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
                         break;
 
                     if (cached_shape->is_dictionary()) {
-                        VERIFY(cache.shape_dictionary_generation.has_value());
+                        ASSERT(cache.shape_dictionary_generation.has_value());
                         if (object->shape().dictionary_generation() != cache.shape_dictionary_generation.value())
                             break;
                     }
@@ -316,7 +316,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
                     return {};
                 }
                 default:
-                    VERIFY_NOT_REACHED();
+                    ASSERT_NOT_REACHED();
                 }
             }
         }
@@ -354,7 +354,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
             switch (cacheable_metadata.type) {
             case CacheableSetPropertyMetadata::Type::AddOwnProperty:
                 // Something went wrong if we ended up here, because cacheable addition of a new property should've changed the shape.
-                VERIFY_NOT_REACHED();
+                ASSERT_NOT_REACHED();
                 break;
             case CacheableSetPropertyMetadata::Type::ChangeOwnProperty:
                 cache.type = PropertyLookupCache::Entry::Type::ChangeOwnProperty;
@@ -379,7 +379,7 @@ ThrowCompletionOr<void> put_by_property_key(VM& vm, Value base, Value this_value
             case CacheableSetPropertyMetadata::Type::NotCacheable:
                 break;
             default:
-                VERIFY_NOT_REACHED();
+                ASSERT_NOT_REACHED();
             }
         }
 
