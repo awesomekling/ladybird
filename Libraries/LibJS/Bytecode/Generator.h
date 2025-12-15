@@ -50,6 +50,8 @@ public:
     [[nodiscard]] ScopedOperand accumulator();
     [[nodiscard]] ScopedOperand this_value();
 
+    [[nodiscard]] ScopedOperand ignored_operand() { return m_ignored_operand; }
+
     void free_register(Register);
 
     void set_local_initialized(Identifier::Local const&);
@@ -418,6 +420,7 @@ private:
     mutable HashMap<i32, ScopedOperand> m_int32_constants;
     mutable HashMap<Utf16String, ScopedOperand> m_string_constants;
 
+    ScopedOperand m_ignored_operand;
     ScopedOperand m_accumulator;
     ScopedOperand m_this_value;
     Vector<Register> m_free_registers;

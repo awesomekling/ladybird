@@ -18,6 +18,7 @@ public:
         Local,
         Constant,
         Argument,
+        Ignored,
     };
 
     [[nodiscard]] bool operator==(Operand const&) const = default;
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] bool is_register() const { return type() == Type::Register; }
     [[nodiscard]] bool is_local() const { return type() == Type::Local; }
     [[nodiscard]] bool is_constant() const { return type() == Type::Constant; }
+    [[nodiscard]] bool is_ignored() const { return type() == Type::Ignored; }
 
     [[nodiscard]] Type type() const { return static_cast<Type>((m_raw & 0xe0000000u) >> 29); }
     [[nodiscard]] u32 index() const { return m_raw & 0x1fffffff; }

@@ -25,8 +25,11 @@ using namespace JS::Bytecode;
 
 static ScopedOperand choose_dst(Bytecode::Generator& generator, Optional<ScopedOperand> const& preferred_dst)
 {
-    if (preferred_dst.has_value())
+    if (preferred_dst.has_value()) {
+        if (preferred_dst.value().operand().is_ignored())
+            return generator.allocate_register();
         return preferred_dst.value();
+    }
     return generator.allocate_register();
 }
 
@@ -78,7 +81,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> EmptyStatement::generat
 Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ExpressionStatement::generate_bytecode(Bytecode::Generator& generator, [[maybe_unused]] Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
-    return m_expression->generate_bytecode(generator);
+    return m_expression->generate_bytecode(generator, generator.must_propagate_completion() ? Optional<ScopedOperand> {} : generator.ignored_operand());
 }
 
 static ThrowCompletionOr<ScopedOperand> constant_fold_unary_expression(Generator& generator, Value value, UnaryOp op)
@@ -1111,7 +1114,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ForStatement::generate_
     if (m_update) {
         generator.switch_to_basic_block(*update_block_ptr);
 
-        (void)TRY(m_update->generate_bytecode(generator));
+        (void)TRY(m_update->generate_bytecode(generator, generator.ignored_operand()));
         generator.emit<Bytecode::Op::Jump>(Bytecode::Label { *test_block_ptr });
     }
 
@@ -2562,7 +2565,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> TaggedTemplateLiteral::
     return dst;
 }
 
-Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UpdateExpression::generate_bytecode(Bytecode::Generator& generator, Optional<ScopedOperand>) const
+Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UpdateExpression::generate_bytecode(Bytecode::Generator& generator, Optional<ScopedOperand> preferred_dst) const
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
     auto reference = TRY(generator.emit_load_from_reference(*m_argument));
@@ -2570,14 +2573,14 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UpdateExpression::gener
     Optional<ScopedOperand> previous_value_for_postfix;
 
     if (m_op == UpdateOp::Increment) {
-        if (m_prefixed) {
+        if (m_prefixed || (preferred_dst.has_value() && preferred_dst->operand().is_ignored())) {
             generator.emit<Bytecode::Op::Increment>(*reference.loaded_value);
         } else {
             previous_value_for_postfix = generator.allocate_register();
             generator.emit<Bytecode::Op::PostfixIncrement>(*previous_value_for_postfix, *reference.loaded_value);
         }
     } else {
-        if (m_prefixed) {
+        if (m_prefixed || (preferred_dst.has_value() && preferred_dst->operand().is_ignored())) {
             generator.emit<Bytecode::Op::Decrement>(*reference.loaded_value);
         } else {
             previous_value_for_postfix = generator.allocate_register();
@@ -2590,9 +2593,9 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> UpdateExpression::gener
     else
         (void)TRY(generator.emit_store_to_reference(reference, *reference.loaded_value));
 
-    if (!m_prefixed)
-        return *previous_value_for_postfix;
-    return *reference.loaded_value;
+    if (m_prefixed || (preferred_dst.has_value() && preferred_dst->operand().is_ignored()))
+        return *reference.loaded_value;
+    return *previous_value_for_postfix;
 }
 
 Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> ThrowStatement::generate_bytecode(Bytecode::Generator& generator, [[maybe_unused]] Optional<ScopedOperand> preferred_dst) const

@@ -18,6 +18,16 @@
 
 namespace JS::Bytecode {
 
+static ScopedOperand choose_dst(Bytecode::Generator& generator, Optional<ScopedOperand> const& preferred_dst)
+{
+    if (preferred_dst.has_value()) {
+        if (preferred_dst.value().operand().is_ignored())
+            return generator.allocate_register();
+        return preferred_dst.value();
+    }
+    return generator.allocate_register();
+}
+
 Generator::Generator(VM& vm, GC::Ptr<SharedFunctionInstanceData const> shared_function_instance_data, MustPropagateCompletion must_propagate_completion, BuiltinAbstractOperationsEnabled builtin_abstract_operations_enabled)
     : m_vm(vm)
     , m_string_table(make<StringTable>())
@@ -25,6 +35,7 @@ Generator::Generator(VM& vm, GC::Ptr<SharedFunctionInstanceData const> shared_fu
     , m_property_key_table(make<PropertyKeyTable>())
     , m_regex_table(make<RegexTable>())
     , m_constants(vm.heap())
+    , m_ignored_operand(*this, Operand(Operand::Type::Ignored, 0))
     , m_accumulator(*this, Operand(Register::accumulator()))
     , m_this_value(*this, Operand(Register::this_value()))
     , m_must_propagate_completion(must_propagate_completion == MustPropagateCompletion::Yes)
@@ -746,7 +757,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
     // https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
     if (is<SuperExpression>(expression.object())) {
         auto super_reference = TRY(emit_super_reference(expression));
-        auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
+        auto dst = choose_dst(*this, preferred_dst);
 
         if (super_reference.referenced_name.has_value()) {
             // 5. Let propertyKey be ? ToPropertyKey(propertyNameValue).
@@ -769,7 +780,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
         auto property = TRY(expression.property().generate_bytecode(*this)).value();
         auto saved_property = allocate_register();
         emit<Bytecode::Op::Mov>(saved_property, property);
-        auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
+        auto dst = choose_dst(*this, preferred_dst);
         emit_get_by_value(dst, base, property, move(base_identifier));
         return ReferenceOperands {
             .base = base,
@@ -780,7 +791,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
     }
     if (expression.property().is_identifier()) {
         auto property_key_table_index = intern_property_key(as<Identifier>(expression.property()).string());
-        auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
+        auto dst = choose_dst(*this, preferred_dst);
         emit_get_by_id(dst, base, property_key_table_index, move(base_identifier));
         return ReferenceOperands {
             .base = base,
@@ -791,7 +802,7 @@ CodeGenerationErrorOr<Generator::ReferenceOperands> Generator::emit_load_from_re
     }
     if (expression.property().is_private_identifier()) {
         auto identifier_table_ref = intern_identifier(as<PrivateIdentifier>(expression.property()).string());
-        auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
+        auto dst = choose_dst(*this, preferred_dst);
         emit<Bytecode::Op::GetPrivateById>(dst, base, identifier_table_ref);
         return ReferenceOperands {
             .base = base,
@@ -1339,7 +1350,7 @@ ScopedOperand Generator::get_this(Optional<ScopedOperand> preferred_dst)
     if (m_shared_function_instance_data && !m_shared_function_instance_data->m_function_environment_needed)
         return this_value();
 
-    auto dst = preferred_dst.has_value() ? preferred_dst.value() : allocate_register();
+    auto dst = choose_dst(*this, preferred_dst);
     emit<Bytecode::Op::ResolveThisBinding>();
     m_current_basic_block->set_has_resolved_this();
     return this_value();
