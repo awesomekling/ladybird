@@ -73,6 +73,15 @@ op Call < Instruction
     m_arguments: Operand[]
 endop
 
+op CallIgnoringResult < Instruction
+    m_length: u32
+    m_callee: Operand
+    m_this_value: Operand
+    m_argument_count: u32
+    m_expression_string: Optional<StringTableIndex>
+    m_arguments: Operand[]
+endop
+
 op CallBuiltin < Instruction
     m_length: u32
     m_dst: Operand

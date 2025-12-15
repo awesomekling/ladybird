@@ -473,6 +473,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(ToInt32);
             HANDLE_INSTRUCTION(BitwiseXor);
             HANDLE_INSTRUCTION(Call);
+            HANDLE_INSTRUCTION(CallIgnoringResult);
             HANDLE_INSTRUCTION(CallBuiltin);
             HANDLE_INSTRUCTION(CallConstruct);
             HANDLE_INSTRUCTION(CallConstructWithArgumentArray);
@@ -2446,12 +2447,11 @@ static ThrowCompletionOr<Value> dispatch_builtin_call(Bytecode::Interpreter& int
 }
 
 template<CallType call_type>
-static ThrowCompletionOr<void> execute_call(
+static ThrowCompletionOr<Value> execute_call(
     Bytecode::Interpreter& interpreter,
     Value callee,
     Value this_value,
     ReadonlySpan<Operand> arguments,
-    Operand dst,
     Optional<StringTableIndex> const expression_string,
     Strict strict)
 {
@@ -2475,31 +2475,41 @@ static ThrowCompletionOr<void> execute_call(
         callee_context_argument_values[i] = js_undefined();
     callee_context->passed_argument_count = insn_argument_count;
 
-    Value retval;
     if (call_type == CallType::DirectEval && callee == interpreter.realm().intrinsics().eval_function()) {
-        retval = TRY(perform_eval(interpreter.vm(), !callee_context->arguments.is_empty() ? callee_context->arguments[0] : js_undefined(), strict == Strict::Yes ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct));
-    } else if (call_type == CallType::Construct) {
-        retval = TRY(function.internal_construct(*callee_context, function));
-    } else {
-        retval = TRY(function.internal_call(*callee_context, this_value));
+        return TRY(perform_eval(interpreter.vm(), !callee_context->arguments.is_empty() ? callee_context->arguments[0] : js_undefined(), strict == Strict::Yes ? CallerMode::Strict : CallerMode::NonStrict, EvalMode::Direct));
     }
-    interpreter.set(dst, retval);
-    return {};
+    if constexpr (call_type == CallType::Construct) {
+        return TRY(function.internal_construct(*callee_context, function));
+    } else {
+        return TRY(function.internal_call(*callee_context, this_value));
+    }
 }
 
 ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    return execute_call<CallType::Call>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
+    auto retval = TRY(execute_call<CallType::Call>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_expression_string, strict()));
+    interpreter.set(m_dst, retval);
+    return {};
+}
+
+ThrowCompletionOr<void> CallIgnoringResult::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    TRY(execute_call<CallType::Call>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_expression_string, strict()));
+    return {};
 }
 
 NEVER_INLINE ThrowCompletionOr<void> CallConstruct::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    return execute_call<CallType::Construct>(interpreter, interpreter.get(m_callee), js_undefined(), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
+    auto retval = TRY(execute_call<CallType::Construct>(interpreter, interpreter.get(m_callee), js_undefined(), { m_arguments, m_argument_count }, m_expression_string, strict()));
+    interpreter.set(m_dst, retval);
+    return {};
 }
 
-ThrowCompletionOr<void> CallDirectEval::execute_impl(Bytecode::Interpreter& interpreter) const
+NEVER_INLINE ThrowCompletionOr<void> CallDirectEval::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    return execute_call<CallType::DirectEval>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
+    auto retval = TRY(execute_call<CallType::DirectEval>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_expression_string, strict()));
+    interpreter.set(m_dst, retval);
+    return {};
 }
 
 ThrowCompletionOr<void> CallBuiltin::execute_impl(Bytecode::Interpreter& interpreter) const
@@ -2511,7 +2521,9 @@ ThrowCompletionOr<void> CallBuiltin::execute_impl(Bytecode::Interpreter& interpr
         return {};
     }
 
-    return execute_call<CallType::Call>(interpreter, callee, interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
+    auto retval = TRY(execute_call<CallType::Call>(interpreter, callee, interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_expression_string, strict()));
+    interpreter.set(m_dst, retval);
+    return {};
 }
 
 template<CallType call_type>

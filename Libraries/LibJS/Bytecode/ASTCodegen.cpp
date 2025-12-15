@@ -306,7 +306,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> LogicalExpression::gene
 {
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
     auto dst = choose_dst(generator, preferred_dst);
-    auto lhs = TRY(m_lhs->generate_bytecode(generator, preferred_dst)).value();
+    auto lhs = TRY(m_lhs->generate_bytecode(generator)).value();
     // FIXME: Only mov lhs into dst in case lhs is the value taken.
     generator.emit_mov(dst, lhs);
 
@@ -1835,13 +1835,22 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> CallExpression::generat
                 expression_string_index,
                 argument_operands);
         } else {
-            generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(
-                argument_operands.size(),
-                dst,
-                callee,
-                this_value,
-                expression_string_index,
-                argument_operands);
+            if (preferred_dst.has_value() && preferred_dst->operand().is_ignored()) {
+                generator.emit_with_extra_operand_slots<Bytecode::Op::CallIgnoringResult>(
+                    argument_operands.size(),
+                    callee,
+                    this_value,
+                    expression_string_index,
+                    argument_operands);
+            } else {
+                generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(
+                    argument_operands.size(),
+                    dst,
+                    callee,
+                    this_value,
+                    expression_string_index,
+                    argument_operands);
+            }
         }
     }
 
