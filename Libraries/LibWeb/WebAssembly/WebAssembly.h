@@ -92,11 +92,15 @@ public:
 
     Wasm::FunctionAddress exported_address() const { return m_exported_address; }
 
-protected:
+private:
     ExportedWasmFunction(Utf16FlyString name, AK::Function<JS::ThrowCompletionOr<JS::Value>(JS::VM&)>, Wasm::FunctionAddress, Object& prototype);
 
-private:
+    virtual void visit_edges(JS::Cell::Visitor&) override;
+
+    virtual JS::ThrowCompletionOr<JS::Value> call() override;
+
     Wasm::FunctionAddress m_exported_address;
+    AK::Function<JS::ThrowCompletionOr<JS::Value>(JS::VM&)> m_native_function;
 };
 
 WebAssemblyCache& get_cache(JS::Realm&);

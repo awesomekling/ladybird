@@ -16,12 +16,19 @@
 namespace JS {
 
 GC_DEFINE_ALLOCATOR(NativeFunction);
+GC_DEFINE_ALLOCATOR(NativeFunctionWithClosure);
+GC_DEFINE_ALLOCATOR(NativeFunctionWithoutClosure);
 
 void NativeFunction::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    visitor.visit_possible_values(m_native_function.raw_capture_range());
     visitor.visit(m_realm);
+}
+
+void NativeFunctionWithClosure::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit_possible_values(m_native_function.raw_capture_range());
 }
 
 // 10.3.3 CreateBuiltinFunction ( behaviour, length, name, additionalInternalSlotsList [ , realm [ , prototype [ , prefix ] ] ] ), https://tc39.es/ecma262/#sec-createbuiltinfunction
@@ -45,7 +52,7 @@ GC::Ref<NativeFunction> NativeFunction::create(Realm& allocating_realm, Function
     // 7. Set func.[[Extensible]] to true.
     // 8. Set func.[[Realm]] to realm.
     // 9. Set func.[[InitialName]] to null.
-    auto function = allocating_realm.create<NativeFunction>(move(behaviour), prototype, *realm.value(), builtin);
+    auto function = allocating_realm.create<NativeFunctionWithClosure>(move(behaviour), prototype, *realm.value(), builtin);
 
     function->unsafe_set_shape(realm.value()->intrinsics().native_function_shape());
 
@@ -64,20 +71,35 @@ GC::Ref<NativeFunction> NativeFunction::create(Realm& allocating_realm, Function
 
 GC::Ref<NativeFunction> NativeFunction::create(Realm& realm, Utf16FlyString const& name, Function<ThrowCompletionOr<Value>(VM&)> function)
 {
-    return realm.create<NativeFunction>(name, move(function), realm.intrinsics().function_prototype());
+    return realm.create<NativeFunctionWithClosure>(name, move(function), realm.intrinsics().function_prototype());
 }
 
-NativeFunction::NativeFunction(AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin)
-    : FunctionObject(realm, prototype)
-    , m_builtin(builtin)
-    , m_native_function(move(native_function))
-    , m_realm(realm)
+GC::Ref<NativeFunctionWithoutClosure> NativeFunctionWithoutClosure::create(Realm& allocating_realm, NativeFunctionWithoutClosureFunctionPtr handler, i32 length, PropertyKey const& name, Optional<Realm*> realm, Optional<StringView> const& prefix, Optional<Bytecode::Builtin> builtin)
+{
+    auto& vm = allocating_realm.vm();
+    if (!realm.has_value())
+        realm = vm.current_realm();
+    auto prototype = (*realm)->intrinsics().function_prototype();
+    auto function = allocating_realm.create<NativeFunctionWithoutClosure>(handler, prototype, *(*realm), builtin);
+    function->unsafe_set_shape((*realm)->intrinsics().native_function_shape());
+    function->put_direct((*realm)->intrinsics().native_function_length_offset(), Value { length });
+    function->put_direct((*realm)->intrinsics().native_function_name_offset(), function->make_function_name(name, prefix));
+    return function;
+}
+
+NativeFunction::NativeFunction(Utf16FlyString name, Object& prototype)
+    : FunctionObject(prototype)
+    , m_name(move(name))
+    , m_realm(prototype.shape().realm())
 {
 }
 
-// FIXME: m_realm is supposed to be the realm argument of CreateBuiltinFunction, or the current
-//        Realm Record. The former is not something that's commonly used or we support, the
-//        latter is impossible as no ExecutionContext exists when most NativeFunctions are created...
+NativeFunction::NativeFunction(Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin)
+    : FunctionObject(realm, prototype)
+    , m_builtin(builtin)
+    , m_realm(realm)
+{
+}
 
 NativeFunction::NativeFunction(Object& prototype)
     : FunctionObject(prototype)
@@ -85,18 +107,21 @@ NativeFunction::NativeFunction(Object& prototype)
 {
 }
 
-NativeFunction::NativeFunction(Utf16FlyString name, AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object& prototype)
-    : FunctionObject(prototype)
-    , m_name(move(name))
+NativeFunctionWithClosure::NativeFunctionWithClosure(AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin)
+    : NativeFunction(prototype, realm, builtin)
     , m_native_function(move(native_function))
-    , m_realm(prototype.shape().realm())
 {
 }
 
-NativeFunction::NativeFunction(Utf16FlyString name, Object& prototype)
-    : FunctionObject(prototype)
-    , m_name(move(name))
-    , m_realm(prototype.shape().realm())
+NativeFunctionWithClosure::NativeFunctionWithClosure(Utf16FlyString name, AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object& prototype)
+    : NativeFunction(name, prototype)
+    , m_native_function(move(native_function))
+{
+}
+
+NativeFunctionWithoutClosure::NativeFunctionWithoutClosure(NativeFunctionWithoutClosureFunctionPtr native_function, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin)
+    : NativeFunction(prototype, realm, builtin)
+    , m_native_function(native_function)
 {
 }
 
@@ -213,7 +238,13 @@ ThrowCompletionOr<GC::Ref<Object>> NativeFunction::internal_construct(ExecutionC
     return *TRY(result);
 }
 
-ThrowCompletionOr<Value> NativeFunction::call()
+ThrowCompletionOr<Value> NativeFunctionWithClosure::call()
+{
+    VERIFY(m_native_function);
+    return m_native_function(vm());
+}
+
+ThrowCompletionOr<Value> NativeFunctionWithoutClosure::call()
 {
     VERIFY(m_native_function);
     return m_native_function(vm());

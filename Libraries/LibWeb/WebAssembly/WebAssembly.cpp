@@ -502,9 +502,21 @@ GC::Ref<ExportedWasmFunction> ExportedWasmFunction::create(JS::Realm& realm, Utf
 }
 
 ExportedWasmFunction::ExportedWasmFunction(Utf16FlyString name, AK::Function<JS::ThrowCompletionOr<JS::Value>(JS::VM&)> behavior, Wasm::FunctionAddress exported_address, JS::Object& prototype)
-    : NativeFunction(move(name), move(behavior), prototype)
+    : NativeFunction(move(name), prototype)
     , m_exported_address(exported_address)
+    , m_native_function(move(behavior))
 {
+}
+
+void ExportedWasmFunction::visit_edges(JS::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit_possible_values(m_native_function.raw_capture_range());
+}
+
+JS::ThrowCompletionOr<JS::Value> ExportedWasmFunction::call()
+{
+    return m_native_function(vm());
 }
 
 JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress address, Utf16FlyString name, Instance* instance)

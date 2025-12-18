@@ -184,13 +184,9 @@ inline void TestRunnerGlobalObject::initialize(JS::Realm& realm)
 
     define_direct_property("global"_utf16_fly_string, this, JS::Attribute::Enumerable);
     for (auto& entry : s_exposed_global_functions) {
-        define_native_function(
-            realm,
-            entry.key,
-            [fn = entry.value.function](auto& vm) {
-                return fn(vm);
-            },
-            entry.value.length, JS::default_attributes);
+        AK::Function<JS::ThrowCompletionOr<JS::Value>(JS::VM&)> callback = [fn = entry.value.function](auto& vm) { return fn(vm); };
+        auto function = JS::NativeFunction::create(realm, move(callback), entry.value.length, entry.key);
+        define_direct_property(entry.key, function, JS::default_attributes);
     }
 }
 

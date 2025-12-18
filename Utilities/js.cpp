@@ -313,7 +313,7 @@ void ReplObject::initialize(JS::Realm& realm)
     define_native_accessor(
         realm,
         "_"_utf16_fly_string,
-        [](JS::VM&) {
+        [](JS::VM&) -> JS::ThrowCompletionOr<JS::Value> {
             return g_last_value.value();
         },
         [](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {

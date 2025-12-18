@@ -27,6 +27,8 @@ namespace JS {
 
 #define JS_OBJECT(class_, base_class) GC_CELL(class_, base_class)
 
+using NativeFunctionWithoutClosureFunctionPtr = ThrowCompletionOr<Value> (*)(VM&);
+
 struct PrivateElement {
     enum class Kind {
         Field,
@@ -203,8 +205,8 @@ public:
     using IntrinsicAccessor = Value (*)(Realm&);
     void define_intrinsic_accessor(PropertyKey const&, PropertyAttributes attributes, IntrinsicAccessor accessor);
 
-    void define_native_function(Realm&, PropertyKey const&, ESCAPING Function<ThrowCompletionOr<Value>(VM&)>, i32 length, PropertyAttributes attributes, Optional<Bytecode::Builtin> builtin = {});
-    void define_native_accessor(Realm&, PropertyKey const&, ESCAPING Function<ThrowCompletionOr<Value>(VM&)> getter, ESCAPING Function<ThrowCompletionOr<Value>(VM&)> setter, PropertyAttributes attributes);
+    void define_native_function(Realm&, PropertyKey const&, NativeFunctionWithoutClosureFunctionPtr, i32 length, PropertyAttributes attributes, Optional<Bytecode::Builtin> builtin = {});
+    void define_native_accessor(Realm&, PropertyKey const&, NativeFunctionWithoutClosureFunctionPtr getter, NativeFunctionWithoutClosureFunctionPtr setter, PropertyAttributes attributes);
     void define_native_javascript_backed_function(PropertyKey const&, GC::Ref<NativeJavaScriptBackedFunction> function, i32 length, PropertyAttributes attributes);
 
     virtual bool is_dom_node() const { return false; }
@@ -232,6 +234,8 @@ public:
     virtual bool is_global_object() const { return false; }
     virtual bool is_proxy_object() const { return false; }
     virtual bool is_native_function() const { return false; }
+    virtual bool is_native_function_with_closure() const { return false; }
+    virtual bool is_native_function_without_closure() const { return false; }
     virtual bool is_ecmascript_function_object() const { return false; }
     virtual bool is_array_iterator() const { return false; }
     virtual bool is_raw_json_object() const { return false; }

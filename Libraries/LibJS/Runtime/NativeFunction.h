@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
@@ -32,7 +32,7 @@ public:
 
     // Used for [[Call]] / [[Construct]]'s "...result of evaluating F in a manner that conforms to the specification of F".
     // Needs to be overridden by all NativeFunctions without an m_native_function.
-    virtual ThrowCompletionOr<Value> call();
+    virtual ThrowCompletionOr<Value> call() = 0;
     virtual ThrowCompletionOr<GC::Ref<Object>> construct(FunctionObject& new_target);
 
     virtual Utf16String name_for_call_stack() const override;
@@ -57,8 +57,7 @@ public:
 
 protected:
     NativeFunction(Utf16FlyString name, Object& prototype);
-    NativeFunction(AK::Function<ThrowCompletionOr<Value>(VM&)>, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin);
-    NativeFunction(Utf16FlyString name, AK::Function<ThrowCompletionOr<Value>(VM&)>, Object& prototype);
+    NativeFunction(Object* prototype, Realm&, Optional<Bytecode::Builtin>);
     explicit NativeFunction(Object& prototype);
 
     virtual void visit_edges(Cell::Visitor& visitor) override;
@@ -69,11 +68,59 @@ private:
     Utf16FlyString m_name;
     Optional<Utf16FlyString> m_initial_name; // [[InitialName]]
     Optional<Bytecode::Builtin> m_builtin;
-    AK::Function<ThrowCompletionOr<Value>(VM&)> m_native_function;
     GC::Ref<Realm> m_realm;
 };
 
 template<>
 inline bool Object::fast_is<NativeFunction>() const { return is_native_function(); }
+
+class JS_API NativeFunctionWithClosure final : public NativeFunction {
+    JS_OBJECT(NativeFunctionWithClosure, NativeFunction);
+    GC_DECLARE_ALLOCATOR(NativeFunctionWithClosure);
+
+public:
+    static GC::Ref<NativeFunction> create(Realm&, ESCAPING Function<ThrowCompletionOr<Value>(VM&)> behaviour, i32 length, PropertyKey const& name = Utf16FlyString {}, Optional<Realm*> = {}, Optional<StringView> const& prefix = {}, Optional<Bytecode::Builtin> builtin = {});
+
+    virtual ~NativeFunctionWithClosure() override = default;
+
+    virtual ThrowCompletionOr<Value> call() final;
+
+private:
+    NativeFunctionWithClosure(AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin);
+    NativeFunctionWithClosure(Utf16FlyString name, AK::Function<ThrowCompletionOr<Value>(VM&)> native_function, Object& prototype);
+
+    virtual bool is_native_function_with_closure() const final { return true; }
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    AK::Function<ThrowCompletionOr<Value>(VM&)> m_native_function;
+};
+
+template<>
+inline bool Object::fast_is<NativeFunctionWithClosure>() const { return is_native_function_with_closure(); }
+
+class JS_API NativeFunctionWithoutClosure final : public NativeFunction {
+    JS_OBJECT(NativeFunctionWithoutClosure, NativeFunction);
+    GC_DECLARE_ALLOCATOR(NativeFunctionWithoutClosure);
+
+public:
+    static GC::Ref<NativeFunctionWithoutClosure> create(Realm&, NativeFunctionWithoutClosureFunctionPtr, i32 length, PropertyKey const& name = Utf16FlyString {}, Optional<Realm*> = {}, Optional<StringView> const& prefix = {}, Optional<Bytecode::Builtin> builtin = {});
+
+    virtual ~NativeFunctionWithoutClosure() override = default;
+
+    virtual ThrowCompletionOr<Value> call() final;
+
+protected:
+    NativeFunctionWithoutClosure(NativeFunctionWithoutClosureFunctionPtr, Object* prototype, Realm& realm, Optional<Bytecode::Builtin> builtin);
+    NativeFunctionWithoutClosure(Utf16FlyString name, NativeFunctionWithoutClosureFunctionPtr, Object& prototype);
+
+private:
+    virtual bool is_native_function_without_closure() const final { return true; }
+
+    NativeFunctionWithoutClosureFunctionPtr m_native_function;
+};
+
+template<>
+inline bool Object::fast_is<NativeFunctionWithoutClosure>() const { return is_native_function_without_closure(); }
 
 }
