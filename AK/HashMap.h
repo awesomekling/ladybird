@@ -39,7 +39,7 @@ public:
 
     HashMap(std::initializer_list<Entry> list)
     {
-        MUST(try_ensure_capacity(list.size()));
+        ensure_capacity(list.size());
         for (auto& [key, value] : list)
             set(key, value);
     }
@@ -61,9 +61,6 @@ public:
     HashSetResult set(K const& key, V const& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.set({ key, value }, existing_entry_behavior); }
     HashSetResult set(K const& key, V&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.set({ key, move(value) }, existing_entry_behavior); }
     HashSetResult set(K&& key, V&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.set({ move(key), move(value) }, existing_entry_behavior); }
-    ErrorOr<HashSetResult> try_set(K const& key, V const& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.try_set({ key, value }, existing_entry_behavior); }
-    ErrorOr<HashSetResult> try_set(K const& key, V&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.try_set({ key, move(value) }, existing_entry_behavior); }
-    ErrorOr<HashSetResult> try_set(K&& key, V&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace) { return m_table.try_set({ move(key), move(value) }, existing_entry_behavior); }
 
     void update(HashMap const& other)
     {
@@ -155,8 +152,6 @@ public:
             return m_table.end();
         return m_table.find(Traits<Key>::hash(key), [&](auto& entry) { return Traits<K>::equals(entry.key, key); });
     }
-
-    ErrorOr<void> try_ensure_capacity(size_t capacity) { return m_table.try_ensure_capacity(capacity); }
 
     void ensure_capacity(size_t capacity) { return m_table.ensure_capacity(capacity); }
 
@@ -281,22 +276,6 @@ public:
         return m_table.ensure(KeyTraits::hash(key), [&](auto& entry) { return KeyTraits::equals(entry.key, key); }, [&] -> Entry { return { key, initialization_callback() }; }, existing_entry_behavior).value;
     }
 
-    template<typename Callback>
-    ErrorOr<V> try_ensure(K const& key, Callback initialization_callback)
-    {
-        auto it = find(key);
-        if (it != end())
-            return it->value;
-        if constexpr (FallibleFunction<Callback>) {
-            auto result = TRY(try_set(key, TRY(initialization_callback())));
-            VERIFY(result == HashSetResult::InsertedNewEntry);
-        } else {
-            auto result = TRY(try_set(key, initialization_callback()));
-            VERIFY(result == HashSetResult::InsertedNewEntry);
-        }
-        return find(key)->value;
-    }
-
     [[nodiscard]] Vector<K> keys() const
     {
         Vector<K> list;
@@ -317,10 +296,10 @@ public:
     }
 
     template<typename NewKeyTraits = KeyTraits, typename NewValueTraits = ValueTraits, bool NewIsOrdered = IsOrdered>
-    ErrorOr<HashMap<K, V, NewKeyTraits, NewValueTraits, NewIsOrdered>> clone() const
+    HashMap<K, V, NewKeyTraits, NewValueTraits, NewIsOrdered> clone() const
     {
         HashMap<K, V, NewKeyTraits, NewValueTraits, NewIsOrdered> hash_map_clone;
-        TRY(hash_map_clone.try_ensure_capacity(size()));
+        hash_map_clone.ensure_capacity(size());
         for (auto const& [key, value] : *this)
             hash_map_clone.set(key, value);
         return hash_map_clone;

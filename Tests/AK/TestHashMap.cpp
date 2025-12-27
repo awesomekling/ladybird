@@ -301,7 +301,7 @@ TEST_CASE(clone_same_template_args)
     EXPECT_EQ(orig.size(), static_cast<size_t>(3));
     EXPECT_EQ(orig.get(2), Optional<int>(20));
 
-    auto second = TRY_OR_FAIL(orig.clone());
+    auto second = orig.clone();
 
     EXPECT_EQ(orig.size(), static_cast<size_t>(3));
     EXPECT_EQ(orig.get(2), Optional<int>(20));
@@ -318,7 +318,7 @@ TEST_CASE(clone_different_traits)
     EXPECT_EQ(orig.get("Well"sv), Optional<StringView>("hello friends!"sv));
     EXPECT_EQ(orig.get("weLL"sv), Optional<StringView>());
 
-    auto second = TRY_OR_FAIL(orig.clone<CaseInsensitiveASCIIStringViewTraits>());
+    auto second = orig.clone<CaseInsensitiveASCIIStringViewTraits>();
 
     EXPECT_EQ(orig.size(), static_cast<size_t>(2));
     EXPECT_EQ(orig.get("Well"sv), Optional<StringView>("hello friends!"sv));

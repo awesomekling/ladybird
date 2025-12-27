@@ -90,9 +90,9 @@ Optional<Database&> Database::for_key_and_name(StorageAPI::StorageKey const& key
 
 ErrorOr<GC::Root<Database>> Database::create_for_key_and_name(JS::Realm& realm, StorageAPI::StorageKey const& key, String const& name)
 {
-    auto database_mapping = TRY(m_databases.try_ensure(key, [] {
+    auto database_mapping = m_databases.ensure(key, [] {
         return HashMap<String, GC::Weak<Database>>();
-    }));
+    });
 
     auto value = Database::create(realm, name);
 

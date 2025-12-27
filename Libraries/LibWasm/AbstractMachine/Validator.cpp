@@ -23,7 +23,7 @@ ErrorOr<void, ValidationError> Validator::validate(Module& module)
     //       as this has no dependency.
     HashTable<StringView> seen_export_names;
     for (auto& export_ : module.export_section().entries())
-        if (seen_export_names.try_set(export_.name()).release_value_but_fixme_should_propagate_errors() != AK::HashSetResult::InsertedNewEntry)
+        if (seen_export_names.set(export_.name()) != AK::HashSetResult::InsertedNewEntry)
             return Errors::duplicate_export_name(export_.name());
 
     m_context = {};

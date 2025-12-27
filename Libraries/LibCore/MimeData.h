@@ -41,7 +41,7 @@ public:
 private:
     MimeData() = default;
     explicit MimeData(HashMap<String, ByteBuffer> const& data)
-        : m_data(data.clone().release_value_but_fixme_should_propagate_errors())
+        : m_data(data)
     {
     }
 

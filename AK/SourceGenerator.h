@@ -44,7 +44,7 @@ public:
 
     [[nodiscard]] SourceGenerator fork()
     {
-        return SourceGenerator { m_builder, MUST(m_mapping.clone()), m_opening, m_closing, m_escape };
+        return SourceGenerator { m_builder, m_mapping.clone(), m_opening, m_closing, m_escape };
     }
 
     void set(StringView key, String value)
@@ -66,7 +66,7 @@ public:
         return result.release_value();
     }
 
-    [[nodiscard]] MappingType clone_mapping() const { return MUST(m_mapping.clone()); }
+    [[nodiscard]] MappingType clone_mapping() const { return m_mapping.clone(); }
 
     StringView as_string_view() const LIFETIME_BOUND { return m_builder.string_view(); }
 

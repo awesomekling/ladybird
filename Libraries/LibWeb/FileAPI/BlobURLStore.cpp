@@ -73,7 +73,7 @@ ErrorOr<Utf16String> add_entry_to_blob_url_store(BlobURLEntry::Object object)
     BlobURLEntry entry { object, HTML::current_principal_settings_object() };
 
     // 4. Set store[url] to entry.
-    TRY(store.try_set(url.to_utf8_but_should_be_ported_to_utf16(), move(entry)));
+    store.set(url.to_utf8_but_should_be_ported_to_utf16(), move(entry));
 
     // 5. Return url.
     return url;

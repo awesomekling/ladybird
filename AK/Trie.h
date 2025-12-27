@@ -113,7 +113,7 @@ public:
             else
                 node = TRY(adopt_nonnull_own_or_enomem(new (nothrow) Trie(value, move(missing_metadata))));
             auto& node_ref = *node;
-            TRY(m_children.try_set(move(value), node.release_nonnull()));
+            m_children.set(move(value), node.release_nonnull());
             return &static_cast<BaseType&>(node_ref);
         }
 
@@ -218,7 +218,7 @@ public:
     {
         Trie root(TRY(m_value->try_clone()), TRY(copy_metadata(m_metadata)));
         for (auto& it : m_children)
-            TRY(root.m_children.try_set(TRY(it.key->try_clone()), TRY(adopt_nonnull_own_or_enomem(new (nothrow) Trie(TRY(it.value->deep_copy()))))));
+            root.m_children.set(TRY(it.key->try_clone()), TRY(adopt_nonnull_own_or_enomem(new (nothrow) Trie(TRY(it.value->deep_copy())))));
         return static_cast<BaseType&&>(move(root));
     }
 
@@ -226,7 +226,7 @@ public:
     {
         Trie root(m_value, TRY(copy_metadata(m_metadata)));
         for (auto& it : m_children)
-            TRY(root.m_children.try_set(it.key, TRY(adopt_nonnull_own_or_enomem(new (nothrow) Trie(TRY(it.value->deep_copy()))))));
+            root.m_children.set(it.key, TRY(adopt_nonnull_own_or_enomem(new (nothrow) Trie(TRY(it.value->deep_copy())))));
         return static_cast<BaseType&&>(move(root));
     }
 

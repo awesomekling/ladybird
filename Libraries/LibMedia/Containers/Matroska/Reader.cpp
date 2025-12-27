@@ -277,7 +277,7 @@ static DecoderErrorOr<void> parse_seek_head(Streamer& streamer, size_t base_posi
                 return ElementIterationDecision::Continue;
             }
 
-            DECODER_TRY_ALLOC(table.try_set(seek_id.release_value(), base_position + seek_position.release_value()));
+            table.set(seek_id.release_value(), base_position + seek_position.release_value());
         } else {
             dbgln_if(MATROSKA_TRACE_DEBUG, "Unknown SeekHead child element ID {:#010x}", seek_head_child_id);
         }
@@ -326,7 +326,7 @@ DecoderErrorOr<Optional<size_t>> Reader::find_first_top_level_element_with_id([[
 
         m_last_top_level_element_position = streamer.position();
 
-        DECODER_TRY_ALLOC(m_seek_entries.try_set(found_element_id, found_element_position, AK::HashSetExistingEntryBehavior::Keep));
+        m_seek_entries.set(found_element_id, found_element_position, AK::HashSetExistingEntryBehavior::Keep);
 
         if (found_element_id == element_id) {
             position = found_element_position;
@@ -587,7 +587,7 @@ DecoderErrorOr<void> Reader::parse_tracks(Streamer& streamer)
         if (element_id == TRACK_ENTRY_ID) {
             auto track_entry = TRY(parse_track_entry(streamer));
             dbgln_if(MATROSKA_DEBUG, "Parsed track {}", track_entry->track_number());
-            DECODER_TRY_ALLOC(m_tracks.try_set(track_entry->track_number(), track_entry));
+            m_tracks.set(track_entry->track_number(), track_entry);
         } else {
             TRY(streamer.read_unknown_element());
         }
@@ -1003,7 +1003,7 @@ static DecoderErrorOr<CuePoint> parse_cue_point(Streamer& streamer, u64 timestam
         }
         case CUE_TRACK_POSITIONS_ID: {
             auto track_position = TRY(parse_cue_track_position(streamer));
-            DECODER_TRY_ALLOC(cue_point.track_positions().try_set(track_position.track_number(), track_position));
+            cue_point.track_positions().set(track_position.track_number(), track_position);
             break;
         }
         default:
@@ -1037,7 +1037,7 @@ DecoderErrorOr<void> Reader::parse_cues(Streamer& streamer)
 
             for (auto track_position_entry : cue_point.track_positions()) {
                 if (!m_cues.contains(track_position_entry.key))
-                    DECODER_TRY_ALLOC(m_cues.try_set(track_position_entry.key, Vector<CuePoint>()));
+                    m_cues.set(track_position_entry.key, Vector<CuePoint>());
                 Vector<CuePoint>& cue_points_for_track = m_cues.get(track_position_entry.key).release_value();
                 cue_points_for_track.append(cue_point);
             }

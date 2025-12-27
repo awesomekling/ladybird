@@ -183,12 +183,12 @@ ErrorOr<T> decode(Decoder& decoder)
     T hashmap;
 
     auto size = TRY(decoder.decode_size());
-    TRY(hashmap.try_ensure_capacity(size));
+    hashmap.ensure_capacity(size);
 
     for (size_t i = 0; i < size; ++i) {
         auto key = TRY(decoder.decode<typename T::KeyType>());
         auto value = TRY(decoder.decode<typename T::ValueType>());
-        TRY(hashmap.try_set(move(key), move(value)));
+        hashmap.set(move(key), move(value));
     }
 
     return hashmap;

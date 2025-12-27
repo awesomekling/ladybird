@@ -8,7 +8,6 @@
 #pragma once
 
 #include <AK/Concepts.h>
-#include <AK/Error.h>
 #include <AK/ReverseIterator.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Traits.h>
@@ -241,19 +240,13 @@ public:
     [[nodiscard]] size_t capacity() const { return m_capacity; }
 
     template<typename U, size_t N>
-    ErrorOr<void> try_set_from(U (&from_array)[N])
-    {
-        for (size_t i = 0; i < N; ++i)
-            TRY(try_set(from_array[i]));
-        return {};
-    }
-    template<typename U, size_t N>
     void set_from(U (&from_array)[N])
     {
-        MUST(try_set_from(from_array));
+        for (size_t i = 0; i < N; ++i)
+            set(from_array[i]);
     }
 
-    ErrorOr<void> try_ensure_capacity(size_t capacity)
+    void ensure_capacity(size_t capacity)
     {
         // The user usually expects "capacity" to mean the number of values that can be stored in a
         // container without it needing to reallocate. Our definition of "capacity" is the number of
@@ -261,12 +254,8 @@ public:
         // This calculates the required internal capacity to store `capacity` number of values.
         size_t required_capacity = capacity * 100 / grow_at_load_factor_percent + 1;
         if (required_capacity <= m_capacity)
-            return {};
-        return try_rehash(required_capacity);
-    }
-    void ensure_capacity(size_t capacity)
-    {
-        MUST(try_ensure_capacity(capacity));
+            return;
+        rehash(required_capacity);
     }
 
     [[nodiscard]] bool contains(T const& value) const
@@ -379,23 +368,12 @@ public:
     }
 
     template<typename U = T>
-    ErrorOr<HashSetResult> try_set(U&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace)
-    {
-        if (should_grow())
-            TRY(try_rehash(m_capacity * (100 + grow_capacity_increase_percent) / 100));
-
-        return write_value(forward<U>(value), existing_entry_behavior);
-    }
-    template<typename U = T>
     HashSetResult set(U&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace)
     {
-        return MUST(try_set(forward<U>(value), existing_entry_behavior));
-    }
+        if (should_grow())
+            rehash(m_capacity * (100 + grow_capacity_increase_percent) / 100);
 
-    template<typename U = T>
-    T& ensure(U&& value, HashSetExistingEntryBehavior existing_entry_behavior = HashSetExistingEntryBehavior::Replace)
-    {
-        return MUST(try_set(forward<U>(value), existing_entry_behavior));
+        return write_value(forward<U>(value), existing_entry_behavior);
     }
 
     template<typename TUnaryPredicate, typename InitializationCallback>
@@ -590,7 +568,7 @@ private:
         return const_cast<HashTable*>(this)->end_bucket();
     }
 
-    ErrorOr<void> try_rehash(size_t new_capacity)
+    void rehash(size_t new_capacity)
     {
         new_capacity = max(new_capacity, m_capacity + grow_capacity_at_least);
         new_capacity = kmalloc_good_size(size_in_bytes(new_capacity)) / sizeof(BucketType);
@@ -602,7 +580,7 @@ private:
 
         auto* new_buckets = kcalloc(1, size_in_bytes(new_capacity));
         if (!new_buckets)
-            return Error::from_errno(ENOMEM);
+            VERIFY_NOT_REACHED();
 
         m_buckets = static_cast<BucketType*>(new_buckets);
         m_capacity = new_capacity;
@@ -611,7 +589,7 @@ private:
             m_collection_data = { nullptr, nullptr };
 
         if (!old_buckets)
-            return {};
+            return;
 
         m_size = 0;
         for (auto it = move(old_iter); it != end(); ++it) {
@@ -620,11 +598,6 @@ private:
         }
 
         kfree_sized(old_buckets, old_buckets_size);
-        return {};
-    }
-    void rehash(size_t new_capacity)
-    {
-        MUST(try_rehash(new_capacity));
     }
 
     template<typename TUnaryPredicate>
