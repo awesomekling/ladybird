@@ -98,7 +98,6 @@ shared_library("AK") {
     "IntrusiveDetails.h",
     "IntrusiveList.h",
     "IntrusiveListRelaxedConst.h",
-    "IntrusiveRedBlackTree.h",
     "IterationDecision.h",
     "Iterator.h",
     "JsonArray.h",

@@ -43,7 +43,6 @@ tests = [
   "TestInsertionSort",
   "TestIntegerMath",
   "TestIntrusiveList",
-  "TestIntrusiveRedBlackTree",
   "TestJSON",
   "TestLEB128",
   "TestLexicalPath",
