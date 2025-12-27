@@ -111,7 +111,7 @@ ErrorOr<Vector<DecodedPEM>> decode_pems(ReadonlyBytes data)
                 }
                 lexer.consume_line();
 
-                TRY(pems.try_append(decoded));
+                pems.append(decoded);
                 decoded = {};
                 header_type = {};
                 break;

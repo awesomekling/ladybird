@@ -146,7 +146,7 @@ void populate_all_property_longhands(JsonObject& properties)
         if (value.as_object().has_array("longhands"sv) || value.as_object().has_string("legacy-alias-for"sv) || name == "direction" || name == "unicode-bidi")
             return;
 
-        MUST(all_entry->get_array("longhands"sv)->append(JsonValue { name }));
+        all_entry->get_array("longhands"sv)->append(JsonValue { name });
     });
 }
 

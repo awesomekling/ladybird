@@ -196,8 +196,9 @@ ErrorOr<void> WebSocket::establish_web_socket_connection(URL::URL const& url_rec
     auto origin_string = window_or_worker.origin().to_byte_string();
 
     Vector<ByteString> protocol_byte_strings;
+    protocol_byte_strings.ensure_capacity(protocols.size());
     for (auto const& protocol : protocols)
-        TRY(protocol_byte_strings.try_append(protocol.to_byte_string()));
+        protocol_byte_strings.append(protocol.to_byte_string());
 
     auto additional_headers = HTTP::HeaderList::create();
 

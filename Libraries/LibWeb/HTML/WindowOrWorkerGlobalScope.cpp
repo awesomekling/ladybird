@@ -799,10 +799,10 @@ ErrorOr<Vector<GC::Root<PerformanceTimeline::PerformanceEntry>>> WindowOrWorkerG
     if (type.has_value()) {
         auto maybe_tuple = map.get(type.value());
         if (maybe_tuple.has_value())
-            TRY(tuple_list.try_append(maybe_tuple.release_value()));
+            tuple_list.append(maybe_tuple.release_value());
     } else {
         for (auto const& it : map)
-            TRY(tuple_list.try_append(it.value));
+            tuple_list.append(it.value);
     }
 
     // 5. For each tuple in tuple list, run the following steps:
@@ -818,7 +818,7 @@ ErrorOr<Vector<GC::Root<PerformanceTimeline::PerformanceEntry>>> WindowOrWorkerG
         auto entries = TRY(filter_buffer_by_name_and_type(buffer, name, type));
 
         // 4. For each entry in entries, append entry to result.
-        TRY(result.try_extend(entries));
+        result.extend(entries);
     }
 
     // 6. Sort results's entries in chronological order with respect to startTime

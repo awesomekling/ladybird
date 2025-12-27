@@ -315,10 +315,7 @@ private:
 class ModuleInstance {
 public:
     explicit ModuleInstance(
-        Vector<FunctionType> types, Vector<FunctionAddress> function_addresses, Vector<TableAddress> table_addresses,
-        Vector<MemoryAddress> memory_addresses, Vector<GlobalAddress> global_addresses, Vector<DataAddress> data_addresses,
-        Vector<TagAddress> tag_addresses, Vector<TagType> tag_types,
-        Vector<ExportInstance> exports)
+        Vector<FunctionType> types, Vector<FunctionAddress> function_addresses, Vector<TableAddress> table_addresses, Vector<MemoryAddress> memory_addresses, Vector<GlobalAddress> global_addresses, Vector<DataAddress> data_addresses, Vector<TagAddress> tag_addresses, Vector<TagType> tag_types, Vector<ExportInstance> exports)
         : m_types(move(types))
         , m_tag_types(move(tag_types))
         , m_functions(move(function_addresses))
@@ -436,8 +433,7 @@ public:
             return false;
         }
         auto previous_size = m_elements.size();
-        if (m_elements.try_resize(new_size).is_error())
-            return false;
+        m_elements.resize(new_size);
         for (size_t i = previous_size; i < m_elements.size(); ++i)
             m_elements[i] = fill_value;
 

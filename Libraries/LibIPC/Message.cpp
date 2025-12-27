@@ -18,27 +18,27 @@ MessageBuffer::MessageBuffer()
 
 ErrorOr<void> MessageBuffer::extend_data_capacity(size_t capacity)
 {
-    TRY(m_data.try_ensure_capacity(m_data.size() + capacity));
+    m_data.ensure_capacity(m_data.size() + capacity);
     return {};
 }
 
 ErrorOr<void> MessageBuffer::append_data(u8 const* values, size_t count)
 {
-    TRY(m_data.try_append(values, count));
+    m_data.append(values, count);
     return {};
 }
 
 ErrorOr<void> MessageBuffer::append_file_descriptor(int fd)
 {
-    auto auto_fd = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) AutoCloseFileDescriptor(fd)));
-    TRY(m_fds.try_append(move(auto_fd)));
+    auto auto_fd = make_ref_counted<AutoCloseFileDescriptor>(fd);
+    m_fds.append(move(auto_fd));
     return {};
 }
 
 ErrorOr<void> MessageBuffer::extend(MessageBuffer&& buffer)
 {
-    TRY(m_data.try_extend(move(buffer.m_data)));
-    TRY(m_fds.try_extend(move(buffer.m_fds)));
+    m_data.extend(move(buffer.m_data));
+    m_fds.extend(move(buffer.m_fds));
     return {};
 }
 

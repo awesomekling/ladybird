@@ -116,14 +116,13 @@ WebIDL::ExceptionOr<void> FormData::append(String const& name, GC::Ref<FileAPI::
 WebIDL::ExceptionOr<void> FormData::append_impl(String const& name, Variant<GC::Ref<FileAPI::Blob>, String> const& value, Optional<String> const& filename)
 {
     auto& realm = this->realm();
-    auto& vm = realm.vm();
 
     // 1. Let value be value if given; otherwise blobValue.
     // 2. Let entry be the result of creating an entry with name, value, and filename if given.
     auto entry = TRY(HTML::create_entry(realm, name, value, filename));
 
     // 3. Append entry to this’s entry list.
-    TRY_OR_THROW_OOM(vm, m_entry_list.try_append(move(entry)));
+    m_entry_list.append(move(entry));
     return {};
 }
 
@@ -150,14 +149,14 @@ Variant<GC::Ref<FileAPI::File>, String, Empty> FormData::get(String const& name)
 }
 
 // https://xhr.spec.whatwg.org/#dom-formdata-getall
-WebIDL::ExceptionOr<Vector<FormDataEntryValue>> FormData::get_all(String const& name)
+Vector<FormDataEntryValue> FormData::get_all(String const& name)
 {
     // 1. If there is no entry whose name is name in this’s entry list, then return the empty list.
     // 2. Return the values of all entries whose name is name, in order, from this’s entry list.
     Vector<FormDataEntryValue> values;
     for (auto const& entry : m_entry_list) {
         if (entry.name == name)
-            TRY_OR_THROW_OOM(vm(), values.try_append(entry.value));
+            values.append(entry.value);
     }
     return values;
 }
@@ -195,7 +194,6 @@ GC::ConservativeVector<FormDataEntry> FormData::entry_list() const
 WebIDL::ExceptionOr<void> FormData::set_impl(String const& name, Variant<GC::Ref<FileAPI::Blob>, String> const& value, Optional<String> const& filename)
 {
     auto& realm = this->realm();
-    auto& vm = realm.vm();
 
     // 1. Let value be value if given; otherwise blobValue.
     // 2. Let entry be the result of creating an entry with name, value, and filename if given.
@@ -214,7 +212,7 @@ WebIDL::ExceptionOr<void> FormData::set_impl(String const& name, Variant<GC::Ref
     }
     // 4. Otherwise, append entry to this’s entry list.
     else {
-        TRY_OR_THROW_OOM(vm, m_entry_list.try_append(move(entry)));
+        m_entry_list.append(move(entry));
     }
 
     return {};

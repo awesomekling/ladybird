@@ -132,7 +132,7 @@ static ErrorOr<Vector<Color>> decode_color_table(Stream& stream, ColorEncoding e
 
     static constexpr size_t MAX_INITIAL_COLOR_TABLE_SIZE = 65536;
     Vector<Color> color_table;
-    TRY(color_table.try_ensure_capacity(min(MAX_INITIAL_COLOR_TABLE_SIZE, color_count)));
+    color_table.ensure_capacity(min(MAX_INITIAL_COLOR_TABLE_SIZE, color_count));
     auto parse_color = [&]() -> ErrorOr<Color> {
         switch (encoding) {
         case ColorEncoding::RGBA8888: {
@@ -163,7 +163,7 @@ static ErrorOr<Vector<Color>> decode_color_table(Stream& stream, ColorEncoding e
         }
     };
     while (color_count-- > 0) {
-        TRY(color_table.try_append(TRY(parse_color())));
+        color_table.append(TRY(parse_color()));
     }
     return color_table;
 }
@@ -387,21 +387,21 @@ ErrorOr<NonnullRefPtr<TinyVGDecodedImageData>> TinyVGDecodedImageData::decode(St
             polygon.move_to(TRY(reader.read_point()));
             for (u32 i = 0; i < header.count - 1; i++)
                 polygon.line_to(TRY(reader.read_point()));
-            TRY(draw_commands.try_append(DrawCommand { move(polygon), move(header.style) }));
+            draw_commands.append(DrawCommand { move(polygon), move(header.style) });
             break;
         }
         case Command::FillRectangles: {
             auto header = TRY(reader.read_fill_command_header(style_type));
             for (u32 i = 0; i < header.count; i++) {
-                TRY(draw_commands.try_append(DrawCommand {
-                    rectangle_to_path(TRY(reader.read_rectangle())), header.style }));
+                draw_commands.append(DrawCommand {
+                    rectangle_to_path(TRY(reader.read_rectangle())), header.style });
             }
             break;
         }
         case Command::FillPath: {
             auto header = TRY(reader.read_fill_command_header(style_type));
             auto path = TRY(reader.read_path(header.count));
-            TRY(draw_commands.try_append(DrawCommand { move(path), move(header.style) }));
+            draw_commands.append(DrawCommand { move(path), move(header.style) });
             break;
         }
         case Command::DrawLines: {
@@ -411,7 +411,7 @@ ErrorOr<NonnullRefPtr<TinyVGDecodedImageData>> TinyVGDecodedImageData::decode(St
                 path.move_to(TRY(reader.read_point()));
                 path.line_to(TRY(reader.read_point()));
             }
-            TRY(draw_commands.try_append(DrawCommand { move(path), {}, move(header.line_style), header.line_width }));
+            draw_commands.append(DrawCommand { move(path), {}, move(header.line_style), header.line_width });
             break;
         }
         case Command::DrawLineStrip:
@@ -423,13 +423,13 @@ ErrorOr<NonnullRefPtr<TinyVGDecodedImageData>> TinyVGDecodedImageData::decode(St
                 path.line_to(TRY(reader.read_point()));
             if (command == Command::DrawLineLoop)
                 path.close();
-            TRY(draw_commands.try_append(DrawCommand { move(path), {}, move(header.line_style), header.line_width }));
+            draw_commands.append(DrawCommand { move(path), {}, move(header.line_style), header.line_width });
             break;
         }
         case Command::DrawLinePath: {
             auto header = TRY(reader.read_draw_command_header(style_type));
             auto path = TRY(reader.read_path(header.count));
-            TRY(draw_commands.try_append(DrawCommand { move(path), {}, move(header.line_style), header.line_width }));
+            draw_commands.append(DrawCommand { move(path), {}, move(header.line_style), header.line_width });
             break;
         }
         case Command::OutlineFillPolygon: {
@@ -439,21 +439,21 @@ ErrorOr<NonnullRefPtr<TinyVGDecodedImageData>> TinyVGDecodedImageData::decode(St
             for (u32 i = 0; i < header.count - 1; i++)
                 polygon.line_to(TRY(reader.read_point()));
             polygon.close();
-            TRY(draw_commands.try_append(DrawCommand { move(polygon), move(header.fill_style), move(header.line_style), header.line_width }));
+            draw_commands.append(DrawCommand { move(polygon), move(header.fill_style), move(header.line_style), header.line_width });
             break;
         }
         case Command::OutlineFillRectangles: {
             auto header = TRY(reader.read_outline_fill_command_header(style_type));
             for (u32 i = 0; i < header.count; i++) {
-                TRY(draw_commands.try_append(DrawCommand {
-                    rectangle_to_path(TRY(reader.read_rectangle())), header.fill_style, header.line_style, header.line_width }));
+                draw_commands.append(DrawCommand {
+                    rectangle_to_path(TRY(reader.read_rectangle())), header.fill_style, header.line_style, header.line_width });
             }
             break;
         }
         case Command::OutLineFillPath: {
             auto header = TRY(reader.read_outline_fill_command_header(style_type));
             auto path = TRY(reader.read_path(header.count));
-            TRY(draw_commands.try_append(DrawCommand { move(path), move(header.fill_style), move(header.line_style), header.line_width }));
+            draw_commands.append(DrawCommand { move(path), move(header.fill_style), move(header.line_style), header.line_width });
             break;
         }
         default:

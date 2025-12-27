@@ -30,7 +30,7 @@ void AccessibilityWalkerActor::handle_message(Message const& message)
 {
     if (message.type == "children"sv) {
         JsonArray children;
-        MUST(children.append(serialize_root()));
+        children.append(serialize_root());
 
         JsonObject response;
         response.set("children"sv, move(children));

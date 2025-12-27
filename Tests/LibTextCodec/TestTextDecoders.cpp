@@ -18,8 +18,9 @@ TEST_CASE(test_utf8_decode)
     EXPECT(decoder.validate(test_string));
 
     Vector<u32> processed_code_points;
-    MUST(decoder.process(test_string, [&](u32 code_point) {
-        return processed_code_points.try_append(code_point);
+    MUST(decoder.process(test_string, [&](u32 code_point) -> ErrorOr<void> {
+        processed_code_points.append(code_point);
+        return {};
     }));
     EXPECT(processed_code_points.size() == 1);
     EXPECT(processed_code_points[0] == 0x1F600);

@@ -80,13 +80,13 @@ void AccessibilityNodeActor::handle_message(Message const& message)
 
             auto report_relation = [&](StringView type, Node const& node) {
                 JsonArray targets;
-                MUST(targets.append(walker->serialize_node(node.node)));
+                targets.append(walker->serialize_node(node.node));
 
                 JsonObject relation;
                 relation.set("targets"sv, move(targets));
                 relation.set("type"sv, type);
 
-                MUST(relations.append(move(relation)));
+                relations.append(move(relation));
             };
 
             // For the root node, list itself as an "embeds" relation.

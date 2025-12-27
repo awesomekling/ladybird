@@ -52,7 +52,7 @@ ErrorOr<Vector<GC::Root<PerformanceTimeline::PerformanceEntry>>> filter_buffer_b
             continue;
 
         // 3. append entry to result.
-        TRY(result.try_append(entry));
+        result.append(entry);
     }
 
     // 3. Sort results's entries in chronological order with respect to startTime
