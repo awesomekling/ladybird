@@ -88,6 +88,7 @@ public:
 
 private:
     friend class MarkingVisitor;
+    friend class ParallelMarkingVisitor;
     friend class GraphConstructorVisitor;
     friend class DeferGC;
     friend class ForeignCell;
