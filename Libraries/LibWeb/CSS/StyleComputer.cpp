@@ -1277,6 +1277,80 @@ StyleComputer::MatchingRuleSet StyleComputer::build_matching_rule_set(DOM::Abstr
     return matching_rule_set;
 }
 
+// Fast path for scanning matching rules for specific properties without full cascade machinery.
+// Returns nullopt if var(), revert, or revert-layer is encountered (needs full cascade).
+// Otherwise returns the cascaded values for each property (may be nullptr if no rule sets it).
+template<size_t N>
+static Optional<Array<RefPtr<StyleValue const>, N>> fast_scan_cascaded_properties(
+    StyleComputer::MatchingRuleSet const& matching_rule_set,
+    Array<PropertyID, N> const& properties)
+{
+    Array<RefPtr<StyleValue const>, N> values {};
+
+    auto scan_rules = [&](Vector<MatchingRule const*> const& rules, Important important) -> bool {
+        for (auto const* rule : rules) {
+            for (auto const& property : rule->declaration().properties()) {
+                if (property.important != important)
+                    continue;
+                for (size_t i = 0; i < N; ++i) {
+                    if (property.property_id != properties[i])
+                        continue;
+                    // These require full cascade machinery to resolve.
+                    if (property.value->is_unresolved() || property.value->is_revert() || property.value->is_revert_layer())
+                        return false;
+                    values[i] = property.value;
+                    break;
+                }
+            }
+        }
+        return true;
+    };
+
+    // Cascade order: UA normal, user normal, author normal (per layer),
+    // author important (reverse layer order), user important, UA important
+    if (!scan_rules(matching_rule_set.user_agent_rules, Important::No))
+        return {};
+    if (!scan_rules(matching_rule_set.user_rules, Important::No))
+        return {};
+    for (auto const& layer : matching_rule_set.author_rules) {
+        if (!scan_rules(layer.rules, Important::No))
+            return {};
+    }
+    for (auto const& layer : matching_rule_set.author_rules.in_reverse()) {
+        if (!scan_rules(layer.rules, Important::Yes))
+            return {};
+    }
+    if (!scan_rules(matching_rule_set.user_rules, Important::Yes))
+        return {};
+    if (!scan_rules(matching_rule_set.user_agent_rules, Important::Yes))
+        return {};
+
+    return values;
+}
+
+// Fast path for checking the content property without full cascade machinery.
+// Returns Unknown if we encounter var(), revert, or revert-layer.
+StyleComputer::FastContentCheckResult StyleComputer::fast_check_content_for_pseudo_element(MatchingRuleSet const& matching_rule_set)
+{
+    auto result = fast_scan_cascaded_properties<1>(matching_rule_set, { PropertyID::Content });
+    if (!result.has_value())
+        return FastContentCheckResult::Unknown;
+
+    auto content_value = (*result)[0];
+
+    // No content value means `normal` (the initial value)
+    if (!content_value)
+        return FastContentCheckResult::None;
+
+    if (content_value->is_keyword()) {
+        auto keyword = content_value->as_keyword().keyword();
+        if (keyword == Keyword::None || keyword == Keyword::Normal)
+            return FastContentCheckResult::None;
+    }
+
+    return FastContentCheckResult::HasValue;
+}
+
 // https://www.w3.org/TR/css-cascade/#cascading
 // https://drafts.csswg.org/css-cascade-5/#layering
 GC::Ref<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, bool did_match_any_pseudo_element_rules, ComputeStyleMode mode, MatchingRuleSet const& matching_rule_set, Optional<LogicalAliasMappingContext> logical_alias_mapping_context, ReadonlySpan<PropertyID> properties_to_cascade) const
@@ -1507,36 +1581,37 @@ void StyleComputer::compute_font(ComputedProperties& style, Optional<DOM::Abstra
 
 LogicalAliasMappingContext StyleComputer::compute_logical_alias_mapping_context(DOM::AbstractElement abstract_element, ComputeStyleMode mode, MatchingRuleSet const& matching_rule_set) const
 {
-    auto normalize_value = [&](auto property_id, auto value) {
+    static constexpr Array<PropertyID, 2> properties { PropertyID::WritingMode, PropertyID::Direction };
+
+    RefPtr<StyleValue const> writing_mode_value;
+    RefPtr<StyleValue const> direction_value;
+
+    // Fast path: try to scan rules directly without allocating CascadedProperties.
+    if (auto fast_result = fast_scan_cascaded_properties<2>(matching_rule_set, properties); fast_result.has_value()) {
+        writing_mode_value = (*fast_result)[0];
+        direction_value = (*fast_result)[1];
+    } else {
+        // Slow path: var(), revert, or revert-layer encountered; use full cascade.
+        bool did_match_any_pseudo_element_rules = false;
+        auto cascaded_properties = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set, {}, properties);
+        writing_mode_value = cascaded_properties->property(PropertyID::WritingMode);
+        direction_value = cascaded_properties->property(PropertyID::Direction);
+    }
+
+    // Resolve inherit/initial/unset.
+    auto normalize = [&](PropertyID property_id, RefPtr<StyleValue const> value) -> NonnullRefPtr<StyleValue const> {
         if (!value || value->is_inherit() || value->is_unset()) {
-            if (auto const inheritance_parent = abstract_element.element_to_inherit_style_from(); inheritance_parent.has_value()) {
-                value = inheritance_parent->computed_properties()->property(property_id);
-            } else {
-                value = property_initial_value(property_id);
-            }
+            if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value())
+                return parent->computed_properties()->property(property_id);
+            return property_initial_value(property_id);
         }
-
         if (value->is_initial())
-            value = property_initial_value(property_id);
-
-        return value;
+            return property_initial_value(property_id);
+        return value.release_nonnull();
     };
 
-    bool did_match_any_pseudo_element_rules = false;
-
-    static Array<PropertyID, 2> properties_to_cascade {
-        PropertyID::WritingMode,
-        PropertyID::Direction,
-    };
-    auto cascaded_properties = compute_cascaded_values(
-        abstract_element,
-        did_match_any_pseudo_element_rules,
-        mode, matching_rule_set,
-        {},
-        properties_to_cascade);
-
-    auto writing_mode = normalize_value(PropertyID::WritingMode, cascaded_properties->property(PropertyID::WritingMode));
-    auto direction = normalize_value(PropertyID::Direction, cascaded_properties->property(PropertyID::Direction));
+    auto writing_mode = normalize(PropertyID::WritingMode, writing_mode_value);
+    auto direction = normalize(PropertyID::Direction, direction_value);
 
     return LogicalAliasMappingContext {
         .writing_mode = keyword_to_writing_mode(writing_mode->to_keyword()).release_value(),
@@ -1859,31 +1934,13 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
     // OPTIMIZATION: For pseudo-elements, check the content property early before doing the full cascade.
     // This saves cascading ~600 properties when the pseudo-element won't be generated anyway.
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
-        // Bail if no pseudo-element rules matched.
         if (!did_match_any_pseudo_element_rules)
             return {};
 
-        // Cascade only the content property first to check if we should bail early.
-        static constexpr Array content_property_only { PropertyID::Content };
-        auto content_only_cascaded = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set, logical_alias_mapping_context, content_property_only);
-
-        // Check if no pseudo-element would be generated due to content: none or content: normal
-        bool content_is_normal = false;
-        if (auto content_value = content_only_cascaded->property(CSS::PropertyID::Content)) {
-            if (content_value->is_keyword()) {
-                auto content = content_value->as_keyword().keyword();
-                if (content == CSS::Keyword::None)
-                    return {};
-                content_is_normal = content == CSS::Keyword::Normal;
-            } else {
-                content_is_normal = false;
-            }
-        } else {
-            // NOTE: `normal` is the initial value, so the absence of a value is treated as `normal`.
-            content_is_normal = true;
-        }
-        if (content_is_normal && first_is_one_of(*abstract_element.pseudo_element(), CSS::PseudoElement::Before, CSS::PseudoElement::After)) {
-            return {};
+        // For ::before and ::after, bail if content is none/normal (no pseudo-element needed).
+        if (first_is_one_of(*abstract_element.pseudo_element(), CSS::PseudoElement::Before, CSS::PseudoElement::After)) {
+            if (fast_check_content_for_pseudo_element(matching_rule_set) == FastContentCheckResult::None)
+                return {};
         }
     }
 

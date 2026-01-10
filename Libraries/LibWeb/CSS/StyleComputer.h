@@ -142,14 +142,6 @@ public:
     static NonnullRefPtr<StyleValue const> compute_opacity(NonnullRefPtr<StyleValue const> const& absolutized_value);
     static NonnullRefPtr<StyleValue const> compute_position_area(NonnullRefPtr<StyleValue const> const& absolutized_value);
 
-private:
-    virtual void visit_edges(Visitor&) override;
-
-    enum class ComputeStyleMode {
-        Normal,
-        CreatePseudoElementStyleIfNeeded,
-    };
-
     struct LayerMatchingRules {
         FlyString qualified_layer_name;
         Vector<MatchingRule const*> rules;
@@ -159,6 +151,14 @@ private:
         Vector<MatchingRule const*> user_agent_rules;
         Vector<MatchingRule const*> user_rules;
         Vector<LayerMatchingRules> author_rules;
+    };
+
+private:
+    virtual void visit_edges(Visitor&) override;
+
+    enum class ComputeStyleMode {
+        Normal,
+        CreatePseudoElementStyleIfNeeded,
     };
 
     [[nodiscard]] MatchingRuleSet build_matching_rule_set(DOM::AbstractElement, PseudoClassBitmap& attempted_pseudo_class_matches, bool& did_match_any_pseudo_element_rules, ComputeStyleMode, StyleScope const&) const;
@@ -185,6 +185,13 @@ private:
         Optional<FlyString> layer_name,
         Optional<LogicalAliasMappingContext>,
         ReadonlySpan<PropertyID> properties_to_cascade) const;
+
+    enum class FastContentCheckResult : u8 {
+        Unknown, // Needs full cascade (var(), revert, etc.)
+        None,    // Content is none/normal - no pseudo-element needed
+        HasValue // Content has actual value - pseudo-element needed
+    };
+    [[nodiscard]] static FastContentCheckResult fast_check_content_for_pseudo_element(MatchingRuleSet const&);
 
     GC::Ref<DOM::Document> m_document;
 
