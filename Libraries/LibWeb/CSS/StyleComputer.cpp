@@ -1855,21 +1855,21 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
     }
 
     auto logical_alias_mapping_context = compute_logical_alias_mapping_context(abstract_element, mode, matching_rule_set);
-    auto cascaded_properties = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set, logical_alias_mapping_context, {});
-    abstract_element.set_cascaded_properties(cascaded_properties);
 
+    // OPTIMIZATION: For pseudo-elements, check the content property early before doing the full cascade.
+    // This saves cascading ~600 properties when the pseudo-element won't be generated anyway.
     if (mode == ComputeStyleMode::CreatePseudoElementStyleIfNeeded) {
-        // NOTE: If we're computing style for a pseudo-element, we look for a number of reasons to bail early.
-
         // Bail if no pseudo-element rules matched.
         if (!did_match_any_pseudo_element_rules)
             return {};
 
-        // Bail if no pseudo-element would be generated due to...
-        // - content: none
-        // - content: normal (for ::before and ::after)
+        // Cascade only the content property first to check if we should bail early.
+        static constexpr Array content_property_only { PropertyID::Content };
+        auto content_only_cascaded = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set, logical_alias_mapping_context, content_property_only);
+
+        // Check if no pseudo-element would be generated due to content: none or content: normal
         bool content_is_normal = false;
-        if (auto content_value = cascaded_properties->property(CSS::PropertyID::Content)) {
+        if (auto content_value = content_only_cascaded->property(CSS::PropertyID::Content)) {
             if (content_value->is_keyword()) {
                 auto content = content_value->as_keyword().keyword();
                 if (content == CSS::Keyword::None)
@@ -1886,6 +1886,9 @@ GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractEleme
             return {};
         }
     }
+
+    auto cascaded_properties = compute_cascaded_values(abstract_element, did_match_any_pseudo_element_rules, mode, matching_rule_set, logical_alias_mapping_context, {});
+    abstract_element.set_cascaded_properties(cascaded_properties);
 
     auto computed_properties = compute_properties(abstract_element, cascaded_properties);
     computed_properties->set_attempted_pseudo_class_matches(attempted_pseudo_class_matches);
