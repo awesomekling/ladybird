@@ -1464,13 +1464,30 @@ static Bytecode::CodeGenerationErrorOr<void> generate_array_binding_pattern_byte
      * unnecessary.
      */
 
+    auto& saved_block = generator.current_block();
+    auto& continuation_block = generator.make_block();
+    auto& finalizer_block = generator.make_block();
+
     auto is_iterator_exhausted = generator.allocate_register();
+    auto should_close_iterator = generator.allocate_register();
     generator.emit_mov(is_iterator_exhausted, generator.add_constant(Value(false)));
+    generator.emit_mov(should_close_iterator, generator.add_constant(Value(false)));
 
     auto iterator_object = generator.allocate_register();
     auto iterator_next_method = generator.allocate_register();
     auto iterator_done_property = generator.allocate_register();
+
+    Optional<Bytecode::Generator::UnwindContext> unwind_context;
+    unwind_context.emplace(generator, Bytecode::Label { finalizer_block });
+
+    auto& target_block = generator.make_block();
+    generator.switch_to_basic_block(saved_block);
+    generator.emit<Bytecode::Op::EnterUnwindContext>(Bytecode::Label { target_block });
+    generator.start_boundary(Bytecode::Generator::BlockBoundaryType::Unwind);
+
+    generator.switch_to_basic_block(target_block);
     generator.emit<Bytecode::Op::GetIterator>(iterator_object, iterator_next_method, iterator_done_property, input_array, IteratorHint::Sync);
+    generator.emit_mov(should_close_iterator, generator.add_constant(Value(true)));
     bool first = true;
 
     auto assign_value_to_alias = [&](auto& alias, ScopedOperand value) {
@@ -1528,7 +1545,9 @@ static Bytecode::CodeGenerationErrorOr<void> generate_array_binding_pattern_byte
                 generator.switch_to_basic_block(continuation_block);
             }
 
-            return assign_value_to_alias(alias, value);
+            generator.emit_mov(is_iterator_exhausted, generator.add_constant(Value(true)));
+            TRY(assign_value_to_alias(alias, value));
+            break;
         }
 
         auto& iterator_is_exhausted_block = generator.make_block();
@@ -1610,6 +1629,40 @@ static Bytecode::CodeGenerationErrorOr<void> generate_array_binding_pattern_byte
     generator.emit<Bytecode::Op::Jump>(Bytecode::Label { done_block });
 
     generator.switch_to_basic_block(done_block);
+    generator.emit<Bytecode::Op::LeaveUnwindContext>();
+    generator.emit<Bytecode::Op::Jump>(Bytecode::Label { continuation_block });
+    generator.end_boundary(Bytecode::Generator::BlockBoundaryType::Unwind);
+
+    unwind_context.clear();
+
+    generator.switch_to_basic_block(finalizer_block);
+    generator.emit<Bytecode::Op::LeaveUnwindContext>();
+
+    auto& close_done_block = generator.make_block();
+    auto& close_check_block = generator.make_block();
+
+    generator.emit_jump_if(
+        should_close_iterator,
+        Bytecode::Label { close_check_block },
+        Bytecode::Label { close_done_block });
+
+    generator.switch_to_basic_block(close_check_block);
+
+    auto& close_block = generator.make_block();
+
+    generator.emit_jump_if(
+        is_iterator_exhausted,
+        Bytecode::Label { close_done_block },
+        Bytecode::Label { close_block });
+
+    generator.switch_to_basic_block(close_block);
+    generator.emit<Bytecode::Op::IteratorClose>(iterator_object, iterator_next_method, iterator_done_property, Completion::Type::Normal, Optional<Value> {});
+    generator.emit<Bytecode::Op::Jump>(Bytecode::Label { close_done_block });
+
+    generator.switch_to_basic_block(close_done_block);
+    generator.emit<Bytecode::Op::ContinuePendingUnwind>(Bytecode::Label { continuation_block });
+
+    generator.switch_to_basic_block(continuation_block);
     return {};
 }
 
