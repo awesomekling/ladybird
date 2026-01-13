@@ -96,6 +96,8 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     Vector<ByteString> raw_urls;
     Vector<ByteString> certificates;
     Optional<HeadlessMode> headless_mode;
+    ByteString screenshot_path;
+    int screenshot_delay_ms { 0 };
     Optional<int> window_width;
     Optional<int> window_height;
     bool new_window = false;
@@ -154,6 +156,8 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         },
     });
 
+    args_parser.add_option(screenshot_path, "Path to save screenshot in headless screenshot mode", "screenshot", 0, "path");
+    args_parser.add_option(screenshot_delay_ms, "Milliseconds to wait after load event before taking screenshot (default: 0)", "screenshot-delay", 0, "milliseconds");
     args_parser.add_option(window_width, "Set viewport width in pixels (default: 800) (currently only supported for headless mode)", "window-width", 0, "pixels");
     args_parser.add_option(window_height, "Set viewport height in pixels (default: 600) (currently only supported for headless mode)", "window-height", 0, "pixels");
     args_parser.add_option(certificates, "Path to a certificate file", "certificate", 'C', "certificate");
@@ -238,6 +242,8 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         .urls = sanitize_urls(raw_urls, m_settings.new_tab_page_url()),
         .raw_urls = move(raw_urls),
         .headless_mode = headless_mode,
+        .screenshot_path = screenshot_path.is_empty() ? Optional<ByteString> {} : move(screenshot_path),
+        .screenshot_delay_ms = screenshot_delay_ms,
         .new_window = new_window ? NewWindow::Yes : NewWindow::No,
         .force_new_process = force_new_process ? ForceNewProcess::Yes : ForceNewProcess::No,
         .allow_popups = allow_popups ? AllowPopups::Yes : AllowPopups::No,
@@ -488,28 +494,39 @@ ErrorOr<void> Application::launch_devtools_server()
     return {};
 }
 
-static NonnullRefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int screenshot_timeout)
+static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int delay_ms)
 {
-    outln("Taking screenshot after {} seconds", screenshot_timeout);
+    auto take_screenshot = [&view, &event_loop] {
+        view.take_screenshot(ViewImplementation::ScreenshotType::Full)
+            ->when_resolved([&event_loop](auto const& path) {
+                outln("Saved screenshot to: {}", path);
+                event_loop.quit(0);
+            })
+            .when_rejected([&event_loop](auto const& error) {
+                warnln("Unable to take screenshot: {}", error);
+                event_loop.quit(1);
+            });
+    };
 
-    auto timer = Core::Timer::create_single_shot(
-        screenshot_timeout * 1000,
-        [&]() {
-            view.take_screenshot(ViewImplementation::ScreenshotType::Full)
-                ->when_resolved([&event_loop](auto const& path) {
-                    outln("Saved screenshot to: {}", path);
-                    event_loop.quit(0);
-                })
-                .when_rejected([&event_loop](auto const& error) {
-                    warnln("Unable to take screenshot: {}", error);
-                    event_loop.quit(0);
-                });
-        });
+    RefPtr<Core::Timer> delay_timer;
+    if (delay_ms > 0) {
+        delay_timer = Core::Timer::create_single_shot(delay_ms, move(take_screenshot));
+
+        view.on_load_finish = [url, delay_timer](auto const& loaded_url) {
+            if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+                return;
+            delay_timer->start();
+        };
+    } else {
+        view.on_load_finish = [url, take_screenshot = move(take_screenshot)](auto const& loaded_url) mutable {
+            if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+                return;
+            take_screenshot();
+        };
+    }
 
     view.load(url);
-    timer->start();
-
-    return timer;
+    return delay_timer;
 }
 
 static void load_page_for_info_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, WebView::PageInfoType type)
@@ -539,7 +556,7 @@ static void load_page_and_exit_on_close(Core::EventLoop& event_loop, HeadlessWeb
 ErrorOr<int> Application::execute()
 {
     OwnPtr<HeadlessWebView> view;
-    RefPtr<Core::Timer> screenshot_timer;
+    RefPtr<Core::Timer> screenshot_delay_timer;
 
     if (m_browser_options.headless_mode.has_value()) {
         auto theme_path = LexicalPath::join(WebView::s_ladybird_resource_root, "themes"sv, "Default.ini"sv);
@@ -553,7 +570,7 @@ ErrorOr<int> Application::execute()
 
             switch (*m_browser_options.headless_mode) {
             case HeadlessMode::Screenshot:
-                screenshot_timer = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), 1);
+                screenshot_delay_timer = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), m_browser_options.screenshot_delay_ms);
                 break;
             case HeadlessMode::LayoutTree:
                 load_page_for_info_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), WebView::PageInfoType::LayoutTree | WebView::PageInfoType::PaintTree);

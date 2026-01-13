@@ -735,15 +735,20 @@ static ErrorOr<LexicalPath> save_screenshot(Gfx::Bitmap const* bitmap)
     if (!bitmap)
         return Error::from_string_literal("Failed to take a screenshot");
 
-    auto file = AK::UnixDateTime::now().to_byte_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
-    auto path = TRY(Application::the().path_for_downloaded_file(file));
+    ByteString path;
+    if (auto const& screenshot_path = Application::the().browser_options().screenshot_path; screenshot_path.has_value()) {
+        path = *screenshot_path;
+    } else {
+        auto file = AK::UnixDateTime::now().to_byte_string("screenshot-%Y-%m-%d-%H-%M-%S.png"sv);
+        path = TRY(Application::the().path_for_downloaded_file(file)).string();
+    }
 
     auto encoded = TRY(Gfx::PNGWriter::encode(*bitmap));
 
-    auto dump_file = TRY(Core::File::open(path.string(), Core::File::OpenMode::Write));
+    auto dump_file = TRY(Core::File::open(path, Core::File::OpenMode::Write));
     TRY(dump_file->write_until_depleted(encoded));
 
-    return path;
+    return LexicalPath { move(path) };
 }
 
 NonnullRefPtr<Core::Promise<LexicalPath>> ViewImplementation::take_screenshot(ScreenshotType type)
