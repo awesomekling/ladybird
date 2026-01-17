@@ -20,6 +20,7 @@
 #include <LibCore/Forward.h>
 #include <LibCore/SharedCircularQueue.h>
 #include <LibCore/Socket.h>
+#include <LibGC/Forward.h>
 #include <LibIPC/Concepts.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Forward.h>
@@ -135,6 +136,15 @@ ErrorOr<Core::DateTime> decode(Decoder&);
 
 template<>
 ErrorOr<Core::ProxyData> decode(Decoder&);
+
+template<>
+ErrorOr<Core::Platform::MemoryRegion> decode(Decoder&);
+
+template<>
+ErrorOr<Core::Platform::MemoryInfo> decode(Decoder&);
+
+template<>
+ErrorOr<GC::HeapStatistics> decode(Decoder&);
 
 template<>
 ErrorOr<URL::BlobURLEntry::Blob> decode(Decoder&);

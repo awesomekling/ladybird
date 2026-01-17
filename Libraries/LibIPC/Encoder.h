@@ -14,6 +14,7 @@
 #include <AK/Variant.h>
 #include <LibCore/Forward.h>
 #include <LibCore/SharedCircularQueue.h>
+#include <LibGC/Forward.h>
 #include <LibIPC/Concepts.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Forward.h>
@@ -138,6 +139,15 @@ ErrorOr<void> encode(Encoder&, Core::DateTime const&);
 
 template<>
 ErrorOr<void> encode(Encoder&, Core::ProxyData const&);
+
+template<>
+ErrorOr<void> encode(Encoder&, Core::Platform::MemoryRegion const&);
+
+template<>
+ErrorOr<void> encode(Encoder&, Core::Platform::MemoryInfo const&);
+
+template<>
+ErrorOr<void> encode(Encoder&, GC::HeapStatistics const&);
 
 template<>
 ErrorOr<void> encode(Encoder&, URL::BlobURLEntry::Blob const&);

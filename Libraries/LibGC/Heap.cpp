@@ -369,6 +369,25 @@ void Heap::dump_allocators()
     dbgln("Total wasted on fragmentation: {} KiB", total_waste / KiB);
 }
 
+HeapStatistics Heap::statistics()
+{
+    HeapStatistics stats;
+
+    for (auto& allocator : m_all_cell_allocators) {
+        allocator.for_each_block([&](HeapBlock& heap_block) {
+            stats.total_allocated_bytes += HeapBlock::BLOCK_SIZE;
+            ++stats.block_count;
+
+            heap_block.template for_each_cell_in_state<Cell::State::Live>([&](Cell*) {
+                stats.total_live_cell_bytes += allocator.cell_size();
+            });
+            return IterationDecision::Continue;
+        });
+    }
+
+    return stats;
+}
+
 void Heap::enqueue_post_gc_task(AK::Function<void()> task)
 {
     m_post_gc_tasks.append(move(task));

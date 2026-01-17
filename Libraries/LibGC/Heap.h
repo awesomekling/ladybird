@@ -21,6 +21,7 @@
 #include <LibGC/ConservativeVector.h>
 #include <LibGC/Forward.h>
 #include <LibGC/HeapRoot.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibGC/Internals.h>
 #include <LibGC/Root.h>
 #include <LibGC/RootHashMap.h>
@@ -57,6 +58,8 @@ public:
 
     void collect_garbage(CollectionType = CollectionType::CollectGarbage, bool print_report = false);
     AK::JsonObject dump_graph();
+
+    HeapStatistics statistics();
 
     bool should_collect_on_every_allocation() const { return m_should_collect_on_every_allocation; }
     void set_should_collect_on_every_allocation(bool b) { m_should_collect_on_every_allocation = b; }

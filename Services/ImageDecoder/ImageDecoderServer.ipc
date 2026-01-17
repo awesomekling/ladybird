@@ -1,4 +1,5 @@
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/Platform/MemoryInfo.h>
 
 endpoint ImageDecoderServer
 {
@@ -7,4 +8,6 @@ endpoint ImageDecoderServer
     cancel_decoding(i64 image_id) =|
 
     connect_new_clients(size_t count) => (Vector<IPC::File> sockets)
+
+    get_memory_statistics() => (Core::Platform::MemoryInfo os_info)
 }

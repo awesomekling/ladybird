@@ -44,6 +44,7 @@ private:
     virtual void cancel_decoding(i64 image_id) override;
     virtual Messages::ImageDecoderServer::ConnectNewClientsResponse connect_new_clients(size_t count) override;
     virtual Messages::ImageDecoderServer::InitTransportResponse init_transport(int peer_pid) override;
+    virtual Messages::ImageDecoderServer::GetMemoryStatisticsResponse get_memory_statistics() override;
 
     ErrorOr<IPC::File> connect_new_client();
 

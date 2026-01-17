@@ -8,6 +8,7 @@
 #include <AK/IDAllocator.h>
 #include <ImageDecoder/ConnectionFromClient.h>
 #include <ImageDecoder/ImageDecoderClientEndpoint.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/System.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ImageFormats/ImageDecoder.h>
@@ -184,6 +185,12 @@ void ConnectionFromClient::cancel_decoding(i64 image_id)
     if (auto job = m_pending_jobs.take(image_id); job.has_value()) {
         job.value()->cancel();
     }
+}
+
+Messages::ImageDecoderServer::GetMemoryStatisticsResponse ConnectionFromClient::get_memory_statistics()
+{
+    auto os_info = Core::Platform::get_memory_info().release_value_but_fixme_should_propagate_errors();
+    return { os_info };
 }
 
 }
