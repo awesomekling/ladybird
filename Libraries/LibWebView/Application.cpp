@@ -512,14 +512,16 @@ static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& ev
     if (delay_ms > 0) {
         delay_timer = Core::Timer::create_single_shot(delay_ms, move(take_screenshot));
 
-        view.on_load_finish = [url, delay_timer](auto const& loaded_url) {
-            if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+        view.on_load_finish = [delay_timer](auto const& loaded_url) {
+            // Ignore initial about:blank load
+            if (loaded_url.equals(URL::about_blank()))
                 return;
             delay_timer->start();
         };
     } else {
-        view.on_load_finish = [url, take_screenshot = move(take_screenshot)](auto const& loaded_url) mutable {
-            if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+        view.on_load_finish = [take_screenshot = move(take_screenshot)](auto const& loaded_url) mutable {
+            // Ignore initial about:blank load
+            if (loaded_url.equals(URL::about_blank()))
                 return;
             take_screenshot();
         };
@@ -531,8 +533,9 @@ static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& ev
 
 static void load_page_for_info_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, WebView::PageInfoType type)
 {
-    view.on_load_finish = [&view, &event_loop, url, type](auto const& loaded_url) {
-        if (!url.equals(loaded_url, URL::ExcludeFragment::Yes))
+    view.on_load_finish = [&view, &event_loop, type](auto const& loaded_url) {
+        // Ignore initial about:blank load
+        if (loaded_url.equals(URL::about_blank()))
             return;
 
         view.request_internal_page_info(type)->when_resolved([&event_loop](auto const& text) {
