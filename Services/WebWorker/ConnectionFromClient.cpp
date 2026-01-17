@@ -5,6 +5,8 @@
  */
 
 #include <LibCore/EventLoop.h>
+#include <LibCore/Platform/MemoryInfo.h>
+#include <LibGC/Heap.h>
 #include <WebWorker/ConnectionFromClient.h>
 #include <WebWorker/PageHost.h>
 #include <WebWorker/WorkerHost.h>
@@ -83,6 +85,13 @@ void ConnectionFromClient::handle_file_return(i32 error, Optional<IPC::File> fil
     VERIFY(file_request.value().on_file_request_finish);
 
     file_request.value().on_file_request_finish(error != 0 ? Error::from_errno(error) : ErrorOr<i32> { file->take_fd() });
+}
+
+Messages::WebWorkerServer::GetMemoryStatisticsResponse ConnectionFromClient::get_memory_statistics()
+{
+    auto os_info = Core::Platform::get_memory_info().release_value_but_fixme_should_propagate_errors();
+    auto gc_stats = GC::Heap::the().statistics();
+    return { os_info, gc_stats };
 }
 
 }

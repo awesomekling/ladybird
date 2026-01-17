@@ -59,6 +59,8 @@ private:
     virtual void websocket_close(u64 websocket_id, u16, ByteString) override;
     virtual Messages::RequestServer::WebsocketSetCertificateResponse websocket_set_certificate(u64, ByteString, ByteString) override;
 
+    virtual Messages::RequestServer::GetMemoryStatisticsResponse get_memory_statistics() override;
+
     static int on_socket_callback(void*, int sockfd, int what, void* user_data, void*);
     static int on_timeout_callback(void*, long timeout_ms, void* user_data);
     void check_active_requests();

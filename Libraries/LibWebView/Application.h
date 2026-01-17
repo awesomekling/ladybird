@@ -107,6 +107,8 @@ public:
     };
     void clear_browsing_data(ClearBrowsingDataOptions const&);
 
+    void collect_and_dump_memory_stats(ByteString const& path);
+
     Action& reload_action() { return *m_reload_action; }
     Action& copy_selection_action() { return *m_copy_selection_action; }
     Action& paste_action() { return *m_paste_action; }

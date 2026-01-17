@@ -12,6 +12,7 @@
 #include <AK/JsonObject.h>
 #include <AK/QuickSort.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/System.h>
 #include <LibGC/Heap.h>
 #include <LibGfx/Bitmap.h>
@@ -1383,6 +1384,13 @@ void ConnectionFromClient::cookies_changed(u64 page_id, Vector<HTTP::Cookie::Coo
 
         window->cookie_store()->process_cookie_changes(move(cookies));
     }
+}
+
+Messages::WebContentServer::GetMemoryStatisticsResponse ConnectionFromClient::get_memory_statistics()
+{
+    auto os_info = Core::Platform::get_memory_info().release_value_but_fixme_should_propagate_errors();
+    auto gc_stats = GC::Heap::the().statistics();
+    return { os_info, gc_stats };
 }
 
 }

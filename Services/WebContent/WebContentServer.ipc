@@ -1,4 +1,6 @@
 #include <LibCore/SharedVersion.h>
+#include <LibCore/Platform/MemoryInfo.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibGfx/Rect.h>
 #include <LibHTTP/Cookie/Cookie.h>
 #include <LibIPC/File.h>
@@ -139,4 +141,6 @@ endpoint WebContentServer
     set_document_cookie_version_buffer(u64 page_id, Core::AnonymousBuffer document_cookie_version_buffer) =|
     set_document_cookie_version_index(u64 page_id, i64 document_id, Core::SharedVersionIndex document_index) =|
     cookies_changed(u64 page_id, Vector<HTTP::Cookie::Cookie> cookies) =|
+
+    get_memory_statistics() => (Core::Platform::MemoryInfo os_info, GC::HeapStatistics gc_stats)
 }

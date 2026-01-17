@@ -1,3 +1,4 @@
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/Proxy.h>
 #include <LibHTTP/Cache/CacheMode.h>
 #include <LibHTTP/Cookie/IncludeCredentials.h>
@@ -35,4 +36,5 @@ endpoint RequestServer
     websocket_close(u64 websocket_id, u16 code, ByteString reason) =|
     websocket_set_certificate(u64 request_id, ByteString certificate, ByteString key) => (bool success)
 
+    get_memory_statistics() => (Core::Platform::MemoryInfo os_info)
 }

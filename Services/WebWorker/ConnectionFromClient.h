@@ -43,6 +43,7 @@ private:
 
     virtual void start_worker(URL::URL url, Web::Bindings::WorkerType type, Web::Bindings::RequestCredentials credentials, String name, Web::HTML::TransferDataEncoder, Web::HTML::SerializedEnvironmentSettingsObject, Web::Bindings::AgentType, Optional<URL::URL>) override;
     virtual void handle_file_return(i32 error, Optional<IPC::File> file, i32 request_id) override;
+    virtual Messages::WebWorkerServer::GetMemoryStatisticsResponse get_memory_statistics() override;
 
     GC::Root<PageHost> m_page_host;
 

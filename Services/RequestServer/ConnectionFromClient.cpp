@@ -7,6 +7,7 @@
 #include <AK/IDAllocator.h>
 #include <AK/NonnullOwnPtr.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/Proxy.h>
 #include <LibCore/Socket.h>
 #include <LibCore/StandardPaths.h>
@@ -433,6 +434,12 @@ Messages::RequestServer::WebsocketSetCertificateResponse ConnectionFromClient::w
         success = true;
     }
     return success;
+}
+
+Messages::RequestServer::GetMemoryStatisticsResponse ConnectionFromClient::get_memory_statistics()
+{
+    auto os_info = Core::Platform::get_memory_info().release_value_but_fixme_should_propagate_errors();
+    return { os_info };
 }
 
 }

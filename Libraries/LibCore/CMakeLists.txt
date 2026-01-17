@@ -100,6 +100,15 @@ else ()
     list(APPEND SOURCES Platform/ProcessStatisticsUnimplemented.cpp)
 endif()
 
+# FIXME: Implement MemoryInfo for Windows and *BSD
+if (LINUX)
+    list(APPEND SOURCES Platform/MemoryInfoLinux.cpp)
+elseif (APPLE AND NOT IOS)
+    list(APPEND SOURCES Platform/MemoryInfoMach.cpp)
+else ()
+    list(APPEND SOURCES Platform/MemoryInfoUnimplemented.cpp)
+endif()
+
 if (LINUX OR BSD)
     list(APPEND SOURCES TimeZoneWatcherUnix.cpp)
 elseif (APPLE AND NOT IOS)

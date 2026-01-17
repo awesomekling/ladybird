@@ -1,5 +1,7 @@
-#include <LibURL/URL.h>
+#include <LibCore/Platform/MemoryInfo.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibIPC/File.h>
+#include <LibURL/URL.h>
 #include <LibWeb/Bindings/AgentType.h>
 #include <LibWeb/Bindings/WorkerPrototype.h>
 #include <LibWeb/HTML/StructuredSerialize.h>
@@ -19,4 +21,6 @@ endpoint WebWorkerServer {
     close_worker() =|
 
     handle_file_return(i32 error, Optional<IPC::File> file, i32 request_id) =|
+
+    get_memory_statistics() => (Core::Platform::MemoryInfo os_info, GC::HeapStatistics gc_stats)
 }

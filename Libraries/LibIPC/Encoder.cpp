@@ -18,8 +18,10 @@
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/Proxy.h>
 #include <LibCore/System.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibIPC/Encoder.h>
 #include <LibIPC/File.h>
 #include <LibURL/Origin.h>
@@ -203,6 +205,35 @@ ErrorOr<void> encode(Encoder& encoder, Core::ProxyData const& proxy)
     TRY(encoder.encode(proxy.type));
     TRY(encoder.encode(proxy.host_ipv4));
     TRY(encoder.encode(proxy.port));
+    return {};
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Core::Platform::MemoryRegion const& region)
+{
+    TRY(encoder.encode(region.name));
+    TRY(encoder.encode(region.size));
+    TRY(encoder.encode(region.resident));
+    TRY(encoder.encode(region.dirty));
+    return {};
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Core::Platform::MemoryInfo const& info)
+{
+    TRY(encoder.encode(info.resident_bytes));
+    TRY(encoder.encode(info.phys_footprint));
+    TRY(encoder.encode(info.phys_footprint_peak));
+    TRY(encoder.encode(info.regions));
+    return {};
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, GC::HeapStatistics const& stats)
+{
+    TRY(encoder.encode(stats.total_allocated_bytes));
+    TRY(encoder.encode(stats.total_live_cell_bytes));
+    TRY(encoder.encode(stats.block_count));
     return {};
 }
 

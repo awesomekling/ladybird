@@ -15,6 +15,7 @@ class Cell;
 class CellAllocator;
 class DeferGC;
 class ForeignCell;
+struct HeapStatistics;
 class RootImpl;
 class Heap;
 class HeapBlock;

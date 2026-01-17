@@ -51,6 +51,13 @@ class WeakEventLoopReference;
 
 struct ProxyData;
 
+namespace Platform {
+
+struct MemoryInfo;
+struct MemoryRegion;
+
+}
+
 #ifdef AK_OS_MACH
 class MachPort;
 #endif

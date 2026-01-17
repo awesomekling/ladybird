@@ -12,8 +12,10 @@
 #include <AK/Types.h>
 #include <AK/Utf16String.h>
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/Proxy.h>
 #include <LibCore/Socket.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibIPC/Decoder.h>
 #include <LibIPC/File.h>
 #include <LibURL/Parser.h>
@@ -184,6 +186,38 @@ ErrorOr<Core::ProxyData> decode(Decoder& decoder)
     auto port = TRY(decoder.decode<u16>());
 
     return Core::ProxyData { type, host_ipv4, port };
+}
+
+template<>
+ErrorOr<Core::Platform::MemoryRegion> decode(Decoder& decoder)
+{
+    Core::Platform::MemoryRegion region;
+    region.name = TRY(decoder.decode<ByteString>());
+    region.size = TRY(decoder.decode<u64>());
+    region.resident = TRY(decoder.decode<u64>());
+    region.dirty = TRY(decoder.decode<u64>());
+    return region;
+}
+
+template<>
+ErrorOr<Core::Platform::MemoryInfo> decode(Decoder& decoder)
+{
+    Core::Platform::MemoryInfo info;
+    info.resident_bytes = TRY(decoder.decode<u64>());
+    info.phys_footprint = TRY(decoder.decode<u64>());
+    info.phys_footprint_peak = TRY(decoder.decode<u64>());
+    info.regions = TRY(decoder.decode<Vector<Core::Platform::MemoryRegion>>());
+    return info;
+}
+
+template<>
+ErrorOr<GC::HeapStatistics> decode(Decoder& decoder)
+{
+    GC::HeapStatistics stats;
+    stats.total_allocated_bytes = TRY(decoder.decode<size_t>());
+    stats.total_live_cell_bytes = TRY(decoder.decode<size_t>());
+    stats.block_count = TRY(decoder.decode<size_t>());
+    return stats;
 }
 
 template<>

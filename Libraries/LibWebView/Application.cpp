@@ -5,14 +5,19 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/JsonArray.h>
+#include <AK/JsonObject.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Environment.h>
+#include <LibCore/File.h>
+#include <LibCore/Platform/MemoryInfo.h>
 #include <LibCore/StandardPaths.h>
 #include <LibCore/System.h>
 #include <LibCore/TimeZoneWatcher.h>
 #include <LibDatabase/Database.h>
 #include <LibDevTools/DevToolsServer.h>
 #include <LibFileSystem/FileSystem.h>
+#include <LibGC/HeapStatistics.h>
 #include <LibImageDecoderClient/Client.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/Loader/UserAgent.h>
@@ -129,6 +134,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     bool force_fontconfig = false;
     bool collect_garbage_on_every_allocation = false;
     bool disable_scrollbar_painting = false;
+    ByteString dump_memory_stats_on_exit_path;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("The Ladybird web browser :^)");
@@ -188,6 +194,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     args_parser.add_option(validate_dnssec_locally, "Validate DNSSEC locally", "dnssec");
     args_parser.add_option(default_time_zone, "Default time zone", "default-time-zone", 0, "time-zone-id");
     args_parser.add_option(resource_substitution_map_path, "Path to JSON file mapping URLs to local files", "resource-map", 0, "path");
+    args_parser.add_option(dump_memory_stats_on_exit_path, "Dump memory statistics to JSON file on exit", "dump-memory-stats-on-exit", 0, "path");
 
     args_parser.add_option(Core::ArgsParser::Option {
         .argument_mode = Core::ArgsParser::OptionArgumentMode::Optional,
@@ -258,6 +265,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
                 : OptionalNone()),
         .devtools_port = devtools_port,
         .enable_content_filter = disable_content_filter ? EnableContentFilter::No : EnableContentFilter::Yes,
+        .dump_memory_stats_on_exit_path = dump_memory_stats_on_exit_path.is_empty() ? Optional<ByteString> {} : move(dump_memory_stats_on_exit_path),
     };
 
     if (window_width.has_value())
@@ -494,12 +502,134 @@ ErrorOr<void> Application::launch_devtools_server()
     return {};
 }
 
-static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int delay_ms)
+static JsonArray aggregate_regions_to_json(Vector<Core::Platform::MemoryRegion> const& regions)
 {
-    auto take_screenshot = [&view, &event_loop] {
+    // Aggregate regions by name
+    HashMap<StringView, Core::Platform::MemoryRegion> aggregated;
+    for (auto const& region : regions) {
+        auto& entry = aggregated.ensure(region.name, [&] {
+            return Core::Platform::MemoryRegion { .name = region.name };
+        });
+        entry.size += region.size;
+        entry.resident += region.resident;
+        entry.dirty += region.dirty;
+    }
+
+    JsonArray regions_array;
+    for (auto const& [name, region] : aggregated) {
+        JsonObject region_obj;
+        region_obj.set("name"sv, JsonValue(region.name));
+        region_obj.set("size"sv, static_cast<i64>(region.size));
+        region_obj.set("resident"sv, static_cast<i64>(region.resident));
+        region_obj.set("dirty"sv, static_cast<i64>(region.dirty));
+        regions_array.must_append(move(region_obj));
+    }
+    return regions_array;
+}
+
+void Application::collect_and_dump_memory_stats(ByteString const& path)
+{
+    JsonObject stats;
+    stats.set("timestamp_ms"sv, AK::UnixDateTime::now().milliseconds_since_epoch());
+
+    JsonArray processes;
+
+    // Collect browser process stats
+    {
+        auto os_info_or_error = Core::Platform::get_memory_info();
+        if (os_info_or_error.is_error()) {
+            warnln("Failed to get browser process memory info: {}", os_info_or_error.error());
+        } else {
+            auto os_info = os_info_or_error.release_value();
+            JsonObject browser_process;
+            browser_process.set("type"sv, "Browser"sv);
+            browser_process.set("pid"sv, Core::System::getpid());
+            browser_process.set("resident_bytes"sv, static_cast<i64>(os_info.resident_bytes));
+            browser_process.set("phys_footprint"sv, static_cast<i64>(os_info.phys_footprint));
+            browser_process.set("phys_footprint_peak"sv, static_cast<i64>(os_info.phys_footprint_peak));
+            browser_process.set("gc_allocated_bytes"sv, 0);
+            browser_process.set("gc_live_bytes"sv, 0);
+            browser_process.set("regions"sv, aggregate_regions_to_json(os_info.regions));
+            processes.must_append(move(browser_process));
+        }
+    }
+
+    // Collect WebContent process stats
+    WebContentClient::for_each_client([&](WebContentClient& client) {
+        auto response = client.get_memory_statistics();
+
+        JsonObject process;
+        process.set("type"sv, "WebContent"sv);
+        process.set("pid"sv, static_cast<i64>(client.pid()));
+        process.set("resident_bytes"sv, static_cast<i64>(response.os_info().resident_bytes));
+        process.set("phys_footprint"sv, static_cast<i64>(response.os_info().phys_footprint));
+        process.set("phys_footprint_peak"sv, static_cast<i64>(response.os_info().phys_footprint_peak));
+        process.set("gc_allocated_bytes"sv, static_cast<i64>(response.gc_stats().total_allocated_bytes));
+        process.set("gc_live_bytes"sv, static_cast<i64>(response.gc_stats().total_live_cell_bytes));
+        process.set("regions"sv, aggregate_regions_to_json(response.os_info().regions));
+        processes.must_append(move(process));
+        return IterationDecision::Continue;
+    });
+
+    // Collect RequestServer process stats
+    if (m_request_server_client) {
+        auto response = m_request_server_client->get_memory_statistics();
+
+        JsonObject process;
+        process.set("type"sv, "RequestServer"sv);
+        process.set("pid"sv, 0); // PID not easily accessible
+        process.set("resident_bytes"sv, static_cast<i64>(response.resident_bytes));
+        process.set("phys_footprint"sv, static_cast<i64>(response.phys_footprint));
+        process.set("phys_footprint_peak"sv, static_cast<i64>(response.phys_footprint_peak));
+        process.set("gc_allocated_bytes"sv, 0);
+        process.set("gc_live_bytes"sv, 0);
+        process.set("regions"sv, aggregate_regions_to_json(response.regions));
+        processes.must_append(move(process));
+    }
+
+    // Collect ImageDecoder process stats
+    if (m_image_decoder_client) {
+        auto response = m_image_decoder_client->get_memory_statistics();
+
+        JsonObject process;
+        process.set("type"sv, "ImageDecoder"sv);
+        process.set("pid"sv, 0); // PID not easily accessible
+        process.set("resident_bytes"sv, static_cast<i64>(response.resident_bytes));
+        process.set("phys_footprint"sv, static_cast<i64>(response.phys_footprint));
+        process.set("phys_footprint_peak"sv, static_cast<i64>(response.phys_footprint_peak));
+        process.set("gc_allocated_bytes"sv, 0);
+        process.set("gc_live_bytes"sv, 0);
+        process.set("regions"sv, aggregate_regions_to_json(response.regions));
+        processes.must_append(move(process));
+    }
+
+    stats.set("processes"sv, move(processes));
+
+    // Write JSON to file
+    auto file_or_error = Core::File::open(path, Core::File::OpenMode::Write | Core::File::OpenMode::Truncate);
+    if (file_or_error.is_error()) {
+        warnln("Failed to open memory stats file '{}': {}", path, file_or_error.error());
+        return;
+    }
+
+    auto file = file_or_error.release_value();
+    auto json_string = stats.serialized();
+    auto write_result = file->write_until_depleted(json_string.bytes());
+    if (write_result.is_error()) {
+        warnln("Failed to write memory stats: {}", write_result.error());
+    } else {
+        outln("Saved memory statistics to: {}", path);
+    }
+}
+
+static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int delay_ms, Optional<ByteString> const& dump_memory_stats_path)
+{
+    auto take_screenshot = [&view, &event_loop, dump_memory_stats_path] {
         view.take_screenshot(ViewImplementation::ScreenshotType::Full)
-            ->when_resolved([&event_loop](auto const& path) {
+            ->when_resolved([&event_loop, dump_memory_stats_path](auto const& path) {
                 outln("Saved screenshot to: {}", path);
+                if (dump_memory_stats_path.has_value())
+                    Application::the().collect_and_dump_memory_stats(dump_memory_stats_path.value());
                 event_loop.quit(0);
             })
             .when_rejected([&event_loop](auto const& error) {
@@ -573,7 +703,7 @@ ErrorOr<int> Application::execute()
 
             switch (*m_browser_options.headless_mode) {
             case HeadlessMode::Screenshot:
-                screenshot_delay_timer = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), m_browser_options.screenshot_delay_ms);
+                screenshot_delay_timer = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), m_browser_options.screenshot_delay_ms, m_browser_options.dump_memory_stats_on_exit_path);
                 break;
             case HeadlessMode::LayoutTree:
                 load_page_for_info_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), WebView::PageInfoType::LayoutTree | WebView::PageInfoType::PaintTree);

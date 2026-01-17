@@ -93,6 +93,7 @@ struct BrowserOptions {
     Optional<DNSSettings> dns_settings {};
     Optional<u16> devtools_port;
     EnableContentFilter enable_content_filter { EnableContentFilter::Yes };
+    Optional<ByteString> dump_memory_stats_on_exit_path {};
 };
 
 enum class HTTPDiskCacheMode {
