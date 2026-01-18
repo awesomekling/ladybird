@@ -80,6 +80,7 @@ struct BrowserOptions {
     Optional<HeadlessMode> headless_mode;
     Optional<ByteString> screenshot_path;
     int screenshot_delay_ms { 0 };
+    int screenshot_timeout_ms { 0 };
     int window_width { 800 };
     int window_height { 600 };
     NewWindow new_window { NewWindow::No };
