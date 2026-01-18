@@ -103,6 +103,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     Optional<HeadlessMode> headless_mode;
     ByteString screenshot_path;
     int screenshot_delay_ms { 0 };
+    int screenshot_timeout_ms { 0 };
     Optional<int> window_width;
     Optional<int> window_height;
     bool new_window = false;
@@ -164,6 +165,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
 
     args_parser.add_option(screenshot_path, "Path to save screenshot in headless screenshot mode", "screenshot", 0, "path");
     args_parser.add_option(screenshot_delay_ms, "Milliseconds to wait after load event before taking screenshot (default: 0)", "screenshot-delay", 0, "milliseconds");
+    args_parser.add_option(screenshot_timeout_ms, "Maximum milliseconds to wait for page load before taking screenshot (default: 0, disabled)", "screenshot-timeout", 0, "milliseconds");
     args_parser.add_option(window_width, "Set viewport width in pixels (default: 800) (currently only supported for headless mode)", "window-width", 0, "pixels");
     args_parser.add_option(window_height, "Set viewport height in pixels (default: 600) (currently only supported for headless mode)", "window-height", 0, "pixels");
     args_parser.add_option(certificates, "Path to a certificate file", "certificate", 'C', "certificate");
@@ -251,6 +253,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         .headless_mode = headless_mode,
         .screenshot_path = screenshot_path.is_empty() ? Optional<ByteString> {} : move(screenshot_path),
         .screenshot_delay_ms = screenshot_delay_ms,
+        .screenshot_timeout_ms = screenshot_timeout_ms,
         .new_window = new_window ? NewWindow::Yes : NewWindow::No,
         .force_new_process = force_new_process ? ForceNewProcess::Yes : ForceNewProcess::No,
         .allow_popups = allow_popups ? AllowPopups::Yes : AllowPopups::No,
@@ -622,9 +625,14 @@ void Application::collect_and_dump_memory_stats(ByteString const& path)
     }
 }
 
-static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int delay_ms, Optional<ByteString> const& dump_memory_stats_path)
+struct ScreenshotTimers {
+    RefPtr<Core::Timer> timeout_timer;
+    RefPtr<Core::Timer> delay_timer;
+};
+
+static ScreenshotTimers load_page_for_screenshot_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, int delay_ms, int timeout_ms, Optional<ByteString> const& dump_memory_stats_path)
 {
-    auto take_screenshot = [&view, &event_loop, dump_memory_stats_path] {
+    auto take_screenshot = [&view, &event_loop, dump_memory_stats_path]() mutable {
         view.take_screenshot(ViewImplementation::ScreenshotType::Full)
             ->when_resolved([&event_loop, dump_memory_stats_path](auto const& path) {
                 outln("Saved screenshot to: {}", path);
@@ -638,27 +646,37 @@ static RefPtr<Core::Timer> load_page_for_screenshot_and_exit(Core::EventLoop& ev
             });
     };
 
-    RefPtr<Core::Timer> delay_timer;
-    if (delay_ms > 0) {
-        delay_timer = Core::Timer::create_single_shot(delay_ms, move(take_screenshot));
+    ScreenshotTimers timers;
 
-        view.on_load_finish = [delay_timer](auto const& loaded_url) {
+    // Timeout timer: starts immediately, acts as maximum wait time (safety net for pages that never finish loading)
+    if (timeout_ms > 0) {
+        timers.timeout_timer = Core::Timer::create_single_shot(timeout_ms, [take_screenshot]() mutable { take_screenshot(); });
+        timers.timeout_timer->start();
+    }
+
+    // Delay timer: starts after load event fires
+    if (delay_ms > 0) {
+        timers.delay_timer = Core::Timer::create_single_shot(delay_ms, [take_screenshot]() mutable { take_screenshot(); });
+
+        view.on_load_finish = [delay_timer = timers.delay_timer](auto const& loaded_url) {
             // Ignore initial about:blank load
             if (loaded_url.equals(URL::about_blank()))
                 return;
             delay_timer->start();
         };
-    } else {
-        view.on_load_finish = [take_screenshot = move(take_screenshot)](auto const& loaded_url) mutable {
+    } else if (timeout_ms == 0) {
+        // No timeout and no delay: take screenshot immediately when load finishes
+        view.on_load_finish = [take_screenshot](auto const& loaded_url) mutable {
             // Ignore initial about:blank load
             if (loaded_url.equals(URL::about_blank()))
                 return;
             take_screenshot();
         };
     }
+    // If timeout_ms > 0 but delay_ms == 0, the timeout timer will handle it
 
     view.load(url);
-    return delay_timer;
+    return timers;
 }
 
 static void load_page_for_info_and_exit(Core::EventLoop& event_loop, HeadlessWebView& view, URL::URL const& url, WebView::PageInfoType type)
@@ -689,7 +707,7 @@ static void load_page_and_exit_on_close(Core::EventLoop& event_loop, HeadlessWeb
 ErrorOr<int> Application::execute()
 {
     OwnPtr<HeadlessWebView> view;
-    RefPtr<Core::Timer> screenshot_delay_timer;
+    ScreenshotTimers screenshot_timers;
 
     if (m_browser_options.headless_mode.has_value()) {
         auto theme_path = LexicalPath::join(WebView::s_ladybird_resource_root, "themes"sv, "Default.ini"sv);
@@ -703,7 +721,7 @@ ErrorOr<int> Application::execute()
 
             switch (*m_browser_options.headless_mode) {
             case HeadlessMode::Screenshot:
-                screenshot_delay_timer = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), m_browser_options.screenshot_delay_ms, m_browser_options.dump_memory_stats_on_exit_path);
+                screenshot_timers = load_page_for_screenshot_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), m_browser_options.screenshot_delay_ms, m_browser_options.screenshot_timeout_ms, m_browser_options.dump_memory_stats_on_exit_path);
                 break;
             case HeadlessMode::LayoutTree:
                 load_page_for_info_and_exit(*m_event_loop, *view, m_browser_options.urls.first(), WebView::PageInfoType::LayoutTree | WebView::PageInfoType::PaintTree);
