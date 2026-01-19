@@ -1158,8 +1158,10 @@ void HTMLMediaElement::set_selected_video_track(Badge<VideoTrack>, GC::Ptr<HTML:
     }
 
     m_selected_video_track = video_track;
-    if (video_track)
+    if (video_track) {
         m_selected_video_track_sink = m_playback_manager->get_or_create_the_displaying_video_sink_for_track(video_track->track_in_playback_manager());
+        update_video_queue_size();
+    }
 }
 
 void HTMLMediaElement::update_video_frame_and_timeline()
@@ -1890,9 +1892,32 @@ void HTMLMediaElement::set_show_poster(bool show_poster)
         return;
 
     m_show_poster = show_poster;
+    update_video_queue_size();
 
     if (auto* paintable = this->paintable())
         paintable->set_needs_display();
+}
+
+void HTMLMediaElement::update_video_queue_size()
+{
+    if (!m_selected_video_track_sink)
+        return;
+
+    // Determine the desired queue size based on playback state and poster visibility.
+    // - When playing: 4 frames for smooth playback buffering
+    // - When paused with show_poster=true and a poster exists: 0 frames (poster is displayed)
+    // - When paused with show_poster=true but no poster: 1 frame (first frame shown as placeholder)
+    // - When paused with show_poster=false: 1 frame (current frame being displayed)
+    size_t desired_queue_size = 1;
+
+    if (!paused()) {
+        desired_queue_size = 4;
+    } else if (m_show_poster) {
+        bool has_poster = is<HTMLVideoElement>(*this) && static_cast<HTMLVideoElement const&>(*this).poster_frame();
+        desired_queue_size = has_poster ? 0 : 1;
+    }
+
+    m_selected_video_track_sink->set_queue_max_size(desired_queue_size);
 }
 
 void HTMLMediaElement::set_paused(bool paused)
@@ -1909,6 +1934,8 @@ void HTMLMediaElement::set_paused(bool paused)
         if (m_audio_tracks->has_enabled_track())
             document().page().client().page_did_change_audio_play_state(AudioPlayState::Paused);
     }
+
+    update_video_queue_size();
 
     if (auto* paintable = this->paintable())
         paintable->set_needs_display();

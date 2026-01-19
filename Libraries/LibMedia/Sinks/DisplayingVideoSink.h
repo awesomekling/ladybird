@@ -40,6 +40,7 @@ public:
 
     void pause_updates();
     void resume_updates();
+    void set_queue_max_size(size_t);
 
     Function<void()> m_on_start_buffering;
 

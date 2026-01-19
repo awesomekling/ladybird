@@ -68,6 +68,11 @@ void VideoDataProvider::start()
     m_thread_data->start();
 }
 
+void VideoDataProvider::set_queue_max_size(size_t size)
+{
+    m_thread_data->set_queue_max_size(size);
+}
+
 void VideoDataProvider::set_frames_queue_is_full_handler(FramesQueueIsFullHandler&& handler)
 {
     m_thread_data->set_frames_queue_is_full_handler(move(handler));
@@ -116,6 +121,13 @@ void VideoDataProvider::ThreadData::start()
     if (m_requested_state != RequestedState::None)
         return;
     m_requested_state = RequestedState::Running;
+    wake();
+}
+
+void VideoDataProvider::ThreadData::set_queue_max_size(size_t size)
+{
+    m_queue_max_size.store(size, AK::MemoryOrder::memory_order_relaxed);
+    auto locker = take_lock();
     wake();
 }
 

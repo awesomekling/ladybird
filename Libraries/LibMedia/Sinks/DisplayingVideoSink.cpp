@@ -94,4 +94,10 @@ void DisplayingVideoSink::resume_updates()
     m_cleared_current_frame = true;
 }
 
+void DisplayingVideoSink::set_queue_max_size(size_t size)
+{
+    if (m_provider)
+        m_provider->set_queue_max_size(size);
+}
+
 }

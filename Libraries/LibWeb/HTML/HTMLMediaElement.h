@@ -227,6 +227,7 @@ private:
 
     void volume_or_muted_attribute_changed();
     void update_volume();
+    void update_video_queue_size();
 
     bool is_eligible_for_autoplay() const;
 

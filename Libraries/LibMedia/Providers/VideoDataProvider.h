@@ -48,6 +48,7 @@ public:
     void set_frames_queue_is_full_handler(FramesQueueIsFullHandler&&);
 
     void start();
+    void set_queue_max_size(size_t);
 
     TimedImage retrieve_frame();
 
@@ -66,6 +67,7 @@ private:
         void set_frames_queue_is_full_handler(FramesQueueIsFullHandler&&);
 
         void start();
+        void set_queue_max_size(size_t);
         void exit();
 
         ImageQueue& queue();
@@ -112,7 +114,7 @@ private:
 
         RefPtr<MediaTimeProvider> m_time_provider;
 
-        size_t m_queue_max_size { 4 };
+        Atomic<size_t> m_queue_max_size { 0 };
         ImageQueue m_queue;
         FrameEndTimeHandler m_frame_end_time_handler;
         ErrorHandler m_error_handler;
