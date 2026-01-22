@@ -10,11 +10,14 @@
 
 #include <AK/Forward.h>
 #include <AK/Queue.h>
+#include <LibCore/EventLoop.h>
 #include <LibCore/EventReceiver.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Forward.h>
 #include <LibIPC/Message.h>
 #include <LibIPC/Transport.h>
+#include <LibThreading/ConditionVariable.h>
+#include <LibThreading/Mutex.h>
 
 namespace IPC {
 
@@ -36,24 +39,27 @@ public:
 protected:
     explicit ConnectionBase(IPC::Stub&, NonnullOwnPtr<Transport>, u32 local_endpoint_magic);
 
+    // Must be called after setting up the message decoder
+    void initialize_messaging();
+
     virtual void shutdown_with_error(Error const&);
-    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes, Queue<File>&) = 0;
 
     OwnPtr<IPC::Message> wait_for_specific_endpoint_message_impl(u32 endpoint_magic, int message_id);
-    void wait_for_transport_to_become_readable();
-    enum class PeerEOF {
-        No,
-        Yes
-    };
-    PeerEOF drain_messages_from_peer();
 
     void handle_messages();
+
+    // Called from I/O thread when a message is decoded
+    void on_message_received(NonnullOwnPtr<IPC::Message> message);
 
     IPC::Stub& m_local_stub;
 
     NonnullOwnPtr<Transport> m_transport;
 
+    Threading::Mutex m_unprocessed_messages_mutex;
+    Threading::ConditionVariable m_unprocessed_messages_cv { m_unprocessed_messages_mutex };
     Vector<NonnullOwnPtr<Message>> m_unprocessed_messages;
+
+    RefPtr<Core::WeakEventLoopReference> m_event_loop;
 
     u32 m_local_endpoint_magic { 0 };
 };
@@ -64,6 +70,24 @@ public:
     Connection(IPC::Stub& local_stub, NonnullOwnPtr<Transport> transport)
         : ConnectionBase(local_stub, move(transport), LocalEndpoint::static_magic())
     {
+        // Set up message handler first so we're ready to receive
+        initialize_messaging();
+
+        // Then set up decoder
+        m_transport->set_message_decoder([](ReadonlyBytes bytes, Queue<File>& fds) -> OwnPtr<IPC::Message> {
+            auto local = LocalEndpoint::decode_message(bytes, fds);
+            if (!local.is_error())
+                return local.release_value();
+
+            auto peer = PeerEndpoint::decode_message(bytes, fds);
+            if (!peer.is_error())
+                return peer.release_value();
+
+            return nullptr;
+        });
+
+        // Now that handler and decoder are set up, start receiving messages
+        m_transport->start();
     }
 
     template<typename RequestType, typename... Args>
@@ -90,19 +114,6 @@ protected:
         if (auto message = wait_for_specific_endpoint_message_impl(Endpoint::static_magic(), MessageType::static_message_id()))
             return message.template release_nonnull<MessageType>();
         return {};
-    }
-
-    virtual OwnPtr<Message> try_parse_message(ReadonlyBytes bytes, Queue<File>& fds) override
-    {
-        auto local_message = LocalEndpoint::decode_message(bytes, fds);
-        if (!local_message.is_error())
-            return local_message.release_value();
-
-        auto peer_message = PeerEndpoint::decode_message(bytes, fds);
-        if (!peer_message.is_error())
-            return peer_message.release_value();
-
-        return nullptr;
     }
 };
 
