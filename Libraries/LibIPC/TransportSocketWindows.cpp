@@ -32,6 +32,11 @@ void TransportSocketWindows::set_message_handler(MessageHandler handler)
     m_message_handler = move(handler);
 }
 
+void TransportSocketWindows::set_peer_closed_handler(PeerClosedHandler handler)
+{
+    m_peer_closed_handler = move(handler);
+}
+
 void TransportSocketWindows::start()
 {
     // Windows does not use a separate I/O thread.
@@ -39,12 +44,14 @@ void TransportSocketWindows::start()
     VERIFY(m_decoder);
     VERIFY(m_message_handler);
     m_socket->on_ready_to_read = [this] {
-        read_as_many_messages_as_possible_without_blocking([this](Message&& message) {
+        auto should_shutdown = read_as_many_messages_as_possible_without_blocking([this](Message&& message) {
             Queue<File> fds;
             if (auto decoded = m_decoder(message.bytes.span(), fds)) {
                 m_message_handler(decoded.release_nonnull());
             }
         });
+        if (should_shutdown == ShouldShutdown::Yes && m_peer_closed_handler)
+            m_peer_closed_handler();
     };
 }
 

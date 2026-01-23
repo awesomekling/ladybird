@@ -48,9 +48,11 @@ public:
     // on the I/O thread, and a handler to receive decoded messages.
     using MessageDecoder = Function<OwnPtr<IPC::Message>(ReadonlyBytes, Queue<File>&)>;
     using MessageHandler = Function<void(NonnullOwnPtr<IPC::Message>)>;
+    using PeerClosedHandler = Function<void()>;
 
     void set_message_decoder(MessageDecoder decoder);
     void set_message_handler(MessageHandler handler);
+    void set_peer_closed_handler(PeerClosedHandler handler);
     void start();
 
     explicit TransportSocket(NonnullOwnPtr<Core::LocalSocket> socket);
@@ -131,6 +133,7 @@ private:
 
     MessageDecoder m_decoder;
     MessageHandler m_message_handler;
+    PeerClosedHandler m_peer_closed_handler;
 };
 
 }

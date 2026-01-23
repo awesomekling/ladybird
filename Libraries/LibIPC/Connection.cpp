@@ -29,6 +29,9 @@ void ConnectionBase::initialize_messaging()
     m_transport->set_message_handler([this](NonnullOwnPtr<IPC::Message> message) {
         on_message_received(move(message));
     });
+    m_transport->set_peer_closed_handler([this] {
+        on_peer_closed();
+    });
 }
 
 ConnectionBase::~ConnectionBase()
@@ -92,6 +95,12 @@ void ConnectionBase::on_message_received(NonnullOwnPtr<IPC::Message> message)
     }
 }
 
+void ConnectionBase::on_peer_closed()
+{
+    m_peer_closed.store(true, AK::MemoryOrder::memory_order_release);
+    m_unprocessed_messages_cv.broadcast();
+}
+
 void ConnectionBase::handle_messages()
 {
     Vector<NonnullOwnPtr<Message>> messages;
@@ -138,7 +147,7 @@ OwnPtr<IPC::Message> ConnectionBase::wait_for_specific_endpoint_message_impl(u32
                     return m_unprocessed_messages.take(i);
             }
 
-            if (!is_open())
+            if (!is_open() || m_peer_closed.load(AK::MemoryOrder::memory_order_acquire))
                 break;
 
             // Wait for more messages from I/O thread
@@ -148,10 +157,11 @@ OwnPtr<IPC::Message> ConnectionBase::wait_for_specific_endpoint_message_impl(u32
 
     dbgln("Failed to receive message_id: {}", message_id);
 
+    bool should_close_transport = false;
     {
         Threading::MutexLocker lock(m_unprocessed_messages_mutex);
         if (!m_unprocessed_messages.is_empty()) {
-            m_transport->close();
+            should_close_transport = true;
 
             dbgln("Transport shutdown with unprocessed messages left: {}", m_unprocessed_messages.size());
             for (size_t i = 0; i < m_unprocessed_messages.size(); ++i) {
@@ -160,6 +170,8 @@ OwnPtr<IPC::Message> ConnectionBase::wait_for_specific_endpoint_message_impl(u32
             }
         }
     }
+    if (should_close_transport)
+        m_transport->close();
 
     dbgln("Handling remaining messages before returning to caller");
     handle_messages();

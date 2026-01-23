@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <AK/Atomic.h>
 #include <AK/Forward.h>
 #include <AK/Queue.h>
 #include <LibCore/EventLoop.h>
@@ -50,6 +51,7 @@ protected:
 
     // Called from I/O thread when a message is decoded
     void on_message_received(NonnullOwnPtr<IPC::Message> message);
+    void on_peer_closed();
 
     IPC::Stub& m_local_stub;
 
@@ -60,6 +62,8 @@ protected:
     Vector<NonnullOwnPtr<Message>> m_unprocessed_messages;
 
     RefPtr<Core::WeakEventLoopReference> m_event_loop;
+
+    Atomic<bool> m_peer_closed { false };
 
     u32 m_local_endpoint_magic { 0 };
 };

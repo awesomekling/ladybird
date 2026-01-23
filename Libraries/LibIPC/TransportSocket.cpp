@@ -306,6 +306,11 @@ void TransportSocket::set_message_handler(MessageHandler handler)
     m_message_handler = move(handler);
 }
 
+void TransportSocket::set_peer_closed_handler(PeerClosedHandler handler)
+{
+    m_peer_closed_handler = move(handler);
+}
+
 TransportSocket::TransferState TransportSocket::transfer_data(ReadonlyBytes& bytes, Vector<int>& fds)
 {
     auto byte_count = bytes.size();
@@ -523,6 +528,8 @@ void TransportSocket::read_incoming_messages()
     }
 
     if (m_peer_eof) {
+        if (m_peer_closed_handler)
+            m_peer_closed_handler();
         m_incoming_cv.broadcast();
         notify_read_available();
     }
