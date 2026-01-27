@@ -499,7 +499,7 @@ public:
             return;
         dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
 
-        cell.set_marked(true);
+        cell.set_cell_state(Cell::CellState::OldBlack);
         m_work_queue.append(cell);
     }
 
@@ -515,7 +515,7 @@ public:
                 continue;
             dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
 
-            cell.set_marked(true);
+            cell.set_cell_state(Cell::CellState::OldBlack);
             m_work_queue.unchecked_append(cell);
         }
     }
@@ -533,7 +533,7 @@ public:
                 return;
             if (cell->state() != Cell::State::Live)
                 return;
-            cell->set_marked(true);
+            cell->set_cell_state(Cell::CellState::OldBlack);
             m_work_queue.append(*cell);
         });
     }
@@ -561,7 +561,7 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<Heap
     visitor.mark_all_live_cells();
 
     for (auto& inverse_root : m_uprooted_cells)
-        inverse_root->set_marked(false);
+        inverse_root->set_cell_state(Cell::CellState::NewWhite);
 
     m_uprooted_cells.clear();
 }
@@ -616,7 +616,7 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
                 ++collected_cells;
                 collected_cell_bytes += block.cell_size();
             } else {
-                cell->set_marked(false);
+                cell->set_cell_state(Cell::CellState::NewWhite);
                 block_has_live_cells = true;
                 ++live_cells;
                 live_cell_bytes += block.cell_size();

@@ -67,7 +67,7 @@ void WeakBlock::sweep()
         if (impl.state() == WeakImpl::State::Freelist)
             continue;
         auto* cell = static_cast<Cell*>(impl.ptr());
-        if (!cell || !cell->is_marked())
+        if (!cell || cell->cell_state() == Cell::CellState::NewWhite)
             impl.set_ptr({}, nullptr);
         if (impl.ref_count() == 0)
             deallocate(&impl);

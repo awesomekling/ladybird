@@ -48,8 +48,16 @@ public:
 
     virtual ~Cell() = default;
 
-    bool is_marked() const { return m_mark; }
-    void set_marked(bool b) { m_mark = b; }
+    enum class CellState : u8 {
+        NewWhite = 0,
+        OldBlack = 1,
+        OldGray = 2,
+    };
+
+    CellState cell_state() const { return m_cell_state; }
+    void set_cell_state(CellState state) { m_cell_state = state; }
+
+    bool is_marked() const { return m_cell_state != CellState::NewWhite; }
 
     enum class State : bool {
         Live,
@@ -230,7 +238,7 @@ protected:
     Cell() = default;
 
 private:
-    bool m_mark { false };
+    CellState m_cell_state { CellState::NewWhite };
     State m_state { State::Live };
 } SWIFT_UNSAFE_REFERENCE;
 
