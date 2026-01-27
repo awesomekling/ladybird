@@ -40,12 +40,13 @@ public:
     {
     }
 
-    Reference(Environment& base, Utf16FlyString referenced_name, Strict strict, Optional<EnvironmentCoordinate> environment_coordinate = {})
+    Reference(Environment& base, Utf16FlyString referenced_name, Strict strict, Optional<EnvironmentCoordinate> environment_coordinate = {}, Optional<u32> environment_binding_index = {})
         : m_base_type(BaseType::Environment)
         , m_base_environment(&base)
         , m_name(move(referenced_name))
         , m_strict(strict)
         , m_environment_coordinate(move(environment_coordinate))
+        , m_environment_binding_index(move(environment_binding_index))
     {
     }
 
@@ -150,6 +151,7 @@ private:
     Strict m_strict { Strict::No };
 
     Optional<EnvironmentCoordinate> m_environment_coordinate;
+    Optional<u32> m_environment_binding_index;
 };
 
 }
