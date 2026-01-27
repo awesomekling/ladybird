@@ -279,6 +279,8 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
         if (print_report)
             collection_measurement_timer.start();
 
+        auto const scope = CollectionScope::Full;
+
         if (collection_type == CollectionType::CollectGarbage) {
             if (m_gc_deferrals) {
                 m_should_gc_when_deferral_ends = true;
@@ -287,11 +289,11 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
             HashMap<Cell*, HeapRoot> roots;
             HashTable<HeapBlock*> all_live_heap_blocks;
             gather_roots(roots, all_live_heap_blocks);
-            mark_live_cells(roots, all_live_heap_blocks);
+            mark_live_cells(roots, all_live_heap_blocks, scope);
         }
-        finalize_unmarked_cells();
+        finalize_unmarked_cells(scope);
         sweep_weak_blocks();
-        sweep_dead_cells(print_report, collection_measurement_timer);
+        sweep_dead_cells(print_report, collection_measurement_timer, scope);
 
         if (print_report)
             dump_allocators();
@@ -553,7 +555,7 @@ private:
     FlatPtr m_max_block_address;
 };
 
-void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks)
+void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks, CollectionScope)
 {
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
 
@@ -566,7 +568,7 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<Heap
     m_uprooted_cells.clear();
 }
 
-void Heap::finalize_unmarked_cells()
+void Heap::finalize_unmarked_cells(CollectionScope)
 {
     for_each_block([&](auto& block) {
         if (!block.overrides_finalize())
@@ -595,7 +597,7 @@ void Heap::sweep_weak_blocks()
     }
 }
 
-void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measurement_timer)
+void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measurement_timer, CollectionScope)
 {
     dbgln_if(HEAP_DEBUG, "sweep_dead_cells:");
     Vector<HeapBlock*, 32> empty_blocks;

@@ -55,6 +55,11 @@ public:
         CollectEverything,
     };
 
+    enum class CollectionScope {
+        Eden,
+        Full,
+    };
+
     void collect_garbage(CollectionType = CollectionType::CollectGarbage, bool print_report = false);
     AK::JsonObject dump_graph();
 
@@ -125,9 +130,9 @@ private:
     void gather_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*>& all_live_heap_blocks);
     void gather_conservative_roots(HashMap<Cell*, HeapRoot>&, HashTable<HeapBlock*> const& all_live_heap_blocks);
     void gather_asan_fake_stack_roots(HashMap<FlatPtr, HeapRoot>&, FlatPtr, FlatPtr min_block_address, FlatPtr max_block_address);
-    void mark_live_cells(HashMap<Cell*, HeapRoot> const& live_cells, HashTable<HeapBlock*> const& all_live_heap_blocks);
-    void finalize_unmarked_cells();
-    void sweep_dead_cells(bool print_report, Core::ElapsedTimer const&);
+    void mark_live_cells(HashMap<Cell*, HeapRoot> const& live_cells, HashTable<HeapBlock*> const& all_live_heap_blocks, CollectionScope);
+    void finalize_unmarked_cells(CollectionScope);
+    void sweep_dead_cells(bool print_report, Core::ElapsedTimer const&, CollectionScope);
     void sweep_weak_blocks();
     void run_post_gc_tasks();
 

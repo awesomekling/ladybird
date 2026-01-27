@@ -44,6 +44,7 @@ public:
 
         if (allocated_cell) {
             ASAN_UNPOISON_MEMORY_REGION(allocated_cell, m_cell_size);
+            m_has_eden_cells = true;
         }
         return allocated_cell;
     }
@@ -95,6 +96,9 @@ public:
     bool overrides_must_survive_garbage_collection() const { return m_overrides_must_survive_garbage_collection; }
     bool overrides_finalize() const { return m_overrides_finalize; }
 
+    bool has_eden_cells() const { return m_has_eden_cells; }
+    void set_has_eden_cells(bool b) { m_has_eden_cells = b; }
+
 private:
     HeapBlock(Heap&, CellAllocator&, size_t cell_size, bool overrides_must_survive_garbage_collection, bool overrides_finalize);
 
@@ -117,6 +121,7 @@ private:
 
     bool m_overrides_must_survive_garbage_collection { false };
     bool m_overrides_finalize { false };
+    bool m_has_eden_cells { false };
 
     Ptr<FreelistEntry> m_freelist;
     alignas(__BIGGEST_ALIGNMENT__) u8 m_storage[];
