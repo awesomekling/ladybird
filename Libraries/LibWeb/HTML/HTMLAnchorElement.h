@@ -59,7 +59,7 @@ private:
 
     virtual Optional<ARIA::Role> default_role() const override;
 
-    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+    GC::MemberPtr<DOM::DOMTokenList> m_rel_list;
 };
 
 }

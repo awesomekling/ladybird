@@ -42,8 +42,8 @@ private:
 
     HTML::Window const& window() const { return *m_window; }
 
-    GC::Ref<HTML::Window> m_window;
-    GC::Ptr<ScreenOrientation> m_orientation;
+    GC::MemberRef<HTML::Window> m_window;
+    GC::MemberPtr<ScreenOrientation> m_orientation;
 };
 
 }

@@ -8,6 +8,7 @@
 
 #include <AK/String.h>
 #include <AK/Variant.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Export.h>
@@ -42,10 +43,10 @@ private:
     String m_name;
 
     // https://dom.spec.whatwg.org/#slotable-assigned-slot
-    GC::Ptr<HTML::HTMLSlotElement> m_assigned_slot;
+    GC::MemberPtr<HTML::HTMLSlotElement> m_assigned_slot;
 
     // https://dom.spec.whatwg.org/#slottable-manual-slot-assignment
-    GC::Ptr<HTML::HTMLSlotElement> m_manual_slot_assignment;
+    GC::MemberPtr<HTML::HTMLSlotElement> m_manual_slot_assignment;
 };
 
 enum class OpenFlag {

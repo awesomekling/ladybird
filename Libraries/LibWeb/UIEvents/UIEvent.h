@@ -55,7 +55,7 @@ protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<HTML::WindowProxy> m_view;
+    GC::MemberPtr<HTML::WindowProxy> m_view;
     int m_detail { 0 };
 };
 

@@ -594,15 +594,15 @@ private:
     QualifiedName m_qualified_name;
     mutable Optional<FlyString> m_html_uppercased_qualified_name;
 
-    GC::Ptr<NamedNodeMap> m_attributes;
-    GC::Ptr<CSS::CSSStyleProperties> m_inline_style;
-    GC::Ptr<CSS::StylePropertyMap> m_attribute_style_map;
-    GC::Ptr<DOMTokenList> m_class_list;
-    GC::Ptr<ShadowRoot> m_shadow_root;
-    GC::Ptr<DOMTokenList> m_part_list;
+    GC::MemberPtr<NamedNodeMap> m_attributes;
+    GC::MemberPtr<CSS::CSSStyleProperties> m_inline_style;
+    GC::MemberPtr<CSS::StylePropertyMap> m_attribute_style_map;
+    GC::MemberPtr<DOMTokenList> m_class_list;
+    GC::MemberPtr<ShadowRoot> m_shadow_root;
+    GC::MemberPtr<DOMTokenList> m_part_list;
 
-    GC::Ptr<CSS::CascadedProperties> m_cascaded_properties;
-    GC::Ptr<CSS::ComputedProperties> m_computed_properties;
+    GC::MemberPtr<CSS::CascadedProperties> m_cascaded_properties;
+    GC::MemberPtr<CSS::ComputedProperties> m_computed_properties;
     OrderedHashMap<FlyString, CSS::StyleProperty> m_custom_properties;
 
     using PseudoElementData = HashMap<CSS::PseudoElement, GC::Ref<PseudoElement>>;
@@ -624,13 +624,13 @@ private:
     OwnPtr<CustomElementReactionQueue> m_custom_element_reaction_queue;
 
     // https://dom.spec.whatwg.org/#concept-element-custom-element-definition
-    GC::Ptr<HTML::CustomElementDefinition> m_custom_element_definition;
+    GC::MemberPtr<HTML::CustomElementDefinition> m_custom_element_definition;
 
     // https://dom.spec.whatwg.org/#concept-element-is-value
     Optional<String> m_is_value;
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#states-set
-    GC::Ptr<HTML::CustomStateSet> m_custom_state_set;
+    GC::MemberPtr<HTML::CustomStateSet> m_custom_state_set;
 
     // https://www.w3.org/TR/intersection-observer/#dom-element-registeredintersectionobservers-slot
     // Element objects have an internal [[RegisteredIntersectionObservers]] slot, which is initialized to an empty list.
@@ -639,7 +639,7 @@ private:
     // https://drafts.css-houdini.org/css-typed-om-1/#dom-element-computedstylemapcache-slot
     // Every Element has a [[computedStyleMapCache]] internal slot, initially set to null, which caches the result of
     // the computedStyleMap() method when it is first called.
-    GC::Ptr<CSS::StylePropertyMapReadOnly> m_computed_style_map_cache;
+    GC::MemberPtr<CSS::StylePropertyMapReadOnly> m_computed_style_map_cache;
 
     CSSPixelPoint m_scroll_offset;
 

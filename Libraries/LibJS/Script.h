@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/NonnullRefPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGC/Root.h>
 #include <LibJS/Export.h>
@@ -51,7 +52,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<Realm> m_realm;                       // [[Realm]]
+    GC::MemberPtr<Realm> m_realm;                 // [[Realm]]
     NonnullRefPtr<Program> m_parse_node;          // [[ECMAScriptCode]]
     Vector<LoadedModuleRequest> m_loaded_modules; // [[LoadedModules]]
 

@@ -8,6 +8,7 @@
 
 #include <AK/FlyString.h>
 #include <AK/Optional.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/Event.h>
 
@@ -39,9 +40,7 @@ public:
     String const& url() const { return m_url; }
     GC::Ptr<Storage const> storage_area() const { return m_storage_area; }
 
-    void init_storage_event(String const& type, bool bubbles = false, bool cancelable = false,
-        Optional<String> const& key = {}, Optional<String> const& old_value = {}, Optional<String> const& new_value = {},
-        String const& url = {}, GC::Ptr<Storage> storage_area = {});
+    void init_storage_event(String const& type, bool bubbles = false, bool cancelable = false, Optional<String> const& key = {}, Optional<String> const& old_value = {}, Optional<String> const& new_value = {}, String const& url = {}, GC::Ptr<Storage> storage_area = {});
 
 protected:
     virtual void visit_edges(Visitor& visitor) override;
@@ -54,7 +53,7 @@ private:
     Optional<String> m_old_value;
     Optional<String> m_new_value;
     String m_url;
-    GC::Ptr<Storage> m_storage_area;
+    GC::MemberPtr<Storage> m_storage_area;
 };
 
 }

@@ -38,11 +38,11 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     FlyString m_type;
-    GC::Ptr<Node const> m_target;
-    GC::Ptr<NodeList> m_added_nodes;
-    GC::Ptr<NodeList> m_removed_nodes;
-    GC::Ptr<Node> m_previous_sibling;
-    GC::Ptr<Node> m_next_sibling;
+    GC::MemberPtr<Node const> m_target;
+    GC::MemberPtr<NodeList> m_added_nodes;
+    GC::MemberPtr<NodeList> m_removed_nodes;
+    GC::MemberPtr<Node> m_previous_sibling;
+    GC::MemberPtr<Node> m_next_sibling;
     Optional<String> m_attribute_name;
     Optional<String> m_attribute_namespace;
     Optional<String> m_old_value;

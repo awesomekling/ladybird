@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/FlyString.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/Speech/SpeechRecognitionResultList.h>
@@ -41,7 +42,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     WebIDL::UnsignedLong m_result_index { 0 };
-    GC::Ptr<SpeechRecognitionResultList> m_results;
+    GC::MemberPtr<SpeechRecognitionResultList> m_results;
 };
 
 }

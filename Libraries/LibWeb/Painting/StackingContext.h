@@ -8,6 +8,7 @@
 
 #include <AK/Vector.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Painting/Paintable.h>
 
@@ -51,8 +52,8 @@ public:
     virtual void visit_edges(Visitor&) override;
 
 private:
-    GC::Ref<PaintableBox> m_paintable;
-    GC::Ptr<StackingContext> m_parent;
+    GC::MemberRef<PaintableBox> m_paintable;
+    GC::MemberPtr<StackingContext> m_parent;
     Vector<GC::Ref<StackingContext>> m_children;
     size_t m_index_in_tree_order { 0 };
     Optional<u64> m_last_paint_generation_id;

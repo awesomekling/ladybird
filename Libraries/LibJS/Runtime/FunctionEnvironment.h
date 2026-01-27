@@ -23,7 +23,7 @@ public:
 
     FunctionObject& function_object() { return *m_function_object; }
     FunctionObject const& function_object() const { return *m_function_object; }
-    void set_function_object(FunctionObject& function) { m_function_object = &function; }
+    void set_function_object(FunctionObject& function) { m_function_object.set(*this, &function); }
 
     Value new_target() const { return m_new_target; }
     void set_new_target(Value new_target)
@@ -45,9 +45,9 @@ private:
     virtual bool is_function_environment() const override { return true; }
     virtual void visit_edges(Visitor&) override;
 
-    Value m_this_value;                        // [[ThisValue]]
-    GC::Ptr<FunctionObject> m_function_object; // [[FunctionObject]]
-    Value m_new_target { js_undefined() };     // [[NewTarget]]
+    Value m_this_value;                              // [[ThisValue]]
+    GC::MemberPtr<FunctionObject> m_function_object; // [[FunctionObject]]
+    Value m_new_target { js_undefined() };           // [[NewTarget]]
 };
 
 template<>

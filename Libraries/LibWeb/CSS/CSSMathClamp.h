@@ -36,9 +36,9 @@ public:
 
 private:
     CSSMathClamp(JS::Realm&, NumericType, GC::Ref<CSSNumericValue> lower, GC::Ref<CSSNumericValue> value, GC::Ref<CSSNumericValue> upper);
-    GC::Ref<CSSNumericValue> m_lower;
-    GC::Ref<CSSNumericValue> m_value;
-    GC::Ref<CSSNumericValue> m_upper;
+    GC::MemberRef<CSSNumericValue> m_lower;
+    GC::MemberRef<CSSNumericValue> m_value;
+    GC::MemberRef<CSSNumericValue> m_upper;
 };
 
 }

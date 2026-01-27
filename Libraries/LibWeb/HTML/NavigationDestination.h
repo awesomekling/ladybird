@@ -50,7 +50,7 @@ private:
     URL::URL m_url;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationdestination-url
-    GC::Ptr<NavigationHistoryEntry> m_entry;
+    GC::MemberPtr<NavigationHistoryEntry> m_entry;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationdestination-state
     SerializationRecord m_state;

@@ -8,6 +8,7 @@
 
 #include <LibGC/Cell.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/IndexedDB/ConnectionState.h>
 
@@ -37,8 +38,8 @@ private:
 
     bool m_observing { false };
 
-    GC::Ref<IDBDatabase> m_database;
-    GC::Ptr<GC::Function<void()>> m_connection_state_changed_observer;
+    GC::MemberRef<IDBDatabase> m_database;
+    GC::MemberPtr<GC::Function<void()>> m_connection_state_changed_observer;
 };
 
 }

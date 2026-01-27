@@ -71,7 +71,7 @@ private:
     // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#iframe-pending-resource-timing-start-time
     Optional<HighResolutionTime::DOMHighResTimeStamp> m_pending_resource_start_time = {};
 
-    GC::Ptr<DOM::DOMTokenList> m_sandbox;
+    GC::MemberPtr<DOM::DOMTokenList> m_sandbox;
 
     // https://html.spec.whatwg.org/multipage/browsers.html#iframe-sandboxing-flag-set
     SandboxingFlagSet m_iframe_sandboxing_flag_set {};

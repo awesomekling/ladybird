@@ -53,7 +53,7 @@ protected:
 
 private:
     NonnullOwnPtr<ExecutionContext> m_execution_context;
-    GC::Ptr<Bytecode::Executable> m_generating_executable;
+    GC::MemberPtr<Bytecode::Executable> m_generating_executable;
     Value m_previous_value;
     GeneratorState m_generator_state { GeneratorState::SuspendedStart };
     Optional<StringView> m_generator_brand;

@@ -68,7 +68,7 @@ public:
     Realm const& realm() const { return *m_realm; }
     bool legacy_features_enabled() const { return m_legacy_features_enabled; }
     void set_legacy_features_enabled(bool legacy_features_enabled) { m_legacy_features_enabled = legacy_features_enabled; }
-    void set_realm(Realm& realm) { m_realm = &realm; }
+    void set_realm(Realm& realm) { m_realm.set(*this, &realm); }
 
 private:
     RegExpObject(Object& prototype);
@@ -82,7 +82,7 @@ private:
     Flags m_flag_bits { 0 };
     bool m_legacy_features_enabled { false }; // [[LegacyFeaturesEnabled]]
     // Note: This is initialized in RegExpAlloc, but will be non-null afterwards
-    GC::Ptr<Realm> m_realm; // [[Realm]]
+    GC::MemberPtr<Realm> m_realm; // [[Realm]]
     Optional<Regex<ECMA262>> m_regex;
 };
 

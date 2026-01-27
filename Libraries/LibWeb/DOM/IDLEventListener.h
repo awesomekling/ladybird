@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/RefCounted.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibWeb/DOM/AbortSignal.h>
 #include <LibWeb/WebIDL/CallbackType.h>
@@ -40,7 +41,7 @@ public:
 private:
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<WebIDL::CallbackType> m_callback;
+    GC::MemberRef<WebIDL::CallbackType> m_callback;
 };
 
 }

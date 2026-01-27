@@ -42,9 +42,9 @@ private:
     virtual bool has_activation_behavior() const override { return true; }
     virtual void activation_behavior(DOM::Event const&) override;
 
-    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+    GC::MemberPtr<DOM::DOMTokenList> m_rel_list;
 
-    GC::Ptr<SVGAnimatedString> m_target;
+    GC::MemberPtr<SVGAnimatedString> m_target;
 };
 
 }

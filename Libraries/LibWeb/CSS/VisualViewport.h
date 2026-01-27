@@ -55,7 +55,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<DOM::Document> m_document;
+    GC::MemberRef<DOM::Document> m_document;
     CSSPixelPoint m_offset;
     double m_scale { 1.0 };
 };

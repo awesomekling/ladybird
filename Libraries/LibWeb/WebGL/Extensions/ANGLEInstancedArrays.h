@@ -30,7 +30,7 @@ protected:
 private:
     ANGLEInstancedArrays(JS::Realm&, GC::Ref<WebGLRenderingContext>);
 
-    GC::Ref<WebGLRenderingContext> m_context;
+    GC::MemberRef<WebGLRenderingContext> m_context;
 };
 
 }

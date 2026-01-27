@@ -58,12 +58,12 @@ private:
     void set_style_sheet(GC::Ref<CSSStyleSheet>);
 
     URL m_url;
-    GC::Ptr<DOM::Document> m_document;
+    GC::MemberPtr<DOM::Document> m_document;
     Optional<FlyString> m_layer;
     Optional<FlyString> m_layer_internal;
     RefPtr<Supports> m_supports;
-    GC::Ref<MediaList> m_media;
-    GC::Ptr<CSSStyleSheet> m_style_sheet;
+    GC::MemberRef<MediaList> m_media;
+    GC::MemberPtr<CSSStyleSheet> m_style_sheet;
     Optional<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer;
 };
 

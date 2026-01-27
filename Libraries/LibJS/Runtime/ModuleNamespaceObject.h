@@ -39,7 +39,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<Module> m_module;         // [[Module]]
+    GC::MemberPtr<Module> m_module;   // [[Module]]
     Vector<Utf16FlyString> m_exports; // [[Exports]]
 };
 

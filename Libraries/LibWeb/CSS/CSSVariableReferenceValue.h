@@ -36,7 +36,7 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     FlyString m_variable;
-    GC::Ptr<CSSUnparsedValue> m_fallback;
+    GC::MemberPtr<CSSUnparsedValue> m_fallback;
 };
 
 }

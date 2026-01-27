@@ -118,7 +118,7 @@ EventLoop& EnvironmentSettingsObject::responsible_event_loop()
     if (m_responsible_event_loop)
         return *m_responsible_event_loop;
 
-    m_responsible_event_loop = relevant_agent(global_object()).event_loop;
+    m_responsible_event_loop.set(*this, relevant_agent(global_object()).event_loop);
     return *m_responsible_event_loop;
 }
 

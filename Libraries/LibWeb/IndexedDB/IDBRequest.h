@@ -93,7 +93,7 @@ private:
     IDBRequestSource m_source;
 
     // A request has a transaction which is initially null.
-    GC::Ptr<IDBTransaction> m_transaction;
+    GC::MemberPtr<IDBTransaction> m_transaction;
 
     // NOTE: Used for debug purposes
     String m_uuid;

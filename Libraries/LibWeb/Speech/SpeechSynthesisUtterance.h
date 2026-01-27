@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/String.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -72,7 +73,7 @@ private:
 
     String m_text;
     String m_lang;
-    GC::Ptr<SpeechSynthesisVoice> m_voice;
+    GC::MemberPtr<SpeechSynthesisVoice> m_voice;
     float m_volume { 1.f };
     float m_rate { 1.f };
     float m_pitch { 1.f };

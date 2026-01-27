@@ -2499,7 +2499,7 @@ void HTMLParser::handle_in_body(HTMLToken& token)
             auto node = m_form_element;
 
             // 2. Set the form element pointer to null.
-            m_form_element = {};
+            m_form_element = nullptr;
 
             // 3. If node is null or if the stack of open elements does not have node in scope, then this is a parse error; return and ignore the token.
             if (!node || !m_stack_of_open_elements.has_in_scope(*node)) {

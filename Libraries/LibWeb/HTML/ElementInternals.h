@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/WeakPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/DOM/NodeList.h>
@@ -66,7 +67,7 @@ private:
     virtual void visit_edges(JS::Cell::Visitor& visitor) override;
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#internals-target
-    GC::Ref<HTMLElement> m_target_element;
+    GC::MemberRef<HTMLElement> m_target_element;
 };
 
 }

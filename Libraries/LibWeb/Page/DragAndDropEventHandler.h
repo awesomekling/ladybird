@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
@@ -53,13 +54,13 @@ private:
     RefPtr<HTML::DragDataStore> m_drag_data_store;
 
     // https://html.spec.whatwg.org/multipage/dnd.html#source-node
-    GC::Ptr<DOM::EventTarget> m_source_node;
+    GC::MemberPtr<DOM::EventTarget> m_source_node;
 
     // https://html.spec.whatwg.org/multipage/dnd.html#immediate-user-selection
-    GC::Ptr<DOM::Node> m_immediate_user_selection;
+    GC::MemberPtr<DOM::Node> m_immediate_user_selection;
 
     // https://html.spec.whatwg.org/multipage/dnd.html#current-target-element
-    GC::Ptr<DOM::Node> m_current_target_element;
+    GC::MemberPtr<DOM::Node> m_current_target_element;
 
     // https://html.spec.whatwg.org/multipage/dnd.html#current-drag-operation
     FlyString m_current_drag_operation;

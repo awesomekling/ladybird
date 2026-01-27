@@ -33,7 +33,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<HTMLElement> m_submitter;
+    GC::MemberPtr<HTMLElement> m_submitter;
 };
 
 }

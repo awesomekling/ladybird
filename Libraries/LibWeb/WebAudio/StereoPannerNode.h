@@ -43,7 +43,7 @@ protected:
 
 private:
     // https://webaudio.github.io/web-audio-api/#dom-stereopannernode-pan
-    GC::Ref<AudioParam> m_pan;
+    GC::MemberRef<AudioParam> m_pan;
 };
 
 }

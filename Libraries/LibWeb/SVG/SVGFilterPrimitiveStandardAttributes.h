@@ -31,7 +31,7 @@ protected:
 private:
     SVGElement* this_svg_element() { return static_cast<IncludingClass*>(this); }
 
-    GC::Ptr<SVGAnimatedString> m_result_animated_string;
+    GC::MemberPtr<SVGAnimatedString> m_result_animated_string;
 };
 
 }

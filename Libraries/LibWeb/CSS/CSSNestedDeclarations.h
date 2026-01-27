@@ -35,7 +35,7 @@ private:
     virtual void clear_caches() override;
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
-    GC::Ref<CSSStyleProperties> m_declaration;
+    GC::MemberRef<CSSStyleProperties> m_declaration;
     GC::Ptr<CSSStyleRule const> mutable m_parent_style_rule;
 };
 

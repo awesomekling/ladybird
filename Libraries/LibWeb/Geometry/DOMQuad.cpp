@@ -128,7 +128,7 @@ WebIDL::ExceptionOr<void> DOMQuad::deserialization_steps(HTML::TransferDataDecod
     auto& vm = this->vm();
     auto& realm = this->realm();
 
-    auto deserialize_dom_point = [&](GC::Ref<DOMPoint>& storage) -> WebIDL::ExceptionOr<void> {
+    auto deserialize_dom_point = [&](GC::MemberRef<DOMPoint>& storage) -> WebIDL::ExceptionOr<void> {
         auto deserialized = TRY(HTML::structured_deserialize_internal(vm, serialized, realm, memory));
         storage = as<DOMPoint>(deserialized.as_object());
         return {};

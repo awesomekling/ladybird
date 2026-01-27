@@ -16,6 +16,7 @@
 #include <AK/Time.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibHTTP/Cache/CacheMode.h>
 #include <LibHTTP/HeaderList.h>
@@ -351,7 +352,7 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-request-client
     // A request has an associated client (null or an environment settings object).
-    GC::Ptr<HTML::EnvironmentSettingsObject> m_client;
+    GC::MemberPtr<HTML::EnvironmentSettingsObject> m_client;
 
     // https://fetch.spec.whatwg.org/#concept-request-reserved-client
     // A request has an associated reserved client (null, an environment, or an environment settings object). Unless

@@ -40,9 +40,9 @@ private:
 
     virtual bool is_bound_function() const final { return true; }
 
-    GC::Ptr<FunctionObject> m_bound_target_function; // [[BoundTargetFunction]]
-    Value m_bound_this;                              // [[BoundThis]]
-    Vector<Value> m_bound_arguments;                 // [[BoundArguments]]
+    GC::MemberPtr<FunctionObject> m_bound_target_function; // [[BoundTargetFunction]]
+    Value m_bound_this;                                    // [[BoundThis]]
+    Vector<Value> m_bound_arguments;                       // [[BoundArguments]]
 };
 
 template<>

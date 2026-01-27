@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
@@ -30,7 +31,7 @@ protected:
     void associated_attribute_changed(FlyString const& name, Optional<String> const& value, Optional<FlyString> const& namespace_);
 
 private:
-    GC::Ptr<DOM::Element> m_popover_target_element;
+    GC::MemberPtr<DOM::Element> m_popover_target_element;
 };
 
 }

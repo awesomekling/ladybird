@@ -8,6 +8,7 @@
 
 #include <AK/Types.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/Value.h>
@@ -58,10 +59,10 @@ protected:
 
 private:
     // A key range has an associated lower bound (null or a key).
-    GC::Ptr<Key> m_lower_bound;
+    GC::MemberPtr<Key> m_lower_bound;
 
     // A key range has an associated upper bound (null or a key).
-    GC::Ptr<Key> m_upper_bound;
+    GC::MemberPtr<Key> m_upper_bound;
 
     // A key range has an associated lower open flag. Unless otherwise stated it is false.
     bool m_lower_open { false };

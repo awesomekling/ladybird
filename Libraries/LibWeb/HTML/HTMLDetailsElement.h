@@ -46,8 +46,8 @@ private:
     // https://html.spec.whatwg.org/multipage/interactive-elements.html#details-toggle-task-tracker
     Optional<ToggleTaskTracker> m_details_toggle_task_tracker;
 
-    GC::Ptr<HTML::HTMLSlotElement> m_summary_slot;
-    GC::Ptr<HTML::HTMLSlotElement> m_descendants_slot;
+    GC::MemberPtr<HTML::HTMLSlotElement> m_summary_slot;
+    GC::MemberPtr<HTML::HTMLSlotElement> m_descendants_slot;
 };
 
 }

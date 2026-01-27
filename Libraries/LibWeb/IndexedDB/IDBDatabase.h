@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -141,7 +142,7 @@ private:
 
     // NOTE: There is an associated database in the spec, but there is no mention where it is assigned, nor where its from
     //       So we stash the one we have when opening a connection.
-    GC::Ref<Database> m_associated_database;
+    GC::MemberRef<Database> m_associated_database;
 
     // NOTE: We need to keep track of what transactions were created by this connection
     Vector<GC::Ref<IDBTransaction>> m_transactions;

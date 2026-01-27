@@ -13,6 +13,7 @@
 #include <AK/Weakable.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Bytecode/Builtins.h>
 #include <LibJS/Export.h>
 #include <LibJS/Heap/Cell.h>
@@ -50,17 +51,17 @@ public:
     static ThrowCompletionOr<NonnullOwnPtr<ExecutionContext>> initialize_host_defined_realm(VM&, Function<Object*(Realm&)> create_global_object, Function<Object*(Realm&)> create_global_this_value);
 
     [[nodiscard]] Object& global_object() const { return *m_global_object; }
-    void set_global_object(GC::Ref<Object> global) { m_global_object = global; }
+    void set_global_object(GC::Ref<Object> global) { m_global_object.set(*this, global); }
 
     [[nodiscard]] GlobalEnvironment& global_environment() const { return *m_global_environment; }
-    void set_global_environment(GC::Ref<GlobalEnvironment> environment) { m_global_environment = environment; }
+    void set_global_environment(GC::Ref<GlobalEnvironment> environment) { m_global_environment.set(*this, environment); }
 
     [[nodiscard]] Intrinsics const& intrinsics() const { return *m_intrinsics; }
     [[nodiscard]] Intrinsics& intrinsics() { return *m_intrinsics; }
     void set_intrinsics(Badge<Intrinsics>, Intrinsics& intrinsics)
     {
         VERIFY(!m_intrinsics);
-        m_intrinsics = &intrinsics;
+        m_intrinsics.set(*this, &intrinsics);
     }
 
     HostDefined* host_defined() { return m_host_defined; }
@@ -73,10 +74,10 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<Intrinsics> m_intrinsics;                // [[Intrinsics]]
-    GC::Ptr<Object> m_global_object;                 // [[GlobalObject]]
-    GC::Ptr<GlobalEnvironment> m_global_environment; // [[GlobalEnv]]
-    OwnPtr<HostDefined> m_host_defined;              // [[HostDefined]]
+    GC::MemberPtr<Intrinsics> m_intrinsics;                // [[Intrinsics]]
+    GC::MemberPtr<Object> m_global_object;                 // [[GlobalObject]]
+    GC::MemberPtr<GlobalEnvironment> m_global_environment; // [[GlobalEnv]]
+    OwnPtr<HostDefined> m_host_defined;                    // [[HostDefined]]
 };
 
 }

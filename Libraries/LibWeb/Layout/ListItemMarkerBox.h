@@ -37,7 +37,7 @@ private:
 
     CSS::ListStyleType m_list_style_type { CSS::CounterStyleNameKeyword::None };
     CSS::ListStylePosition m_list_style_position { CSS::ListStylePosition::Outside };
-    GC::Ref<DOM::Element> m_list_item_element;
+    GC::MemberRef<DOM::Element> m_list_item_element;
 };
 
 template<>

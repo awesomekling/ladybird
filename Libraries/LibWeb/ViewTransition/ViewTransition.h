@@ -154,16 +154,16 @@ private:
     ViewTransitionUpdateCallback m_update_callback = {};
 
     // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-ready-promise
-    GC::Ref<WebIDL::Promise> m_ready_promise;
+    GC::MemberRef<WebIDL::Promise> m_ready_promise;
 
     // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-update-callback-done-promise
-    GC::Ref<WebIDL::Promise> m_update_callback_done_promise;
+    GC::MemberRef<WebIDL::Promise> m_update_callback_done_promise;
 
     // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-finished-promise
-    GC::Ref<WebIDL::Promise> m_finished_promise;
+    GC::MemberRef<WebIDL::Promise> m_finished_promise;
 
     // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-transition-root-pseudo-element
-    GC::Ref<DOM::PseudoElementTreeNode> m_transition_root_pseudo_element;
+    GC::MemberRef<DOM::PseudoElementTreeNode> m_transition_root_pseudo_element;
 
     // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-initial-snapshot-containing-block-size
     Optional<CSSPixelSize> m_initial_snapshot_containing_block_size;

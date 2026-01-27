@@ -64,9 +64,9 @@ private:
     String m_script_url;
     WorkerOptions m_options;
 
-    GC::Ptr<MessagePort> m_outside_port;
+    GC::MemberPtr<MessagePort> m_outside_port;
 
-    GC::Ptr<WorkerAgentParent> m_agent;
+    GC::MemberPtr<WorkerAgentParent> m_agent;
 };
 
 void run_a_worker(Variant<GC::Ref<Worker>, GC::Ref<SharedWorker>> worker, URL::URL& url, EnvironmentSettingsObject& outside_settings, GC::Ptr<MessagePort> outside_port, WorkerOptions const& options);

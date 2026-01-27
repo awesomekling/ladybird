@@ -42,15 +42,15 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<AudioParam> m_forward_x;
-    GC::Ref<AudioParam> m_forward_y;
-    GC::Ref<AudioParam> m_forward_z;
-    GC::Ref<AudioParam> m_position_x;
-    GC::Ref<AudioParam> m_position_y;
-    GC::Ref<AudioParam> m_position_z;
-    GC::Ref<AudioParam> m_up_x;
-    GC::Ref<AudioParam> m_up_y;
-    GC::Ref<AudioParam> m_up_z;
+    GC::MemberRef<AudioParam> m_forward_x;
+    GC::MemberRef<AudioParam> m_forward_y;
+    GC::MemberRef<AudioParam> m_forward_z;
+    GC::MemberRef<AudioParam> m_position_x;
+    GC::MemberRef<AudioParam> m_position_y;
+    GC::MemberRef<AudioParam> m_position_z;
+    GC::MemberRef<AudioParam> m_up_x;
+    GC::MemberRef<AudioParam> m_up_y;
+    GC::MemberRef<AudioParam> m_up_z;
 };
 
 }

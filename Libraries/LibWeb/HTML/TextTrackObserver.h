@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Bindings/TextTrackPrototype.h>
@@ -30,8 +31,8 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
     virtual void finalize() override;
 
-    GC::Ref<TextTrack> m_text_track;
-    GC::Ptr<GC::Function<void(TextTrack::ReadinessState)>> m_track_readiness_observer;
+    GC::MemberRef<TextTrack> m_text_track;
+    GC::MemberPtr<GC::Function<void(TextTrack::ReadinessState)>> m_track_readiness_observer;
 };
 
 }

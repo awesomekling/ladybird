@@ -33,7 +33,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<Set> m_set;
+    GC::MemberRef<Set> m_set;
     bool m_done { false };
     Object::PropertyKind m_iteration_kind;
     Map::ConstIterator m_iterator;

@@ -48,7 +48,7 @@ public:
 
     Vector<TracebackFrame, 32> const& traceback() const { return m_traceback; }
 
-    void set_cached_string(GC::Ref<PrimitiveString> string) { m_cached_string = string; }
+    void set_cached_string(GC::Ref<PrimitiveString> string) { m_cached_string.set(*this, string); }
     GC::Ptr<PrimitiveString> cached_string() const { return m_cached_string; }
 
 protected:
@@ -62,7 +62,7 @@ private:
     void populate_stack();
     Vector<TracebackFrame, 32> m_traceback;
 
-    GC::Ptr<PrimitiveString> m_cached_string;
+    GC::MemberPtr<PrimitiveString> m_cached_string;
 };
 
 template<>

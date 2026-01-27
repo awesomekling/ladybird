@@ -9,6 +9,7 @@
 #include <AK/JsonObjectSerializer.h>
 #include <AK/Vector.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/Forward.h>
@@ -36,7 +37,7 @@ protected:
 private:
     explicit AccessibilityTreeNode(GC::Ptr<DOM::Node const>);
 
-    GC::Ptr<DOM::Node const> m_value;
+    GC::MemberPtr<DOM::Node const> m_value;
     Vector<GC::Ptr<AccessibilityTreeNode>> m_children;
 };
 

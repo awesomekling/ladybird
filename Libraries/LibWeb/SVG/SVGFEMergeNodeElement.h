@@ -27,7 +27,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<SVGAnimatedString> m_in1;
+    GC::MemberPtr<SVGAnimatedString> m_in1;
 };
 
 }

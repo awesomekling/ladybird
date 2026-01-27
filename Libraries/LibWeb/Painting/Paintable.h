@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/Export.h>
@@ -166,8 +167,8 @@ protected:
 
 private:
     IntrusiveListNode<Paintable> m_list_node;
-    GC::Ptr<DOM::Node> m_dom_node;
-    GC::Ref<Layout::Node const> m_layout_node;
+    GC::MemberPtr<DOM::Node> m_dom_node;
+    GC::MemberRef<Layout::Node const> m_layout_node;
 
     SelectionState m_selection_state { SelectionState::None };
 

@@ -49,7 +49,7 @@ private:
     void setup_palette();
 
     ConnectionFromClient& m_client;
-    GC::Ref<Web::Page> m_page;
+    GC::MemberRef<Web::Page> m_page;
     RefPtr<Gfx::PaletteImpl> m_palette_impl;
 };
 

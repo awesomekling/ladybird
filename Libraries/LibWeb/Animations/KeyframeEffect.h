@@ -121,7 +121,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://www.w3.org/TR/web-animations-1/#effect-target-target-element
-    GC::Ptr<DOM::Element> m_target_element {};
+    GC::MemberPtr<DOM::Element> m_target_element {};
 
     // https://www.w3.org/TR/web-animations-1/#dom-keyframeeffect-pseudoelement
     Optional<CSS::Selector::PseudoElementSelector> m_target_pseudo_selector {};

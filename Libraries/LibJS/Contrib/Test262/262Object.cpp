@@ -32,8 +32,8 @@ void $262Object::initialize(Realm& realm)
 {
     Base::initialize(realm);
 
-    m_agent = realm.create<AgentObject>(realm);
-    m_is_htmldda = realm.create<IsHTMLDDA>(realm);
+    m_agent.set(*this, realm.create<AgentObject>(realm));
+    m_is_htmldda.set(*this, realm.create<IsHTMLDDA>(realm));
 
     u8 attr = Attribute::Writable | Attribute::Configurable;
     define_native_function(realm, "clearKeptObjects"_utf16_fly_string, clear_kept_objects, 0, attr);

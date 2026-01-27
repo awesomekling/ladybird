@@ -40,7 +40,7 @@ private:
     virtual String serialized() const override;
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
-    GC::Ref<MediaList> m_media;
+    GC::MemberRef<MediaList> m_media;
 };
 
 template<>

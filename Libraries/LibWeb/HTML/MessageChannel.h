@@ -32,8 +32,8 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<MessagePort> m_port1;
-    GC::Ptr<MessagePort> m_port2;
+    GC::MemberPtr<MessagePort> m_port1;
+    GC::MemberPtr<MessagePort> m_port2;
 };
 
 }

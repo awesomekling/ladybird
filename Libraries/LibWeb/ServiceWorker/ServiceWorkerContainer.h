@@ -57,8 +57,8 @@ private:
 
     void start_register(Optional<URL::URL> scope_url, Optional<URL::URL> script_url, GC::Ref<WebIDL::Promise>, HTML::EnvironmentSettingsObject&, URL::URL referrer, Bindings::WorkerType, Bindings::ServiceWorkerUpdateViaCache);
 
-    GC::Ref<HTML::EnvironmentSettingsObject> m_service_worker_client;
-    GC::Ptr<WebIDL::Promise> m_ready_promise;
+    GC::MemberRef<HTML::EnvironmentSettingsObject> m_service_worker_client;
+    GC::MemberPtr<WebIDL::Promise> m_ready_promise;
 };
 
 }

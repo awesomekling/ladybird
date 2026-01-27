@@ -9,6 +9,7 @@
 #include <AK/Badge.h>
 #include <AK/HashMap.h>
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -69,12 +70,12 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-controller-full-timing-info
     // full timing info (default null)
     //    Null or a fetch timing info.
-    GC::Ptr<FetchTimingInfo> m_full_timing_info;
+    GC::MemberPtr<FetchTimingInfo> m_full_timing_info;
 
     // https://fetch.spec.whatwg.org/#fetch-controller-report-timing-steps
     // report timing steps (default null)
     //    Null or an algorithm accepting a global object.
-    GC::Ptr<GC::Function<void(JS::Object&)>> m_report_timing_steps;
+    GC::MemberPtr<GC::Function<void(JS::Object&)>> m_report_timing_steps;
 
     // https://fetch.spec.whatwg.org/#fetch-controller-report-timing-steps
     // serialized abort reason (default null)
@@ -84,9 +85,9 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-controller-next-manual-redirect-steps
     // next manual redirect steps (default null)
     //     Null or an algorithm accepting nothing.
-    GC::Ptr<GC::Function<void()>> m_next_manual_redirect_steps;
+    GC::MemberPtr<GC::Function<void()>> m_next_manual_redirect_steps;
 
-    GC::Ptr<FetchParams> m_fetch_params;
+    GC::MemberPtr<FetchParams> m_fetch_params;
 
     HashMap<u64, HTML::TaskID> m_ongoing_fetch_tasks;
     u64 m_next_fetch_task_id { 0 };
@@ -99,7 +100,7 @@ class FetchControllerHolder : public JS::Cell {
 public:
     static GC::Ref<FetchControllerHolder> create(JS::VM&);
 
-    [[nodiscard]] GC::Ptr<FetchController> const& controller() const { return m_controller; }
+    [[nodiscard]] GC::Ptr<FetchController> controller() const { return m_controller; }
     void set_controller(GC::Ref<FetchController> controller) { m_controller = controller; }
 
 private:
@@ -107,7 +108,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<FetchController> m_controller;
+    GC::MemberPtr<FetchController> m_controller;
 };
 
 }

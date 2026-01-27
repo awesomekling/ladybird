@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
@@ -63,7 +64,7 @@ private:
     mutable Vector<GC::Weak<Element>> m_cached_elements;
     mutable OwnPtr<OrderedHashMap<FlyString, GC::Weak<Element>>> m_cached_name_to_element_mappings;
 
-    GC::Ref<ParentNode> m_root;
+    GC::MemberRef<ParentNode> m_root;
     Function<bool(Element const&)> m_filter;
     Function<bool(Element const&, Element const&)> m_sort;
 

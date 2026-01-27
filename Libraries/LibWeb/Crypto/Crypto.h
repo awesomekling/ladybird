@@ -34,7 +34,7 @@ protected:
 private:
     explicit Crypto(JS::Realm&);
 
-    GC::Ptr<SubtleCrypto> m_subtle;
+    GC::MemberPtr<SubtleCrypto> m_subtle;
 };
 
 WEB_API ErrorOr<String> generate_random_uuid();

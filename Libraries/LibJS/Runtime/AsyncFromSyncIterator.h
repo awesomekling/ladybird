@@ -30,7 +30,7 @@ public:
 private:
     AsyncFromSyncIterator(Realm&, GC::Ref<IteratorRecord> sync_iterator_record);
 
-    GC::Ref<IteratorRecord> m_sync_iterator_record; // [[SyncIteratorRecord]]
+    GC::MemberRef<IteratorRecord> m_sync_iterator_record; // [[SyncIteratorRecord]]
 };
 
 }

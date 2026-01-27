@@ -36,7 +36,7 @@ private:
     virtual bool eligible_for_own_property_enumeration_fast_path() const override final { return false; }
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<PrimitiveString> m_string;
+    GC::MemberRef<PrimitiveString> m_string;
 };
 
 template<>

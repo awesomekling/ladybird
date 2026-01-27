@@ -115,7 +115,7 @@ private:
     double m_movement_y { 0 };
     i16 m_button { 0 };
     u16 m_buttons { 0 };
-    GC::Ptr<DOM::EventTarget> m_related_target { nullptr };
+    GC::MemberPtr<DOM::EventTarget> m_related_target { nullptr };
 };
 
 }

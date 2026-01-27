@@ -78,7 +78,7 @@ private:
     Vector<Parser::RuleContext> rule_context() const;
 
     Vector<GC::Ref<CSSRule>> m_rules;
-    GC::Ptr<CSSRule> m_owner_rule;
+    GC::MemberPtr<CSSRule> m_owner_rule;
 };
 
 }

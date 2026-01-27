@@ -10,6 +10,7 @@
 #include <AK/Badge.h>
 #include <AK/RefPtr.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/WindowGlobalMixin.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -302,9 +303,9 @@ private:
     WebIDL::ExceptionOr<void> window_post_message_steps(JS::Value, WindowPostMessageOptions const&);
 
     // https://html.spec.whatwg.org/multipage/window-object.html#concept-document-window
-    GC::Ptr<DOM::Document> m_associated_document;
+    GC::MemberPtr<DOM::Document> m_associated_document;
 
-    GC::Ptr<DOM::Event> m_current_event;
+    GC::MemberPtr<DOM::Event> m_current_event;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#resolved-module-set
     // A global object has a resolved module set, a set of specifier resolution records, initially empty.
@@ -315,22 +316,22 @@ private:
     //       only Window global objects have their module set data structures modified from the initial empty one.
     Vector<SpecifierResolution> m_resolved_module_set;
 
-    GC::Ptr<CSS::Screen> m_screen;
-    GC::Ptr<Navigator> m_navigator;
-    GC::Ptr<Location> m_location;
-    GC::Ptr<CloseWatcherManager> m_close_watcher_manager;
-    GC::Ptr<CookieStore::CookieStore> m_cookie_store;
-    GC::Ptr<Speech::SpeechSynthesis> m_speech_synthesis;
+    GC::MemberPtr<CSS::Screen> m_screen;
+    GC::MemberPtr<Navigator> m_navigator;
+    GC::MemberPtr<Location> m_location;
+    GC::MemberPtr<CloseWatcherManager> m_close_watcher_manager;
+    GC::MemberPtr<CookieStore::CookieStore> m_cookie_store;
+    GC::MemberPtr<Speech::SpeechSynthesis> m_speech_synthesis;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#window-navigation-api
-    GC::Ptr<Navigation> m_navigation;
+    GC::MemberPtr<Navigation> m_navigation;
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#custom-elements-api
     // Each Window object has an associated custom element registry (a CustomElementRegistry object).
     // It is set to a new CustomElementRegistry object when the Window object is created.
-    GC::Ptr<CustomElementRegistry> m_custom_element_registry;
+    GC::MemberPtr<CustomElementRegistry> m_custom_element_registry;
 
-    GC::Ptr<AnimationFrameCallbackDriver> m_animation_frame_callback_driver;
+    GC::MemberPtr<AnimationFrameCallbackDriver> m_animation_frame_callback_driver;
 
     // https://w3c.github.io/requestidlecallback/#dfn-list-of-idle-request-callbacks
     Vector<NonnullRefPtr<IdleCallback>> m_idle_request_callbacks;
@@ -358,15 +359,15 @@ private:
     // When the Window object is created, the attribute must be set to the empty string. It does not do anything else.
     String m_status;
 
-    GC::Ptr<BarProp const> m_locationbar;
-    GC::Ptr<BarProp const> m_menubar;
-    GC::Ptr<BarProp const> m_personalbar;
-    GC::Ptr<BarProp const> m_scrollbars;
-    GC::Ptr<BarProp const> m_statusbar;
-    GC::Ptr<BarProp const> m_toolbar;
+    GC::MemberPtr<BarProp const> m_locationbar;
+    GC::MemberPtr<BarProp const> m_menubar;
+    GC::MemberPtr<BarProp const> m_personalbar;
+    GC::MemberPtr<BarProp const> m_scrollbars;
+    GC::MemberPtr<BarProp const> m_statusbar;
+    GC::MemberPtr<BarProp const> m_toolbar;
 
     // https://html.spec.whatwg.org/multipage/obsolete.html#dom-external
-    GC::Ptr<External> m_external;
+    GC::MemberPtr<External> m_external;
 };
 
 void run_animation_frame_callbacks(DOM::Document&, double now);

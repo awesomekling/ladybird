@@ -12,6 +12,7 @@
 #include <AK/StringView.h>
 #include <AK/Types.h>
 #include <LibGC/Cell.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -187,7 +188,7 @@ private:
     void restore_to(ssize_t new_iterator);
     HTMLToken::Position nth_last_position(size_t n = 0);
 
-    GC::Ptr<HTMLParser> m_parser;
+    GC::MemberPtr<HTMLParser> m_parser;
 
     State m_state { State::Data };
     State m_return_state { State::Data };

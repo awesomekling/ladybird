@@ -35,7 +35,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     Optional<Bindings::NavigationType> m_navigation_type;
-    GC::Ref<NavigationHistoryEntry> m_from;
+    GC::MemberRef<NavigationHistoryEntry> m_from;
 };
 
 }

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibURL/URL.h>
@@ -58,7 +59,7 @@ private:
 
     State m_state { State::New };
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
 
     struct Callbacks {
         GC::Ptr<GC::Function<void()>> on_finish;
@@ -67,10 +68,10 @@ private:
     Vector<Callbacks> m_callbacks;
 
     URL::URL m_url;
-    GC::Ptr<DecodedImageData> m_image_data;
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<DecodedImageData> m_image_data;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
 
-    GC::Ptr<DOM::Document> m_document;
+    GC::MemberPtr<DOM::Document> m_document;
 };
 
 }

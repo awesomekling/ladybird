@@ -47,7 +47,7 @@ private:
 
     virtual void visit_edges(Visitor& visitor) override;
 
-    GC::Ptr<Map> m_values;
+    GC::MemberPtr<Map> m_values;
 };
 
 // 24.2.1.1 Set Records, https://tc39.es/ecma262/#sec-set-records

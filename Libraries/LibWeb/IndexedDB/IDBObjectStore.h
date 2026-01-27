@@ -8,6 +8,7 @@
 
 #include <AK/HashMap.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBTransaction.h>
@@ -73,8 +74,8 @@ protected:
 
 private:
     // An object store handle has an associated object store and an associated transaction.
-    GC::Ref<ObjectStore> m_store;
-    GC::Ref<IDBTransaction> m_transaction;
+    GC::MemberRef<ObjectStore> m_store;
+    GC::MemberRef<IDBTransaction> m_transaction;
 
     // An object store handle has a name, which is initialized to the name of the associated object store when the object store handle is created.
     String m_name;

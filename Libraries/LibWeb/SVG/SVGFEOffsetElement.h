@@ -33,9 +33,9 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<SVGAnimatedString> m_in1;
-    GC::Ptr<SVGAnimatedNumber> m_dx;
-    GC::Ptr<SVGAnimatedNumber> m_dy;
+    GC::MemberPtr<SVGAnimatedString> m_in1;
+    GC::MemberPtr<SVGAnimatedNumber> m_dx;
+    GC::MemberPtr<SVGAnimatedNumber> m_dy;
 };
 
 }

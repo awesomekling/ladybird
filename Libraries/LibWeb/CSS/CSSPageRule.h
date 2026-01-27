@@ -37,7 +37,7 @@ private:
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
     PageSelectorList m_selectors;
-    GC::Ref<CSSPageDescriptors> m_style;
+    GC::MemberRef<CSSPageDescriptors> m_style;
 };
 
 }

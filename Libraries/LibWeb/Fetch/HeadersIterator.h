@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Fetch/Headers.h>
@@ -29,7 +30,7 @@ private:
 
     HeadersIterator(Headers const&, JS::Object::PropertyKind iteration_kind);
 
-    GC::Ref<Headers const> m_headers;
+    GC::MemberRef<Headers const> m_headers;
     JS::Object::PropertyKind m_iteration_kind;
     size_t m_index { 0 };
 };

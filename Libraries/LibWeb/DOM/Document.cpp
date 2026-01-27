@@ -1885,7 +1885,7 @@ void Document::invalidate_style_for_elements_affected_by_pseudo_class_change(CSS
         rules.for_each_matching_rules({ element }, [&](auto& rules) {
             for (auto& rule : rules) {
                 bool before = does_rule_match_on_element(element, rule);
-                TemporaryChange change { element_slot, node };
+                TemporaryChange change { element_slot, decltype(element_slot)(node) };
                 bool after = does_rule_match_on_element(element, rule);
                 if (before != after) {
                     result = true;
@@ -2504,7 +2504,7 @@ void Document::set_focused_area(GC::Ptr<Node> node)
     if (m_focused_area == node)
         return;
 
-    GC::Ptr old_focused_area = m_focused_area;
+    GC::Ptr<Node> old_focused_area = m_focused_area;
 
     if (auto* old_focused_element = as_if<Element>(old_focused_area.ptr()))
         old_focused_element->did_lose_focus();

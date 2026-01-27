@@ -14,6 +14,7 @@
 #include <AK/Vector.h>
 #include <LibCore/ElapsedTimer.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -60,7 +61,7 @@ public:
         Vector<String> stack;
     };
 
-    void set_client(ConsoleClient& client) { m_client = &client; }
+    void set_client(ConsoleClient& client) { m_client.set(*this, &client); }
 
     Realm& realm() const { return m_realm; }
 
@@ -99,8 +100,8 @@ private:
 
     ThrowCompletionOr<String> value_vector_to_string(GC::RootVector<Value> const&);
 
-    GC::Ref<Realm> m_realm;
-    GC::Ptr<ConsoleClient> m_client;
+    GC::MemberRef<Realm> m_realm;
+    GC::MemberPtr<ConsoleClient> m_client;
 
     HashMap<String, unsigned> m_counters;
     HashMap<String, Core::ElapsedTimer> m_timer_table;
@@ -131,7 +132,7 @@ protected:
     virtual ~ConsoleClient() override;
     virtual void visit_edges(Visitor& visitor) override;
 
-    GC::Ref<Console> m_console;
+    GC::MemberRef<Console> m_console;
 };
 
 }

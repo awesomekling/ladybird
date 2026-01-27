@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -52,7 +53,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<DOM::ParentNode> m_root;
+    GC::MemberRef<DOM::ParentNode> m_root;
     Function<bool(DOM::Element const&)> m_filter;
     Scope m_scope { Scope::Descendants };
 };

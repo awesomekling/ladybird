@@ -10,6 +10,7 @@
 #include <AK/Badge.h>
 #include <AK/StringView.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/RootVector.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
@@ -322,7 +323,7 @@ protected:
     bool m_is_typed_array : 1 { false };
 
 private:
-    void set_shape(Shape& shape) { m_shape = &shape; }
+    void set_shape(Shape& shape) { m_shape.set(*this, &shape); }
 
     Object* prototype() { return shape().prototype(); }
 
@@ -331,7 +332,7 @@ private:
     // True if this object has lazily allocated intrinsic properties.
     bool m_has_intrinsic_accessors : 1 { false };
 
-    GC::Ptr<Shape> m_shape;
+    GC::MemberPtr<Shape> m_shape;
     Vector<Value> m_storage;
     IndexedProperties m_indexed_properties;
     OwnPtr<Vector<PrivateElement>> m_private_elements; // [[PrivateElements]]

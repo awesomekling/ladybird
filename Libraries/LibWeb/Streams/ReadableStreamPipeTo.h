@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -56,22 +57,22 @@ private:
     bool check_for_forward_close();
     bool check_for_backward_close();
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<WebIDL::Promise> m_promise;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<WebIDL::Promise> m_promise;
 
-    GC::Ref<ReadableStream> m_source;
-    GC::Ref<WritableStream> m_destination;
+    GC::MemberRef<ReadableStream> m_source;
+    GC::MemberRef<WritableStream> m_destination;
 
-    GC::Ref<ReadableStreamDefaultReader> m_reader;
-    GC::Ref<WritableStreamDefaultWriter> m_writer;
+    GC::MemberRef<ReadableStreamDefaultReader> m_reader;
+    GC::MemberRef<WritableStreamDefaultWriter> m_writer;
 
-    GC::Ptr<DOM::AbortSignal> m_signal;
+    GC::MemberPtr<DOM::AbortSignal> m_signal;
     DOM::AbortSignal::AbortAlgorithmID m_signal_id { 0 };
 
-    GC::Ptr<WebIDL::Promise> m_last_write_promise;
+    GC::MemberPtr<WebIDL::Promise> m_last_write_promise;
     Vector<JS::Value, 1> m_unwritten_chunks;
 
-    GC::Ref<WebIDL::ReactionSteps> m_on_shutdown;
+    GC::MemberRef<WebIDL::ReactionSteps> m_on_shutdown;
 
     bool m_prevent_close { false };
     bool m_prevent_abort { false };

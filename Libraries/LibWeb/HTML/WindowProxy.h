@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Runtime/Object.h>
@@ -48,7 +49,7 @@ private:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
     // [[Window]], https://html.spec.whatwg.org/multipage/window-object.html#concept-windowproxy-window
-    GC::Ptr<Window> m_window;
+    GC::MemberPtr<Window> m_window;
 };
 
 }

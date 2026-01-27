@@ -32,8 +32,8 @@ private:
 
     explicit SVGAnimatedRect(JS::Realm&);
 
-    GC::Ptr<Geometry::DOMRect> m_base_val;
-    GC::Ptr<Geometry::DOMRect> m_anim_val;
+    GC::MemberPtr<Geometry::DOMRect> m_base_val;
+    GC::MemberPtr<Geometry::DOMRect> m_anim_val;
 
     bool m_nulled { true };
 };

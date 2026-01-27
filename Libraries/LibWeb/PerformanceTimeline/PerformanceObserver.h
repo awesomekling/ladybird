@@ -56,7 +56,7 @@ private:
 
     // https://w3c.github.io/performance-timeline/#dfn-observer-callback
     // A PerformanceObserverCallback observer callback set on creation.
-    GC::Ptr<WebIDL::CallbackType> m_callback;
+    GC::MemberPtr<WebIDL::CallbackType> m_callback;
 
     // https://w3c.github.io/performance-timeline/#dfn-observer-buffer
     // A PerformanceEntryList object called the observer buffer that is initially empty.

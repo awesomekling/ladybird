@@ -96,7 +96,7 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ref<BaseAudioContext> m_context;
+    GC::MemberRef<BaseAudioContext> m_context;
     WebIDL::UnsignedLong m_channel_count { 2 };
     Bindings::ChannelCountMode m_channel_count_mode { Bindings::ChannelCountMode::Max };
     Bindings::ChannelInterpretation m_channel_interpretation { Bindings::ChannelInterpretation::Speakers };

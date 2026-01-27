@@ -37,7 +37,7 @@ private:
 
     virtual Optional<JS::Value> item_value(size_t index) const override;
 
-    GC::Ref<DataTransfer> m_data_transfer;
+    GC::MemberRef<DataTransfer> m_data_transfer;
 };
 
 }

@@ -10,6 +10,7 @@
 #include <AK/HashMap.h>
 #include <AK/Optional.h>
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/CascadeOrigin.h>

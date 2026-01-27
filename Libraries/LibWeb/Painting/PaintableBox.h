@@ -319,7 +319,7 @@ private:
     bool scrollbar_contains(ScrollDirection, CSSPixelPoint adjusted_position, ChromeMetrics const& chrome_metrics) const;
     void scroll_to_mouse_position(CSSPixelPoint, ChromeMetrics const& chrome_metrics);
 
-    GC::Ptr<StackingContext> m_stacking_context;
+    GC::MemberPtr<StackingContext> m_stacking_context;
 
     Optional<OverflowData> m_overflow_data;
 

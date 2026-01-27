@@ -57,7 +57,7 @@ private:
     void update();
 
     Vector<QueryParam> m_list;
-    GC::Ptr<DOMURL> m_url;
+    GC::MemberPtr<DOMURL> m_url;
 };
 
 }

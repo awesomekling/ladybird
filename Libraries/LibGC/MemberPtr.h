@@ -9,22 +9,24 @@
 #include <AK/Format.h>
 #include <AK/Traits.h>
 #include <AK/Types.h>
+#include <LibGC/Cell.h>
 #include <LibGC/Forward.h>
 #include <LibGC/Ptr.h>
 
 namespace GC {
 
-// Fires a write barrier for a member pointer field at the given address.
-// Looks up the owning cell via block address masking and transitions it
-// from OldBlack to OldGray if needed.
-GC_API void write_barrier_for_member(void const* member_address);
-
-// MemberRef<T> is like GC::Ref<T>, but fires a write barrier on assignment.
-// It must only be used for fields inside Cell-derived classes.
+// MemberRef<T> is like GC::Ref<T>, but requires an explicit set() call with
+// the owning Cell to fire a write barrier. Used for fields inside Cell-derived
+// classes. Construction does not fire a barrier (the cell is being initialized).
 template<typename T>
 class MemberRef {
 public:
     MemberRef() = delete;
+
+    MemberRef(MemberRef const&) = default;
+    MemberRef(MemberRef&&) = default;
+    MemberRef& operator=(MemberRef const&) = delete;
+    MemberRef& operator=(MemberRef&&) = delete;
 
     MemberRef(T& ptr)
         : m_ptr(&ptr)
@@ -52,38 +54,33 @@ public:
     {
     }
 
-    template<typename U>
-    MemberRef& operator=(MemberRef<U> const& other)
-    requires(IsConvertible<U*, T*>)
+    ALWAYS_INLINE void set(Cell& owner, T& value)
     {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
+        m_ptr = &value;
+        owner.write_barrier();
+    }
+
+    ALWAYS_INLINE void set(Cell& owner, T* value)
+    {
+        ASSERT(value);
+        m_ptr = value;
+        owner.write_barrier();
     }
 
     template<typename U>
-    MemberRef& operator=(Ref<U> const& other)
+    ALWAYS_INLINE void set(Cell& owner, Ref<U> const& value)
     requires(IsConvertible<U*, T*>)
     {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
-    }
-
-    MemberRef& operator=(T& other)
-    {
-        m_ptr = &other;
-        fire_write_barrier();
-        return *this;
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
     }
 
     template<typename U>
-    MemberRef& operator=(U& other)
+    ALWAYS_INLINE void set(Cell& owner, MemberRef<U> const& value)
     requires(IsConvertible<U*, T*>)
     {
-        m_ptr = &static_cast<T&>(other);
-        fire_write_barrier();
-        return *this;
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
     }
 
     RETURNS_NONNULL T* operator->() const { return m_ptr; }
@@ -102,16 +99,12 @@ public:
     bool operator!() const = delete;
 
 private:
-    ALWAYS_INLINE void fire_write_barrier()
-    {
-        write_barrier_for_member(this);
-    }
-
     T* m_ptr { nullptr };
 };
 
-// MemberPtr<T> is like GC::Ptr<T>, but fires a write barrier on assignment.
-// It must only be used for fields inside Cell-derived classes.
+// MemberPtr<T> is like GC::Ptr<T>, but requires an explicit set() call with
+// the owning Cell to fire a write barrier. Used for fields inside Cell-derived
+// classes. Construction and nullptr assignment do not fire barriers.
 template<typename T>
 class MemberPtr {
 public:
@@ -170,92 +163,64 @@ public:
     {
     }
 
-    template<typename U>
-    MemberPtr& operator=(MemberPtr<U> const& other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
-    }
+    // Allow copy/move construction (needed for reading the field value).
+    MemberPtr(MemberPtr const&) = default;
+    MemberPtr(MemberPtr&&) = default;
 
-    template<typename U>
-    MemberPtr& operator=(Ptr<U> const& other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
-    }
+    // Prevent implicit copy/move assignment, which would bypass the write barrier.
+    MemberPtr& operator=(MemberPtr const&) = delete;
+    MemberPtr& operator=(MemberPtr&&) = delete;
 
-    MemberPtr& operator=(MemberRef<T> const& other)
-    {
-        m_ptr = other.ptr();
-        fire_write_barrier();
-        return *this;
-    }
-
-    template<typename U>
-    MemberPtr& operator=(MemberRef<U> const& other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
-    }
-
-    MemberPtr& operator=(Ref<T> const& other)
-    {
-        m_ptr = other.ptr();
-        fire_write_barrier();
-        return *this;
-    }
-
-    template<typename U>
-    MemberPtr& operator=(Ref<U> const& other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = static_cast<T*>(other.ptr());
-        fire_write_barrier();
-        return *this;
-    }
-
-    MemberPtr& operator=(T& other)
-    {
-        m_ptr = &other;
-        fire_write_barrier();
-        return *this;
-    }
-
-    template<typename U>
-    MemberPtr& operator=(U& other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = &static_cast<T&>(other);
-        fire_write_barrier();
-        return *this;
-    }
-
-    MemberPtr& operator=(T* other)
-    {
-        m_ptr = other;
-        fire_write_barrier();
-        return *this;
-    }
-
-    template<typename U>
-    MemberPtr& operator=(U* other)
-    requires(IsConvertible<U*, T*>)
-    {
-        m_ptr = static_cast<T*>(other);
-        fire_write_barrier();
-        return *this;
-    }
-
+    // Clearing to nullptr does not need a barrier.
     MemberPtr& operator=(nullptr_t)
     {
         m_ptr = nullptr;
         return *this;
+    }
+
+    // All other assignments must go through set() to fire a write barrier.
+    ALWAYS_INLINE void set(Cell& owner, T* value)
+    {
+        m_ptr = value;
+        owner.write_barrier();
+    }
+
+    ALWAYS_INLINE void set(Cell& owner, T& value)
+    {
+        m_ptr = &value;
+        owner.write_barrier();
+    }
+
+    template<typename U>
+    ALWAYS_INLINE void set(Cell& owner, Ptr<U> const& value)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
+    }
+
+    template<typename U>
+    ALWAYS_INLINE void set(Cell& owner, Ref<U> const& value)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
+    }
+
+    template<typename U>
+    ALWAYS_INLINE void set(Cell& owner, MemberPtr<U> const& value)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
+    }
+
+    template<typename U>
+    ALWAYS_INLINE void set(Cell& owner, MemberRef<U> const& value)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(value.ptr());
+        owner.write_barrier();
     }
 
     T* operator->() const
@@ -286,11 +251,6 @@ public:
     }
 
 private:
-    ALWAYS_INLINE void fire_write_barrier()
-    {
-        write_barrier_for_member(this);
-    }
-
     T* m_ptr { nullptr };
 };
 

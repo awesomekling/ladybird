@@ -58,9 +58,9 @@ private:
     Vector<AsyncGeneratorRequest> m_async_generator_queue;     // [[AsyncGeneratorQueue]]
     Optional<String> m_generator_brand;                        // [[GeneratorBrand]]
 
-    GC::Ref<Bytecode::Executable> m_generating_executable;
+    GC::MemberRef<Bytecode::Executable> m_generating_executable;
     Value m_previous_value;
-    GC::Ptr<Promise> m_current_promise;
+    GC::MemberPtr<Promise> m_current_promise;
 };
 
 }

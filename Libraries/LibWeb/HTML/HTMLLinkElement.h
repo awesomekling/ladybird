@@ -214,7 +214,7 @@ private:
         };
     };
 
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
     Optional<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer;
 
     struct LoadedIcon {
@@ -223,10 +223,10 @@ private:
     };
 
     Optional<LoadedIcon> m_loaded_icon;
-    GC::Ptr<CSS::CSSStyleSheet> m_loaded_style_sheet;
+    GC::MemberPtr<CSS::CSSStyleSheet> m_loaded_style_sheet;
 
-    GC::Ptr<DOM::DOMTokenList> m_rel_list;
-    GC::Ptr<DOM::DOMTokenList> m_sizes;
+    GC::MemberPtr<DOM::DOMTokenList> m_rel_list;
+    GC::MemberPtr<DOM::DOMTokenList> m_sizes;
     unsigned m_relationship { 0 };
 
     // https://html.spec.whatwg.org/multipage/semantics.html#explicitly-enabled

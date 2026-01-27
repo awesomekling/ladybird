@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/FlyString.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibJS/Runtime/Promise.h>
 #include <LibJS/Runtime/Value.h>
@@ -40,7 +41,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<JS::Object> m_promise;
+    GC::MemberRef<JS::Object> m_promise;
     JS::Value m_reason;
 };
 

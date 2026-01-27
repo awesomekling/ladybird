@@ -197,7 +197,7 @@ private:
     ConnectionFromClient& client() const;
 
     PageHost& m_owner;
-    GC::Ref<Web::Page> m_page;
+    GC::MemberRef<Web::Page> m_page;
     RefPtr<Gfx::PaletteImpl> m_palette_impl;
     Vector<Web::DevicePixelRect> m_all_screen_rects { Web::DevicePixelRect {} };
     size_t m_main_screen_index { 0 };

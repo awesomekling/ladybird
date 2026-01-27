@@ -106,19 +106,19 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestream-closerequest
     // The promise returned from the writer’s close() method
-    GC::Ptr<WebIDL::Promise> m_close_request;
+    GC::MemberPtr<WebIDL::Promise> m_close_request;
 
     // https://streams.spec.whatwg.org/#writablestream-controller
     // A WritableStreamDefaultController created with the ability to control the state and queue of this stream
-    GC::Ptr<WritableStreamDefaultController> m_controller;
+    GC::MemberPtr<WritableStreamDefaultController> m_controller;
 
     // https://streams.spec.whatwg.org/#writablestream-inflightwriterequest
     // A slot set to the promise for the current in-flight write operation while the underlying sink's write algorithm is executing and has not yet fulfilled, used to prevent reentrant calls
-    GC::Ptr<WebIDL::Promise> m_in_flight_write_request;
+    GC::MemberPtr<WebIDL::Promise> m_in_flight_write_request;
 
     // https://streams.spec.whatwg.org/#writablestream-inflightcloserequest
     // A slot set to the promise for the current in-flight close operation while the underlying sink's close algorithm is executing and has not yet fulfilled, used to prevent the abort() method from interrupting close
-    GC::Ptr<WebIDL::Promise> m_in_flight_close_request;
+    GC::MemberPtr<WebIDL::Promise> m_in_flight_close_request;
 
     // https://streams.spec.whatwg.org/#writablestream-pendingabortrequest
     // A pending abort request
@@ -134,7 +134,7 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestream-writer
     // A WritableStreamDefaultWriter instance, if the stream is locked to a writer, or undefined if it is not
-    GC::Ptr<WritableStreamDefaultWriter> m_writer;
+    GC::MemberPtr<WritableStreamDefaultWriter> m_writer;
 
     // https://streams.spec.whatwg.org/#writablestream-writerequests
     // A list of promises representing the stream’s internal queue of write requests not yet processed by the underlying sink

@@ -153,7 +153,7 @@ WebIDL::ExceptionOr<void> HTMLDialogElement::show()
 
     // 11. If hideUntil is null, then set hideUntil to document.
     if (!hide_until.get<GC::Ptr<HTMLElement>>())
-        hide_until = document;
+        hide_until = GC::Ptr<DOM::Document> { document };
 
     // 12. Run hide all popovers until given hideUntil, false, and true.
     hide_all_popovers_until(hide_until, FocusPreviousElement::No, FireEvents::Yes);

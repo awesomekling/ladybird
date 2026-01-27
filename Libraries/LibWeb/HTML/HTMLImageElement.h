@@ -10,6 +10,7 @@
 #include <AK/ByteBuffer.h>
 #include <AK/OwnPtr.h>
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGfx/Forward.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
@@ -151,7 +152,7 @@ private:
 
     Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
 
-    GC::Ptr<DOM::DocumentObserver> m_document_observer;
+    GC::MemberPtr<DOM::DocumentObserver> m_document_observer;
 
     CORSSettingAttribute m_cors_setting { CORSSettingAttribute::NoCORS };
 
@@ -160,10 +161,10 @@ private:
     Optional<String> m_last_selected_source;
 
     // https://html.spec.whatwg.org/multipage/images.html#current-request
-    GC::Ptr<ImageRequest> m_current_request;
+    GC::MemberPtr<ImageRequest> m_current_request;
 
     // https://html.spec.whatwg.org/multipage/images.html#pending-request
-    GC::Ptr<ImageRequest> m_pending_request;
+    GC::MemberPtr<ImageRequest> m_pending_request;
 
     SourceSet m_source_set;
 

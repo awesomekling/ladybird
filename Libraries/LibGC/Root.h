@@ -74,6 +74,16 @@ public:
     {
     }
 
+    Root(MemberPtr<T> cell, SourceLocation location = SourceLocation::current())
+        : Root(cell.ptr(), location)
+    {
+    }
+
+    Root(MemberRef<T> cell, SourceLocation location = SourceLocation::current())
+        : Root(*cell, location)
+    {
+    }
+
     T* cell() const
     {
         if (!m_impl)

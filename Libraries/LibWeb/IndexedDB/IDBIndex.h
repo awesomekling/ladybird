@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IndexedDB/IDBObjectStore.h>
 #include <LibWeb/IndexedDB/Internal/Index.h>
@@ -49,8 +50,8 @@ protected:
 
 private:
     // An index handle has an associated index and an associated object store handle.
-    GC::Ref<Index> m_index;
-    GC::Ref<IDBObjectStore> m_object_store_handle;
+    GC::MemberRef<Index> m_index;
+    GC::MemberRef<IDBObjectStore> m_object_store_handle;
 
     // An index handle has a name, which is initialized to the name of the associated index when the index handle is created.
     String m_name;

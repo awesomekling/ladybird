@@ -157,9 +157,9 @@ private:
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#planned-navigation
     // Each form element has a planned navigation, which is either null or a task; when the form is first created,
     // its planned navigation must be set to null.
-    GC::Ptr<Task const> m_planned_navigation;
+    GC::MemberPtr<Task const> m_planned_navigation;
 
-    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+    GC::MemberPtr<DOM::DOMTokenList> m_rel_list;
 };
 
 }

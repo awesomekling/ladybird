@@ -10,6 +10,7 @@
 #include <AK/Utf16FlyString.h>
 #include <AK/Vector.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 
 namespace JS {
@@ -54,8 +55,8 @@ private:
 
     static u64 s_next_id;
 
-    GC::Ptr<PrivateEnvironment> m_outer_environment; // [[OuterEnv]]
-    Vector<PrivateName> m_private_names;             // [[Names]]
+    GC::MemberPtr<PrivateEnvironment> m_outer_environment; // [[OuterEnv]]
+    Vector<PrivateName> m_private_names;                   // [[Names]]
     u64 m_unique_id;
 };
 

@@ -43,9 +43,9 @@ private:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
     Registration const& m_registration;
-    GC::Ptr<ServiceWorker> m_installing;
-    GC::Ptr<ServiceWorker> m_waiting;
-    GC::Ptr<ServiceWorker> m_active;
+    GC::MemberPtr<ServiceWorker> m_installing;
+    GC::MemberPtr<ServiceWorker> m_waiting;
+    GC::MemberPtr<ServiceWorker> m_active;
 };
 
 }

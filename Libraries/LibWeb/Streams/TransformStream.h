@@ -65,19 +65,19 @@ private:
 
     // https://streams.spec.whatwg.org/#transformstream-backpressurechangepromise
     // A promise which is fulfilled and replaced every time the value of [[backpressure]] changes
-    GC::Ptr<WebIDL::Promise> m_backpressure_change_promise;
+    GC::MemberPtr<WebIDL::Promise> m_backpressure_change_promise;
 
     // https://streams.spec.whatwg.org/#transformstream-controller
     // A TransformStreamDefaultController created with the ability to control [[readable]] and [[writable]]
-    GC::Ptr<TransformStreamDefaultController> m_controller;
+    GC::MemberPtr<TransformStreamDefaultController> m_controller;
 
     // https://streams.spec.whatwg.org/#transformstream-readable
     // The ReadableStream instance controlled by this object
-    GC::Ptr<ReadableStream> m_readable;
+    GC::MemberPtr<ReadableStream> m_readable;
 
     // https://streams.spec.whatwg.org/#transformstream-writable
     // The WritableStream instance controlled by this object
-    GC::Ptr<WritableStream> m_writable;
+    GC::MemberPtr<WritableStream> m_writable;
 };
 
 }

@@ -102,7 +102,7 @@ private:
     // https://xhr.spec.whatwg.org/#upload-object
     // upload object
     //     An XMLHttpRequestUpload object.
-    GC::Ref<XMLHttpRequestUpload> m_upload_object;
+    GC::MemberRef<XMLHttpRequestUpload> m_upload_object;
 
     // https://xhr.spec.whatwg.org/#concept-xmlhttprequest-state
     // state
@@ -142,7 +142,7 @@ private:
     // https://xhr.spec.whatwg.org/#request-body
     // request body
     //     Initially null.
-    GC::Ptr<Fetch::Infrastructure::Body> m_request_body;
+    GC::MemberPtr<Fetch::Infrastructure::Body> m_request_body;
 
     // https://xhr.spec.whatwg.org/#synchronous-flag
     // synchronous flag
@@ -167,7 +167,7 @@ private:
     // https://xhr.spec.whatwg.org/#response
     // response
     //     A response, initially a network error.
-    GC::Ref<Fetch::Infrastructure::Response> m_response;
+    GC::MemberRef<Fetch::Infrastructure::Response> m_response;
 
     // https://xhr.spec.whatwg.org/#received-bytes
     // received bytes
@@ -193,7 +193,7 @@ private:
     // fetch controller
     //     A fetch controller, initially a new fetch controller.
     //     NOTE: The send() method sets it to a useful fetch controller, but for simplicity it always holds a fetch controller.
-    GC::Ref<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberRef<Fetch::Infrastructure::FetchController> m_fetch_controller;
 
     // https://xhr.spec.whatwg.org/#override-mime-type
     // override MIME type

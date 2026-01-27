@@ -8,6 +8,7 @@
 
 #include <LibGC/Cell.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Forward.h>
 
 namespace Web::IndexedDB {
@@ -36,8 +37,8 @@ private:
 
     bool m_observing { false };
 
-    GC::Ref<IDBRequest> m_request;
-    GC::Ptr<GC::Function<void()>> m_request_processed_changed_observer;
+    GC::MemberRef<IDBRequest> m_request;
+    GC::MemberPtr<GC::Function<void()>> m_request_processed_changed_observer;
 };
 
 }

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -74,11 +75,11 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-response-response
     // A Response object has an associated response (a response).
-    GC::Ref<Infrastructure::Response> m_response;
+    GC::MemberRef<Infrastructure::Response> m_response;
 
     // https://fetch.spec.whatwg.org/#response-headers
     // A Response object also has an associated headers (null or a Headers object), initially null.
-    GC::Ptr<Headers> m_headers;
+    GC::MemberPtr<Headers> m_headers;
 };
 
 }

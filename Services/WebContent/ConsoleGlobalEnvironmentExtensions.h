@@ -36,7 +36,7 @@ private:
     // $$(selector, element), equivalent to `(element || document).querySelectorAll(selector)`
     JS_DECLARE_NATIVE_FUNCTION($$_function);
 
-    GC::Ref<Web::HTML::Window> m_window_object;
+    GC::MemberRef<Web::HTML::Window> m_window_object;
     JS::Value m_most_recent_result { JS::js_undefined() };
 };
 

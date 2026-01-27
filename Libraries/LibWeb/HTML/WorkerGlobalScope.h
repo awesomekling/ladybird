@@ -122,15 +122,15 @@ protected:
 
     virtual void finalize() override;
 
-    GC::Ptr<MessagePort> m_internal_port;
+    GC::MemberPtr<MessagePort> m_internal_port;
 
 private:
     virtual bool is_window_or_worker_global_scope_mixin() const final { return true; }
 
-    GC::Ptr<WorkerLocation> m_location;
-    GC::Ptr<WorkerNavigator> m_navigator;
+    GC::MemberPtr<WorkerLocation> m_location;
+    GC::MemberPtr<WorkerNavigator> m_navigator;
 
-    GC::Ref<Web::Page> m_page;
+    GC::MemberRef<Web::Page> m_page;
 
     // https://html.spec.whatwg.org/multipage/workers.html#concept-WorkerGlobalScope-owner-set
     // FIXME: A WorkerGlobalScope object has an associated owner set (a set of Document and WorkerGlobalScope objects). It is initially empty and populated when the worker is created or obtained.
@@ -170,7 +170,7 @@ private:
     bool m_closing { false };
 
     // https://drafts.csswg.org/css-font-loading/#font-source
-    GC::Ptr<CSS::FontFaceSet> m_fonts;
+    GC::MemberPtr<CSS::FontFaceSet> m_fonts;
 };
 
 }

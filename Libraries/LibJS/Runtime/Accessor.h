@@ -24,10 +24,10 @@ public:
     }
 
     FunctionObject* getter() const { return m_getter; }
-    void set_getter(FunctionObject* getter) { m_getter = getter; }
+    void set_getter(FunctionObject* getter) { m_getter.set(*this, getter); }
 
     FunctionObject* setter() const { return m_setter; }
-    void set_setter(FunctionObject* setter) { m_setter = setter; }
+    void set_setter(FunctionObject* setter) { m_setter.set(*this, setter); }
 
     void visit_edges(Cell::Visitor& visitor) override
     {
@@ -43,8 +43,8 @@ private:
     {
     }
 
-    GC::Ptr<FunctionObject> m_getter;
-    GC::Ptr<FunctionObject> m_setter;
+    GC::MemberPtr<FunctionObject> m_getter;
+    GC::MemberPtr<FunctionObject> m_setter;
 };
 
 }

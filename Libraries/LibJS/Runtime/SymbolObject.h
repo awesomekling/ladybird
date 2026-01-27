@@ -28,7 +28,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Symbol> m_symbol;
+    GC::MemberRef<Symbol> m_symbol;
 };
 
 }

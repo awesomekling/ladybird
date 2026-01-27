@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/Optional.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGC/Root.h>
 #include <LibJS/Forward.h>
@@ -33,7 +34,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Object> m_exports;
+    GC::MemberRef<Object> m_exports;
     NonnullOwnPtr<Wasm::ModuleInstance> m_module_instance;
     HashMap<Wasm::FunctionAddress, GC::Ptr<JS::FunctionObject>> m_function_instances;
     HashMap<Wasm::TableAddress, GC::Ptr<WebAssembly::Table>> m_table_instances;

@@ -53,7 +53,7 @@ private:
 
     QualifiedName m_qualified_name;
     String m_value;
-    GC::Ptr<Element> m_owner_element;
+    GC::MemberPtr<Element> m_owner_element;
 };
 
 template<>

@@ -42,7 +42,7 @@ private:
     // https://html.spec.whatwg.org/multipage/browsers.html#browsing-context-group-set
     OrderedHashTable<GC::Ref<BrowsingContext>> m_browsing_context_set;
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
 };
 
 }

@@ -32,7 +32,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<SVGLengthList> m_base_val;
+    GC::MemberRef<SVGLengthList> m_base_val;
 };
 
 }

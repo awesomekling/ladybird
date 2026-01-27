@@ -53,16 +53,16 @@ private:
     Bindings::BiquadFilterType m_type { Bindings::BiquadFilterType::Lowpass };
 
     // https://webaudio.github.io/web-audio-api/#dom-biquadfilternode-frequency
-    GC::Ref<AudioParam> m_frequency;
+    GC::MemberRef<AudioParam> m_frequency;
 
     // https://webaudio.github.io/web-audio-api/#dom-biquadfilternode-detune
-    GC::Ref<AudioParam> m_detune;
+    GC::MemberRef<AudioParam> m_detune;
 
     // https://webaudio.github.io/web-audio-api/#dom-biquadfilternode-q
-    GC::Ref<AudioParam> m_q;
+    GC::MemberRef<AudioParam> m_q;
 
     // https://webaudio.github.io/web-audio-api/#dom-biquadfilternode-gain
-    GC::Ref<AudioParam> m_gain;
+    GC::MemberRef<AudioParam> m_gain;
 };
 
 }

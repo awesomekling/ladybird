@@ -36,7 +36,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<DOM::DocumentFragment> m_content;
+    GC::MemberPtr<DOM::DocumentFragment> m_content;
 };
 
 }

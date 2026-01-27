@@ -28,7 +28,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<GeolocationCoordinates const> m_coords;
+    GC::MemberRef<GeolocationCoordinates const> m_coords;
     HighResolutionTime::EpochTimeStamp m_timestamp;
 
     // https://w3c.github.io/geolocation/#dfn-ishighaccuracy

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Cell.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Forward.h>
 
@@ -24,7 +25,7 @@ protected:
     void visit_edges(GC::Cell::Visitor&);
 
     // https://streams.spec.whatwg.org/#generictransformstream-transform
-    GC::Ref<TransformStream> m_transform;
+    GC::MemberRef<TransformStream> m_transform;
 };
 
 }

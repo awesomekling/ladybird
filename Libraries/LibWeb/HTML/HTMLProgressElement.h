@@ -53,7 +53,7 @@ private:
 
     bool is_determinate() const { return has_attribute(HTML::AttributeNames::value); }
 
-    GC::Ptr<DOM::Element> m_progress_value_element;
+    GC::MemberPtr<DOM::Element> m_progress_value_element;
 };
 
 }

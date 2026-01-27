@@ -144,28 +144,28 @@ void WebGLRenderingContextImpl::bind_buffer(WebIDL::UnsignedLong target, GC::Roo
     if (m_context->webgl_version() == OpenGLContext::WebGLVersion::WebGL2) {
         switch (target) {
         case GL_ARRAY_BUFFER:
-            m_array_buffer_binding = buffer;
+            m_array_buffer_binding.set(*this, buffer);
             break;
         case GL_COPY_READ_BUFFER:
-            m_copy_read_buffer_binding = buffer;
+            m_copy_read_buffer_binding.set(*this, buffer);
             break;
         case GL_COPY_WRITE_BUFFER:
-            m_copy_write_buffer_binding = buffer;
+            m_copy_write_buffer_binding.set(*this, buffer);
             break;
         case GL_ELEMENT_ARRAY_BUFFER:
-            m_element_array_buffer_binding = buffer;
+            m_element_array_buffer_binding.set(*this, buffer);
             break;
         case GL_PIXEL_PACK_BUFFER:
-            m_pixel_pack_buffer_binding = buffer;
+            m_pixel_pack_buffer_binding.set(*this, buffer);
             break;
         case GL_PIXEL_UNPACK_BUFFER:
-            m_pixel_unpack_buffer_binding = buffer;
+            m_pixel_unpack_buffer_binding.set(*this, buffer);
             break;
         case GL_TRANSFORM_FEEDBACK_BUFFER:
-            m_transform_feedback_buffer_binding = buffer;
+            m_transform_feedback_buffer_binding.set(*this, buffer);
             break;
         case GL_UNIFORM_BUFFER:
-            m_uniform_buffer_binding = buffer;
+            m_uniform_buffer_binding.set(*this, buffer);
             break;
         default:
             dbgln("Unknown WebGL buffer object binding target for storing current binding: 0x{:04x}", target);
@@ -175,10 +175,10 @@ void WebGLRenderingContextImpl::bind_buffer(WebIDL::UnsignedLong target, GC::Roo
     } else {
         switch (target) {
         case GL_ELEMENT_ARRAY_BUFFER:
-            m_element_array_buffer_binding = buffer;
+            m_element_array_buffer_binding.set(*this, buffer);
             break;
         case GL_ARRAY_BUFFER:
-            m_array_buffer_binding = buffer;
+            m_array_buffer_binding.set(*this, buffer);
             break;
         default:
             dbgln("Unknown WebGL buffer object binding target for storing current binding: 0x{:04x}", target);
@@ -205,7 +205,7 @@ void WebGLRenderingContextImpl::bind_framebuffer(WebIDL::UnsignedLong target, GC
     }
 
     glBindFramebuffer(target, framebuffer ? framebuffer_handle : m_context->default_framebuffer());
-    m_framebuffer_binding = framebuffer;
+    m_framebuffer_binding.set(*this, framebuffer);
 }
 
 void WebGLRenderingContextImpl::bind_renderbuffer(WebIDL::UnsignedLong target, GC::Root<WebGLRenderbuffer> renderbuffer)
@@ -223,7 +223,7 @@ void WebGLRenderingContextImpl::bind_renderbuffer(WebIDL::UnsignedLong target, G
     }
 
     glBindRenderbuffer(target, renderbuffer ? renderbuffer_handle : m_context->default_renderbuffer());
-    m_renderbuffer_binding = renderbuffer;
+    m_renderbuffer_binding.set(*this, renderbuffer);
 }
 
 void WebGLRenderingContextImpl::bind_texture(WebIDL::UnsignedLong target, GC::Root<WebGLTexture> texture)
@@ -242,15 +242,15 @@ void WebGLRenderingContextImpl::bind_texture(WebIDL::UnsignedLong target, GC::Ro
 
     switch (target) {
     case GL_TEXTURE_2D:
-        m_texture_binding_2d = texture;
+        m_texture_binding_2d.set(*this, texture);
         break;
     case GL_TEXTURE_CUBE_MAP:
-        m_texture_binding_cube_map = texture;
+        m_texture_binding_cube_map.set(*this, texture);
         break;
 
     case GL_TEXTURE_2D_ARRAY:
         if (m_context->webgl_version() == OpenGLContext::WebGLVersion::WebGL2) {
-            m_texture_binding_2d_array = texture;
+            m_texture_binding_2d_array.set(*this, texture);
             break;
         }
 
@@ -258,7 +258,7 @@ void WebGLRenderingContextImpl::bind_texture(WebIDL::UnsignedLong target, GC::Ro
         return;
     case GL_TEXTURE_3D:
         if (m_context->webgl_version() == OpenGLContext::WebGLVersion::WebGL2) {
-            m_texture_binding_3d = texture;
+            m_texture_binding_3d.set(*this, texture);
             break;
         }
 
@@ -2189,7 +2189,7 @@ void WebGLRenderingContextImpl::use_program(GC::Root<WebGLProgram> program)
     }
 
     glUseProgram(program_handle);
-    m_current_program = program;
+    m_current_program.set(*this, program);
 }
 
 void WebGLRenderingContextImpl::validate_program(GC::Root<WebGLProgram> program)

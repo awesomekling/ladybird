@@ -32,8 +32,8 @@ public:
 private:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<DOM::Element> m_target;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<DOM::Element> m_target;
     Bindings::ResizeObserverBoxOptions m_observed_box;
     Vector<GC::Ref<ResizeObserverSize>> m_last_reported_sizes;
 };

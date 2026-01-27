@@ -44,7 +44,7 @@ public:
 private:
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<HTML::EventLoop> m_event_loop;
+    GC::MemberRef<HTML::EventLoop> m_event_loop;
 
     Vector<GC::Ref<HTML::Task>> m_tasks;
 };

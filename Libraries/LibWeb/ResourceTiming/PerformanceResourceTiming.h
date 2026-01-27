@@ -79,7 +79,7 @@ protected:
 private:
     FlyString m_initiator_type;
     String m_requested_url;
-    GC::Ref<Fetch::Infrastructure::FetchTimingInfo> m_timing_info;
+    GC::MemberRef<Fetch::Infrastructure::FetchTimingInfo> m_timing_info;
     Fetch::Infrastructure::Response::BodyInfo m_response_body_info;
     Optional<Fetch::Infrastructure::Response::CacheState> m_cache_mode;
     Fetch::Infrastructure::Status m_response_status;

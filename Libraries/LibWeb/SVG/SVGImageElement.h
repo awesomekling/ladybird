@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/SVG/SVGAnimatedLength.h>
@@ -58,10 +59,10 @@ private:
     virtual GC::Ptr<Layout::Node> create_layout_node(GC::Ref<CSS::ComputedProperties>) override;
     void animate();
 
-    GC::Ptr<SVG::SVGAnimatedLength> m_x;
-    GC::Ptr<SVG::SVGAnimatedLength> m_y;
-    GC::Ptr<SVG::SVGAnimatedLength> m_width;
-    GC::Ptr<SVG::SVGAnimatedLength> m_height;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_x;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_y;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_width;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_height;
 
     RefPtr<Core::Timer> m_animation_timer;
     size_t m_current_frame_index { 0 };
@@ -69,7 +70,7 @@ private:
 
     Optional<URL::URL> m_href;
 
-    GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<HTML::SharedResourceRequest> m_resource_request;
     Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
 };
 

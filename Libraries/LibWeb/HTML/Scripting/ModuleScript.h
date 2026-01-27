@@ -52,7 +52,7 @@ private:
     virtual bool is_javascript_module_script() const final { return true; }
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ptr<JS::SourceTextModule> m_record;
+    GC::MemberPtr<JS::SourceTextModule> m_record;
 
     size_t m_fetch_internal_request_count { 0 };
     size_t m_completed_fetch_internal_request_count { 0 };

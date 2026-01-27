@@ -11,6 +11,7 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/Variant.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGC/Root.h>
 #include <LibWeb/Export.h>
@@ -73,7 +74,7 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-body-stream
     // A stream (a ReadableStream object).
-    GC::Ref<Streams::ReadableStream> m_stream;
+    GC::MemberRef<Streams::ReadableStream> m_stream;
 
     // https://fetch.spec.whatwg.org/#concept-body-source
     // A source (null, a byte sequence, a Blob object, or a FormData object), initially null.
@@ -87,7 +88,7 @@ private:
     // Non-standard: Captured "resource header" bytes for MIME type sniffing.
     ByteBuffer m_sniff_bytes;
     bool m_sniff_bytes_complete { false };
-    GC::Ptr<GC::Function<void(ReadonlyBytes)>> m_sniff_bytes_callback;
+    GC::MemberPtr<GC::Function<void(ReadonlyBytes)>> m_sniff_bytes_callback;
 };
 
 // https://fetch.spec.whatwg.org/#body-with-type

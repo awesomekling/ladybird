@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/String.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -72,7 +73,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<SpeechGrammarList> m_grammars;
+    GC::MemberPtr<SpeechGrammarList> m_grammars;
     String m_lang;
     bool m_continuous { false };
     bool m_interim_results { false };

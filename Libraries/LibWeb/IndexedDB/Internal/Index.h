@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Realm.h>
@@ -52,7 +53,7 @@ private:
     Index(GC::Ref<ObjectStore>, String const&, KeyPath const&, bool, bool);
 
     // An index [...] has a referenced object store.
-    GC::Ref<ObjectStore> m_object_store;
+    GC::MemberRef<ObjectStore> m_object_store;
 
     // The index has a list of records which hold the data stored in the index.
     Vector<IndexRecord> m_records;

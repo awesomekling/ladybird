@@ -29,7 +29,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<NumberFormat> m_number_format; // [[NumberFormat]]
+    GC::MemberRef<NumberFormat> m_number_format; // [[NumberFormat]]
 };
 
 }

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -39,8 +40,8 @@ private:
     void run_callback();
 
     GC::Ptr<GC::Function<void(GC::Ref<Infrastructure::Response>)>> m_callback;
-    GC::Ref<Infrastructure::Request> m_request;
-    GC::Ptr<Infrastructure::Response> m_response;
+    GC::MemberRef<Infrastructure::Request> m_request;
+    GC::MemberPtr<Infrastructure::Response> m_response;
 };
 
 }

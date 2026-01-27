@@ -41,7 +41,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Geometry::DOMMatrix> m_matrix;
+    GC::MemberRef<Geometry::DOMMatrix> m_matrix;
 };
 
 }

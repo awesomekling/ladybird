@@ -118,7 +118,7 @@ private:
     Bindings::NavigationType m_navigation_type = { Bindings::NavigationType::Push };
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-destination
-    GC::Ref<NavigationDestination> m_destination;
+    GC::MemberRef<NavigationDestination> m_destination;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-canintercept
     bool m_can_intercept = { false };
@@ -130,10 +130,10 @@ private:
     bool m_hash_change = { false };
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-signal
-    GC::Ref<DOM::AbortSignal> m_signal;
+    GC::MemberRef<DOM::AbortSignal> m_signal;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-formdata
-    GC::Ptr<XHR::FormData> m_form_data;
+    GC::MemberPtr<XHR::FormData> m_form_data;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-downloadrequest
     Optional<String> m_download_request;
@@ -145,7 +145,7 @@ private:
     bool m_has_ua_visual_transition { false };
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-navigateevent-sourceelement
-    GC::Ptr<DOM::Element> m_source_element { nullptr };
+    GC::MemberPtr<DOM::Element> m_source_element { nullptr };
 };
 
 }

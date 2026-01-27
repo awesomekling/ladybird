@@ -62,7 +62,7 @@ private:
     void add_sheet(CSSStyleSheet&);
     void remove_sheet(CSSStyleSheet&);
 
-    GC::Ref<DOM::Node> m_document_or_shadow_root;
+    GC::MemberRef<DOM::Node> m_document_or_shadow_root;
     Vector<GC::Ref<CSSStyleSheet>> m_sheets;
 
     // https://www.w3.org/TR/cssom/#preferred-css-style-sheet-set-name

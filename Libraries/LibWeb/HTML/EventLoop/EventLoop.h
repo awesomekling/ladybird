@@ -9,6 +9,7 @@
 #include <AK/Function.h>
 #include <AK/Noncopyable.h>
 #include <LibCore/Forward.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGC/Weak.h>
 #include <LibJS/Forward.h>
@@ -107,18 +108,18 @@ private:
 
     Vector<GC::Ref<GC::Function<void()>>> m_reached_step_1_tasks;
 
-    GC::Ptr<TaskQueue> m_task_queue;
-    GC::Ptr<TaskQueue> m_microtask_queue;
+    GC::MemberPtr<TaskQueue> m_task_queue;
+    GC::MemberPtr<TaskQueue> m_microtask_queue;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#currently-running-task
-    GC::Ptr<Task> m_currently_running_task { nullptr };
+    GC::MemberPtr<Task> m_currently_running_task { nullptr };
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-render-opportunity-time
     double m_last_render_opportunity_time { 0 };
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-idle-period-start-time
     double m_last_idle_period_start_time { 0 };
 
-    GC::Ptr<Platform::Timer> m_system_event_loop_timer;
+    GC::MemberPtr<Platform::Timer> m_system_event_loop_timer;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#performing-a-microtask-checkpoint
     bool m_performing_a_microtask_checkpoint { false };
@@ -142,7 +143,7 @@ private:
 
     bool m_running_rendering_task { false };
 
-    GC::Ptr<GC::Function<void()>> m_rendering_task_function;
+    GC::MemberPtr<GC::Function<void()>> m_rendering_task_function;
 };
 
 WEB_API EventLoop& main_thread_event_loop();

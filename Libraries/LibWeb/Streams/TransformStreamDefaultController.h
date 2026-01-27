@@ -45,19 +45,19 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://streams.spec.whatwg.org/#transformstreamdefaultcontroller-cancelalgorithm
-    GC::Ptr<CancelAlgorithm> m_cancel_algorithm;
+    GC::MemberPtr<CancelAlgorithm> m_cancel_algorithm;
 
     // https://streams.spec.whatwg.org/#transformstreamdefaultcontroller-finishpromise
-    GC::Ptr<JS::PromiseCapability> m_finish_promise;
+    GC::MemberPtr<JS::PromiseCapability> m_finish_promise;
 
     // https://streams.spec.whatwg.org/#transformstreamdefaultcontroller-flushalgorithm
-    GC::Ptr<FlushAlgorithm> m_flush_algorithm;
+    GC::MemberPtr<FlushAlgorithm> m_flush_algorithm;
 
     // https://streams.spec.whatwg.org/#transformstreamdefaultcontroller-transformalgorithm
-    GC::Ptr<TransformAlgorithm> m_transform_algorithm;
+    GC::MemberPtr<TransformAlgorithm> m_transform_algorithm;
 
     // https://streams.spec.whatwg.org/#transformstreamdefaultcontroller-stream
-    GC::Ptr<TransformStream> m_stream;
+    GC::MemberPtr<TransformStream> m_stream;
 };
 
 }

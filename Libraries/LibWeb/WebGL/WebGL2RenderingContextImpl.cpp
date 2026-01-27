@@ -1273,7 +1273,7 @@ void WebGL2RenderingContextImpl::bind_vertex_array(GC::Root<WebGLVertexArrayObje
     }
 
     glBindVertexArray(array_handle);
-    m_current_vertex_array = array;
+    m_current_vertex_array.set(*this, array);
 }
 
 void WebGL2RenderingContextImpl::compressed_tex_image3d(WebIDL::UnsignedLong target, WebIDL::Long level, WebIDL::UnsignedLong internalformat, WebIDL::Long width, WebIDL::Long height, WebIDL::Long depth, WebIDL::Long border, GC::Root<WebIDL::ArrayBufferView> src_data, WebIDL::UnsignedLongLong src_offset, WebIDL::UnsignedLong src_length_override)

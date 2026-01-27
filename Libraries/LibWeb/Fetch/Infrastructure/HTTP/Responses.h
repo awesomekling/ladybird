@@ -12,6 +12,7 @@
 #include <AK/Optional.h>
 #include <AK/Time.h>
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibHTTP/HeaderList.h>
 #include <LibJS/Forward.h>
@@ -157,7 +158,7 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-response-body
     // A response has an associated body (null or a body). Unless stated otherwise it is null.
-    GC::Ptr<Body> m_body;
+    GC::MemberPtr<Body> m_body;
 
     // https://fetch.spec.whatwg.org/#concept-response-cache-state
     // A response has an associated cache state (the empty string, "local", or "validated"). Unless stated otherwise, it is the empty string.
@@ -255,7 +256,7 @@ protected:
 
 private:
     // https://fetch.spec.whatwg.org/#concept-internal-response
-    GC::Ref<Response> m_internal_response;
+    GC::MemberRef<Response> m_internal_response;
 };
 
 // https://fetch.spec.whatwg.org/#concept-filtered-response-basic

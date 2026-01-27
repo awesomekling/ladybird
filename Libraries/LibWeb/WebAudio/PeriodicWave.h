@@ -39,8 +39,8 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ptr<JS::Float32Array> m_real;
-    GC::Ptr<JS::Float32Array> m_imag;
+    GC::MemberPtr<JS::Float32Array> m_real;
+    GC::MemberPtr<JS::Float32Array> m_imag;
     bool m_normalize { true };
 };
 

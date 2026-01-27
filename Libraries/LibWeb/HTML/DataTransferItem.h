@@ -40,7 +40,7 @@ private:
 
     Optional<DragDataStore::Mode> mode() const;
 
-    GC::Ref<DataTransfer> m_data_transfer;
+    GC::MemberRef<DataTransfer> m_data_transfer;
     Optional<size_t> m_item_index;
 };
 

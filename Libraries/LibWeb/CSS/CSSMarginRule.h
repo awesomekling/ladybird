@@ -33,7 +33,7 @@ private:
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
     FlyString m_name;
-    GC::Ref<CSSStyleProperties> m_style;
+    GC::MemberRef<CSSStyleProperties> m_style;
 };
 
 bool is_margin_rule_name(StringView);

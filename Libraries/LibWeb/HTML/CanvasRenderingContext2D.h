@@ -164,7 +164,7 @@ private:
     void paint_shadow_for_fill_internal(Gfx::Path const&, Gfx::WindingRule);
     void paint_shadow_for_stroke_internal(Gfx::Path const&, Gfx::Path::CapStyle, Gfx::Path::JoinStyle, Vector<float> const&);
 
-    GC::Ref<HTMLCanvasElement> m_element;
+    GC::MemberRef<HTMLCanvasElement> m_element;
     OwnPtr<Gfx::Painter> m_painter;
 
     // https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-origin-clean

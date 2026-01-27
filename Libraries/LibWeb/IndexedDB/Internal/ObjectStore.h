@@ -11,6 +11,7 @@
 #include <AK/String.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Realm.h>
@@ -61,7 +62,7 @@ private:
     ObjectStore(GC::Ref<Database> database, String name, bool auto_increment, Optional<KeyPath> const& key_path);
 
     // AD-HOC: An ObjectStore needs to know what Database it belongs to...
-    GC::Ref<Database> m_database;
+    GC::MemberRef<Database> m_database;
 
     // AD-HOC: An Index has referenced ObjectStores, we also need the reverse mapping
     AK::HashMap<String, GC::Ref<Index>> m_indexes;

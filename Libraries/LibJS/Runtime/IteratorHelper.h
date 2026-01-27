@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/GeneratorObject.h>
 #include <LibJS/Runtime/Iterator.h>
@@ -36,8 +37,8 @@ private:
     virtual ThrowCompletionOr<IterationResult> execute(VM&, JS::Completion const& completion) override;
 
     Vector<GC::Ref<IteratorRecord>> m_underlying_iterators; // [[UnderlyingIterators]]
-    GC::Ref<Closure> m_closure;
-    GC::Ptr<AbruptClosure> m_abrupt_closure;
+    GC::MemberRef<Closure> m_closure;
+    GC::MemberPtr<AbruptClosure> m_abrupt_closure;
 
     size_t m_counter { 0 };
     bool m_done { false };

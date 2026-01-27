@@ -9,6 +9,7 @@
 #include <AK/Forward.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/WeakPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGfx/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -80,12 +81,12 @@ private:
     void handle_gamepad_updated(SDL_JoystickID);
     void handle_gamepad_disconnected(SDL_JoystickID);
 
-    GC::Ref<HTML::Navigable> m_navigable;
+    GC::MemberRef<HTML::Navigable> m_navigable;
 
     bool m_in_mouse_selection { false };
     InputEventsTarget* m_mouse_selection_target { nullptr };
 
-    GC::Ptr<Painting::Paintable> m_mouse_event_tracking_paintable;
+    GC::MemberPtr<Painting::Paintable> m_mouse_event_tracking_paintable;
 
     NonnullOwnPtr<DragAndDropEventHandler> m_drag_and_drop_event_handler;
     OwnPtr<ElementResizeAction> m_element_resize_in_progress;

@@ -72,7 +72,7 @@ private:
 
     ThrowCompletionOr<bool> set_length(PropertyDescriptor const&);
 
-    GC::Ref<Realm> m_realm;
+    GC::MemberRef<Realm> m_realm;
     bool m_length_writable { true };
     bool m_is_proxy_target { false };
 };

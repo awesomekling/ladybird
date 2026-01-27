@@ -8,6 +8,7 @@
 
 #include <LibCore/Forward.h>
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Export.h>
@@ -32,7 +33,7 @@ private:
     virtual void visit_edges(JS::Cell::Visitor& visitor) override;
 
     NonnullRefPtr<Core::Timer> m_timer;
-    GC::Ptr<GC::Function<void()>> m_on_timeout;
+    GC::MemberPtr<GC::Function<void()>> m_on_timeout;
     bool m_timed_out { false };
 };
 

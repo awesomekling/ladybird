@@ -361,7 +361,7 @@ ThrowCompletionOr<GC::Ref<Promise>> CyclicModule::evaluate(VM& vm)
 
     // 6. Let capability be ! NewPromiseCapability(%Promise%).
     // 7. Set module.[[TopLevelCapability]] to capability.
-    m_top_level_capability = MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor()));
+    m_top_level_capability.set(*this, MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor())));
 
     // 8. Let result be Completion(InnerModuleEvaluation(module, stack, 0)).
     auto result = inner_module_evaluation(vm, stack, 0);
@@ -568,7 +568,7 @@ ThrowCompletionOr<u32> CyclicModule::inner_module_evaluation(VM& vm, Vector<Modu
                 done = true;
 
             // vii. Set requiredModule.[[CycleRoot]] to module.
-            cyclic_module.m_cycle_root = this;
+            cyclic_module.m_cycle_root.set(cyclic_module, this);
         }
     }
 

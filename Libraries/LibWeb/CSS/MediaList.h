@@ -46,7 +46,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<StyleSheet> m_associated_style_sheet;
+    GC::MemberPtr<StyleSheet> m_associated_style_sheet;
     Vector<NonnullRefPtr<MediaQuery>> m_media;
 };
 

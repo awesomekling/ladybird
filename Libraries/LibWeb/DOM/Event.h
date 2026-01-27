@@ -165,9 +165,9 @@ private:
     virtual bool is_dom_event() const final { return true; }
 
     FlyString m_type;
-    GC::Ptr<EventTarget> m_target;
-    GC::Ptr<EventTarget> m_related_target;
-    GC::Ptr<EventTarget> m_current_target;
+    GC::MemberPtr<EventTarget> m_target;
+    GC::MemberPtr<EventTarget> m_related_target;
+    GC::MemberPtr<EventTarget> m_current_target;
 
     Phase m_phase { None };
 

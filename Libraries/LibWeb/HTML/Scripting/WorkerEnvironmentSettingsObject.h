@@ -46,7 +46,7 @@ private:
     URL::Origin m_origin;
     bool m_outside_settings_has_cross_site_ancestor;
 
-    GC::Ref<WorkerGlobalScope> m_global_scope;
+    GC::MemberRef<WorkerGlobalScope> m_global_scope;
 
     HighResolutionTime::DOMHighResTimeStamp m_unsafe_worker_creation_time { 0 };
 };

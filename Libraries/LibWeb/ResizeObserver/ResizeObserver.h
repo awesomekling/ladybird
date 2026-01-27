@@ -48,7 +48,7 @@ private:
 
     void unregister_observer_if_needed();
 
-    GC::Ptr<WebIDL::CallbackType> m_callback;
+    GC::MemberPtr<WebIDL::CallbackType> m_callback;
     Vector<GC::Ref<ResizeObservation>> m_observation_targets;
     Vector<GC::Ref<ResizeObservation>> m_active_targets;
     Vector<GC::Ref<ResizeObservation>> m_skipped_targets;

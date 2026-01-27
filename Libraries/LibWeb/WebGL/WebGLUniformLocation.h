@@ -32,7 +32,7 @@ protected:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
     GLuint m_handle { 0 };
-    GC::Ptr<WebGLProgram> m_parent_shader;
+    GC::MemberPtr<WebGLProgram> m_parent_shader;
 };
 
 }

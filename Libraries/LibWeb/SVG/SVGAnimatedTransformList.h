@@ -36,8 +36,8 @@ private:
     virtual void initialize(JS::Realm& realm) override;
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
-    GC::Ref<SVGTransformList> m_base_val;
-    GC::Ref<SVGTransformList> m_anim_val;
+    GC::MemberRef<SVGTransformList> m_base_val;
+    GC::MemberRef<SVGTransformList> m_anim_val;
 };
 
 }

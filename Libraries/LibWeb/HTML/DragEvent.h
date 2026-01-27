@@ -36,7 +36,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ptr<DataTransfer> m_data_transfer;
+    GC::MemberPtr<DataTransfer> m_data_transfer;
 };
 
 }

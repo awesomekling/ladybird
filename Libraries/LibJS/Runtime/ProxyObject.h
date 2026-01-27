@@ -59,8 +59,8 @@ private:
 
     virtual ThrowCompletionOr<void> get_stack_frame_size(size_t& registers_and_locals_count, size_t& constants_count, size_t& argument_count) override;
 
-    GC::Ref<Object> m_target;
-    GC::Ref<Object> m_handler;
+    GC::MemberRef<Object> m_target;
+    GC::MemberRef<Object> m_handler;
     bool m_is_revoked { false };
 };
 

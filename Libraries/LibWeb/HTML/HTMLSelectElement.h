@@ -157,11 +157,11 @@ private:
     mutable size_t m_cached_number_of_selected_options { 0 };
 
     mutable GC::Ptr<HTMLOptionsCollection> m_options;
-    GC::Ptr<DOM::HTMLCollection> m_selected_options;
+    GC::MemberPtr<DOM::HTMLCollection> m_selected_options;
     bool m_is_open { false };
     Vector<SelectItem> m_select_items;
-    GC::Ptr<DOM::Element> m_inner_text_element;
-    GC::Ptr<DOM::Element> m_chevron_icon_element;
+    GC::MemberPtr<DOM::Element> m_inner_text_element;
+    GC::MemberPtr<DOM::Element> m_chevron_icon_element;
 
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#user-validity
     bool m_user_validity { false };

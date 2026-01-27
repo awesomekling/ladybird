@@ -8,6 +8,7 @@
 
 #include <AK/Vector.h>
 #include <LibGC/Cell.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/WebIDL/Types.h>
 
@@ -46,7 +47,7 @@ protected:
     ReadOnlyList read_only() const { return m_read_only; }
 
 private:
-    GC::Ref<JS::Realm> m_realm;
+    GC::MemberRef<JS::Realm> m_realm;
     Vector<T> m_items;
 
     // https://www.w3.org/TR/SVG2/types.html#ReadOnlyList

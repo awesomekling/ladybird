@@ -60,7 +60,7 @@ public:
     void set_date_time_format(Unicode::CalendarPattern date_time_format) { m_date_time_format = move(date_time_format); }
 
     NativeFunction* bound_format() const { return m_bound_format; }
-    void set_bound_format(NativeFunction* bound_format) { m_bound_format = bound_format; }
+    void set_bound_format(NativeFunction* bound_format) { m_bound_format.set(*this, bound_format); }
 
     Unicode::DateTimeFormat const& formatter() const { return *m_formatter; }
     void set_formatter(NonnullOwnPtr<Unicode::DateTimeFormat> formatter) { m_formatter = move(formatter); }
@@ -103,7 +103,7 @@ private:
     Optional<Unicode::CalendarPattern> m_temporal_plain_time_format;       // [[TemporalPlainTimeFormat]]
     Optional<Unicode::CalendarPattern> m_temporal_plain_date_time_format;  // [[TemporalPlainDateTimeFormat]]
     Optional<Unicode::CalendarPattern> m_temporal_instant_format;          // [[TemporalInstantFormat]]
-    GC::Ptr<NativeFunction> m_bound_format;                                // [[BoundFormat]]
+    GC::MemberPtr<NativeFunction> m_bound_format;                          // [[BoundFormat]]
 
     // Non-standard. Stores the ICU date-time formatters for the Intl object's formatting options.
     String m_icu_locale;

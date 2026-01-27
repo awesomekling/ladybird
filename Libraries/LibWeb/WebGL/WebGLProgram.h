@@ -35,8 +35,8 @@ protected:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
-    GC::Ptr<WebGLShader> m_attached_vertex_shader;
-    GC::Ptr<WebGLShader> m_attached_fragment_shader;
+    GC::MemberPtr<WebGLShader> m_attached_vertex_shader;
+    GC::MemberPtr<WebGLShader> m_attached_fragment_shader;
 };
 
 }

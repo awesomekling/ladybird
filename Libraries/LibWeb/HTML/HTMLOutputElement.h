@@ -65,7 +65,7 @@ private:
 
     virtual void form_associated_element_attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_) override;
 
-    GC::Ptr<DOM::DOMTokenList> m_html_for;
+    GC::MemberPtr<DOM::DOMTokenList> m_html_for;
 
     Optional<Utf16String> m_default_value_override;
 };

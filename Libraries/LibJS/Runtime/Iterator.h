@@ -55,7 +55,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<IteratorRecord> m_iterated; // [[Iterated]]
+    GC::MemberRef<IteratorRecord> m_iterated; // [[Iterated]]
 };
 
 enum class IteratorHint {

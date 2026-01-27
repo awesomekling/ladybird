@@ -65,8 +65,8 @@ private:
     bool stop_haptic_effects();
     void clear_playing_effect_timers();
 
-    GC::Ref<Gamepad> m_gamepad;
-    GC::Ref<DOM::DocumentObserver> m_document_became_hidden_observer;
+    GC::MemberRef<Gamepad> m_gamepad;
+    GC::MemberRef<DOM::DocumentObserver> m_document_became_hidden_observer;
 
     // https://w3c.github.io/gamepad/#dfn-effects
     // Represents the effects supported by the actuator.
@@ -74,8 +74,8 @@ private:
 
     // https://w3c.github.io/gamepad/#dfn-playingeffectpromise
     // The Promise to play some effect, or null if no effect is playing.
-    GC::Ptr<WebIDL::Promise> m_playing_effect_promise;
-    GC::Ptr<Platform::Timer> m_playing_effect_timer;
+    GC::MemberPtr<WebIDL::Promise> m_playing_effect_promise;
+    GC::MemberPtr<Platform::Timer> m_playing_effect_timer;
 };
 
 }

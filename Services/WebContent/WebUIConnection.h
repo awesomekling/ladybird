@@ -8,6 +8,7 @@
 
 #include <AK/JsonValue.h>
 #include <AK/NonnullRefPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibIPC/ConnectionFromClient.h>
 #include <LibIPC/Transport.h>
@@ -33,7 +34,7 @@ private:
     virtual void die() override { }
     virtual void send_message(String name, JsonValue data) override;
 
-    GC::Ref<Web::DOM::Document> m_document;
+    GC::MemberRef<Web::DOM::Document> m_document;
 };
 
 }

@@ -50,7 +50,7 @@ private:
 
     String m_old_state;
     String m_new_state;
-    GC::Ptr<DOM::Element> m_source;
+    GC::MemberPtr<DOM::Element> m_source;
 };
 
 }

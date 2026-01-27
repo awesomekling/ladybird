@@ -62,11 +62,11 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-abortalgorithm
     // A promise-returning algorithm, taking one argument (the abort reason), which communicates a requested abort to the underlying sink
-    GC::Ptr<AbortAlgorithm> m_abort_algorithm;
+    GC::MemberPtr<AbortAlgorithm> m_abort_algorithm;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-closealgorithm
     // A promise-returning algorithm which communicates a requested close to the underlying sink
-    GC::Ptr<CloseAlgorithm> m_close_algorithm;
+    GC::MemberPtr<CloseAlgorithm> m_close_algorithm;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-queue
     // A list representing the stream’s internal queue of chunks
@@ -78,7 +78,7 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-signal
     // An AbortSignal that can be used to abort the pending write or close operation when the stream is aborted.
-    GC::Ptr<DOM::AbortSignal> m_signal;
+    GC::MemberPtr<DOM::AbortSignal> m_signal;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-started
     // A boolean flag indicating whether the underlying sink has finished starting
@@ -90,15 +90,15 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-strategysizealgorithm
     // An algorithm to calculate the size of enqueued chunks, as part of the stream’s queuing strategy
-    GC::Ptr<SizeAlgorithm> m_strategy_size_algorithm;
+    GC::MemberPtr<SizeAlgorithm> m_strategy_size_algorithm;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-stream
     // The WritableStream instance controlled
-    GC::Ptr<WritableStream> m_stream;
+    GC::MemberPtr<WritableStream> m_stream;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultcontroller-writealgorithm
     // A promise-returning algorithm, taking one argument (the chunk to write), which writes data to the underlying sink
-    GC::Ptr<WriteAlgorithm> m_write_algorithm;
+    GC::MemberPtr<WriteAlgorithm> m_write_algorithm;
 };
 
 }

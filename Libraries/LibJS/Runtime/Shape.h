@@ -11,6 +11,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/StringView.h>
 #include <AK/Weakable.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Weak.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
@@ -127,18 +128,18 @@ private:
     bool m_dictionary : 1 { false };
     bool m_is_prototype_shape : 1 { false };
 
-    GC::Ref<Realm> m_realm;
+    GC::MemberRef<Realm> m_realm;
 
     mutable OwnPtr<OrderedHashMap<PropertyKey, PropertyMetadata>> m_property_table;
 
     OwnPtr<HashMap<TransitionKey, GC::Weak<Shape>>> m_forward_transitions;
     OwnPtr<HashMap<GC::Ptr<Object>, GC::Weak<Shape>>> m_prototype_transitions;
     OwnPtr<HashMap<PropertyKey, GC::Weak<Shape>>> m_delete_transitions;
-    GC::Ptr<Shape> m_previous;
+    GC::MemberPtr<Shape> m_previous;
     Optional<PropertyKey> m_property_key;
-    GC::Ptr<Object> m_prototype;
+    GC::MemberPtr<Object> m_prototype;
 
-    GC::Ptr<PrototypeChainValidity> m_prototype_chain_validity;
+    GC::MemberPtr<PrototypeChainValidity> m_prototype_chain_validity;
 
     u32 m_property_count { 0 };
     u32 m_dictionary_generation { 0 };

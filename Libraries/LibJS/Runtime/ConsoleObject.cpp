@@ -37,7 +37,7 @@ void ConsoleObject::initialize(Realm& realm)
 {
     auto& vm = this->vm();
     Base::initialize(realm);
-    m_console = realm.create<Console>(realm);
+    m_console.set(*this, realm.create<Console>(realm));
     u8 attr = Attribute::Writable | Attribute::Enumerable | Attribute::Configurable;
     define_native_function(realm, vm.names.assert, assert_, 0, attr);
     define_native_function(realm, vm.names.clear, clear, 0, attr);

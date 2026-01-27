@@ -32,9 +32,9 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<BigInt const> m_epoch_nanoseconds; // [[EpochNanoseconds]]
-    String m_time_zone;                        // [[TimeZone]]
-    String m_calendar;                         // [[Calendar]]
+    GC::MemberRef<BigInt const> m_epoch_nanoseconds; // [[EpochNanoseconds]]
+    String m_time_zone;                              // [[TimeZone]]
+    String m_calendar;                               // [[Calendar]]
 };
 
 enum class OffsetBehavior {

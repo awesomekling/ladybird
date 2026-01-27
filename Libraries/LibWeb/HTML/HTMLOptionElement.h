@@ -83,7 +83,7 @@ private:
     u64 m_selectedness_update_index { 0 };
 
     // https://html.spec.whatwg.org/multipage/form-elements.html#cached-nearest-ancestor-select-element
-    GC::Ptr<HTMLSelectElement> m_cached_nearest_select_element;
+    GC::MemberPtr<HTMLSelectElement> m_cached_nearest_select_element;
 };
 
 }

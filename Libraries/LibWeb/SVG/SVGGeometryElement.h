@@ -32,7 +32,7 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ptr<SVGAnimatedNumber> m_path_length;
+    GC::MemberPtr<SVGAnimatedNumber> m_path_length;
 };
 
 }

@@ -45,7 +45,7 @@ public:
     void set_array_length(ByteLength length) { m_array_length = move(length); }
     void set_byte_length(ByteLength length) { m_byte_length = move(length); }
     void set_byte_offset(u32 offset) { m_byte_offset = offset; }
-    void set_viewed_array_buffer(ArrayBuffer* array_buffer) { m_viewed_array_buffer = array_buffer; }
+    void set_viewed_array_buffer(ArrayBuffer* array_buffer) { m_viewed_array_buffer.set(*this, array_buffer); }
 
     [[nodiscard]] Kind kind() const { return m_kind; }
 
@@ -80,7 +80,7 @@ protected:
     u32 m_byte_offset { 0 };
     ContentType m_content_type { ContentType::Number };
     Kind m_kind {};
-    GC::Ptr<ArrayBuffer> m_viewed_array_buffer;
+    GC::MemberPtr<ArrayBuffer> m_viewed_array_buffer;
 
 private:
     virtual bool is_typed_array_base() const final { return true; }

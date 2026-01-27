@@ -33,9 +33,9 @@ protected:
 
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<PageClient> m_client;
-    GC::Ref<ConsoleGlobalEnvironmentExtensions> m_console_global_environment_extensions;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<PageClient> m_client;
+    GC::MemberRef<ConsoleGlobalEnvironmentExtensions> m_console_global_environment_extensions;
 };
 
 }

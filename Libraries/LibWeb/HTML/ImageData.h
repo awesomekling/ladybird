@@ -61,7 +61,7 @@ private:
 
     RefPtr<Gfx::Bitmap> m_bitmap;
     Bindings::PredefinedColorSpace m_color_space { Bindings::PredefinedColorSpace::Srgb };
-    GC::Ptr<JS::Uint8ClampedArray> m_data;
+    GC::MemberPtr<JS::Uint8ClampedArray> m_data;
 };
 
 }

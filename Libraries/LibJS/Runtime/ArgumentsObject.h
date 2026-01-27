@@ -38,7 +38,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<Environment> m_environment;
+    GC::MemberRef<Environment> m_environment;
     Vector<Utf16FlyString> m_mapped_names;
 };
 

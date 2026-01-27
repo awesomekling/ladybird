@@ -61,7 +61,7 @@ private:
 
     void update_meter_value_element();
 
-    GC::Ptr<DOM::Element> m_meter_value_element;
+    GC::MemberPtr<DOM::Element> m_meter_value_element;
     ValueState m_cached_value_state { ValueState::Optimal };
 };
 

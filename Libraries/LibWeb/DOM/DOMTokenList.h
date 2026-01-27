@@ -58,7 +58,7 @@ private:
     Vector<String> parse_ordered_set(StringView) const;
     String serialize_ordered_set() const;
 
-    GC::Ref<Element> m_associated_element;
+    GC::MemberRef<Element> m_associated_element;
     FlyString m_associated_attribute;
     Vector<String> m_token_set;
 };

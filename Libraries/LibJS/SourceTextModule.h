@@ -30,23 +30,20 @@ public:
     virtual ResolvedBinding resolve_export(VM& vm, Utf16FlyString const& export_name, Vector<ResolvedBinding> resolve_set = {}) override;
 
     Object* import_meta() { return m_import_meta; }
-    void set_import_meta(Badge<VM>, Object* import_meta) { m_import_meta = import_meta; }
+    void set_import_meta(Badge<VM>, Object* import_meta) { m_import_meta.set(*this, import_meta); }
 
 protected:
     virtual ThrowCompletionOr<void> initialize_environment(VM& vm) override;
     virtual ThrowCompletionOr<void> execute_module(VM& vm, GC::Ptr<PromiseCapability> capability) override;
 
 private:
-    SourceTextModule(Realm&, StringView filename, Script::HostDefined* host_defined, bool has_top_level_await, NonnullRefPtr<Program> body, Vector<ModuleRequest> requested_modules,
-        Vector<ImportEntry> import_entries, Vector<ExportEntry> local_export_entries,
-        Vector<ExportEntry> indirect_export_entries, Vector<ExportEntry> star_export_entries,
-        RefPtr<ExportStatement const> default_export);
+    SourceTextModule(Realm&, StringView filename, Script::HostDefined* host_defined, bool has_top_level_await, NonnullRefPtr<Program> body, Vector<ModuleRequest> requested_modules, Vector<ImportEntry> import_entries, Vector<ExportEntry> local_export_entries, Vector<ExportEntry> indirect_export_entries, Vector<ExportEntry> star_export_entries, RefPtr<ExportStatement const> default_export);
 
     virtual void visit_edges(Cell::Visitor&) override;
 
     NonnullRefPtr<Program> m_ecmascript_code;            // [[ECMAScriptCode]]
     NonnullOwnPtr<ExecutionContext> m_execution_context; // [[Context]]
-    GC::Ptr<Object> m_import_meta;                       // [[ImportMeta]]
+    GC::MemberPtr<Object> m_import_meta;                 // [[ImportMeta]]
     Vector<ImportEntry> m_import_entries;                // [[ImportEntries]]
     Vector<ExportEntry> m_local_export_entries;          // [[LocalExportEntries]]
     Vector<ExportEntry> m_indirect_export_entries;       // [[IndirectExportEntries]]

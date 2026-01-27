@@ -104,7 +104,7 @@ private:
     Bindings::AlignSetting m_text_alignment { Bindings::AlignSetting::Center };
 
     // https://w3c.github.io/webvtt/#webvtt-cue-region
-    GC::Ptr<VTTRegion> m_region;
+    GC::MemberPtr<VTTRegion> m_region;
 };
 
 }

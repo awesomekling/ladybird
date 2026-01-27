@@ -149,10 +149,8 @@ GC::Ref<Object> Module::get_module_namespace(VM& vm)
     // FIXME: Spec bug: https://github.com/tc39/ecma262/issues/3114
 
     // 2. Let namespace be module.[[Namespace]].
-    auto namespace_ = m_namespace;
-
     // 3. If namespace is EMPTY, then
-    if (!namespace_) {
+    if (!m_namespace) {
         // a. Let exportedNames be module.GetExportedNames().
         auto exported_names = get_exported_names(vm);
 
@@ -170,11 +168,11 @@ GC::Ref<Object> Module::get_module_namespace(VM& vm)
         }
 
         // d. Set namespace to ModuleNamespaceCreate(module, unambiguousNames).
-        namespace_ = module_namespace_create(unambiguous_names);
+        m_namespace.set(*this, module_namespace_create(unambiguous_names));
     }
 
     // 4. Return namespace.
-    return *namespace_;
+    return *m_namespace;
 }
 
 Vector<Utf16FlyString> Module::get_exported_names(VM& vm)
@@ -201,7 +199,7 @@ GC::Ref<Object> Module::module_namespace_create(Vector<Utf16FlyString> unambiguo
     auto module_namespace = realm.create<ModuleNamespaceObject>(realm, this, move(unambiguous_names));
 
     // 9. Set module.[[Namespace]] to M.
-    m_namespace = module_namespace;
+    m_namespace.set(*this, module_namespace);
 
     // 10. Return M.
     return module_namespace;

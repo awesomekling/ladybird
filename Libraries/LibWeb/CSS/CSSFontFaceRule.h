@@ -45,8 +45,8 @@ private:
 
     void handle_src_descriptor_change();
 
-    GC::Ref<CSSFontFaceDescriptors> m_style;
-    GC::Ptr<FontFace> m_css_connected_font_face;
+    GC::MemberRef<CSSFontFaceDescriptors> m_style;
+    GC::MemberPtr<FontFace> m_css_connected_font_face;
 };
 
 template<>

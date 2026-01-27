@@ -54,8 +54,8 @@ private:
     WebIDL::ExceptionOr<HighResolutionTime::DOMHighResTimeStamp> convert_name_to_timestamp(JS::Realm& realm, String const& name);
     WebIDL::ExceptionOr<HighResolutionTime::DOMHighResTimeStamp> convert_mark_to_timestamp(JS::Realm& realm, Variant<String, HighResolutionTime::DOMHighResTimeStamp> mark);
 
-    GC::Ptr<NavigationTiming::PerformanceNavigation> m_navigation;
-    GC::Ptr<NavigationTiming::PerformanceTiming> m_timing;
+    GC::MemberPtr<NavigationTiming::PerformanceNavigation> m_navigation;
+    GC::MemberPtr<NavigationTiming::PerformanceTiming> m_timing;
 };
 
 }

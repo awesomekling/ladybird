@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/DOM/Document.h>
@@ -41,7 +42,7 @@ private:
     Document& document() { return m_document; }
     Document const& document() const { return m_document; }
 
-    GC::Ref<Document> m_document;
+    GC::MemberRef<Document> m_document;
 };
 
 }

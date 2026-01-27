@@ -83,7 +83,8 @@ public:
     WebIDL::ExceptionOr<GC::Ref<PannerNode>> create_panner();
     WebIDL::ExceptionOr<GC::Ref<PeriodicWave>> create_periodic_wave(Vector<float> const& real, Vector<float> const& imag, Optional<PeriodicWaveConstraints> const& constraints = {});
     WebIDL::ExceptionOr<GC::Ref<ScriptProcessorNode>> create_script_processor(WebIDL::UnsignedLong buffer_size,
-        WebIDL::UnsignedLong number_of_input_channels, WebIDL::UnsignedLong number_of_output_channels);
+        WebIDL::UnsignedLong number_of_input_channels,
+        WebIDL::UnsignedLong number_of_output_channels);
     WebIDL::ExceptionOr<GC::Ref<StereoPannerNode>> create_stereo_panner();
 
     GC::Ref<WebIDL::Promise> decode_audio_data(GC::Root<WebIDL::BufferSource>, GC::Ptr<WebIDL::CallbackType>, GC::Ptr<WebIDL::CallbackType>);
@@ -100,7 +101,7 @@ protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<AudioDestinationNode> m_destination;
+    GC::MemberPtr<AudioDestinationNode> m_destination;
     Vector<GC::Ref<WebIDL::Promise>> m_pending_promises;
 
 private:
@@ -114,7 +115,7 @@ private:
     float m_sample_rate { 0 };
     double m_current_time { 0 };
 
-    GC::Ref<AudioListener> m_listener;
+    GC::MemberRef<AudioListener> m_listener;
 
     Bindings::AudioContextState m_control_thread_state = Bindings::AudioContextState::Suspended;
     Bindings::AudioContextState m_rendering_thread_state = Bindings::AudioContextState::Suspended;

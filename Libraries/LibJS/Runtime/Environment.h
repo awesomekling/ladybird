@@ -79,7 +79,7 @@ private:
     bool m_permanently_screwed_by_eval { false };
     bool m_declarative { false };
 
-    GC::Ptr<Environment> m_outer_environment;
+    GC::MemberPtr<Environment> m_outer_environment;
 };
 
 template<>

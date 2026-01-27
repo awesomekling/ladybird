@@ -9,6 +9,7 @@
 
 #include <AK/FlyString.h>
 #include <AK/NonnullRefPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/CSS/CSSKeyframeRule.h>
 #include <LibWeb/CSS/CSSRule.h>
@@ -43,7 +44,7 @@ private:
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
     FlyString m_name;
-    GC::Ref<CSSRuleList> m_rules;
+    GC::MemberRef<CSSRuleList> m_rules;
 };
 
 template<>

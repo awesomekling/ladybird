@@ -251,13 +251,13 @@ private:
     String m_id;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#nav-parent
-    GC::Ptr<Navigable> m_parent;
+    GC::MemberPtr<Navigable> m_parent;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#nav-current-history-entry
-    GC::Ptr<SessionHistoryEntry> m_current_session_history_entry;
+    GC::MemberPtr<SessionHistoryEntry> m_current_session_history_entry;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#nav-active-history-entry
-    GC::Ptr<SessionHistoryEntry> m_active_session_history_entry;
+    GC::MemberPtr<SessionHistoryEntry> m_active_session_history_entry;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#is-closing
     bool m_closing { false };
@@ -266,9 +266,9 @@ private:
     Optional<DOM::DocumentLoadEventDelayer> m_delaying_the_load_event;
 
     // Implied link between navigable and its container.
-    GC::Ptr<NavigableContainer> m_container;
+    GC::MemberPtr<NavigableContainer> m_container;
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
 
     NavigationObserver::NavigationObserversList m_navigation_observers;
 
@@ -287,7 +287,7 @@ private:
     bool m_needs_repaint { true };
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
-    GC::Ref<Painting::BackingStoreManager> m_backing_store_manager;
+    GC::MemberRef<Painting::BackingStoreManager> m_backing_store_manager;
     RefPtr<Gfx::SkiaBackendContext> m_skia_backend_context;
     RenderingThread m_rendering_thread;
 };

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/Utf16FlyString.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Export.h>
 #include <LibJS/ModuleLoading.h>
@@ -128,7 +129,7 @@ protected:
 
     void set_environment(GC::Ref<ModuleEnvironment> environment)
     {
-        m_environment = environment;
+        m_environment.set(*this, environment);
     }
 
 private:
@@ -140,9 +141,9 @@ private:
     // destroy the VM but keep the modules this should not happen. Because VM
     // stores modules with a RefPtr we cannot just store the VM as that leads to
     // cycles.
-    GC::Ptr<Realm> m_realm;                          // [[Realm]]
-    GC::Ptr<ModuleEnvironment> m_environment;        // [[Environment]]
-    GC::Ptr<Object> m_namespace;                     // [[Namespace]]
+    GC::MemberPtr<Realm> m_realm;                    // [[Realm]]
+    GC::MemberPtr<ModuleEnvironment> m_environment;  // [[Environment]]
+    GC::MemberPtr<Object> m_namespace;               // [[Namespace]]
     Script::HostDefined* m_host_defined { nullptr }; // [[HostDefined]]
 
     // Needed for potential lookups of modules.

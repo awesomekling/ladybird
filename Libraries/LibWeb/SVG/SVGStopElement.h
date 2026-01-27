@@ -36,7 +36,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<SVGAnimatedNumber> m_stop_offset;
+    GC::MemberPtr<SVGAnimatedNumber> m_stop_offset;
 };
 
 }

@@ -40,7 +40,7 @@ private:
 
     GC::RootVector<Node*> collection() const;
 
-    GC::Ref<Node const> m_root;
+    GC::MemberRef<Node const> m_root;
     Function<bool(Node const&)> m_filter;
     Scope m_scope { Scope::Descendants };
 };

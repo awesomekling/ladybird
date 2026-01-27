@@ -38,7 +38,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<CSSNumericValue> m_ay;
+    GC::MemberRef<CSSNumericValue> m_ay;
 };
 
 }

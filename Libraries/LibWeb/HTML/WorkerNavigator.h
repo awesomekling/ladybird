@@ -54,12 +54,12 @@ private:
     virtual Bindings::PlatformObject const& this_navigator_storage_object() const override { return *this; }
 
     // https://w3c.github.io/media-capabilities/#dom-workernavigator-mediacapabilities
-    GC::Ptr<MediaCapabilitiesAPI::MediaCapabilities> m_media_capabilities;
+    GC::MemberPtr<MediaCapabilitiesAPI::MediaCapabilities> m_media_capabilities;
 
     // https://wicg.github.io/serial/#extensions-to-the-workernavigator-interface
-    GC::Ptr<Serial::Serial> m_serial;
+    GC::MemberPtr<Serial::Serial> m_serial;
 
-    GC::Ptr<ServiceWorker::ServiceWorkerContainer> m_service_worker_container;
+    GC::MemberPtr<ServiceWorker::ServiceWorkerContainer> m_service_worker_container;
 };
 
 }

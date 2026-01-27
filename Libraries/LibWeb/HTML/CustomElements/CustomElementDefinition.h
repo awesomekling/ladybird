@@ -72,7 +72,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-constructor
     // A Web IDL CustomElementConstructor callback function type value wrapping the custom element constructor
-    GC::Ref<WebIDL::CallbackType> m_constructor;
+    GC::MemberRef<WebIDL::CallbackType> m_constructor;
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#concept-custom-element-definition-observed-attributes
     // A list of observed attributes

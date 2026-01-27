@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/HTML/DOMStringMap.h>
@@ -31,7 +32,7 @@ protected:
     void visit_edges(JS::Cell::Visitor&);
 
     // https://html.spec.whatwg.org/multipage/dom.html#dom-dataset-dev
-    GC::Ptr<DOMStringMap> m_dataset;
+    GC::MemberPtr<DOMStringMap> m_dataset;
 
     // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#cryptographicnonce
     String m_cryptographic_nonce;

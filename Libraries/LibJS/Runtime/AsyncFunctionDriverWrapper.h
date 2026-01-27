@@ -30,13 +30,13 @@ private:
     AsyncFunctionDriverWrapper(Realm&, GC::Ref<GeneratorObject>, GC::Ref<Promise> top_level_promise);
     ThrowCompletionOr<void> await(Value);
 
-    GC::Ref<GeneratorObject> m_generator_object;
-    GC::Ref<Promise> m_top_level_promise;
-    GC::Ptr<Promise> m_current_promise { nullptr };
+    GC::MemberRef<GeneratorObject> m_generator_object;
+    GC::MemberRef<Promise> m_top_level_promise;
+    GC::MemberPtr<Promise> m_current_promise { nullptr };
     OwnPtr<ExecutionContext> m_suspended_execution_context;
 
-    GC::Ptr<NativeFunction> m_on_fulfilled;
-    GC::Ptr<NativeFunction> m_on_rejected;
+    GC::MemberPtr<NativeFunction> m_on_fulfilled;
+    GC::MemberPtr<NativeFunction> m_on_rejected;
 };
 
 }

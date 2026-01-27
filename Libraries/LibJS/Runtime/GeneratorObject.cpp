@@ -56,7 +56,7 @@ GC::Ref<GeneratorObject> GeneratorObject::create(Realm& realm, Value initial_val
         });
 
     auto object = realm.create<GeneratorObject>(realm, generating_function_prototype_object, move(execution_context));
-    object->m_generating_executable = generating_executable;
+    object->m_generating_executable.set(*object, generating_executable);
     object->m_previous_value = initial_value;
     return object;
 }

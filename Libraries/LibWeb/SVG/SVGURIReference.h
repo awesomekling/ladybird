@@ -49,7 +49,7 @@ protected:
     }
 
 private:
-    GC::Ptr<SVGAnimatedString> m_href_animated_string;
+    GC::MemberPtr<SVGAnimatedString> m_href_animated_string;
 };
 
 }

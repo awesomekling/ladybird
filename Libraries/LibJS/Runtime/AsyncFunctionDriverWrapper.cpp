@@ -76,7 +76,7 @@ ThrowCompletionOr<void> AsyncFunctionDriverWrapper::await(JS::Value value)
 
     // 4. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 1, "", « »).
     if (!m_on_fulfilled)
-        m_on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 1);
+        m_on_fulfilled.set(*this, NativeFunction::create(realm, move(fulfilled_closure), 1));
 
     // 5. Let rejectedClosure be a new Abstract Closure with parameters (reason) that captures asyncContext and performs the
     //    following steps when called:
@@ -105,10 +105,10 @@ ThrowCompletionOr<void> AsyncFunctionDriverWrapper::await(JS::Value value)
 
     // 6. Let onRejected be CreateBuiltinFunction(rejectedClosure, 1, "", « »).
     if (!m_on_rejected)
-        m_on_rejected = NativeFunction::create(realm, move(rejected_closure), 1);
+        m_on_rejected.set(*this, NativeFunction::create(realm, move(rejected_closure), 1));
 
     // 7. Perform PerformPromiseThen(promise, onFulfilled, onRejected).
-    m_current_promise = as<Promise>(promise_object);
+    m_current_promise.set(*this, as<Promise>(promise_object));
     m_current_promise->perform_then(m_on_fulfilled, m_on_rejected, {});
 
     // NOTE: None of these are necessary. 8-12 are handled by step d of the above lambdas.

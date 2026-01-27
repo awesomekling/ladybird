@@ -117,14 +117,14 @@ private:
     // https://drafts.csswg.org/css-font-loading/#dom-fontface-status
     Bindings::FontFaceLoadStatus m_status { Bindings::FontFaceLoadStatus::Unloaded };
 
-    GC::Ref<WebIDL::Promise> m_font_status_promise; // [[FontStatusPromise]]
-    Vector<ParsedFontFace::Source> m_urls;          // [[Urls]]
-    ByteBuffer m_binary_data {};                    // [[Data]]
+    GC::MemberRef<WebIDL::Promise> m_font_status_promise; // [[FontStatusPromise]]
+    Vector<ParsedFontFace::Source> m_urls;                // [[Urls]]
+    ByteBuffer m_binary_data {};                          // [[Data]]
 
     RefPtr<Gfx::Typeface const> m_parsed_font;
     RefPtr<Core::Promise<NonnullRefPtr<Gfx::Typeface const>>> m_font_load_promise;
 
-    GC::Ptr<CSSFontFaceRule> m_css_font_face_rule;
+    GC::MemberPtr<CSSFontFaceRule> m_css_font_face_rule;
 };
 
 bool font_format_is_supported(FlyString const& name);

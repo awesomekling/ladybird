@@ -33,10 +33,10 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<SVG::SVGAnimatedLength> m_x;
-    GC::Ptr<SVG::SVGAnimatedLength> m_y;
-    GC::Ptr<SVG::SVGAnimatedLength> m_width;
-    GC::Ptr<SVG::SVGAnimatedLength> m_height;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_x;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_y;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_width;
+    GC::MemberPtr<SVG::SVGAnimatedLength> m_height;
 };
 
 }

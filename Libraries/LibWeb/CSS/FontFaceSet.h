@@ -55,8 +55,8 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<JS::Set> m_set_entries;
-    GC::Ref<WebIDL::Promise> m_ready_promise; // [[ReadyPromise]]
+    GC::MemberRef<JS::Set> m_set_entries;
+    GC::MemberRef<WebIDL::Promise> m_ready_promise; // [[ReadyPromise]]
 
     Vector<GC::Ref<FontFace>> m_loading_fonts {}; // [[LoadingFonts]]
     Vector<GC::Ref<FontFace>> m_loaded_fonts {};  // [[LoadedFonts]]

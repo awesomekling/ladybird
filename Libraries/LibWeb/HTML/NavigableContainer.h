@@ -55,7 +55,7 @@ protected:
     WebIDL::ExceptionOr<void> create_new_child_navigable(GC::Ptr<GC::Function<void()>> after_session_history_update = {});
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#content-navigable
-    GC::Ptr<Navigable> m_content_navigable { nullptr };
+    GC::MemberPtr<Navigable> m_content_navigable { nullptr };
 
     void set_potentially_delays_the_load_event(bool value) { m_potentially_delays_the_load_event = value; }
 

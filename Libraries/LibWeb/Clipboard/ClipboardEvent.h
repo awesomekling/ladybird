@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/Forward.h>
@@ -35,7 +36,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ptr<HTML::DataTransfer> m_clipboard_data;
+    GC::MemberPtr<HTML::DataTransfer> m_clipboard_data;
 };
 
 }

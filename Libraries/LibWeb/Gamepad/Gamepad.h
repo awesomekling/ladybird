@@ -144,7 +144,7 @@ private:
     bool m_exposed { false };
 
     // https://w3c.github.io/gamepad/#dfn-vibrationactuator
-    GC::Ptr<GamepadHapticActuator> m_vibration_actuator;
+    GC::MemberPtr<GamepadHapticActuator> m_vibration_actuator;
 
     // https://w3c.github.io/gamepad/#dom-gamepad-mapping
     // The mapping in use for this device. If the user agent has knowledge of the layout of the device, then it SHOULD

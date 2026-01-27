@@ -88,13 +88,13 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#browsing-context
-    GC::Ptr<WindowProxy> m_window_proxy;
+    GC::MemberPtr<WindowProxy> m_window_proxy;
 
     // https://html.spec.whatwg.org/multipage/browsers.html#opener-browsing-context
-    GC::Ptr<BrowsingContext> m_opener_browsing_context;
+    GC::MemberPtr<BrowsingContext> m_opener_browsing_context;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#opener-origin-at-creation
     Optional<URL::Origin> m_opener_origin_at_creation;
@@ -115,7 +115,7 @@ private:
     u64 m_virtual_browsing_context_group_id = { 0 };
 
     // https://html.spec.whatwg.org/multipage/browsers.html#tlbc-group
-    GC::Ptr<BrowsingContextGroup> m_group;
+    GC::MemberPtr<BrowsingContextGroup> m_group;
 };
 
 URL::Origin determine_the_origin(Optional<URL::URL const&>, SandboxingFlagSet, Optional<URL::Origin> source_origin);

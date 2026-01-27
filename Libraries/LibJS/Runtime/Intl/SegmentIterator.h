@@ -36,7 +36,7 @@ private:
     NonnullOwnPtr<Unicode::Segmenter> m_iterating_segmenter; // [[IteratingSegmenter]]
     Utf16View m_iterated_string;                             // [[IteratedString]]
 
-    GC::Ref<Segments const> m_segments;
+    GC::MemberRef<Segments const> m_segments;
 };
 
 }

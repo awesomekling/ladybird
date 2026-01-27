@@ -27,7 +27,7 @@ protected:
 
 private:
     Optional<ViewBox> m_view_box;
-    GC::Ptr<SVGAnimatedRect> m_view_box_for_bindings;
+    GC::MemberPtr<SVGAnimatedRect> m_view_box_for_bindings;
     Optional<PreserveAspectRatio> m_preserve_aspect_ratio;
 };
 

@@ -56,9 +56,9 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ptr<AudioBuffer> m_buffer;
-    GC::Ref<AudioParam> m_playback_rate;
-    GC::Ref<AudioParam> m_detune;
+    GC::MemberPtr<AudioBuffer> m_buffer;
+    GC::MemberRef<AudioParam> m_playback_rate;
+    GC::MemberRef<AudioParam> m_detune;
     bool m_loop { false };
     // https://webaudio.github.io/web-audio-api/#dom-audiobuffersourcenode-buffer-set-slot
     bool m_buffer_set { false };

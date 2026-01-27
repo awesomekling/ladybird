@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/HeapVector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/IndexedDB/Internal/ObjectStore.h>
@@ -86,7 +87,7 @@ private:
     u64 m_version { 0 };
 
     // A database has at most one associated upgrade transaction, which is either null or an upgrade transaction, and is initially null.
-    GC::Ptr<IDBTransaction> m_upgrade_transaction;
+    GC::MemberPtr<IDBTransaction> m_upgrade_transaction;
 
     // A database has zero or more object stores which hold the data stored in the database.
     Vector<GC::Ref<ObjectStore>> m_object_stores;

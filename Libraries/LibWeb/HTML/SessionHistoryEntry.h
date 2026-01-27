@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/WeakPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibURL/URL.h>
@@ -88,7 +89,7 @@ private:
     URL::URL m_url;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#she-document-state
-    GC::Ptr<HTML::DocumentState> m_document_state;
+    GC::MemberPtr<HTML::DocumentState> m_document_state;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#she-classic-history-api-state
     // classic history API state, which is serialized state, initially StructuredSerializeForStorage(null).
@@ -111,7 +112,7 @@ private:
     ScrollRestorationMode m_scroll_restoration_mode { ScrollRestorationMode::Auto };
 
     // policy container, a policy container or null
-    GC::Ptr<PolicyContainer> m_policy_container;
+    GC::MemberPtr<PolicyContainer> m_policy_container;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#she-scroll-position
     // FIXME: scroll position data, which is scroll position data for the document's restorable scrollable regions
@@ -123,7 +124,7 @@ private:
     // FIXME: persisted user state, which is implementation-defined, initially null
     // NOTE: This is where we could remember the state of form controls, for example.
 
-    GC::Ptr<BrowsingContext> m_original_source_browsing_context;
+    GC::MemberPtr<BrowsingContext> m_original_source_browsing_context;
 };
 
 }

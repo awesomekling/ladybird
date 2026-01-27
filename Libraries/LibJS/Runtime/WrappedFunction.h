@@ -37,8 +37,8 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     // Internal Slots of Wrapped Function Exotic Objects, https://tc39.es/proposal-shadowrealm/#table-internal-slots-of-wrapped-function-exotic-objects
-    GC::Ref<FunctionObject> m_wrapped_target_function; // [[WrappedTargetFunction]]
-    GC::Ref<Realm> m_realm;                            // [[Realm]]
+    GC::MemberRef<FunctionObject> m_wrapped_target_function; // [[WrappedTargetFunction]]
+    GC::MemberRef<Realm> m_realm;                            // [[Realm]]
 };
 
 ThrowCompletionOr<Value> ordinary_wrapped_function_call(WrappedFunction&, Value this_argument, Span<Value> arguments_list);

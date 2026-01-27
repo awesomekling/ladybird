@@ -33,8 +33,8 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<JS::Set> m_set_entries;
-    GC::Ref<DOM::Element> m_element;
+    GC::MemberRef<JS::Set> m_set_entries;
+    GC::MemberRef<DOM::Element> m_element;
 };
 
 }

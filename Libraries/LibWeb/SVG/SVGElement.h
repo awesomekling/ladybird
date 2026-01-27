@@ -58,7 +58,7 @@ private:
 
     virtual bool is_svg_element() const final { return true; }
 
-    GC::Ptr<SVGAnimatedString> m_class_name_animated_string;
+    GC::MemberPtr<SVGAnimatedString> m_class_name_animated_string;
 };
 
 }

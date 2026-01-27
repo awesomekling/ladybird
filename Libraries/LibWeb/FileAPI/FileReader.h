@@ -117,7 +117,7 @@ private:
 
     // A FileReader has an associated error (null or a DOMException). It is initially null.
     // https://w3c.github.io/FileAPI/#filereader-error
-    GC::Ptr<WebIDL::DOMException> m_error;
+    GC::MemberPtr<WebIDL::DOMException> m_error;
 };
 
 }

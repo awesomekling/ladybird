@@ -41,7 +41,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<DOM::Document> m_document;
+    GC::MemberRef<DOM::Document> m_document;
     Vector<NonnullRefPtr<MediaQuery>> m_media;
 
     mutable Optional<bool> m_has_changed_state { false };

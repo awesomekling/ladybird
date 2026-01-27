@@ -213,7 +213,7 @@ protected:
     Bindings::PlaybackDirection m_playback_direction { Bindings::PlaybackDirection::Normal };
 
     // https://www.w3.org/TR/web-animations-1/#animation-associated-effect
-    GC::Ptr<Animation> m_associated_animation {};
+    GC::MemberPtr<Animation> m_associated_animation {};
 
     // https://www.w3.org/TR/web-animations-1/#time-transformations
     CSS::EasingFunction m_timing_function { CSS::EasingFunction::linear() };

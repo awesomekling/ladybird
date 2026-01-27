@@ -37,7 +37,7 @@ public:
 private:
     explicit NativeJavaScriptBackedFunction(GC::Ref<SharedFunctionInstanceData const> shared_function_instance_data, Object& prototype);
 
-    GC::Ref<SharedFunctionInstanceData const> m_shared_function_instance_data;
+    GC::MemberRef<SharedFunctionInstanceData const> m_shared_function_instance_data;
 };
 
 }

@@ -26,8 +26,8 @@ public:
 private:
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Body> m_body;
-    GC::Ref<Streams::ReadableStreamDefaultReader> m_reader;
+    GC::MemberRef<Body> m_body;
+    GC::MemberRef<Streams::ReadableStreamDefaultReader> m_reader;
     TaskDestination m_task_destination;
     Body::ProcessBodyChunkCallback m_process_body_chunk;
     Body::ProcessEndOfBodyCallback m_process_end_of_body;

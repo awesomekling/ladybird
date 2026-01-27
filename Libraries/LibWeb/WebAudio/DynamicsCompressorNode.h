@@ -51,19 +51,19 @@ protected:
 
 private:
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-threshold
-    GC::Ref<AudioParam> m_threshold;
+    GC::MemberRef<AudioParam> m_threshold;
 
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-knee
-    GC::Ref<AudioParam> m_knee;
+    GC::MemberRef<AudioParam> m_knee;
 
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-ratio
-    GC::Ref<AudioParam> m_ratio;
+    GC::MemberRef<AudioParam> m_ratio;
 
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-attack
-    GC::Ref<AudioParam> m_attack;
+    GC::MemberRef<AudioParam> m_attack;
 
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-release
-    GC::Ref<AudioParam> m_release;
+    GC::MemberRef<AudioParam> m_release;
 
     // https://webaudio.github.io/web-audio-api/#dom-dynamicscompressornode-internal-reduction-slot
     float m_reduction { 0 }; // [[internal reduction]]

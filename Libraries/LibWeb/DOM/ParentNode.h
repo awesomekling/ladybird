@@ -56,7 +56,7 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ptr<HTMLCollection> m_children;
+    GC::MemberPtr<HTMLCollection> m_children;
 };
 
 template<>

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -59,7 +60,7 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-params-request
     // request
     //     A request.
-    GC::Ref<Request> m_request;
+    GC::MemberRef<Request> m_request;
 
     // https://fetch.spec.whatwg.org/#fetch-params-process-request-body
     // process request body chunk length (default null)
@@ -74,7 +75,7 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-params-process-response-consume-body
     // process response consume body (default null)
     //     Null or an algorithm.
-    GC::Ref<FetchAlgorithms const> m_algorithms;
+    GC::MemberRef<FetchAlgorithms const> m_algorithms;
 
     // https://fetch.spec.whatwg.org/#fetch-params-task-destination
     // task destination (default null)
@@ -89,12 +90,12 @@ private:
     // https://fetch.spec.whatwg.org/#fetch-params-controller
     // controller (default a new fetch controller)
     //     A fetch controller.
-    GC::Ref<FetchController> m_controller;
+    GC::MemberRef<FetchController> m_controller;
 
     // https://fetch.spec.whatwg.org/#fetch-params-timing-info
     // timing info
     //     A fetch timing info.
-    GC::Ref<FetchTimingInfo> m_timing_info;
+    GC::MemberRef<FetchTimingInfo> m_timing_info;
 
     // https://fetch.spec.whatwg.org/#fetch-params-preloaded-response-candidate
     // preloaded response candidate (default null)

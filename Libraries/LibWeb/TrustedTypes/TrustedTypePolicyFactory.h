@@ -52,13 +52,13 @@ private:
     Vector<Utf16String> m_created_policy_names;
 
     // https://w3c.github.io/trusted-types/dist/spec/#trustedtypepolicyfactory-default-policy
-    GC::Ptr<TrustedTypePolicy> m_default_policy;
+    GC::MemberPtr<TrustedTypePolicy> m_default_policy;
 
     // https://www.w3.org/TR/trusted-types/#dom-trustedtypepolicyfactory-emptyhtml
-    GC::Ptr<TrustedHTML const> m_empty_html;
+    GC::MemberPtr<TrustedHTML const> m_empty_html;
 
     // https://www.w3.org/TR/trusted-types/#dom-trustedtypepolicyfactory-emptyscript
-    GC::Ptr<TrustedScript const> m_empty_script;
+    GC::MemberPtr<TrustedScript const> m_empty_script;
 };
 
 struct TrustedTypeData {

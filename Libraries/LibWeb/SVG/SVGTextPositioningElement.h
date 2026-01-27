@@ -22,8 +22,7 @@ struct TextPositioning {
     Vector<Position> dy;
     Vector<float> rotate;
 
-    void apply_to_text_position(Layout::Node const& node, CSSPixelSize viewport, Gfx::FloatPoint& current_text_position,
-        size_t character_index) const
+    void apply_to_text_position(Layout::Node const& node, CSSPixelSize viewport, Gfx::FloatPoint& current_text_position, size_t character_index) const
     {
         auto value_for_character = [&](Vector<Position> const& values) -> float {
             if (values.is_empty())
@@ -69,13 +68,13 @@ protected:
     virtual void visit_edges(Visitor&) override;
 
 private:
-    GC::Ref<SVGAnimatedLengthList> ensure_length_list(GC::Ptr<SVGAnimatedLengthList>&, FlyString const& attribute_name) const;
+    GC::Ref<SVGAnimatedLengthList> ensure_length_list(GC::MemberPtr<SVGAnimatedLengthList>&, FlyString const& attribute_name) const;
 
-    GC::Ptr<SVGAnimatedLengthList> m_x;
-    GC::Ptr<SVGAnimatedLengthList> m_y;
-    GC::Ptr<SVGAnimatedLengthList> m_dx;
-    GC::Ptr<SVGAnimatedLengthList> m_dy;
-    GC::Ptr<SVGAnimatedNumberList> m_rotate;
+    GC::MemberPtr<SVGAnimatedLengthList> m_x;
+    GC::MemberPtr<SVGAnimatedLengthList> m_y;
+    GC::MemberPtr<SVGAnimatedLengthList> m_dx;
+    GC::MemberPtr<SVGAnimatedLengthList> m_dy;
+    GC::MemberPtr<SVGAnimatedNumberList> m_rotate;
 };
 
 }

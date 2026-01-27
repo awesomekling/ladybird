@@ -36,9 +36,9 @@ private:
     Bindings::AgentType m_agent_type { Bindings::AgentType::DedicatedWorker };
     URL::URL m_url;
 
-    GC::Ptr<MessagePort> m_message_port;
-    GC::Ptr<MessagePort> m_outside_port;
-    GC::Ref<EnvironmentSettingsObject> m_outside_settings;
+    GC::MemberPtr<MessagePort> m_message_port;
+    GC::MemberPtr<MessagePort> m_outside_port;
+    GC::MemberRef<EnvironmentSettingsObject> m_outside_settings;
 
     RefPtr<Web::HTML::WebWorkerClient> m_worker_ipc;
 };

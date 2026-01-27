@@ -55,10 +55,10 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<DOMPoint> m_p1;
-    GC::Ref<DOMPoint> m_p2;
-    GC::Ref<DOMPoint> m_p3;
-    GC::Ref<DOMPoint> m_p4;
+    GC::MemberRef<DOMPoint> m_p1;
+    GC::MemberRef<DOMPoint> m_p2;
+    GC::MemberRef<DOMPoint> m_p3;
+    GC::MemberRef<DOMPoint> m_p4;
 };
 
 }

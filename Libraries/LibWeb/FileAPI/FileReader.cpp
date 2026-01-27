@@ -155,7 +155,7 @@ WebIDL::ExceptionOr<void> FileReader::read_operation(Blob& blob, Type type, Opti
     m_result = {};
 
     // 4. Set fr’s error to null.
-    m_error = {};
+    m_error = nullptr;
 
     // 5. Let stream be the result of calling get stream on blob.
     auto stream = blob.get_stream();

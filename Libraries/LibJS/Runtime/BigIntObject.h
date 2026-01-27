@@ -31,7 +31,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<BigInt> m_bigint;
+    GC::MemberRef<BigInt> m_bigint;
 };
 
 template<>

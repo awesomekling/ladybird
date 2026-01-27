@@ -10,6 +10,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/StringView.h>
 #include <AK/Time.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibURL/URL.h>
@@ -81,7 +82,7 @@ private:
     URL::URL m_url;
 
     // https://html.spec.whatwg.org/multipage/server-sent-events.html#concept-event-stream-request
-    GC::Ptr<Fetch::Infrastructure::Request> m_request;
+    GC::MemberPtr<Fetch::Infrastructure::Request> m_request;
 
     // https://html.spec.whatwg.org/multipage/server-sent-events.html#concept-event-stream-reconnection-time
     AK::Duration m_reconnection_time { AK::Duration::from_seconds(3) };
@@ -96,8 +97,8 @@ private:
 
     ReadyState m_ready_state { ReadyState::Connecting };
 
-    GC::Ptr<Fetch::Infrastructure::FetchAlgorithms> m_fetch_algorithms;
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<Fetch::Infrastructure::FetchAlgorithms> m_fetch_algorithms;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
 };
 
 }

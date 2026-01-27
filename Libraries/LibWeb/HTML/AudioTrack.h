@@ -35,7 +35,7 @@ private:
     // https://html.spec.whatwg.org/multipage/media.html#dom-audiotrack-enabled
     bool m_enabled { false };
 
-    GC::Ptr<AudioTrackList> m_audio_track_list;
+    GC::MemberPtr<AudioTrackList> m_audio_track_list;
 };
 
 }

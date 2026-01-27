@@ -11,6 +11,7 @@
 #include <LibCore/Timer.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -38,8 +39,8 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<GC::Function<NonnullRefPtr<Core::Promise<Empty>>()>> m_steps;
-    GC::Ptr<HTML::Navigable> m_target_navigable;
+    GC::MemberRef<GC::Function<NonnullRefPtr<Core::Promise<Empty>>()>> m_steps;
+    GC::MemberPtr<HTML::Navigable> m_target_navigable;
 };
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#tn-session-history-traversal-queue

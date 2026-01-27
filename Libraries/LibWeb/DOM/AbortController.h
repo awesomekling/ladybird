@@ -33,7 +33,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://dom.spec.whatwg.org/#abortcontroller-signal
-    GC::Ref<AbortSignal> m_signal;
+    GC::MemberRef<AbortSignal> m_signal;
 };
 
 }

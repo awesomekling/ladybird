@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/RootVector.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/HTML/TextTrack.h>
@@ -46,7 +47,7 @@ protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<TextTrack> m_track;
+    GC::MemberPtr<TextTrack> m_track;
 
     // https://html.spec.whatwg.org/multipage/media.html#text-track-cue-identifier
     String m_identifier;

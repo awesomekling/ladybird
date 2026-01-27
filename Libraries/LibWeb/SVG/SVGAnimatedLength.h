@@ -29,8 +29,8 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<SVGLength> m_base_val;
-    GC::Ref<SVGLength> m_anim_val;
+    GC::MemberRef<SVGLength> m_base_val;
+    GC::MemberRef<SVGLength> m_anim_val;
 };
 
 }

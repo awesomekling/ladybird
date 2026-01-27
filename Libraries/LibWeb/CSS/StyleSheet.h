@@ -63,11 +63,11 @@ protected:
     explicit StyleSheet(JS::Realm&, MediaList& media);
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<MediaList> m_media;
+    GC::MemberRef<MediaList> m_media;
 
 private:
-    GC::Ptr<DOM::Element> m_owner_node;
-    GC::Ptr<CSSStyleSheet> m_parent_style_sheet;
+    GC::MemberPtr<DOM::Element> m_owner_node;
+    GC::MemberPtr<CSSStyleSheet> m_parent_style_sheet;
 
     Optional<::URL::URL> m_location;
     String m_title;

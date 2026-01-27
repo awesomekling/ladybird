@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Weak.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/Enums.h>
@@ -76,15 +77,15 @@ private:
     void animate();
     Gfx::ImmutableBitmap const* bitmap(size_t frame_index, Gfx::IntSize = {}) const;
 
-    GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
-    GC::Ptr<CSSStyleSheet> m_style_sheet;
+    GC::MemberPtr<HTML::SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<CSSStyleSheet> m_style_sheet;
 
     URL m_url;
     GC::Weak<DOM::Document> m_document;
 
     size_t m_current_frame_index { 0 };
     size_t m_loops_completed { 0 };
-    GC::Ptr<Platform::Timer> m_timer;
+    GC::MemberPtr<Platform::Timer> m_timer;
 
     HashTable<Client*> m_clients;
 };

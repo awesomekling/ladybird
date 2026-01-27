@@ -157,11 +157,11 @@ private:
 
     void update_placeholder_visibility();
 
-    GC::Ptr<DOM::Element> m_placeholder_element;
-    GC::Ptr<DOM::Text> m_placeholder_text_node;
+    GC::MemberPtr<DOM::Element> m_placeholder_element;
+    GC::MemberPtr<DOM::Text> m_placeholder_text_node;
 
-    GC::Ptr<DOM::Element> m_inner_text_element;
-    GC::Ptr<DOM::Text> m_text_node;
+    GC::MemberPtr<DOM::Element> m_inner_text_element;
+    GC::MemberPtr<DOM::Text> m_text_node;
 
     RefPtr<Core::Timer> m_input_event_timer;
 

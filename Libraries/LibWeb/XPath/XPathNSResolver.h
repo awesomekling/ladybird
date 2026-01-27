@@ -25,7 +25,7 @@ public:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ref<WebIDL::CallbackType> m_callback;
+    GC::MemberRef<WebIDL::CallbackType> m_callback;
 };
 
 }

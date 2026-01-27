@@ -163,7 +163,7 @@ void FetchedDataReceiver::pull_bytes_into_stream()
                 m_lifecycle_state = LifecycleState::ReadyToClose;
         }));
 
-    m_pending_promise = {};
+    m_pending_promise = nullptr;
 }
 
 void FetchedDataReceiver::close_stream()
@@ -172,7 +172,7 @@ void FetchedDataReceiver::close_stream()
     VERIFY(buffer_is_eof());
 
     WebIDL::resolve_promise(m_stream->realm(), *m_pending_promise, JS::js_undefined());
-    m_pending_promise = {};
+    m_pending_promise = nullptr;
     m_lifecycle_state = LifecycleState::Closed;
     m_stream->close();
 

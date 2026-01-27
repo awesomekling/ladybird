@@ -35,7 +35,7 @@ private:
     virtual GC::Ref<WebIDL::Promise> next_iteration_result(JS::Realm&) override;
     virtual GC::Ref<WebIDL::Promise> iterator_return(JS::Realm&, JS::Value) override;
 
-    GC::Ref<ReadableStreamDefaultReader> m_reader;
+    GC::MemberRef<ReadableStreamDefaultReader> m_reader;
     bool m_prevent_cancel { false };
 };
 

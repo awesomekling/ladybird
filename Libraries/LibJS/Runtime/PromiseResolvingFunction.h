@@ -42,8 +42,8 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Promise> m_promise;
-    GC::Ref<AlreadyResolved> m_already_resolved;
+    GC::MemberRef<Promise> m_promise;
+    GC::MemberRef<AlreadyResolved> m_already_resolved;
     FunctionType m_native_function;
 };
 

@@ -110,7 +110,7 @@ private:
 
     mutable OwnPtr<ElementByIdMap> m_element_by_id;
 
-    GC::Ptr<CSS::StyleSheetList> m_style_sheets;
+    GC::MemberPtr<CSS::StyleSheetList> m_style_sheets;
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
     IntrusiveListNode<ShadowRoot> m_list_node;

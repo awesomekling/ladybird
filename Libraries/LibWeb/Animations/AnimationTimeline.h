@@ -61,7 +61,7 @@ protected:
     bool m_is_monotonically_increasing { false };
 
     // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
-    GC::Ptr<DOM::Document> m_associated_document {};
+    GC::MemberPtr<DOM::Document> m_associated_document {};
 
     HashTable<GC::Weak<Animation>> m_associated_animations {};
 };

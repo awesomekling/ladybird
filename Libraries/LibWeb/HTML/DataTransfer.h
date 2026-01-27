@@ -85,7 +85,7 @@ private:
     FlyString m_effect_allowed { DataTransferEffect::none };
 
     // https://html.spec.whatwg.org/multipage/dnd.html#dom-datatransfer-items
-    GC::Ptr<DataTransferItemList> m_items;
+    GC::MemberPtr<DataTransferItemList> m_items;
     Vector<GC::Ref<DataTransferItem>> m_item_list;
 
     // https://html.spec.whatwg.org/multipage/dnd.html#concept-datatransfer-types

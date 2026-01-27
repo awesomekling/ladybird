@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Realm.h>
 #include <LibWeb/DOM/InputEventsTarget.h>
@@ -52,8 +53,8 @@ private:
 
     GC::Ptr<Selection::Selection> get_selection_for_navigation(CollapseSelection) const;
 
-    GC::Ref<Document> m_document;
-    GC::Ptr<DOM::Node> m_active_contenteditable_element;
+    GC::MemberRef<Document> m_document;
+    GC::MemberPtr<DOM::Node> m_active_contenteditable_element;
 };
 
 }

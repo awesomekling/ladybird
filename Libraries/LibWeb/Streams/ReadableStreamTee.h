@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -53,10 +54,10 @@ private:
     virtual void on_close() override;
     virtual void on_error(JS::Value) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<ReadableStream> m_stream;
-    GC::Ref<ReadableStreamTeeParams> m_params;
-    GC::Ref<WebIDL::Promise> m_cancel_promise;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<ReadableStream> m_stream;
+    GC::MemberRef<ReadableStreamTeeParams> m_params;
+    GC::MemberRef<WebIDL::Promise> m_cancel_promise;
     bool m_clone_for_branch2 { false };
 };
 
@@ -100,10 +101,10 @@ private:
     virtual void on_close() override;
     virtual void on_error(JS::Value) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<ReadableStream> m_stream;
-    GC::Ref<ReadableByteStreamTeeParams> m_params;
-    GC::Ref<WebIDL::Promise> m_cancel_promise;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<ReadableStream> m_stream;
+    GC::MemberRef<ReadableByteStreamTeeParams> m_params;
+    GC::MemberRef<WebIDL::Promise> m_cancel_promise;
 };
 
 // https://streams.spec.whatwg.org/#ref-for-read-into-request②
@@ -127,12 +128,12 @@ private:
     virtual void on_close(JS::Value chunk) override;
     virtual void on_error(JS::Value) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<ReadableStream> m_stream;
-    GC::Ref<ReadableByteStreamTeeParams> m_params;
-    GC::Ref<WebIDL::Promise> m_cancel_promise;
-    GC::Ref<ReadableStream> m_byob_branch;
-    GC::Ref<ReadableStream> m_other_branch;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<ReadableStream> m_stream;
+    GC::MemberRef<ReadableByteStreamTeeParams> m_params;
+    GC::MemberRef<WebIDL::Promise> m_cancel_promise;
+    GC::MemberRef<ReadableStream> m_byob_branch;
+    GC::MemberRef<ReadableStream> m_other_branch;
     bool m_for_branch2 { false };
 };
 

@@ -44,7 +44,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(time_log);
     JS_DECLARE_NATIVE_FUNCTION(time_end);
 
-    GC::Ptr<Console> m_console;
+    GC::MemberPtr<Console> m_console;
 };
 
 }

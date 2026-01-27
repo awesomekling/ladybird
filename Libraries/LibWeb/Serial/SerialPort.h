@@ -110,7 +110,7 @@ private:
 
     // https://wicg.github.io/serial/#dfn-readable
     // A ReadableStream that receives data from the port
-    GC::Ptr<Streams::ReadableStream> m_readable = {};
+    GC::Ptr<Streams::ReadableStream> m_readable = nullptr;
 
     // https://wicg.github.io/serial/#dfn-readfatal
     // A flag indicating that the port has encountered a fatal read error
@@ -118,7 +118,7 @@ private:
 
     // https://wicg.github.io/serial/#dfn-writable
     // A WritableStream that transmits data to the port
-    GC::Ptr<Streams::WritableStream> m_writable = {};
+    GC::Ptr<Streams::WritableStream> m_writable = nullptr;
 
     // https://wicg.github.io/serial/#dfn-writefatal
     // A flag indicating that the port has encountered a fatal write error

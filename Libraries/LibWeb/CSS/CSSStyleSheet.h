@@ -113,15 +113,15 @@ private:
 
     Optional<String> m_source_text;
 
-    GC::Ptr<CSSRuleList> m_rules;
-    GC::Ptr<CSSNamespaceRule> m_default_namespace_rule;
+    GC::MemberPtr<CSSRuleList> m_rules;
+    GC::MemberPtr<CSSNamespaceRule> m_default_namespace_rule;
     HashMap<FlyString, GC::Ptr<CSSNamespaceRule>> m_namespace_rules;
     Vector<GC::Ref<CSSImportRule>> m_import_rules;
 
-    GC::Ptr<CSSRule> m_owner_css_rule;
+    GC::MemberPtr<CSSRule> m_owner_css_rule;
 
     Optional<::URL::URL> m_base_url;
-    GC::Ptr<DOM::Document const> m_constructor_document;
+    GC::MemberPtr<DOM::Document const> m_constructor_document;
     HashTable<GC::Ptr<DOM::Node>> m_owning_documents_or_shadow_roots;
     bool m_constructed { false };
     bool m_disallow_modification { false };

@@ -111,10 +111,10 @@ private:
     void mark_as_ready(Result);
 
     // https://html.spec.whatwg.org/multipage/scripting.html#parser-document
-    GC::Ptr<DOM::Document> m_parser_document;
+    GC::MemberPtr<DOM::Document> m_parser_document;
 
     // https://html.spec.whatwg.org/multipage/scripting.html#preparation-time-document
-    GC::Ptr<DOM::Document> m_preparation_time_document;
+    GC::MemberPtr<DOM::Document> m_preparation_time_document;
 
     // https://html.spec.whatwg.org/multipage/scripting.html#script-force-async
     bool m_force_async { true };

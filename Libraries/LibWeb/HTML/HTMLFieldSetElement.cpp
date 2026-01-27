@@ -60,7 +60,7 @@ bool HTMLFieldSetElement::is_disabled() const
 }
 
 // https://html.spec.whatwg.org/multipage/form-elements.html#dom-fieldset-elements
-GC::Ptr<DOM::HTMLCollection> const& HTMLFieldSetElement::elements()
+GC::Ptr<DOM::HTMLCollection> HTMLFieldSetElement::elements()
 {
     // The elements IDL attribute must return an HTMLCollection rooted at the fieldset element, whose filter matches listed elements.
     if (!m_elements) {

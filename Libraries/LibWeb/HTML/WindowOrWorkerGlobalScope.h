@@ -146,17 +146,17 @@ private:
 
     HashTable<GC::Ref<EventSource>> m_registered_event_sources;
 
-    GC::Ptr<HighResolutionTime::Performance> m_performance;
+    GC::MemberPtr<HighResolutionTime::Performance> m_performance;
 
-    GC::Ptr<IndexedDB::IDBFactory> m_indexed_db;
+    GC::MemberPtr<IndexedDB::IDBFactory> m_indexed_db;
 
     mutable GC::Ptr<JS::Object> m_supported_entry_types_array;
 
-    GC::Ptr<Crypto::Crypto> m_crypto;
+    GC::MemberPtr<Crypto::Crypto> m_crypto;
 
-    GC::Ptr<ServiceWorker::CacheStorage> m_cache_storage;
+    GC::MemberPtr<ServiceWorker::CacheStorage> m_cache_storage;
 
-    GC::Ptr<TrustedTypes::TrustedTypePolicyFactory> m_trusted_type_policy_factory;
+    GC::MemberPtr<TrustedTypes::TrustedTypePolicyFactory> m_trusted_type_policy_factory;
 
     bool m_error_reporting_mode { false };
 

@@ -171,10 +171,10 @@ private:
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigation-transition
     // Each Navigation has a transition, which is a NavigationTransition or null, initially null.
-    GC::Ptr<NavigationTransition> m_transition { nullptr };
+    GC::MemberPtr<NavigationTransition> m_transition { nullptr };
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#ongoing-navigate-event
-    GC::Ptr<NavigateEvent> m_ongoing_navigate_event { nullptr };
+    GC::MemberPtr<NavigateEvent> m_ongoing_navigate_event { nullptr };
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#focus-changed-during-ongoing-navigation
     bool m_focus_changed_during_ongoing_navigation { false };

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/OwnPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibJS/Export.h>
 #include <LibJS/Runtime/Completion.h>
@@ -39,7 +40,7 @@ public:
     CustomData* custom_data() { return m_custom_data; }
 
 private:
-    GC::Ref<FunctionObject> m_callback;
+    GC::MemberRef<FunctionObject> m_callback;
     OwnPtr<CustomData> m_custom_data { nullptr };
 };
 

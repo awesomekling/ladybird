@@ -282,6 +282,18 @@ public:
     }
 
     template<typename T>
+    Value(GC::MemberPtr<T> ptr)
+        : Value(ptr.ptr())
+    {
+    }
+
+    template<typename T>
+    Value(GC::MemberRef<T> ptr)
+        : Value(ptr.ptr())
+    {
+    }
+
+    template<typename T>
     Value(GC::Root<T> const& ptr)
         : Value(ptr.ptr())
     {

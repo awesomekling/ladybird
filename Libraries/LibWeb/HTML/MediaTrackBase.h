@@ -33,7 +33,7 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ref<HTMLMediaElement> m_media_element;
+    GC::MemberRef<HTMLMediaElement> m_media_element;
 
     Media::Track m_track_in_playback_manager;
 

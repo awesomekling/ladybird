@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Cell.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/PixelUnits.h>
 
@@ -23,7 +24,7 @@ public:
     void visit_edges(GC::Cell::Visitor&) const;
 
 private:
-    GC::Ref<DOM::Element> m_element;
+    GC::MemberRef<DOM::Element> m_element;
     CSSPixelPoint m_pointer_down_origin;
     CSSPixelSize m_initial_border_box_size;
 };

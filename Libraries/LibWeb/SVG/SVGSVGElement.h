@@ -100,7 +100,7 @@ private:
 
     Optional<ViewBox> m_fallback_view_box_for_svg_as_image;
 
-    GC::Ptr<SVGViewElement> m_active_view_element;
+    GC::MemberPtr<SVGViewElement> m_active_view_element;
 };
 
 }

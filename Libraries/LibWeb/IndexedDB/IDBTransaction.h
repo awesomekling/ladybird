@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/IDBDatabasePrototype.h>
 #include <LibWeb/Bindings/IDBTransactionPrototype.h>
@@ -108,7 +109,7 @@ private:
     Vector<GC::Ref<IDBTransactionObserver>> m_transaction_observers_being_notified;
 
     // AD-HOC: The transaction has a connection
-    GC::Ref<IDBDatabase> m_connection;
+    GC::MemberRef<IDBDatabase> m_connection;
 
     // A transaction has a mode that determines which types of interactions can be performed upon that transaction.
     Bindings::IDBTransactionMode m_mode;
@@ -120,10 +121,10 @@ private:
     TransactionState m_state { TransactionState::Active };
 
     // A transaction has a error which is set if the transaction is aborted.
-    GC::Ptr<WebIDL::DOMException> m_error;
+    GC::MemberPtr<WebIDL::DOMException> m_error;
 
     // A transaction has an associated upgrade request
-    GC::Ptr<IDBRequest> m_associated_request;
+    GC::MemberPtr<IDBRequest> m_associated_request;
 
     // AD-HOC: We need to track abort state separately, since we cannot rely on only the error.
     bool m_aborted { false };
@@ -135,7 +136,7 @@ private:
     RequestList m_request_list;
 
     // A transaction optionally has a cleanup event loop which is an event loop.
-    GC::Ptr<HTML::EventLoop> m_cleanup_event_loop;
+    GC::MemberPtr<HTML::EventLoop> m_cleanup_event_loop;
 
     // NOTE: Used for debug purposes
     String m_uuid;

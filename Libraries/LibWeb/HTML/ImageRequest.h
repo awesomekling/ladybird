@@ -8,6 +8,7 @@
 
 #include <AK/Error.h>
 #include <AK/OwnPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibGfx/Size.h>
 #include <LibURL/URL.h>
@@ -64,7 +65,7 @@ public:
 private:
     explicit ImageRequest(GC::Ref<Page>);
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
 
     // https://html.spec.whatwg.org/multipage/images.html#img-req-state
     // An image request's state is initially unavailable.
@@ -75,7 +76,7 @@ private:
     String m_current_url;
 
     // https://html.spec.whatwg.org/multipage/images.html#img-req-data
-    GC::Ptr<DecodedImageData> m_image_data;
+    GC::MemberPtr<DecodedImageData> m_image_data;
 
     // https://html.spec.whatwg.org/multipage/images.html#current-pixel-density
     // Each image request has a current pixel density, which must initially be 1.
@@ -86,7 +87,7 @@ private:
     // which is either a struct consisting of a width and a height or is null. It must initially be null.
     Optional<Gfx::FloatSize> m_preferred_density_corrected_dimensions;
 
-    GC::Ptr<SharedResourceRequest> m_shared_resource_request;
+    GC::MemberPtr<SharedResourceRequest> m_shared_resource_request;
 };
 
 // https://html.spec.whatwg.org/multipage/images.html#abort-the-image-request

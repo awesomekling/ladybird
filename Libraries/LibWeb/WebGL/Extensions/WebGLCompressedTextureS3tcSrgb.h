@@ -26,7 +26,7 @@ protected:
 private:
     WebGLCompressedTextureS3tcSrgb(JS::Realm&, GC::Ref<WebGLRenderingContextBase>);
 
-    GC::Ref<WebGLRenderingContextBase> m_context;
+    GC::MemberRef<WebGLRenderingContextBase> m_context;
 };
 
 }

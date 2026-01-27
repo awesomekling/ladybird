@@ -265,7 +265,7 @@ void ReadableStreamPipeTo::write_unwritten_chunks()
 void ReadableStreamPipeTo::wait_for_pending_writes_to_complete(Function<void()> on_complete)
 {
     auto last_write_promise = m_last_write_promise;
-    m_last_write_promise = {};
+    m_last_write_promise = nullptr;
     if (!last_write_promise) {
         HTML::queue_a_microtask(nullptr, GC::create_function(heap(), [on_complete = move(on_complete)]() {
             on_complete();

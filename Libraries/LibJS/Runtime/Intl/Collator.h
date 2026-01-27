@@ -49,7 +49,7 @@ public:
     void set_numeric(bool numeric) { m_numeric = numeric; }
 
     CollatorCompareFunction* bound_compare() const { return m_bound_compare; }
-    void set_bound_compare(CollatorCompareFunction* bound_compare) { m_bound_compare = bound_compare; }
+    void set_bound_compare(CollatorCompareFunction* bound_compare) { m_bound_compare.set(*this, bound_compare); }
 
     Unicode::Collator const& collator() const { return *m_collator; }
     void set_collator(NonnullOwnPtr<Unicode::Collator> collator) { m_collator = move(collator); }
@@ -66,7 +66,7 @@ private:
     String m_collation;                                                   // [[Collation]]
     bool m_ignore_punctuation { false };                                  // [[IgnorePunctuation]]
     bool m_numeric { false };                                             // [[Numeric]]
-    GC::Ptr<CollatorCompareFunction> m_bound_compare;                     // [[BoundCompare]]
+    GC::MemberPtr<CollatorCompareFunction> m_bound_compare;               // [[BoundCompare]]
 
     // Non-standard. Stores the ICU collator for the Intl object's collation options.
     OwnPtr<Unicode::Collator> m_collator;

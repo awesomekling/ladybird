@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
@@ -59,7 +60,7 @@ private:
     virtual bool webgl_draw_buffers_extension_enabled() const override;
     virtual ReadonlySpan<WebIDL::UnsignedLong> enabled_compressed_texture_formats() const override;
 
-    GC::Ref<HTML::HTMLCanvasElement> m_canvas_element;
+    GC::MemberRef<HTML::HTMLCanvasElement> m_canvas_element;
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#context-creation-parameters
     // Each WebGLRenderingContext has context creation parameters, set upon creation, in a WebGLContextAttributes object.
@@ -83,12 +84,12 @@ private:
 
     // Extensions
     // "Multiple calls to getExtension with the same extension string, taking into account case-insensitive comparison, must return the same object as long as the extension is enabled."
-    GC::Ptr<Extensions::EXTColorBufferFloat> m_ext_color_buffer_float_extension;
-    GC::Ptr<Extensions::EXTRenderSnorm> m_ext_render_snorm;
-    GC::Ptr<Extensions::EXTTextureFilterAnisotropic> m_ext_texture_filter_anisotropic;
-    GC::Ptr<Extensions::EXTTextureNorm16> m_ext_texture_norm16;
-    GC::Ptr<Extensions::WebGLCompressedTextureS3tc> m_webgl_compressed_texture_s3tc_extension;
-    GC::Ptr<Extensions::WebGLCompressedTextureS3tcSrgb> m_webgl_compressed_texture_s3tc_srgb_extension;
+    GC::MemberPtr<Extensions::EXTColorBufferFloat> m_ext_color_buffer_float_extension;
+    GC::MemberPtr<Extensions::EXTRenderSnorm> m_ext_render_snorm;
+    GC::MemberPtr<Extensions::EXTTextureFilterAnisotropic> m_ext_texture_filter_anisotropic;
+    GC::MemberPtr<Extensions::EXTTextureNorm16> m_ext_texture_norm16;
+    GC::MemberPtr<Extensions::WebGLCompressedTextureS3tc> m_webgl_compressed_texture_s3tc_extension;
+    GC::MemberPtr<Extensions::WebGLCompressedTextureS3tcSrgb> m_webgl_compressed_texture_s3tc_srgb_extension;
 };
 
 }

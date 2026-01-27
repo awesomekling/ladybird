@@ -41,7 +41,7 @@ private:
     bool m_already_processed { false };
     bool m_parser_inserted { false };
 
-    GC::Ptr<HTML::ClassicScript> m_script;
+    GC::MemberPtr<HTML::ClassicScript> m_script;
 
     size_t m_source_line_number { 1 };
 };

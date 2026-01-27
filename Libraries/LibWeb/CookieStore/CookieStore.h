@@ -75,7 +75,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<PageClient> m_client;
+    GC::MemberRef<PageClient> m_client;
 };
 
 }

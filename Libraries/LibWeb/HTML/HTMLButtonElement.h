@@ -99,7 +99,7 @@ private:
     // ^DOM::Element
     virtual i32 default_tab_index_value() const override;
 
-    GC::Ptr<DOM::Element> m_command_for_element;
+    GC::MemberPtr<DOM::Element> m_command_for_element;
 };
 
 }

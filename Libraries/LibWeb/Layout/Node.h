@@ -225,19 +225,19 @@ protected:
 private:
     friend class NodeWithStyle;
 
-    GC::Ref<DOM::Node> m_dom_node;
+    GC::MemberRef<DOM::Node> m_dom_node;
     PaintableList m_paintable;
 
-    GC::Ptr<Box> m_containing_block;
+    GC::MemberPtr<Box> m_containing_block;
 
     // For absolutely positioned elements, if there's an inline element (like a <span> with
     // position:relative) that should be the containing block but can't be stored in m_containing_block
     // (because it's not a Box), we store it here. This happens when a block element is inside an
     // inline element - the layout tree restructures so the block becomes a sibling of the inline,
     // but the CSS containing block relationship is based on the DOM structure.
-    GC::Ptr<InlineNode> m_inline_containing_block_if_applicable;
+    GC::MemberPtr<InlineNode> m_inline_containing_block_if_applicable;
 
-    GC::Ptr<DOM::Element> m_pseudo_element_generator;
+    GC::MemberPtr<DOM::Element> m_pseudo_element_generator;
 
     bool m_anonymous { false };
     bool m_has_style { false };
@@ -326,7 +326,7 @@ protected:
 private:
     virtual bool is_node_with_style_and_box_model_metrics() const final { return true; }
 
-    GC::Ptr<NodeWithStyleAndBoxModelMetrics> m_continuation_of_node;
+    GC::MemberPtr<NodeWithStyleAndBoxModelMetrics> m_continuation_of_node;
 };
 
 template<>

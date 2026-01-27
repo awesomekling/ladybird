@@ -72,8 +72,8 @@ private:
     String m_return_value;
     bool m_is_modal { false };
     Optional<String> m_request_close_return_value;
-    GC::Ptr<DOM::Element> m_request_close_source_element;
-    GC::Ptr<CloseWatcher> m_close_watcher;
+    GC::MemberPtr<DOM::Element> m_request_close_source_element;
+    GC::MemberPtr<CloseWatcher> m_close_watcher;
 
     // https://html.spec.whatwg.org/multipage/interactive-elements.html#enable-close-watcher-for-requestclose()
     bool m_enable_close_watcher_for_request_close { false };
@@ -82,7 +82,7 @@ private:
     Optional<ToggleTaskTracker> m_dialog_toggle_task_tracker;
 
     // https://html.spec.whatwg.org/multipage/interactive-elements.html#previously-focused-element
-    GC::Ptr<Node> m_previously_focused_element;
+    GC::MemberPtr<Node> m_previously_focused_element;
 };
 
 }

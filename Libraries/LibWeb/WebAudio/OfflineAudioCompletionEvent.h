@@ -33,7 +33,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<AudioBuffer> m_rendered_buffer;
+    GC::MemberPtr<AudioBuffer> m_rendered_buffer;
 };
 
 }

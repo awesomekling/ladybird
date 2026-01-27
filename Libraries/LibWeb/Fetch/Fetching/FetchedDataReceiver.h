@@ -9,6 +9,7 @@
 
 #include <AK/ByteBuffer.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibHTTP/Forward.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
@@ -45,12 +46,12 @@ private:
     bool buffer_is_eof() const { return m_pulled_bytes == m_buffer.size(); }
     ByteBuffer copy_unpulled_bytes();
 
-    GC::Ref<Infrastructure::FetchParams const> m_fetch_params;
-    GC::Ptr<Fetch::Infrastructure::Response const> m_response;
-    GC::Ptr<Fetch::Infrastructure::Body> m_body;
+    GC::MemberRef<Infrastructure::FetchParams const> m_fetch_params;
+    GC::MemberPtr<Fetch::Infrastructure::Response const> m_response;
+    GC::MemberPtr<Fetch::Infrastructure::Body> m_body;
 
-    GC::Ref<Streams::ReadableStream> m_stream;
-    GC::Ptr<WebIDL::Promise> m_pending_promise;
+    GC::MemberRef<Streams::ReadableStream> m_stream;
+    GC::MemberPtr<WebIDL::Promise> m_pending_promise;
 
     RefPtr<HTTP::MemoryCache> m_http_cache;
 

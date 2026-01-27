@@ -49,7 +49,7 @@ public:
 private:
     AudioParam(JS::Realm&, GC::Ref<BaseAudioContext>, float default_value, float min_value, float max_value, Bindings::AutomationRate, FixedAutomationRate = FixedAutomationRate::No);
 
-    GC::Ref<BaseAudioContext> m_context;
+    GC::MemberRef<BaseAudioContext> m_context;
 
     // https://webaudio.github.io/web-audio-api/#dom-audioparam-current-value-slot
     float m_current_value {}; //  [[current value]]

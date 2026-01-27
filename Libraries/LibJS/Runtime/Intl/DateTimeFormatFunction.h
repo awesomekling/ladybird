@@ -29,7 +29,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<DateTimeFormat> m_date_time_format; // [[DateTimeFormat]]
+    GC::MemberRef<DateTimeFormat> m_date_time_format; // [[DateTimeFormat]]
 };
 
 }

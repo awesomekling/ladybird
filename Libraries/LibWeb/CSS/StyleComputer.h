@@ -186,7 +186,7 @@ private:
         Optional<LogicalAliasMappingContext>,
         ReadonlySpan<PropertyID> properties_to_cascade) const;
 
-    GC::Ref<DOM::Document> m_document;
+    GC::MemberRef<DOM::Document> m_document;
 
     [[nodiscard]] RuleCache const* rule_cache_for_cascade_origin(CascadeOrigin, Optional<FlyString const> qualified_layer_name, GC::Ptr<DOM::ShadowRoot const>) const;
 

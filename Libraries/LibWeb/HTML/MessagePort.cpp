@@ -204,7 +204,7 @@ void MessagePort::entangle_with(MessagePort& remote_port)
             strong_this->read_from_transport();
     });
 
-    m_remote_port->m_transport->set_up_read_hook([remote_port = GC::make_root(m_remote_port)]() {
+    m_remote_port->m_transport->set_up_read_hook([remote_port = GC::make_root(m_remote_port.ptr())]() {
         if (remote_port->m_enabled)
             remote_port->read_from_transport();
     });

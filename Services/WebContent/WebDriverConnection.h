@@ -10,6 +10,7 @@
 
 #include <AK/ByteString.h>
 #include <AK/String.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/RootVector.h>
 #include <LibGfx/Rect.h>
 #include <LibIPC/ConnectionToServer.h>
@@ -163,13 +164,13 @@ private:
     Web::WebDriver::TimeoutsConfiguration m_timeouts_configuration;
 
     // https://w3c.github.io/webdriver/#dfn-current-browsing-context
-    GC::Ptr<Web::HTML::BrowsingContext> m_current_browsing_context;
+    GC::MemberPtr<Web::HTML::BrowsingContext> m_current_browsing_context;
 
     // https://w3c.github.io/webdriver/#dfn-current-parent-browsing-context
-    GC::Ptr<Web::HTML::BrowsingContext> m_current_parent_browsing_context;
+    GC::MemberPtr<Web::HTML::BrowsingContext> m_current_parent_browsing_context;
 
     // https://w3c.github.io/webdriver/#dfn-current-top-level-browsing-context
-    GC::Ptr<Web::HTML::BrowsingContext> m_current_top_level_browsing_context;
+    GC::MemberPtr<Web::HTML::BrowsingContext> m_current_top_level_browsing_context;
 
     size_t m_pending_window_rect_requests { 0 };
 
@@ -177,13 +178,13 @@ private:
     Optional<size_t> m_current_script_execution_id;
 
     friend class ElementLocator;
-    GC::Ptr<ElementLocator> m_element_locator;
+    GC::MemberPtr<ElementLocator> m_element_locator;
 
-    GC::Ptr<JS::Cell> m_action_executor;
+    GC::MemberPtr<JS::Cell> m_action_executor;
 
-    GC::Ptr<Web::DOM::DocumentObserver> m_document_observer;
-    GC::Ptr<Web::HTML::NavigationObserver> m_navigation_observer;
-    GC::Ptr<Web::WebDriver::HeapTimer> m_navigation_timer;
+    GC::MemberPtr<Web::DOM::DocumentObserver> m_document_observer;
+    GC::MemberPtr<Web::HTML::NavigationObserver> m_navigation_observer;
+    GC::MemberPtr<Web::WebDriver::HeapTimer> m_navigation_timer;
 };
 
 }

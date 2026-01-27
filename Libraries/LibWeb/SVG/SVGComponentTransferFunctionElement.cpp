@@ -42,11 +42,11 @@ void SVGComponentTransferFunctionElement::attribute_changed(FlyString const& nam
 
     // FIXME: Support reflection instead of invalidating the enumeration.
     if (name == AttributeNames::type)
-        m_type = {};
+        m_type = nullptr;
 
     // FIXME: Support reflection instead of invalidating the list.
     if (name == AttributeNames::tableValues)
-        m_table_values = {};
+        m_table_values = nullptr;
 
     // Clear our cached color table on any attribute change.
     m_cached_color_table.clear();

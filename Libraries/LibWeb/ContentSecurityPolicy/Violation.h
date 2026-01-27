@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibURL/URL.h>
 #include <LibWeb/ContentSecurityPolicy/Policy.h>
@@ -88,7 +89,7 @@ private:
 
     // https://w3c.github.io/webappsec-csp/#violation-global-object
     // Each violation has a global object, which is the global object whose policy has been violated.
-    GC::Ptr<JS::Object> m_global_object;
+    GC::MemberPtr<JS::Object> m_global_object;
 
     // https://w3c.github.io/webappsec-csp/#violation-status
     // Each violation has a status which is a non-negative integer representing the HTTP status code of the resource
@@ -110,7 +111,7 @@ private:
 
     // https://w3c.github.io/webappsec-csp/#violation-policy
     // Each violation has a policy, which is the policy that has been violated.
-    GC::Ref<Policy const> m_policy;
+    GC::MemberRef<Policy const> m_policy;
 
     // https://w3c.github.io/webappsec-csp/#violation-effective-directive
     // Each violation has an effective directive which is a non-empty string representing the directive whose enforcement
@@ -131,7 +132,7 @@ private:
 
     // https://w3c.github.io/webappsec-csp/#violation-element
     // Each violation has a element, which is either null or an element.
-    GC::Ptr<DOM::Element> m_element;
+    GC::MemberPtr<DOM::Element> m_element;
 
     // https://w3c.github.io/webappsec-csp/#violation-sample
     // Each violation has a sample, which is a string. It is the empty string unless otherwise specified.

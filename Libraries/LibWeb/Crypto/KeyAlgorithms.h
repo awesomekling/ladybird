@@ -40,7 +40,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(name_getter);
 
     String m_name;
-    GC::Ref<JS::Realm> m_realm;
+    GC::MemberRef<JS::Realm> m_realm;
 };
 
 // https://w3c.github.io/webcrypto/#RsaKeyAlgorithm-dictionary
@@ -71,7 +71,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(public_exponent_getter);
 
     u32 m_modulus_length { 0 };
-    GC::Ref<JS::Uint8Array> m_public_exponent;
+    GC::MemberRef<JS::Uint8Array> m_public_exponent;
 };
 
 // https://w3c.github.io/webcrypto/#RsaHashedKeyAlgorithm-dictionary
@@ -172,7 +172,7 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(hash_getter);
     JS_DECLARE_NATIVE_FUNCTION(length_getter);
 
-    GC::Ptr<KeyAlgorithm> m_hash;
+    GC::MemberPtr<KeyAlgorithm> m_hash;
     WebIDL::UnsignedLong m_length;
 };
 

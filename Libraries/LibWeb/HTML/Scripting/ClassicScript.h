@@ -45,7 +45,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<JS::Script> m_script_record;
+    GC::MemberPtr<JS::Script> m_script_record;
     MutedErrors m_muted_errors { MutedErrors::No };
 };
 

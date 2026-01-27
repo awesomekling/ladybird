@@ -32,7 +32,7 @@ private:
 
     virtual void visit_edges(Visitor& visitor) override;
 
-    GC::Ptr<ArrayBuffer> m_viewed_array_buffer;
+    GC::MemberPtr<ArrayBuffer> m_viewed_array_buffer;
     ByteLength m_byte_length { 0 };
     size_t m_byte_offset { 0 };
 };

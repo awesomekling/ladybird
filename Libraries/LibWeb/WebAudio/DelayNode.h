@@ -39,7 +39,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://webaudio.github.io/web-audio-api/#dom-delaynode-delaytime
-    GC::Ref<AudioParam> m_delay_time;
+    GC::MemberRef<AudioParam> m_delay_time;
 };
 
 }

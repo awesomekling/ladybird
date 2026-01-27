@@ -30,7 +30,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<BigInt const> m_epoch_nanoseconds; // [[EpochNanoseconds]]
+    GC::MemberRef<BigInt const> m_epoch_nanoseconds; // [[EpochNanoseconds]]
 };
 
 // https://tc39.es/proposal-temporal/#eqn-nsMaxInstant

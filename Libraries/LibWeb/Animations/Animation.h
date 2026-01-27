@@ -183,10 +183,10 @@ private:
     unsigned int m_global_animation_list_order { 0 };
 
     // https://www.w3.org/TR/web-animations-1/#dom-animation-effect
-    GC::Ptr<AnimationEffect> m_effect;
+    GC::MemberPtr<AnimationEffect> m_effect;
 
     // https://www.w3.org/TR/web-animations-1/#dom-animation-timeline
-    GC::Ptr<AnimationTimeline> m_timeline;
+    GC::MemberPtr<AnimationTimeline> m_timeline;
 
     // https://www.w3.org/TR/web-animations-1/#animation-start-time
     Optional<TimeValue> m_start_time {};

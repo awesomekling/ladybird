@@ -58,16 +58,16 @@ private:
     JS::ThrowCompletionOr<NodeFilter::Result> filter(Node&);
 
     // https://dom.spec.whatwg.org/#concept-traversal-root
-    GC::Ref<Node> m_root;
+    GC::MemberRef<Node> m_root;
 
     // https://dom.spec.whatwg.org/#treewalker-current
-    GC::Ref<Node> m_current;
+    GC::MemberRef<Node> m_current;
 
     // https://dom.spec.whatwg.org/#concept-traversal-whattoshow
     unsigned m_what_to_show { 0 };
 
     // https://dom.spec.whatwg.org/#concept-traversal-filter
-    GC::Ptr<NodeFilter> m_filter;
+    GC::MemberPtr<NodeFilter> m_filter;
 
     // https://dom.spec.whatwg.org/#concept-traversal-active
     bool m_active { false };

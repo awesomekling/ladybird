@@ -92,7 +92,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     URL::URL m_url;
-    GC::Ref<URLSearchParams> m_query;
+    GC::MemberRef<URLSearchParams> m_query;
 };
 
 // https://url.spec.whatwg.org/#concept-url-parser

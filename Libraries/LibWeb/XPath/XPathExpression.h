@@ -28,7 +28,7 @@ public:
 
 private:
     String m_expression;
-    GC::Ptr<XPathNSResolver> m_resolver;
+    GC::MemberPtr<XPathNSResolver> m_resolver;
 };
 
 }

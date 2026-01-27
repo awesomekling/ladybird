@@ -38,7 +38,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://webaudio.github.io/web-audio-api/#dom-constantsourcenode-offset
-    GC::Ref<AudioParam> m_offset;
+    GC::MemberRef<AudioParam> m_offset;
 };
 
 }

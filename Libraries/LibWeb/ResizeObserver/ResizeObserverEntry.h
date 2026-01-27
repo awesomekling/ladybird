@@ -44,13 +44,13 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ref<DOM::Element> m_target;
+    GC::MemberRef<DOM::Element> m_target;
 
     Vector<GC::Ref<ResizeObserverSize>> m_content_box_size;
     Vector<GC::Ref<ResizeObserverSize>> m_border_box_size;
     Vector<GC::Ref<ResizeObserverSize>> m_device_pixel_content_box_size;
 
-    GC::Ptr<Geometry::DOMRectReadOnly> m_content_rect;
+    GC::MemberPtr<Geometry::DOMRectReadOnly> m_content_rect;
 };
 
 }

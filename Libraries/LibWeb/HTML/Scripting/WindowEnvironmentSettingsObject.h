@@ -33,7 +33,7 @@ private:
 
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ptr<Window> m_window;
+    GC::MemberPtr<Window> m_window;
 };
 
 }

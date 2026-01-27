@@ -33,7 +33,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<XHR::FormData> m_form_data;
+    GC::MemberPtr<XHR::FormData> m_form_data;
 };
 
 }

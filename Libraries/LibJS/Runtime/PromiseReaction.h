@@ -40,8 +40,8 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     Type m_type;
-    GC::Ptr<PromiseCapability> m_capability;
-    GC::Ptr<JobCallback> m_handler;
+    GC::MemberPtr<PromiseCapability> m_capability;
+    GC::MemberPtr<JobCallback> m_handler;
 };
 
 }

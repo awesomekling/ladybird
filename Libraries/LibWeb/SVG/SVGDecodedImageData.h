@@ -51,11 +51,11 @@ private:
 
     mutable HashMap<Gfx::IntSize, NonnullRefPtr<Gfx::PaintingSurface>> m_cached_rendered_surfaces;
 
-    GC::Ref<Page> m_page;
-    GC::Ref<SVGPageClient> m_page_client;
+    GC::MemberRef<Page> m_page;
+    GC::MemberRef<SVGPageClient> m_page_client;
 
-    GC::Ref<DOM::Document> m_document;
-    GC::Ref<SVG::SVGSVGElement> m_root_element;
+    GC::MemberRef<DOM::Document> m_document;
+    GC::MemberRef<SVG::SVGSVGElement> m_root_element;
 };
 
 class SVGDecodedImageData::SVGPageClient final : public PageClient {
@@ -70,8 +70,8 @@ public:
 
     virtual ~SVGPageClient() override = default;
 
-    GC::Ref<Page> m_host_page;
-    GC::Ptr<Page> m_svg_page;
+    GC::MemberRef<Page> m_host_page;
+    GC::MemberPtr<Page> m_svg_page;
 
     virtual u64 id() const override { VERIFY_NOT_REACHED(); }
     virtual Page& page() override { return *m_svg_page; }

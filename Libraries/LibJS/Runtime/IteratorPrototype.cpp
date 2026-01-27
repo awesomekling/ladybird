@@ -401,7 +401,7 @@ private:
         }
     }
 
-    GC::Ptr<IteratorRecord> m_inner_iterator;
+    GC::MemberPtr<IteratorRecord> m_inner_iterator;
 };
 
 GC_DEFINE_ALLOCATOR(FlatMapIterator);

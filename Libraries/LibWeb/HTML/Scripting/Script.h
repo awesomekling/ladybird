@@ -48,7 +48,7 @@ private:
 
     Optional<URL::URL> m_base_url;
     ByteString m_filename;
-    GC::Ref<JS::Realm> m_realm;
+    GC::MemberRef<JS::Realm> m_realm;
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-parse-error
     JS::Value m_parse_error;

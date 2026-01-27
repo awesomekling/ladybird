@@ -27,7 +27,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Collator> m_collator; // [[Collator]]
+    GC::MemberRef<Collator> m_collator; // [[Collator]]
 };
 
 int compare_strings(Collator const&, Utf16View const& x, Utf16View const& y);

@@ -142,7 +142,7 @@ private:
     }
     virtual Gfx::Path& path_for_canvas_state() override { return path(); }
 
-    GC::Ref<OffscreenCanvas> m_canvas;
+    GC::MemberRef<OffscreenCanvas> m_canvas;
     Gfx::IntSize m_size;
     CanvasRenderingContext2DSettings m_context_attributes;
 };

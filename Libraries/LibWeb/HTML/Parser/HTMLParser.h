@@ -216,10 +216,10 @@ private:
 
     JS::Realm& realm();
 
-    GC::Ptr<DOM::Document> m_document;
-    GC::Ptr<HTMLHeadElement> m_head_element;
-    GC::Ptr<HTMLFormElement> m_form_element;
-    GC::Ptr<DOM::Element> m_context_element;
+    GC::MemberPtr<DOM::Document> m_document;
+    GC::MemberPtr<HTMLHeadElement> m_head_element;
+    GC::MemberPtr<HTMLFormElement> m_form_element;
+    GC::MemberPtr<DOM::Element> m_context_element;
 
 #ifdef LIBWEB_USE_SWIFT
     GC::ForeignPtr<Web::SpeculativeHTMLParser> m_speculative_parser;
@@ -227,7 +227,7 @@ private:
 
     Vector<HTMLToken> m_pending_table_character_tokens;
 
-    GC::Ptr<DOM::Text> m_character_insertion_node;
+    GC::MemberPtr<DOM::Text> m_character_insertion_node;
     StringBuilder m_character_insertion_builder { StringBuilder::Mode::UTF16 };
 } SWIFT_UNSAFE_REFERENCE;
 

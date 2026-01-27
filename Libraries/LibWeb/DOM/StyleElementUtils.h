@@ -26,9 +26,9 @@ public:
 
 private:
     // https://www.w3.org/TR/cssom/#associated-css-style-sheet
-    GC::Ptr<CSS::CSSStyleSheet> m_associated_css_style_sheet;
+    GC::MemberPtr<CSS::CSSStyleSheet> m_associated_css_style_sheet;
 
-    GC::Ptr<CSS::StyleSheetList> m_style_sheet_list;
+    GC::MemberPtr<CSS::StyleSheetList> m_style_sheet_list;
 };
 
 }

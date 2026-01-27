@@ -51,15 +51,15 @@ void SVGTextPositioningElement::attribute_changed(FlyString const& name, Optiona
     Base::attribute_changed(name, old_value, value, namespace_);
 
     if (name == AttributeNames::x)
-        m_x = {};
+        m_x = nullptr;
     else if (name == AttributeNames::y)
-        m_y = {};
+        m_y = nullptr;
     else if (name == AttributeNames::dx)
-        m_dx = {};
+        m_dx = nullptr;
     else if (name == AttributeNames::dy)
-        m_dy = {};
+        m_dy = nullptr;
     else if (name == AttributeNames::rotate)
-        m_rotate = {};
+        m_rotate = nullptr;
 }
 
 TextPositioning SVGTextPositioningElement::text_positioning() const
@@ -95,7 +95,7 @@ TextPositioning SVGTextPositioningElement::text_positioning() const
     };
 }
 
-GC::Ref<SVGAnimatedLengthList> SVGTextPositioningElement::ensure_length_list(GC::Ptr<SVGAnimatedLengthList>& list,
+GC::Ref<SVGAnimatedLengthList> SVGTextPositioningElement::ensure_length_list(GC::MemberPtr<SVGAnimatedLengthList>& list,
     FlyString const& attribute_name) const
 {
     if (!list) {

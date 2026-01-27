@@ -11,6 +11,7 @@
 #include <AK/Error.h>
 #include <AK/String.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/Forward.h>
 
@@ -43,7 +44,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Node> m_node;
+    GC::MemberRef<Node> m_node;
     unsigned m_offset { 0 };
 };
 

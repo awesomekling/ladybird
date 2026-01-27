@@ -32,7 +32,7 @@ public:
     BackingStoreManager(HTML::Navigable&);
 
 private:
-    GC::Ref<HTML::Navigable> m_navigable;
+    GC::MemberRef<HTML::Navigable> m_navigable;
 
     i32 m_front_bitmap_id { -1 };
     i32 m_back_bitmap_id { -1 };

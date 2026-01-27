@@ -50,9 +50,9 @@ private:
 
     // Each SharedWorker has a port, a MessagePort set when the object is created.
     // https://html.spec.whatwg.org/multipage/workers.html#concept-sharedworker-port
-    GC::Ref<MessagePort> m_port;
+    GC::MemberRef<MessagePort> m_port;
 
-    GC::Ptr<WorkerAgentParent> m_agent;
+    GC::MemberPtr<WorkerAgentParent> m_agent;
 };
 
 }

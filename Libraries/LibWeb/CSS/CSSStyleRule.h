@@ -50,8 +50,8 @@ private:
 
     SelectorList m_selectors;
     mutable Optional<SelectorList> m_cached_absolutized_selectors;
-    GC::Ref<CSSStyleProperties> m_declaration;
-    GC::Ptr<StylePropertyMap> m_style_map;
+    GC::MemberRef<CSSStyleProperties> m_declaration;
+    GC::MemberPtr<StylePropertyMap> m_style_map;
 };
 
 template<>

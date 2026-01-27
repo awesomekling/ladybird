@@ -12,6 +12,7 @@
 #include <AK/StringView.h>
 #include <AK/Utf16String.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -100,8 +101,8 @@ private:
 
     void resolve(EncodingPreference) const;
 
-    mutable GC::Ptr<PrimitiveString> m_lhs;
-    mutable GC::Ptr<PrimitiveString> m_rhs;
+    mutable GC::MemberPtr<PrimitiveString> m_lhs;
+    mutable GC::MemberPtr<PrimitiveString> m_rhs;
 };
 
 }

@@ -75,7 +75,7 @@ private:
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-cancelalgorithm
     // A promise-returning algorithm, taking one argument (the cancel reason), which communicates a requested cancelation to the underlying source
-    GC::Ptr<CancelAlgorithm> m_cancel_algorithm;
+    GC::MemberPtr<CancelAlgorithm> m_cancel_algorithm;
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-closerequested
     // A boolean flag indicating whether the stream has been closed by its underlying source, but still has chunks in its internal queue that have not yet been read
@@ -87,7 +87,7 @@ private:
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-pullalgorithm
     // A promise-returning algorithm that pulls data from the underlying source
-    GC::Ptr<PullAlgorithm> m_pull_algorithm;
+    GC::MemberPtr<PullAlgorithm> m_pull_algorithm;
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-pulling
     // A boolean flag set to true while the underlying source's pull algorithm is executing and the returned promise has not yet fulfilled, used to prevent reentrant calls
@@ -111,11 +111,11 @@ private:
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-strategysizealgorithm
     // An algorithm to calculate the size of enqueued chunks, as part of the stream’s queuing strategy
-    GC::Ptr<SizeAlgorithm> m_strategy_size_algorithm;
+    GC::MemberPtr<SizeAlgorithm> m_strategy_size_algorithm;
 
     // https://streams.spec.whatwg.org/#readablestreamdefaultcontroller-stream
     // The ReadableStream instance controlled
-    GC::Ptr<ReadableStream> m_stream;
+    GC::MemberPtr<ReadableStream> m_stream;
 };
 
 }

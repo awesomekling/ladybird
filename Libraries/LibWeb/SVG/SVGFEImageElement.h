@@ -37,7 +37,7 @@ private:
 
     Optional<URL::URL> m_href;
 
-    GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<HTML::SharedResourceRequest> m_resource_request;
 };
 
 };

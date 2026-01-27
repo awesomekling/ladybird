@@ -216,7 +216,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     //       which must give the properties in chronological order which in this case is the order they
     //       are defined in the spec.
 
-    m_name_string = PrimitiveString::create(vm, name());
+    m_name_string.set(*this, PrimitiveString::create(vm, name()));
 
     if (!is_arrow_function() && kind() == FunctionKind::Normal) {
         put_direct(realm.intrinsics().normal_function_length_offset(), Value(function_length()));
@@ -437,7 +437,7 @@ void ECMAScriptFunctionObject::visit_edges(Visitor& visitor)
 void ECMAScriptFunctionObject::make_method(Object& home_object)
 {
     // 1. Set F.[[HomeObject]] to homeObject.
-    m_home_object = &home_object;
+    m_home_object.set(*this, &home_object);
 
     // 2. Return unused.
 }
@@ -667,7 +667,7 @@ void ECMAScriptFunctionObject::set_name(Utf16FlyString const& name)
 {
     auto& vm = this->vm();
     const_cast<SharedFunctionInstanceData&>(shared_data()).m_name = name;
-    m_name_string = PrimitiveString::create(vm, name);
+    m_name_string.set(*this, PrimitiveString::create(vm, name));
     PropertyDescriptor descriptor { .value = m_name_string, .writable = false, .enumerable = false, .configurable = true };
     MUST(define_property_or_throw(vm.names.name, descriptor));
 }

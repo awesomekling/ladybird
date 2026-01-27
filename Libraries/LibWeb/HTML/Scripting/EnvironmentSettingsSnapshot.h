@@ -38,7 +38,7 @@ private:
     URL::URL m_url;
     URL::Origin m_origin;
     bool m_has_cross_site_ancestor;
-    GC::Ref<PolicyContainer> m_policy_container;
+    GC::MemberRef<PolicyContainer> m_policy_container;
     double m_time_origin { 0 };
 };
 

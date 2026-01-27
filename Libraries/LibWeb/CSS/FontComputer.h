@@ -9,6 +9,7 @@
  */
 
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibWeb/CSS/Fetch.h>
 #include <LibWeb/CSS/Percentage.h>
@@ -71,14 +72,14 @@ private:
 
     void font_did_load_or_fail(RefPtr<Gfx::Typeface const>);
 
-    GC::Ref<FontComputer> m_font_computer;
+    GC::MemberRef<FontComputer> m_font_computer;
     RuleOrDeclaration m_rule_or_declaration;
     FlyString m_family_name;
     Vector<Gfx::UnicodeRange> m_unicode_ranges;
     RefPtr<Gfx::Typeface const> m_typeface;
     Vector<URL> m_urls;
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
-    GC::Ptr<GC::Function<void(RefPtr<Gfx::Typeface const>)>> m_on_load;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<GC::Function<void(RefPtr<Gfx::Typeface const>)>> m_on_load;
 };
 
 class WEB_API FontComputer final : public GC::Cell {
@@ -118,7 +119,7 @@ private:
     NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values_impl(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, HashMap<FlyString, double> const& font_variation_settings) const;
     RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(FlyString const& family_name, int weight, int slope, float font_size_in_pt, Gfx::FontVariationSettings const& variations) const;
 
-    GC::Ref<DOM::Document> m_document;
+    GC::MemberRef<DOM::Document> m_document;
 
     using FontLoaderList = Vector<GC::Ref<FontLoader>>;
     HashMap<OwnFontFaceKey, FontLoaderList> m_loaded_fonts;

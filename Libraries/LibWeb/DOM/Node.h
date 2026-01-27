@@ -508,9 +508,9 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
     virtual void finalize() override;
 
-    GC::Ptr<Document> m_document;
-    GC::Ptr<Layout::Node> m_layout_node;
-    GC::Ptr<Painting::Paintable> m_paintable;
+    GC::MemberPtr<Document> m_document;
+    GC::MemberPtr<Layout::Node> m_layout_node;
+    GC::MemberPtr<Painting::Paintable> m_paintable;
     NodeType m_type { NodeType::INVALID };
     bool m_needs_layout_tree_update { false };
     bool m_child_needs_layout_tree_update { false };
@@ -540,7 +540,7 @@ private:
 
     static Optional<StringView> first_valid_id(StringView, Document const&);
 
-    GC::Ptr<NodeList> m_child_nodes;
+    GC::MemberPtr<NodeList> m_child_nodes;
 };
 
 }

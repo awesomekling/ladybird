@@ -9,6 +9,7 @@
 
 #include <AK/HashMap.h>
 #include <AK/String.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Page/Page.h>
@@ -76,7 +77,7 @@ private:
     {
     }
 
-    GC::Ref<Page> m_page;
+    GC::MemberRef<Page> m_page;
     StorageKey m_storage_key;
 };
 

@@ -25,7 +25,7 @@ protected:
 private:
     EXTColorBufferFloat(JS::Realm&, GC::Ref<WebGL2RenderingContext>);
 
-    GC::Ref<WebGL2RenderingContext> m_context;
+    GC::MemberRef<WebGL2RenderingContext> m_context;
 };
 
 }

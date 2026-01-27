@@ -31,7 +31,7 @@ public:
 
     bool is_disabled() const;
 
-    GC::Ptr<DOM::HTMLCollection> const& elements();
+    GC::Ptr<DOM::HTMLCollection> elements();
 
     // ^FormAssociatedElement
     // https://html.spec.whatwg.org/multipage/forms.html#category-listed
@@ -54,7 +54,7 @@ private:
 
     virtual bool is_html_fieldset_element() const override { return true; }
 
-    GC::Ptr<DOM::HTMLCollection> m_elements;
+    GC::MemberPtr<DOM::HTMLCollection> m_elements;
 };
 
 }

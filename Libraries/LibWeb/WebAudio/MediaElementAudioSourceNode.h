@@ -37,7 +37,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<HTML::HTMLMediaElement> m_media_element;
+    GC::MemberRef<HTML::HTMLMediaElement> m_media_element;
 };
 
 }

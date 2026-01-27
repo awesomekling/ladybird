@@ -79,7 +79,7 @@ private:
     void visit_edges(Cell::Visitor&) override;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-document
-    GC::Ptr<DOM::Document> m_document;
+    GC::MemberPtr<DOM::Document> m_document;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-history-policy-container
     Variant<GC::Ref<PolicyContainer>, Client> m_history_policy_container { Client::Tag };

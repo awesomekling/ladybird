@@ -62,13 +62,13 @@ private:
     HighResolutionTime::DOMHighResTimeStamp m_time { 0.0 };
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserverentry-rootbounds
-    GC::Ptr<Geometry::DOMRectReadOnly> m_root_bounds;
+    GC::MemberPtr<Geometry::DOMRectReadOnly> m_root_bounds;
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserverentry-boundingclientrect
-    GC::Ref<Geometry::DOMRectReadOnly> m_bounding_client_rect;
+    GC::MemberRef<Geometry::DOMRectReadOnly> m_bounding_client_rect;
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserverentry-intersectionrect
-    GC::Ref<Geometry::DOMRectReadOnly> m_intersection_rect;
+    GC::MemberRef<Geometry::DOMRectReadOnly> m_intersection_rect;
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserverentry-isintersecting
     bool m_is_intersecting { false };
@@ -77,7 +77,7 @@ private:
     double m_intersection_ratio { 0.0 };
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserverentry-target
-    GC::Ref<DOM::Element> m_target;
+    GC::MemberRef<DOM::Element> m_target;
 };
 
 }

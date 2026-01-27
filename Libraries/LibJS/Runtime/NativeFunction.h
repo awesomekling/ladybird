@@ -61,7 +61,7 @@ private:
     Utf16FlyString m_name;
     Optional<Utf16FlyString> m_initial_name; // [[InitialName]]
     AK::Function<ThrowCompletionOr<Value>(VM&)> m_native_function;
-    GC::Ref<Realm> m_realm;
+    GC::MemberRef<Realm> m_realm;
 };
 
 template<>

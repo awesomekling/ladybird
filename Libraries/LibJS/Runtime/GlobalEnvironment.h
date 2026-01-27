@@ -44,9 +44,9 @@ private:
     virtual bool is_global_environment() const override { return true; }
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ptr<ObjectEnvironment> m_object_record;           // [[ObjectRecord]]
-    GC::Ptr<Object> m_global_this_value;                  // [[GlobalThisValue]]
-    GC::Ptr<DeclarativeEnvironment> m_declarative_record; // [[DeclarativeRecord]]
+    GC::MemberPtr<ObjectEnvironment> m_object_record;           // [[ObjectRecord]]
+    GC::MemberPtr<Object> m_global_this_value;                  // [[GlobalThisValue]]
+    GC::MemberPtr<DeclarativeEnvironment> m_declarative_record; // [[DeclarativeRecord]]
 };
 
 template<>

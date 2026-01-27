@@ -44,10 +44,10 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<CSSNumericValue> m_x;
-    GC::Ref<CSSNumericValue> m_y;
-    GC::Ref<CSSNumericValue> m_z;
-    GC::Ref<CSSNumericValue> m_angle;
+    GC::MemberRef<CSSNumericValue> m_x;
+    GC::MemberRef<CSSNumericValue> m_y;
+    GC::MemberRef<CSSNumericValue> m_z;
+    GC::MemberRef<CSSNumericValue> m_angle;
 };
 
 }

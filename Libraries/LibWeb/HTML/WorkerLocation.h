@@ -35,7 +35,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<WorkerGlobalScope> m_global_scope;
+    GC::MemberRef<WorkerGlobalScope> m_global_scope;
 };
 
 }

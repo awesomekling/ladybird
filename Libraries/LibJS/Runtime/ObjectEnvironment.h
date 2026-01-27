@@ -47,7 +47,7 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Object> m_binding_object;
+    GC::MemberRef<Object> m_binding_object;
     bool m_with_environment { false };
 };
 

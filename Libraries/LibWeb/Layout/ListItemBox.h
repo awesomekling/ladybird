@@ -30,7 +30,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<ListItemMarkerBox> m_marker;
+    GC::MemberPtr<ListItemMarkerBox> m_marker;
 };
 
 template<>

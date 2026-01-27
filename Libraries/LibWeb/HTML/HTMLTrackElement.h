@@ -42,14 +42,14 @@ private:
     virtual void attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_) override;
     virtual void inserted() override;
 
-    GC::Ptr<TextTrack> m_track;
-    GC::Ptr<TextTrackObserver> m_track_observer;
+    GC::MemberPtr<TextTrack> m_track;
+    GC::MemberPtr<TextTrackObserver> m_track_observer;
 
     // https://html.spec.whatwg.org/multipage/media.html#track-url
     String m_track_url {};
 
-    GC::Ptr<Fetch::Infrastructure::FetchAlgorithms> m_fetch_algorithms;
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<Fetch::Infrastructure::FetchAlgorithms> m_fetch_algorithms;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
 
     bool m_loading { false };
     bool m_awaiting_track_url_change { false };

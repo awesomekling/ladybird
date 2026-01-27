@@ -67,8 +67,8 @@ private:
 
     Optional<URL::URL> m_href;
 
-    GC::Ptr<DOM::DocumentObserver> m_document_observer;
-    GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<DOM::DocumentObserver> m_document_observer;
+    GC::MemberPtr<HTML::SharedResourceRequest> m_resource_request;
     Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
 };
 

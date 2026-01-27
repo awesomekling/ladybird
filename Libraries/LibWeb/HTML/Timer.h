@@ -11,6 +11,7 @@
 #include <AK/WeakPtr.h>
 #include <LibCore/Forward.h>
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
@@ -41,7 +42,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     RefPtr<Core::Timer> m_timer;
-    GC::Ref<JS::Object> m_window_or_worker_global_scope;
+    GC::MemberRef<JS::Object> m_window_or_worker_global_scope;
     i32 m_id { 0 };
 };
 

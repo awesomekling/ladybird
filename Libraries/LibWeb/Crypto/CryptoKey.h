@@ -10,6 +10,7 @@
 #include <LibCrypto/PK/MLDSA.h>
 #include <LibCrypto/PK/MLKEM.h>
 #include <LibCrypto/PK/RSA.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/CryptoKeyPrototype.h>
@@ -62,8 +63,8 @@ private:
 
     Bindings::KeyType m_type;
     bool m_extractable { false };
-    GC::Ref<Object> m_algorithm;
-    GC::Ref<Object> m_usages;
+    GC::MemberRef<Object> m_algorithm;
+    GC::MemberRef<Object> m_usages;
 
     Vector<Bindings::KeyUsage> m_key_usages;
     InternalKeyData m_key_data; // [[handle]]
@@ -90,8 +91,8 @@ private:
     JS_DECLARE_NATIVE_FUNCTION(public_key_getter);
     JS_DECLARE_NATIVE_FUNCTION(private_key_getter);
 
-    GC::Ref<CryptoKey> m_public_key;
-    GC::Ref<CryptoKey> m_private_key;
+    GC::MemberRef<CryptoKey> m_public_key;
+    GC::MemberRef<CryptoKey> m_private_key;
 };
 
 }

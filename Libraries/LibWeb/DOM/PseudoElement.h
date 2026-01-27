@@ -8,6 +8,7 @@
 
 #include <AK/OwnPtr.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/StyleProperty.h>
@@ -45,9 +46,9 @@ class WEB_API PseudoElement : public JS::Cell {
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
-    GC::Ptr<Layout::NodeWithStyle> m_layout_node;
-    GC::Ptr<CSS::CascadedProperties> m_cascaded_properties;
-    GC::Ptr<CSS::ComputedProperties> m_computed_properties;
+    GC::MemberPtr<Layout::NodeWithStyle> m_layout_node;
+    GC::MemberPtr<CSS::CascadedProperties> m_cascaded_properties;
+    GC::MemberPtr<CSS::ComputedProperties> m_computed_properties;
     OrderedHashMap<FlyString, CSS::StyleProperty> m_custom_properties;
     OwnPtr<CSS::CountersSet> m_counters_set;
     CSSPixelPoint m_scroll_offset {};

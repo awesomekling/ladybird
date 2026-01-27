@@ -784,14 +784,4 @@ void Cell::Visitor::visit_possible_values(ReadonlyBytes bytes)
     VERIFY_NOT_REACHED();
 }
 
-void write_barrier_for_member(void const* member_address)
-{
-    auto* block_base = HeapBlockBase::from_cell(reinterpret_cast<Cell const*>(member_address));
-    auto* heap_block = static_cast<HeapBlock*>(block_base);
-    if (auto* owning_cell = heap_block->cell_from_possible_pointer(bit_cast<FlatPtr>(member_address))) {
-        if (owning_cell->cell_state() == Cell::CellState::OldBlack)
-            owning_cell->set_cell_state(Cell::CellState::OldGray);
-    }
-}
-
 }

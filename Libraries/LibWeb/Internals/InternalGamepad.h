@@ -45,7 +45,7 @@ private:
     SDL_Joystick* m_sdl_joystick;
     Vector<GC::Ref<JS::Object>> m_received_rumble_effects;
     Vector<GC::Ref<JS::Object>> m_received_rumble_trigger_effects;
-    GC::Ref<Internals> m_internals;
+    GC::MemberRef<Internals> m_internals;
 };
 
 }

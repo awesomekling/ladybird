@@ -47,7 +47,7 @@ private:
     virtual void dump(StringBuilder&, int indent_levels) const override;
 
     CSS::Percentage m_key;
-    GC::Ref<CSSStyleProperties> m_declarations;
+    GC::MemberRef<CSSStyleProperties> m_declarations;
 };
 
 template<>

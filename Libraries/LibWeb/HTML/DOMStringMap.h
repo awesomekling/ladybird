@@ -47,7 +47,7 @@ private:
     Vector<NameValuePair> get_name_value_pairs() const;
 
     // https://html.spec.whatwg.org/multipage/dom.html#concept-domstringmap-element
-    GC::Ref<DOM::Element> m_associated_element;
+    GC::MemberRef<DOM::Element> m_associated_element;
 };
 
 }

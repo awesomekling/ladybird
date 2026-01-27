@@ -51,13 +51,13 @@ private:
 
     virtual void attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& new_value, Optional<FlyString> const& namespace_) override;
 
-    GC::Ptr<SVGAnimatedString> m_in1;
-    GC::Ptr<SVGAnimatedString> m_in2;
+    GC::MemberPtr<SVGAnimatedString> m_in1;
+    GC::MemberPtr<SVGAnimatedString> m_in2;
 
-    GC::Ptr<SVGAnimatedNumber> m_k1;
-    GC::Ptr<SVGAnimatedNumber> m_k2;
-    GC::Ptr<SVGAnimatedNumber> m_k3;
-    GC::Ptr<SVGAnimatedNumber> m_k4;
+    GC::MemberPtr<SVGAnimatedNumber> m_k1;
+    GC::MemberPtr<SVGAnimatedNumber> m_k2;
+    GC::MemberPtr<SVGAnimatedNumber> m_k3;
+    GC::MemberPtr<SVGAnimatedNumber> m_k4;
 
     Optional<CompositingOperator> m_operator;
 };

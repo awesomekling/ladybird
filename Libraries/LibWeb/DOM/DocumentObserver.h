@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Export.h>
@@ -50,13 +51,13 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
     virtual void finalize() override;
 
-    GC::Ref<Document> m_document;
-    GC::Ptr<GC::Function<void()>> m_document_became_active;
-    GC::Ptr<GC::Function<void()>> m_document_became_inactive;
-    GC::Ptr<GC::Function<void()>> m_document_completely_loaded;
-    GC::Ptr<GC::Function<void(HTML::DocumentReadyState)>> m_document_readiness_observer;
-    GC::Ptr<GC::Function<void(HTML::VisibilityState)>> m_document_visibility_state_observer;
-    GC::Ptr<GC::Function<void(bool)>> m_document_page_showing_observer;
+    GC::MemberRef<Document> m_document;
+    GC::MemberPtr<GC::Function<void()>> m_document_became_active;
+    GC::MemberPtr<GC::Function<void()>> m_document_became_inactive;
+    GC::MemberPtr<GC::Function<void()>> m_document_completely_loaded;
+    GC::MemberPtr<GC::Function<void(HTML::DocumentReadyState)>> m_document_readiness_observer;
+    GC::MemberPtr<GC::Function<void(HTML::VisibilityState)>> m_document_visibility_state_observer;
+    GC::MemberPtr<GC::Function<void(bool)>> m_document_page_showing_observer;
 };
 
 }

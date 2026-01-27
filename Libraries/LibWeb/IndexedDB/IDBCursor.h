@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibWeb/Bindings/IDBCursorPrototype.h>
 #include <LibWeb/Bindings/IDBCursorWithValuePrototype.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -80,10 +81,10 @@ protected:
 
 private:
     // A cursor has a position within its range.
-    GC::Ptr<Key> m_position;
+    GC::MemberPtr<Key> m_position;
 
     // When iterating indexes the cursor also has an object store position
-    GC::Ptr<Key> m_object_store_position;
+    GC::MemberPtr<Key> m_object_store_position;
 
     // A cursor has a direction that determines whether it moves in monotonically increasing or decreasing order of the record keys when iterated, and if it skips duplicated values when iterating indexes.
     Bindings::IDBCursorDirection m_direction;
@@ -92,16 +93,16 @@ private:
     bool m_got_value { false };
 
     // A cursor has a key which represent the key the last iterated record.
-    GC::Ptr<Key> m_key;
+    GC::MemberPtr<Key> m_key;
 
     // A cursor has a source handle, which is the index handle or the object store handle that opened the cursor.
     CursorSourceHandle m_source_handle;
 
     // A cursor has a range of records in either an index or an object store.
-    GC::Ref<IDBKeyRange> m_range;
+    GC::MemberRef<IDBKeyRange> m_range;
 
     // A cursor has a request, which is the request used to open the cursor.
-    GC::Ptr<IDBRequest> m_request;
+    GC::MemberPtr<IDBRequest> m_request;
 
     // A cursor also has a key only flag, that indicates whether the cursor’s value is exposed via the API.
     bool m_key_only { false };

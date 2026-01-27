@@ -85,7 +85,7 @@ public:
     [[nodiscard]] i32 function_length() const { return shared_data().m_function_length; }
 
     Object* home_object() const { return m_home_object; }
-    void set_home_object(Object* home_object) { m_home_object = home_object; }
+    void set_home_object(Object* home_object) { m_home_object.set(*this, home_object); }
 
     [[nodiscard]] Utf16View source_text() const { return shared_data().m_source_text; }
     void set_source_text(Utf16View source_text) { const_cast<SharedFunctionInstanceData&>(shared_data()).m_source_text = move(source_text); }
@@ -140,15 +140,15 @@ private:
     void prepare_for_ordinary_call(VM&, ExecutionContext& callee_context, Object* new_target);
     void ordinary_call_bind_this(VM&, ExecutionContext&, Value this_argument);
 
-    GC::Ref<SharedFunctionInstanceData> m_shared_data;
+    GC::MemberRef<SharedFunctionInstanceData> m_shared_data;
 
-    GC::Ptr<PrimitiveString> m_name_string;
+    GC::MemberPtr<PrimitiveString> m_name_string;
 
     // Internal Slots of ECMAScript Function Objects, https://tc39.es/ecma262/#table-internal-slots-of-ecmascript-function-objects
-    GC::Ptr<Environment> m_environment;                // [[Environment]]
-    GC::Ptr<PrivateEnvironment> m_private_environment; // [[PrivateEnvironment]]
-    ScriptOrModule m_script_or_module;                 // [[ScriptOrModule]]
-    GC::Ptr<Object> m_home_object;                     // [[HomeObject]]
+    GC::MemberPtr<Environment> m_environment;                // [[Environment]]
+    GC::MemberPtr<PrivateEnvironment> m_private_environment; // [[PrivateEnvironment]]
+    ScriptOrModule m_script_or_module;                       // [[ScriptOrModule]]
+    GC::MemberPtr<Object> m_home_object;                     // [[HomeObject]]
     struct ClassData {
         Vector<ClassFieldDefinition> fields;    // [[Fields]]
         Vector<PrivateElement> private_methods; // [[PrivateMethods]]

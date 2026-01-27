@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibGC/Weak.h>
 #include <LibGfx/Cursor.h>
@@ -262,11 +263,11 @@ private:
 
     void on_pending_dialog_closed();
 
-    GC::Ref<PageClient> m_client;
+    GC::MemberRef<PageClient> m_client;
 
     GC::Weak<HTML::Navigable> m_focused_navigable;
 
-    GC::Ptr<HTML::TraversableNavigable> m_top_level_traversable;
+    GC::MemberPtr<HTML::TraversableNavigable> m_top_level_traversable;
 
     bool m_is_scripting_enabled { true };
 
@@ -283,14 +284,14 @@ private:
 
     DevicePixelPoint m_window_position {};
     DevicePixelSize m_window_size {};
-    GC::Ptr<GC::Function<void(DevicePixelRect)>> m_window_rect_observer;
+    GC::MemberPtr<GC::Function<void(DevicePixelRect)>> m_window_rect_observer;
 
     PendingDialog m_pending_dialog { PendingDialog::None };
     Optional<String> m_pending_dialog_text;
     Optional<Empty> m_pending_alert_response;
     Optional<bool> m_pending_confirm_response;
     Optional<Optional<String>> m_pending_prompt_response;
-    GC::Ptr<GC::Function<void()>> m_on_pending_dialog_closed;
+    GC::MemberPtr<GC::Function<void()>> m_on_pending_dialog_closed;
 
     PendingNonBlockingDialog m_pending_non_blocking_dialog { PendingNonBlockingDialog::None };
     GC::Weak<HTML::HTMLElement> m_pending_non_blocking_dialog_target;

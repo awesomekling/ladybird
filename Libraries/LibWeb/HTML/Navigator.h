@@ -87,35 +87,35 @@ private:
     // ^StorageAPI::NavigatorStorage
     virtual Bindings::PlatformObject const& this_navigator_storage_object() const override { return *this; }
 
-    GC::Ptr<PluginArray> m_plugin_array;
-    GC::Ptr<MimeTypeArray> m_mime_type_array;
+    GC::MemberPtr<PluginArray> m_plugin_array;
+    GC::MemberPtr<MimeTypeArray> m_mime_type_array;
 
     // https://w3c.github.io/clipboard-apis/#dom-navigator-clipboard
-    GC::Ptr<Clipboard::Clipboard> m_clipboard;
+    GC::MemberPtr<Clipboard::Clipboard> m_clipboard;
 
     // https://w3c.github.io/geolocation/#navigator_interface
-    GC::Ptr<Geolocation::Geolocation> m_geolocation;
+    GC::MemberPtr<Geolocation::Geolocation> m_geolocation;
 
     // https://wicg.github.io/serial/#extensions-to-the-navigator-interface
-    GC::Ptr<Serial::Serial> m_serial;
+    GC::MemberPtr<Serial::Serial> m_serial;
 
     // https://html.spec.whatwg.org/multipage/interaction.html#dom-navigator-useractivation
-    GC::Ptr<UserActivation> m_user_activation;
+    GC::MemberPtr<UserActivation> m_user_activation;
 
     // https://w3c.github.io/ServiceWorker/#navigator-serviceworker
-    GC::Ptr<ServiceWorker::ServiceWorkerContainer> m_service_worker_container;
+    GC::MemberPtr<ServiceWorker::ServiceWorkerContainer> m_service_worker_container;
 
     // https://w3c.github.io/media-capabilities/#dom-navigator-mediacapabilities
-    GC::Ptr<MediaCapabilitiesAPI::MediaCapabilities> m_media_capabilities;
+    GC::MemberPtr<MediaCapabilitiesAPI::MediaCapabilities> m_media_capabilities;
 
     // https://w3c.github.io/webappsec-credential-management/#framework-credential-management
-    GC::Ptr<CredentialManagement::CredentialsContainer> m_credentials;
+    GC::MemberPtr<CredentialManagement::CredentialsContainer> m_credentials;
 
     // https://w3c.github.io/battery/
-    GC::Ptr<WebIDL::Promise> m_battery_promise;
+    GC::MemberPtr<WebIDL::Promise> m_battery_promise;
 
     // https://immersive-web.github.io/webxr/#dom-navigator-xr
-    GC::Ptr<WebXR::XRSystem> m_xr;
+    GC::MemberPtr<WebXR::XRSystem> m_xr;
 };
 
 }

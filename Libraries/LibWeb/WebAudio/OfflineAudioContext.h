@@ -29,7 +29,9 @@ class OfflineAudioContext final : public BaseAudioContext {
 public:
     static WebIDL::ExceptionOr<GC::Ref<OfflineAudioContext>> construct_impl(JS::Realm&, OfflineAudioContextOptions const&);
     static WebIDL::ExceptionOr<GC::Ref<OfflineAudioContext>> construct_impl(JS::Realm&,
-        WebIDL::UnsignedLong number_of_channels, WebIDL::UnsignedLong length, float sample_rate);
+        WebIDL::UnsignedLong number_of_channels,
+        WebIDL::UnsignedLong length,
+        float sample_rate);
 
     virtual ~OfflineAudioContext() override;
 
@@ -52,7 +54,7 @@ private:
     WebIDL::UnsignedLong m_number_of_channels {};
     bool m_rendering_started { false };
 
-    GC::Ptr<AudioBuffer> m_rendered_buffer;
+    GC::MemberPtr<AudioBuffer> m_rendered_buffer;
 
     void begin_offline_rendering(GC::Ref<WebIDL::Promise> promise);
 };

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/SinglyLinkedList.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibGC/WeakContainer.h>
 #include <LibJS/Export.h>
@@ -44,8 +45,8 @@ private:
 
     virtual void visit_edges(Visitor& visitor) override;
 
-    GC::Ref<Realm> m_realm;
-    GC::Ref<JobCallback> m_cleanup_callback;
+    GC::MemberRef<Realm> m_realm;
+    GC::MemberRef<JobCallback> m_cleanup_callback;
 
     struct FinalizationRecord {
         GC::Ptr<Cell> target;

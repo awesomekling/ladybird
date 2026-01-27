@@ -52,8 +52,8 @@ private:
     using SetAnIndexedValueCallbackHeapFunction = GC::Function<SetAnIndexedValueCallbackFunction::FunctionType>;
     using DeleteAnIndexedValueCallbackHeapFunction = GC::Function<DeleteAnIndexedValueCallbackFunction::FunctionType>;
 
-    GC::Ptr<SetAnIndexedValueCallbackHeapFunction> m_on_set_an_indexed_value;
-    GC::Ptr<DeleteAnIndexedValueCallbackHeapFunction> m_on_delete_an_indexed_value;
+    GC::MemberPtr<SetAnIndexedValueCallbackHeapFunction> m_on_set_an_indexed_value;
+    GC::MemberPtr<DeleteAnIndexedValueCallbackHeapFunction> m_on_delete_an_indexed_value;
 };
 
 }

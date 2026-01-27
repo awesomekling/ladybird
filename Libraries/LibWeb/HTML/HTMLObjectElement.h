@@ -91,9 +91,9 @@ private:
 
     Representation m_representation { Representation::Unknown };
 
-    GC::Ptr<SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<SharedResourceRequest> m_resource_request;
 
-    GC::Ptr<DOM::DocumentObserver> m_document_observer;
+    GC::MemberPtr<DOM::DocumentObserver> m_document_observer;
 
     Vector<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer_for_object_representation_task;
     Vector<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer_for_resource_load;

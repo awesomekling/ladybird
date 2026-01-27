@@ -56,10 +56,10 @@ protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<Node> m_start_container;
+    GC::MemberRef<Node> m_start_container;
     WebIDL::UnsignedLong m_start_offset;
 
-    GC::Ref<Node> m_end_container;
+    GC::MemberRef<Node> m_end_container;
     WebIDL::UnsignedLong m_end_offset;
 };
 

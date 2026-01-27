@@ -7,6 +7,7 @@
 #pragma once
 
 #include <LibGC/Function.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Export.h>
@@ -34,9 +35,9 @@ private:
     virtual void finalize() override;
 
     IntrusiveListNode<NavigationObserver> m_list_node;
-    GC::Ref<Navigable> m_navigable;
-    GC::Ptr<GC::Function<void()>> m_navigation_complete;
-    GC::Ptr<GC::Function<void()>> m_ongoing_navigation_changed;
+    GC::MemberRef<Navigable> m_navigable;
+    GC::MemberPtr<GC::Function<void()>> m_navigation_complete;
+    GC::MemberPtr<GC::Function<void()>> m_ongoing_navigation_changed;
 
 public:
     using NavigationObserversList = IntrusiveList<&NavigationObserver::m_list_node>;

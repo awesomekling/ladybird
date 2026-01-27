@@ -68,19 +68,19 @@ private:
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationtransition-from
     // Each NavigationTransition has an associated from entry, which is a NavigationHistoryEntry.
-    GC::Ref<NavigationHistoryEntry> m_from_entry;
+    GC::MemberRef<NavigationHistoryEntry> m_from_entry;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationtransition-destination
     // Each NavigationTransition has an associated destination, which is a NavigationDestination.
-    GC::Ref<NavigationDestination> m_destination;
+    GC::MemberRef<NavigationDestination> m_destination;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationtransition-committedc
     // Each NavigationTransition has an associated committed promise, which is a promise.
-    GC::Ref<WebIDL::Promise> m_committed_promise;
+    GC::MemberRef<WebIDL::Promise> m_committed_promise;
 
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#concept-navigationtransition-finished
     // Each NavigationTransition has an associated finished promise, which is a promise.
-    GC::Ref<WebIDL::Promise> m_finished_promise;
+    GC::MemberRef<WebIDL::Promise> m_finished_promise;
 };
 
 }

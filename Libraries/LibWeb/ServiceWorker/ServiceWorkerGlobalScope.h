@@ -41,7 +41,7 @@ protected:
 private:
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ptr<CookieStore::CookieStore> m_cookie_store;
+    GC::MemberPtr<CookieStore::CookieStore> m_cookie_store;
 };
 
 }

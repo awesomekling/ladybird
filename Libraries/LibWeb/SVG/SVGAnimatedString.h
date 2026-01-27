@@ -31,7 +31,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<SVGElement> m_element;
+    GC::MemberRef<SVGElement> m_element;
     DOM::QualifiedName m_reflected_attribute;
     Optional<DOM::QualifiedName> m_deprecated_reflected_attribute;
     Optional<FlyString> m_initial_value;

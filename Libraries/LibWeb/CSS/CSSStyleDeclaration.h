@@ -82,7 +82,7 @@ private:
     virtual Optional<JS::Value> item_value(size_t index) const override;
 
     // https://drafts.csswg.org/cssom/#cssstyledeclaration-parent-css-rule
-    GC::Ptr<CSSRule> m_parent_rule { nullptr };
+    GC::MemberPtr<CSSRule> m_parent_rule { nullptr };
 
     // https://drafts.csswg.org/cssom/#cssstyledeclaration-owner-node
     Optional<DOM::AbstractElement> m_owner_node {};

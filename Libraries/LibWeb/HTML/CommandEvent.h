@@ -39,7 +39,7 @@ private:
 
     void initialize(JS::Realm&) override;
 
-    GC::Ptr<DOM::Element> m_source;
+    GC::MemberPtr<DOM::Element> m_source;
     String m_command;
 };
 

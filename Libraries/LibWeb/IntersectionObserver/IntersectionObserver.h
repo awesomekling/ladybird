@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserverEntry.h>
@@ -81,10 +82,10 @@ private:
     static Optional<Vector<CSS::LengthPercentage>> parse_a_margin(JS::Realm&, String);
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserver-callback-slot
-    GC::Ptr<WebIDL::CallbackType> m_callback;
+    GC::MemberPtr<WebIDL::CallbackType> m_callback;
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserver-root
-    GC::Ptr<DOM::Node> m_root;
+    GC::MemberPtr<DOM::Node> m_root;
 
     // https://www.w3.org/TR/intersection-observer/#dom-intersectionobserver-rootmargin
     Vector<CSS::LengthPercentage> m_root_margin;

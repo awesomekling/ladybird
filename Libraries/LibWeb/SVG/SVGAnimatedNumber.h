@@ -27,9 +27,7 @@ public:
         Second,
     };
 
-    [[nodiscard]] static GC::Ref<SVGAnimatedNumber> create(JS::Realm&, GC::Ref<SVGElement>,
-        DOM::QualifiedName reflected_attribute, float initial_value, SupportsSecondValue = SupportsSecondValue::No,
-        ValueRepresented = ValueRepresented::First);
+    [[nodiscard]] static GC::Ref<SVGAnimatedNumber> create(JS::Realm&, GC::Ref<SVGElement>, DOM::QualifiedName reflected_attribute, float initial_value, SupportsSecondValue = SupportsSecondValue::No, ValueRepresented = ValueRepresented::First);
     virtual ~SVGAnimatedNumber() override;
 
     float base_val() const;
@@ -46,7 +44,7 @@ private:
     float parse_value_or_initial(StringView) const;
     float get_base_or_anim_value() const;
 
-    GC::Ref<SVGElement> m_element;
+    GC::MemberRef<SVGElement> m_element;
     DOM::QualifiedName m_reflected_attribute;
     float m_initial_value;
     SupportsSecondValue m_supports_second_value;

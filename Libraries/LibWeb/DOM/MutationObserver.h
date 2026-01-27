@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Root.h>
 #include <LibWeb/DOM/MutationRecord.h>
 #include <LibWeb/WebIDL/CallbackType.h>
@@ -55,7 +56,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // https://dom.spec.whatwg.org/#concept-mo-callback
-    GC::Ptr<WebIDL::CallbackType> m_callback;
+    GC::MemberPtr<WebIDL::CallbackType> m_callback;
 
     // https://dom.spec.whatwg.org/#mutationobserver-node-list
     // Registered observers in a node’s registered observer list have a weak reference to the node.
@@ -85,7 +86,7 @@ protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
 private:
-    GC::Ref<MutationObserver> m_observer;
+    GC::MemberRef<MutationObserver> m_observer;
     MutationObserverInit m_options;
 };
 
@@ -105,7 +106,7 @@ private:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<RegisteredObserver> m_source;
+    GC::MemberRef<RegisteredObserver> m_source;
 };
 
 }

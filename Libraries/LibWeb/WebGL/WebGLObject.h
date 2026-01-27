@@ -34,7 +34,7 @@ protected:
 
     bool invalidated() const { return m_invalidated; }
 
-    GC::Ref<WebGLRenderingContextBase> m_context;
+    GC::MemberRef<WebGLRenderingContextBase> m_context;
 
 private:
     GLuint m_handle { 0 };

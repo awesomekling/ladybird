@@ -28,7 +28,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<FormData const> m_form_data;
+    GC::MemberRef<FormData const> m_form_data;
     JS::Object::PropertyKind m_iterator_kind;
     size_t m_index { 0 };
 };

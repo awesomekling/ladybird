@@ -158,7 +158,7 @@ public:
     Vector<Iterable> m_iterables;
     size_t m_index { 0 };
 
-    GC::Ptr<IteratorRecord> m_inner_iterator;
+    GC::MemberPtr<IteratorRecord> m_inner_iterator;
 };
 
 GC_DEFINE_ALLOCATOR(ConcatIterator);

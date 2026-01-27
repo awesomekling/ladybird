@@ -35,7 +35,7 @@ public:
 
 private:
     CSSMathSum(JS::Realm&, NumericType, GC::Ref<CSSNumericArray>);
-    GC::Ref<CSSNumericArray> m_values;
+    GC::MemberRef<CSSNumericArray> m_values;
 };
 
 }

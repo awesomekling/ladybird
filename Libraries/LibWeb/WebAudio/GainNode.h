@@ -40,7 +40,7 @@ protected:
 
 private:
     // https://webaudio.github.io/web-audio-api/#dom-gainnode-gain
-    GC::Ref<AudioParam> m_gain;
+    GC::MemberRef<AudioParam> m_gain;
 };
 
 }

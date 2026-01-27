@@ -36,7 +36,7 @@ private:
     // https://html.spec.whatwg.org/multipage/media.html#dom-videotrack-selected
     bool m_selected { false };
 
-    GC::Ptr<VideoTrackList> m_video_track_list;
+    GC::MemberPtr<VideoTrackList> m_video_track_list;
 };
 
 }

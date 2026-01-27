@@ -59,9 +59,9 @@ protected:
     virtual ThrowCompletionOr<Value> resolve_element() = 0;
 
     size_t m_index { 0 };
-    GC::Ref<PromiseValueList> m_values;
-    GC::Ref<PromiseCapability const> m_capability;
-    GC::Ref<RemainingElements> m_remaining_elements;
+    GC::MemberRef<PromiseValueList> m_values;
+    GC::MemberRef<PromiseCapability const> m_capability;
+    GC::MemberRef<RemainingElements> m_remaining_elements;
 
 private:
     virtual void visit_edges(Visitor&) override;

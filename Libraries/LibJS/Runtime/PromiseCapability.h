@@ -34,9 +34,9 @@ private:
 
     virtual void visit_edges(Visitor&) override;
 
-    GC::Ref<Object> m_promise;
-    GC::Ref<FunctionObject> m_resolve;
-    GC::Ref<FunctionObject> m_reject;
+    GC::MemberRef<Object> m_promise;
+    GC::MemberRef<FunctionObject> m_resolve;
+    GC::MemberRef<FunctionObject> m_reject;
 };
 
 // 27.2.1.1.1 IfAbruptRejectPromise ( value, capability ), https://tc39.es/ecma262/#sec-ifabruptrejectpromise

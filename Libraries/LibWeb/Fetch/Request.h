@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Forward.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -110,15 +111,15 @@ private:
 
     // https://fetch.spec.whatwg.org/#concept-request-request
     // A Request object has an associated request (a request).
-    GC::Ref<Infrastructure::Request> m_request;
+    GC::MemberRef<Infrastructure::Request> m_request;
 
     // https://fetch.spec.whatwg.org/#request-headers
     // A Request object also has an associated headers (null or a Headers object), initially null.
-    GC::Ptr<Headers> m_headers;
+    GC::MemberPtr<Headers> m_headers;
 
     // https://fetch.spec.whatwg.org/#request-signal
     // A Request object has an associated signal (null or an AbortSignal object), initially null.
-    GC::Ptr<DOM::AbortSignal> m_signal;
+    GC::MemberPtr<DOM::AbortSignal> m_signal;
 };
 
 }

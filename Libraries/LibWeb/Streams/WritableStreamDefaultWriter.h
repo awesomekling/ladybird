@@ -52,15 +52,15 @@ private:
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultwriter-closedpromise
     // A promise returned by the writer’s closed getter
-    GC::Ptr<WebIDL::Promise> m_closed_promise;
+    GC::MemberPtr<WebIDL::Promise> m_closed_promise;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultwriter-readypromise
     // A promise returned by the writer’s ready getter
-    GC::Ptr<WebIDL::Promise> m_ready_promise;
+    GC::MemberPtr<WebIDL::Promise> m_ready_promise;
 
     // https://streams.spec.whatwg.org/#writablestreamdefaultwriter-stream
     // A WritableStream instance that owns this reader
-    GC::Ptr<WritableStream> m_stream;
+    GC::MemberPtr<WritableStream> m_stream;
 };
 
 }

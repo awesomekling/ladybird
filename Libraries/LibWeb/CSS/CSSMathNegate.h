@@ -34,7 +34,7 @@ public:
 
 private:
     CSSMathNegate(JS::Realm&, NumericType, GC::Ref<CSSNumericValue>);
-    GC::Ref<CSSNumericValue> m_value;
+    GC::MemberRef<CSSNumericValue> m_value;
 };
 
 }

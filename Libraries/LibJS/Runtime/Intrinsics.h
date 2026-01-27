@@ -8,6 +8,7 @@
 #pragma once
 
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
@@ -178,78 +179,78 @@ private:
     JS_ENUMERATE_TEMPORAL_OBJECTS
 #undef __JS_ENUMERATE
 
-    GC::Ref<Realm> m_realm;
+    GC::MemberRef<Realm> m_realm;
 
-    GC::Ptr<Shape> m_empty_object_shape;
-    GC::Ptr<Shape> m_new_object_shape;
+    GC::MemberPtr<Shape> m_empty_object_shape;
+    GC::MemberPtr<Shape> m_new_object_shape;
 
-    GC::Ptr<Shape> m_iterator_result_object_shape;
+    GC::MemberPtr<Shape> m_iterator_result_object_shape;
     u32 m_iterator_result_object_value_offset { 0 };
     u32 m_iterator_result_object_done_offset { 0 };
 
-    GC::Ptr<Shape> m_normal_function_prototype_shape;
+    GC::MemberPtr<Shape> m_normal_function_prototype_shape;
     u32 m_normal_function_prototype_constructor_offset { 0 };
 
-    GC::Ptr<Shape> m_normal_function_shape;
+    GC::MemberPtr<Shape> m_normal_function_shape;
     u32 m_normal_function_length_offset { 0 };
     u32 m_normal_function_name_offset { 0 };
 
-    GC::Ptr<Shape> m_native_function_shape;
+    GC::MemberPtr<Shape> m_native_function_shape;
     u32 m_native_function_length_offset { 0 };
     u32 m_native_function_name_offset { 0 };
 
-    GC::Ptr<Shape> m_unmapped_arguments_object_shape;
+    GC::MemberPtr<Shape> m_unmapped_arguments_object_shape;
     u32 m_unmapped_arguments_object_length_offset { 0 };
     u32 m_unmapped_arguments_object_well_known_symbol_iterator_offset { 0 };
     u32 m_unmapped_arguments_object_callee_offset { 0 };
 
-    GC::Ptr<Shape> m_mapped_arguments_object_shape;
+    GC::MemberPtr<Shape> m_mapped_arguments_object_shape;
     u32 m_mapped_arguments_object_length_offset { 0 };
     u32 m_mapped_arguments_object_well_known_symbol_iterator_offset { 0 };
     u32 m_mapped_arguments_object_callee_offset { 0 };
 
-    GC::Ptr<Shape> m_default_array_prototype_shape;
-    GC::Ptr<Shape> m_default_object_prototype_shape;
+    GC::MemberPtr<Shape> m_default_array_prototype_shape;
+    GC::MemberPtr<Shape> m_default_object_prototype_shape;
 
-    GC::Ptr<Shape> m_regexp_builtin_exec_array_shape;
+    GC::MemberPtr<Shape> m_regexp_builtin_exec_array_shape;
     u32 m_regexp_builtin_exec_array_index_offset { 0 };
     u32 m_regexp_builtin_exec_array_input_offset { 0 };
     u32 m_regexp_builtin_exec_array_groups_offset { 0 };
 
-    GC::Ptr<Accessor> m_throw_type_error_accessor;
+    GC::MemberPtr<Accessor> m_throw_type_error_accessor;
 
     // Not included in JS_ENUMERATE_NATIVE_OBJECTS due to missing distinct prototype
-    GC::Ptr<ProxyConstructor> m_proxy_constructor;
+    GC::MemberPtr<ProxyConstructor> m_proxy_constructor;
 
     // Not included in JS_ENUMERATE_NATIVE_OBJECTS due to missing distinct constructor
-    GC::Ptr<Object> m_async_from_sync_iterator_prototype;
-    GC::Ptr<Object> m_async_generator_prototype;
-    GC::Ptr<Object> m_generator_prototype;
-    GC::Ptr<Object> m_wrap_for_valid_iterator_prototype;
+    GC::MemberPtr<Object> m_async_from_sync_iterator_prototype;
+    GC::MemberPtr<Object> m_async_generator_prototype;
+    GC::MemberPtr<Object> m_generator_prototype;
+    GC::MemberPtr<Object> m_wrap_for_valid_iterator_prototype;
 
     // Not included in JS_ENUMERATE_INTL_OBJECTS due to missing distinct constructor
-    GC::Ptr<Object> m_intl_segments_prototype;
+    GC::MemberPtr<Object> m_intl_segments_prototype;
 
     // Global object functions
-    GC::Ptr<FunctionObject> m_eval_function;
-    GC::Ptr<FunctionObject> m_is_finite_function;
-    GC::Ptr<FunctionObject> m_is_nan_function;
-    GC::Ptr<FunctionObject> m_parse_float_function;
-    GC::Ptr<FunctionObject> m_parse_int_function;
-    GC::Ptr<FunctionObject> m_decode_uri_function;
-    GC::Ptr<FunctionObject> m_decode_uri_component_function;
-    GC::Ptr<FunctionObject> m_encode_uri_function;
-    GC::Ptr<FunctionObject> m_encode_uri_component_function;
-    GC::Ptr<FunctionObject> m_escape_function;
-    GC::Ptr<FunctionObject> m_unescape_function;
+    GC::MemberPtr<FunctionObject> m_eval_function;
+    GC::MemberPtr<FunctionObject> m_is_finite_function;
+    GC::MemberPtr<FunctionObject> m_is_nan_function;
+    GC::MemberPtr<FunctionObject> m_parse_float_function;
+    GC::MemberPtr<FunctionObject> m_parse_int_function;
+    GC::MemberPtr<FunctionObject> m_decode_uri_function;
+    GC::MemberPtr<FunctionObject> m_decode_uri_component_function;
+    GC::MemberPtr<FunctionObject> m_encode_uri_function;
+    GC::MemberPtr<FunctionObject> m_encode_uri_component_function;
+    GC::MemberPtr<FunctionObject> m_escape_function;
+    GC::MemberPtr<FunctionObject> m_unescape_function;
 
     // Namespace/constructor object functions
-    GC::Ptr<FunctionObject> m_array_prototype_values_function;
-    GC::Ptr<FunctionObject> m_date_constructor_now_function;
-    GC::Ptr<FunctionObject> m_json_parse_function;
-    GC::Ptr<FunctionObject> m_json_stringify_function;
-    GC::Ptr<FunctionObject> m_object_prototype_to_string_function;
-    GC::Ptr<FunctionObject> m_throw_type_error_function;
+    GC::MemberPtr<FunctionObject> m_array_prototype_values_function;
+    GC::MemberPtr<FunctionObject> m_date_constructor_now_function;
+    GC::MemberPtr<FunctionObject> m_json_parse_function;
+    GC::MemberPtr<FunctionObject> m_json_stringify_function;
+    GC::MemberPtr<FunctionObject> m_object_prototype_to_string_function;
+    GC::MemberPtr<FunctionObject> m_throw_type_error_function;
 
 #define __JS_ENUMERATE(ClassName, snake_name, PrototypeName, ConstructorName, ArrayType) \
     GC::Ptr<ConstructorName> m_##snake_name##_constructor;                               \
@@ -289,7 +290,7 @@ private:
     JS_ENUMERATE_NATIVE_JAVASCRIPT_BACKED_ARRAY_CONSTRUCTOR_FUNCTIONS
 #undef __JS_ENUMERATE
 
-    GC::Ptr<Intl::Collator> m_default_collator;
+    GC::MemberPtr<Intl::Collator> m_default_collator;
 };
 
 void add_restricted_function_properties(FunctionObject&, Realm&);

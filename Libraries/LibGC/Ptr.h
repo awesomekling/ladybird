@@ -9,6 +9,7 @@
 #include <AK/Format.h>
 #include <AK/Traits.h>
 #include <AK/Types.h>
+#include <LibGC/Forward.h>
 
 namespace GC {
 
@@ -40,7 +41,22 @@ public:
     }
 
     template<typename U>
+    Ref(MemberRef<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    template<typename U>
     Ref& operator=(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ref& operator=(MemberRef<U> const& other)
     requires(IsConvertible<U*, T*>)
     {
         m_ptr = static_cast<T*>(other.ptr());
@@ -112,6 +128,20 @@ public:
     {
     }
 
+    template<typename U>
+    Ptr(MemberPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    template<typename U>
+    Ptr(MemberRef<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
     Ptr(nullptr_t)
         : m_ptr(nullptr)
     {
@@ -133,6 +163,22 @@ public:
 
     template<typename U>
     Ptr& operator=(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(MemberPtr<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(MemberRef<U> const& other)
     requires(IsConvertible<U*, T*>)
     {
         m_ptr = static_cast<T*>(other.ptr());

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/NonnullOwnPtr.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Forward.h>
@@ -146,25 +147,25 @@ public:
 protected:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ptr<WebGLBuffer> m_array_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_element_array_buffer_binding;
-    GC::Ptr<WebGLProgram> m_current_program;
-    GC::Ptr<WebGLFramebuffer> m_framebuffer_binding;
-    GC::Ptr<WebGLRenderbuffer> m_renderbuffer_binding;
-    GC::Ptr<WebGLTexture> m_texture_binding_2d;
-    GC::Ptr<WebGLTexture> m_texture_binding_cube_map;
+    GC::MemberPtr<WebGLBuffer> m_array_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_element_array_buffer_binding;
+    GC::MemberPtr<WebGLProgram> m_current_program;
+    GC::MemberPtr<WebGLFramebuffer> m_framebuffer_binding;
+    GC::MemberPtr<WebGLRenderbuffer> m_renderbuffer_binding;
+    GC::MemberPtr<WebGLTexture> m_texture_binding_2d;
+    GC::MemberPtr<WebGLTexture> m_texture_binding_cube_map;
 
     // FIXME: Those are WebGL2 only but those need to be accessible from shared methods
-    GC::Ptr<WebGLBuffer> m_uniform_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_copy_read_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_copy_write_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_transform_feedback_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_pixel_pack_buffer_binding;
-    GC::Ptr<WebGLBuffer> m_pixel_unpack_buffer_binding;
-    GC::Ptr<WebGLTexture> m_texture_binding_2d_array;
-    GC::Ptr<WebGLTexture> m_texture_binding_3d;
-    GC::Ptr<WebGLTransformFeedback> m_transform_feedback_binding;
-    GC::Ptr<WebGLVertexArrayObject> m_current_vertex_array;
+    GC::MemberPtr<WebGLBuffer> m_uniform_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_copy_read_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_copy_write_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_transform_feedback_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_pixel_pack_buffer_binding;
+    GC::MemberPtr<WebGLBuffer> m_pixel_unpack_buffer_binding;
+    GC::MemberPtr<WebGLTexture> m_texture_binding_2d_array;
+    GC::MemberPtr<WebGLTexture> m_texture_binding_3d;
+    GC::MemberPtr<WebGLTransformFeedback> m_transform_feedback_binding;
+    GC::MemberPtr<WebGLVertexArrayObject> m_current_vertex_array;
 
     NonnullOwnPtr<OpenGLContext> m_context;
 };

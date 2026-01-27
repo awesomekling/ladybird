@@ -49,7 +49,7 @@ private:
     HashTable<WebIDL::UnsignedLong> m_watch_ids;
 
     // https://w3c.github.io/geolocation/#dfn-cachedposition
-    GC::Ptr<GeolocationPosition> m_cached_position;
+    GC::MemberPtr<GeolocationPosition> m_cached_position;
 
     Vector<GC::Ref<Platform::Timer>> m_timeout_timers;
 };

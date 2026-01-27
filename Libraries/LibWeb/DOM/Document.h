@@ -1035,22 +1035,22 @@ private:
 
     void build_registered_properties_cache();
 
-    GC::Ref<Page> m_page;
-    GC::Ptr<CSS::StyleComputer> m_style_computer;
-    GC::Ptr<CSS::FontComputer> m_font_computer;
-    GC::Ptr<CSS::StyleSheetList> m_style_sheets;
-    GC::Ptr<Node> m_active_favicon;
-    GC::Ptr<HTML::BrowsingContext> m_browsing_context;
+    GC::MemberRef<Page> m_page;
+    GC::MemberPtr<CSS::StyleComputer> m_style_computer;
+    GC::MemberPtr<CSS::FontComputer> m_font_computer;
+    GC::MemberPtr<CSS::StyleSheetList> m_style_sheets;
+    GC::MemberPtr<Node> m_active_favicon;
+    GC::MemberPtr<HTML::BrowsingContext> m_browsing_context;
     URL::URL m_url;
     mutable OwnPtr<ElementByIdMap> m_element_by_id;
 
-    GC::Ptr<HTML::Window> m_window;
+    GC::MemberPtr<HTML::Window> m_window;
 
-    GC::Ptr<Layout::Viewport> m_layout_root;
+    GC::MemberPtr<Layout::Viewport> m_layout_root;
 
-    GC::Ptr<Node> m_hovered_node;
-    GC::Ptr<Node> m_inspected_node;
-    GC::Ptr<Node> m_highlighted_node;
+    GC::MemberPtr<Node> m_hovered_node;
+    GC::MemberPtr<Node> m_inspected_node;
+    GC::MemberPtr<Node> m_highlighted_node;
     Optional<CSS::PseudoElement> m_highlighted_pseudo_element;
 
     Optional<Color> m_normal_link_color;
@@ -1059,7 +1059,7 @@ private:
 
     Optional<Vector<String>> m_supported_color_schemes;
 
-    GC::Ptr<HTML::HTMLParser> m_parser;
+    GC::MemberPtr<HTML::HTMLParser> m_parser;
     bool m_active_parser_was_aborted { false };
 
     bool m_has_been_destroyed { false };
@@ -1068,7 +1068,7 @@ private:
 
     String m_source;
 
-    GC::Ptr<HTML::HTMLScriptElement> m_pending_parsing_blocking_script;
+    GC::MemberPtr<HTML::HTMLScriptElement> m_pending_parsing_blocking_script;
 
     Vector<GC::Ref<HTML::HTMLScriptElement>> m_scripts_to_execute_when_parsing_has_finished;
 
@@ -1088,16 +1088,16 @@ private:
     bool m_editable { false };
 
     // https://html.spec.whatwg.org/multipage/interaction.html#focused-area-of-the-document
-    GC::Ptr<Node> m_focused_area;
+    GC::MemberPtr<Node> m_focused_area;
 
     HTML::FocusTrigger m_last_focus_trigger { HTML::FocusTrigger::Other };
 
-    GC::Ptr<Element> m_active_element;
-    GC::Ptr<Element> m_target_element;
+    GC::MemberPtr<Element> m_active_element;
+    GC::MemberPtr<Element> m_target_element;
 
     bool m_created_for_appropriate_template_contents { false };
-    GC::Ptr<Document> m_associated_inert_template_document;
-    GC::Ptr<Document> m_appropriate_template_contents_owner_document;
+    GC::MemberPtr<Document> m_associated_inert_template_document;
+    GC::MemberPtr<Document> m_appropriate_template_contents_owner_document;
 
     // https://html.spec.whatwg.org/multipage/dom.html#current-document-readiness
     // Each Document has a current document readiness, a string, initially "complete".
@@ -1113,8 +1113,8 @@ private:
 
     bool m_ready_for_post_load_tasks { false };
 
-    GC::Ptr<DOMImplementation> m_implementation;
-    GC::Ptr<HTML::HTMLScriptElement> m_current_script;
+    GC::MemberPtr<DOMImplementation> m_implementation;
+    GC::MemberPtr<HTML::HTMLScriptElement> m_current_script;
 
     bool m_should_invalidate_styles_on_attribute_changes { true };
 
@@ -1131,7 +1131,7 @@ private:
 
     HashTable<GC::Ref<CSS::CSSImportRule>> m_pending_css_import_rules;
 
-    GC::Ptr<HTML::History> m_history;
+    GC::MemberPtr<HTML::History> m_history;
 
     size_t m_number_of_things_delaying_the_load_event { 0 };
 
@@ -1188,17 +1188,17 @@ private:
     // https://dom.spec.whatwg.org/#concept-document-origin
     URL::Origin m_origin { URL::Origin::create_opaque() };
 
-    GC::Ptr<HTMLCollection> m_applets;
-    GC::Ptr<HTMLCollection> m_anchors;
-    GC::Ptr<HTMLCollection> m_images;
-    GC::Ptr<HTMLCollection> m_embeds;
-    GC::Ptr<HTMLCollection> m_links;
-    GC::Ptr<HTMLCollection> m_forms;
-    GC::Ptr<HTMLCollection> m_scripts;
-    GC::Ptr<HTML::HTMLAllCollection> m_all;
+    GC::MemberPtr<HTMLCollection> m_applets;
+    GC::MemberPtr<HTMLCollection> m_anchors;
+    GC::MemberPtr<HTMLCollection> m_images;
+    GC::MemberPtr<HTMLCollection> m_embeds;
+    GC::MemberPtr<HTMLCollection> m_links;
+    GC::MemberPtr<HTMLCollection> m_forms;
+    GC::MemberPtr<HTMLCollection> m_scripts;
+    GC::MemberPtr<HTML::HTMLAllCollection> m_all;
 
     // https://drafts.csswg.org/css-font-loading/#font-source
-    GC::Ptr<CSS::FontFaceSet> m_fonts;
+    GC::MemberPtr<CSS::FontFaceSet> m_fonts;
 
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#completely-loaded-time
     Optional<AK::UnixDateTime> m_completely_loaded_time;
@@ -1222,16 +1222,16 @@ private:
     DocumentUnloadTimingInfo m_previous_document_unload_timing;
 
     // https://w3c.github.io/selection-api/#dfn-selection
-    GC::Ptr<Selection::Selection> m_selection;
+    GC::MemberPtr<Selection::Selection> m_selection;
 
     // NOTE: This is a cache to make finding the first <base href> or <base target> element O(1).
-    GC::Ptr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;
-    GC::Ptr<HTML::HTMLBaseElement> m_first_base_element_with_target_in_tree_order;
+    GC::MemberPtr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;
+    GC::MemberPtr<HTML::HTMLBaseElement> m_first_base_element_with_target_in_tree_order;
 
     // https://html.spec.whatwg.org/multipage/images.html#list-of-available-images
-    GC::Ptr<HTML::ListOfAvailableImages> m_list_of_available_images;
+    GC::MemberPtr<HTML::ListOfAvailableImages> m_list_of_available_images;
 
-    GC::Ptr<CSS::VisualViewport> m_visual_viewport;
+    GC::MemberPtr<CSS::VisualViewport> m_visual_viewport;
 
     // NOTE: Not in the spec per se, but Document must be able to access all IntersectionObservers whose root is in the document.
     IGNORE_GC OrderedHashTable<GC::Ref<IntersectionObserver::IntersectionObserver>> m_intersection_observers;
@@ -1242,7 +1242,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#lazy-load-intersection-observer
     // Each Document has a lazy load intersection observer, initially set to null but can be set to an IntersectionObserver instance.
-    GC::Ptr<IntersectionObserver::IntersectionObserver> m_lazy_load_intersection_observer;
+    GC::MemberPtr<IntersectionObserver::IntersectionObserver> m_lazy_load_intersection_observer;
 
     ResizeObserver::ResizeObserver::ResizeObserversList m_resize_observers;
 
@@ -1255,7 +1255,7 @@ private:
     TemporaryDocumentForFragmentParsing m_temporary_document_for_fragment_parsing { TemporaryDocumentForFragmentParsing::No };
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#latest-entry
-    GC::Ptr<HTML::SessionHistoryEntry> m_latest_entry;
+    GC::MemberPtr<HTML::SessionHistoryEntry> m_latest_entry;
 
     HashMap<URL::URL, GC::Ptr<HTML::SharedResourceRequest>> m_shared_resource_requests;
 
@@ -1263,7 +1263,7 @@ private:
     HashTable<GC::Ref<Animations::AnimationTimeline>> m_associated_animation_timelines;
 
     // https://www.w3.org/TR/web-animations-1/#document-default-document-timeline
-    GC::Ptr<Animations::DocumentTimeline> m_default_timeline;
+    GC::MemberPtr<Animations::DocumentTimeline> m_default_timeline;
     Optional<double> m_last_animation_frame_timestamp;
 
     // https://www.w3.org/TR/web-animations-1/#pending-animation-event-queue
@@ -1307,10 +1307,10 @@ private:
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;
 
-    GC::Ptr<HTML::HTMLElement> m_popover_pointerdown_target;
+    GC::MemberPtr<HTML::HTMLElement> m_popover_pointerdown_target;
 
     Vector<GC::Ref<HTML::HTMLDialogElement>> m_open_dialogs_list;
-    GC::Ptr<HTML::HTMLDialogElement> m_dialog_pointerdown_target;
+    GC::MemberPtr<HTML::HTMLDialogElement> m_dialog_pointerdown_target;
 
     // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
     bool m_allow_declarative_shadow_roots { false };
@@ -1318,7 +1318,7 @@ private:
     // https://w3c.github.io/selection-api/#dfn-has-scheduled-selectionchange-event
     bool m_has_scheduled_selectionchange_event { false };
 
-    GC::Ptr<JS::ConsoleClient> m_console_client;
+    GC::MemberPtr<JS::ConsoleClient> m_console_client;
 
     RefPtr<Core::Timer> m_cursor_blink_timer;
     bool m_cursor_blink_state { false };
@@ -1334,7 +1334,7 @@ private:
     mutable OwnPtr<Unicode::Segmenter> m_grapheme_segmenter;
     mutable OwnPtr<Unicode::Segmenter> m_word_segmenter;
 
-    GC::Ref<EditingHostManager> m_editing_host_manager;
+    GC::MemberRef<EditingHostManager> m_editing_host_manager;
 
     bool m_inside_exec_command { false };
 
@@ -1352,23 +1352,23 @@ private:
 
     // https://html.spec.whatwg.org/multipage/webstorage.html#session-storage-holder
     // A Document object has an associated session storage holder, which is null or a Storage object. It is initially null.
-    GC::Ptr<HTML::Storage> m_session_storage_holder;
+    GC::MemberPtr<HTML::Storage> m_session_storage_holder;
 
     // https://html.spec.whatwg.org/multipage/webstorage.html#local-storage-holder
     // A Document object has an associated local storage holder, which is null or a Storage object. It is initially null.
-    GC::Ptr<HTML::Storage> m_local_storage_holder;
+    GC::MemberPtr<HTML::Storage> m_local_storage_holder;
 
     // https://html.spec.whatwg.org/multipage/dom.html#render-blocking-element-set
     HashTable<GC::Ref<Element>> m_render_blocking_elements;
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-active-view-transition
-    GC::Ptr<ViewTransition::ViewTransition> m_active_view_transition;
+    GC::MemberPtr<ViewTransition::ViewTransition> m_active_view_transition;
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-rendering-suppression-for-view-transitions
     bool m_rendering_suppression_for_view_transitions { false };
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-dynamic-view-transition-style-sheet
-    GC::Ptr<CSS::CSSStyleSheet> m_dynamic_view_transition_style_sheet;
+    GC::MemberPtr<CSS::CSSStyleSheet> m_dynamic_view_transition_style_sheet;
 
     // https://drafts.csswg.org/css-view-transitions-1/#document-show-view-transition-tree
     bool m_show_view_transition_tree { false };
@@ -1376,7 +1376,7 @@ private:
     // https://drafts.csswg.org/css-view-transitions-1/#document-update-callback-queue
     Vector<GC::Ptr<ViewTransition::ViewTransition>> m_update_callback_queue = {};
 
-    GC::Ref<StyleInvalidator> m_style_invalidator;
+    GC::MemberRef<StyleInvalidator> m_style_invalidator;
 
     // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
     HashMap<FlyString, CSS::CustomPropertyRegistration> m_registered_property_set;

@@ -158,7 +158,7 @@ public:
     void set_sign_display(StringView sign_display) { m_sign_display = Unicode::sign_display_from_string(sign_display); }
 
     NativeFunction* bound_format() const { return m_bound_format; }
-    void set_bound_format(NativeFunction* bound_format) { m_bound_format = bound_format; }
+    void set_bound_format(NativeFunction* bound_format) { m_bound_format.set(*this, bound_format); }
 
     Unicode::DisplayOptions display_options() const override;
 
@@ -177,7 +177,7 @@ private:
     Optional<Unicode::Style> m_unit_display;                       // [[UnitDisplay]]
     Unicode::Grouping m_use_grouping { Unicode::Grouping::False }; // [[UseGrouping]]
     Unicode::SignDisplay m_sign_display;                           // [[SignDisplay]]
-    GC::Ptr<NativeFunction> m_bound_format;                        // [[BoundFormat]]
+    GC::MemberPtr<NativeFunction> m_bound_format;                  // [[BoundFormat]]
 };
 
 int currency_digits(StringView currency);

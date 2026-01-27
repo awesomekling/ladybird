@@ -40,7 +40,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
-    GC::Ref<SessionHistoryEntry> m_session_history_entry;
+    GC::MemberRef<SessionHistoryEntry> m_session_history_entry;
 };
 
 }

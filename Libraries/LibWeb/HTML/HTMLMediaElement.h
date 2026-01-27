@@ -12,6 +12,7 @@
 #include <AK/Optional.h>
 #include <AK/Time.h>
 #include <AK/Variant.h>
+#include <LibGC/MemberPtr.h>
 #include <LibGC/RootVector.h>
 #include <LibGfx/Rect.h>
 #include <LibMedia/Forward.h>
@@ -266,7 +267,7 @@ private:
     UniqueTaskSource m_media_element_event_task_source {};
 
     // https://html.spec.whatwg.org/multipage/media.html#dom-media-error
-    GC::Ptr<MediaError> m_error;
+    GC::MemberPtr<MediaError> m_error;
 
     // https://html.spec.whatwg.org/multipage/media.html#dom-media-crossorigin
     CORSSettingAttribute m_crossorigin { CORSSettingAttribute::NoCORS };
@@ -321,13 +322,13 @@ private:
     bool m_muted { false };
 
     // https://html.spec.whatwg.org/multipage/media.html#dom-media-audiotracks
-    GC::Ptr<AudioTrackList> m_audio_tracks;
+    GC::MemberPtr<AudioTrackList> m_audio_tracks;
 
     // https://html.spec.whatwg.org/multipage/media.html#dom-media-videotracks
-    GC::Ptr<VideoTrackList> m_video_tracks;
+    GC::MemberPtr<VideoTrackList> m_video_tracks;
 
     // https://html.spec.whatwg.org/multipage/media.html#dom-media-texttracks
-    GC::Ptr<TextTrackList> m_text_tracks;
+    GC::MemberPtr<TextTrackList> m_text_tracks;
 
     // https://html.spec.whatwg.org/multipage/media.html#media-data
     RefPtr<Media::IncrementallyPopulatedStream> m_media_data;
@@ -341,14 +342,14 @@ private:
     bool m_running_time_update_event_handler { false };
     Optional<MonotonicTime> m_last_time_update_event_time;
 
-    GC::Ptr<DOM::DocumentObserver> m_document_observer;
+    GC::MemberPtr<DOM::DocumentObserver> m_document_observer;
 
-    GC::Ptr<SourceElementSelector> m_source_element_selector;
+    GC::MemberPtr<SourceElementSelector> m_source_element_selector;
 
-    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    GC::MemberPtr<Fetch::Infrastructure::FetchController> m_fetch_controller;
 
     RefPtr<Media::PlaybackManager> m_playback_manager;
-    GC::Ptr<VideoTrack> m_selected_video_track;
+    GC::MemberPtr<VideoTrack> m_selected_video_track;
     RefPtr<Media::DisplayingVideoSink> m_selected_video_track_sink;
 
     bool m_loop_was_specified_when_reaching_end_of_media_resource { false };

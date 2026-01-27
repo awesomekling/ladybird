@@ -83,9 +83,9 @@ private:
     void set_range(GC::Ptr<DOM::Range>);
 
     // https://w3c.github.io/selection-api/#dfn-empty
-    GC::Ptr<DOM::Range> m_range;
+    GC::MemberPtr<DOM::Range> m_range;
 
-    GC::Ref<DOM::Document> m_document;
+    GC::MemberRef<DOM::Document> m_document;
     Direction m_direction { Direction::Directionless };
 };
 

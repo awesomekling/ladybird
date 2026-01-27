@@ -38,7 +38,7 @@ protected:
     virtual void clear_caches() override;
 
 private:
-    GC::Ref<CSSRuleList> m_rules;
+    GC::MemberRef<CSSRuleList> m_rules;
 };
 
 }

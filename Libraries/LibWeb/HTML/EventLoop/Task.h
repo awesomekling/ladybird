@@ -8,6 +8,7 @@
 
 #include <AK/DistinctNumeric.h>
 #include <LibGC/CellAllocator.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -112,8 +113,8 @@ private:
 
     TaskID m_id {};
     Source m_source { Source::Unspecified };
-    GC::Ref<GC::Function<void()>> m_steps;
-    GC::Ptr<DOM::Document const> m_document;
+    GC::MemberRef<GC::Function<void()>> m_steps;
+    GC::MemberPtr<DOM::Document const> m_document;
 };
 
 struct WEB_API UniqueTaskSource {

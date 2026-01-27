@@ -222,7 +222,7 @@ private:
 
     GC::Ref<DOM::DocumentFragment> rendered_text_fragment(Utf16View const& input);
 
-    GC::Ptr<DOM::NodeList> m_labels;
+    GC::MemberPtr<DOM::NodeList> m_labels;
 
     void queue_a_popover_toggle_event_task(String old_state, String new_state, GC::Ptr<HTMLElement> source);
 
@@ -235,7 +235,7 @@ private:
     size_t popover_stack_position();
 
     // https://html.spec.whatwg.org/multipage/custom-elements.html#attached-internals
-    GC::Ptr<ElementInternals> m_attached_internals;
+    GC::MemberPtr<ElementInternals> m_attached_internals;
 
     // https://html.spec.whatwg.org/multipage/interaction.html#attr-contenteditable
     ContentEditableState m_content_editable_state { ContentEditableState::Inherit };
@@ -254,13 +254,13 @@ private:
     bool m_popover_showing_or_hiding { false };
 
     // https://html.spec.whatwg.org/multipage/popover.html#popover-trigger
-    GC::Ptr<HTMLElement> m_popover_trigger;
+    GC::MemberPtr<HTMLElement> m_popover_trigger;
 
     // https://html.spec.whatwg.org/multipage/popover.html#the-popover-attribute:toggle-task-tracker
     Optional<ToggleTaskTracker> m_popover_toggle_task_tracker;
 
     // https://html.spec.whatwg.org/multipage/popover.html#popover-close-watcher
-    GC::Ptr<CloseWatcher> m_popover_close_watcher;
+    GC::MemberPtr<CloseWatcher> m_popover_close_watcher;
 
     Optional<String> m_opened_in_popover_mode;
 };

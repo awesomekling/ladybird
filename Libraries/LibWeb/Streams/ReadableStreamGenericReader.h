@@ -36,13 +36,13 @@ protected:
 
     // https://streams.spec.whatwg.org/#readablestreamgenericreader-closedpromise
     // A promise returned by the reader's closed getter
-    GC::Ptr<WebIDL::Promise> m_closed_promise;
+    GC::MemberPtr<WebIDL::Promise> m_closed_promise;
 
     // https://streams.spec.whatwg.org/#readablestreamgenericreader-stream
     // A ReadableStream instance that owns this reader
-    GC::Ptr<ReadableStream> m_stream;
+    GC::MemberPtr<ReadableStream> m_stream;
 
-    GC::Ref<JS::Realm> m_realm;
+    GC::MemberRef<JS::Realm> m_realm;
 };
 
 }

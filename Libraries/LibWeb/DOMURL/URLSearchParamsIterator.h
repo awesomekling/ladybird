@@ -28,7 +28,7 @@ private:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GC::Ref<URLSearchParams const> m_url_search_params;
+    GC::MemberRef<URLSearchParams const> m_url_search_params;
     JS::Object::PropertyKind m_iteration_kind;
     size_t m_index { 0 };
 };

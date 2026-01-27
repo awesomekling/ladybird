@@ -111,7 +111,7 @@ private:
     JS::ThrowCompletionOr<GC::Ptr<JS::Object>> iterator_return_impl(GC::Ref<WebIDL::Promise> return_promise_capability, JS::Value);
 
     JS::Object::PropertyKind m_kind { JS::Object::PropertyKind::Value };
-    GC::Ptr<JS::Promise> m_ongoing_promise;
+    GC::MemberPtr<JS::Promise> m_ongoing_promise;
     bool m_is_finished { false };
 };
 

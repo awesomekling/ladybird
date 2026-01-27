@@ -55,13 +55,13 @@ private:
 
     Type type_from_attribute() const;
 
-    GC::Ptr<SVGAnimatedEnumeration> m_type;
-    GC::Ptr<SVGAnimatedNumberList> m_table_values;
-    GC::Ptr<SVGAnimatedNumber> m_slope;
-    GC::Ptr<SVGAnimatedNumber> m_intercept;
-    GC::Ptr<SVGAnimatedNumber> m_amplitude;
-    GC::Ptr<SVGAnimatedNumber> m_exponent;
-    GC::Ptr<SVGAnimatedNumber> m_offset;
+    GC::MemberPtr<SVGAnimatedEnumeration> m_type;
+    GC::MemberPtr<SVGAnimatedNumberList> m_table_values;
+    GC::MemberPtr<SVGAnimatedNumber> m_slope;
+    GC::MemberPtr<SVGAnimatedNumber> m_intercept;
+    GC::MemberPtr<SVGAnimatedNumber> m_amplitude;
+    GC::MemberPtr<SVGAnimatedNumber> m_exponent;
+    GC::MemberPtr<SVGAnimatedNumber> m_offset;
 
     Optional<ByteBuffer> m_cached_color_table;
 };

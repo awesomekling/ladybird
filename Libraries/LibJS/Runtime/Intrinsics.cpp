@@ -227,7 +227,7 @@ void Intrinsics::initialize_intrinsics(Realm& realm)
     auto& vm = this->vm();
 
     // These are done first since other prototypes depend on their presence.
-    m_empty_object_shape = heap().allocate<Shape>(realm);
+    m_empty_object_shape.set(*this, heap().allocate<Shape>(realm));
     m_object_prototype = heap().allocate<ObjectPrototype>(realm);
     m_object_prototype->convert_to_prototype_if_needed();
     m_function_prototype = heap().allocate<FunctionPrototype>(realm);

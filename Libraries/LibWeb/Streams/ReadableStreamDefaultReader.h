@@ -60,12 +60,12 @@ private:
     virtual void on_close() override;
     virtual void on_error(JS::Value error) override;
 
-    GC::Ref<JS::Realm> m_realm;
-    GC::Ref<ReadableStreamDefaultReader> m_reader;
+    GC::MemberRef<JS::Realm> m_realm;
+    GC::MemberRef<ReadableStreamDefaultReader> m_reader;
     ByteBuffer m_bytes;
-    GC::Ref<SuccessSteps> m_success_steps;
-    GC::Ref<FailureSteps> m_failure_steps;
-    GC::Ptr<ChunkSteps> m_chunk_steps;
+    GC::MemberRef<SuccessSteps> m_success_steps;
+    GC::MemberRef<FailureSteps> m_failure_steps;
+    GC::MemberPtr<ChunkSteps> m_chunk_steps;
 };
 
 // https://streams.spec.whatwg.org/#readablestreamdefaultreader
@@ -111,7 +111,7 @@ private:
 
     SinglyLinkedList<GC::Ref<ReadRequest>> m_read_requests;
 
-    GC::Ptr<JS::Cell> m_readable_stream_pipe_to_operation;
+    GC::MemberPtr<JS::Cell> m_readable_stream_pipe_to_operation;
 };
 
 }

@@ -62,7 +62,7 @@ private:
     void broadcast(Optional<String> const& key, Optional<String> const& old_value, Optional<String> const& new_value);
 
     Type m_type {};
-    GC::Ref<StorageAPI::StorageBottle> m_storage_bottle;
+    GC::MemberRef<StorageAPI::StorageBottle> m_storage_bottle;
 };
 
 }

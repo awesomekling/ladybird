@@ -92,22 +92,22 @@ private:
     Bindings::PanningModelType m_panning_model { Bindings::PanningModelType::Equalpower };
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-positionx
-    GC::Ref<AudioParam> m_position_x;
+    GC::MemberRef<AudioParam> m_position_x;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-positiony
-    GC::Ref<AudioParam> m_position_y;
+    GC::MemberRef<AudioParam> m_position_y;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-positionz
-    GC::Ref<AudioParam> m_position_z;
+    GC::MemberRef<AudioParam> m_position_z;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-orientationx
-    GC::Ref<AudioParam> m_orientation_x;
+    GC::MemberRef<AudioParam> m_orientation_x;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-orientationy
-    GC::Ref<AudioParam> m_orientation_y;
+    GC::MemberRef<AudioParam> m_orientation_y;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-orientationz
-    GC::Ref<AudioParam> m_orientation_z;
+    GC::MemberRef<AudioParam> m_orientation_z;
 
     // https://webaudio.github.io/web-audio-api/#dom-pannernode-distancemodel
     Bindings::DistanceModelType m_distance_model { Bindings::DistanceModelType::Inverse };

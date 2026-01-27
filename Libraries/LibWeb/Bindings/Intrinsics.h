@@ -10,6 +10,7 @@
 #include <AK/Forward.h>
 #include <AK/HashMap.h>
 #include <LibGC/Heap.h>
+#include <LibGC/MemberPtr.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/VM.h>
@@ -101,7 +102,7 @@ private:
     HashMap<FlyString, GC::Ref<JS::Object>> m_prototypes;
     HashMap<FlyString, GC::Ptr<JS::NativeFunction>> m_constructors;
     HashMap<UnforgeableKey, GC::Ref<JS::NativeFunction>> m_unforgeable_functions;
-    GC::Ref<JS::Realm> m_realm;
+    GC::MemberRef<JS::Realm> m_realm;
 };
 
 WEB_API Intrinsics& host_defined_intrinsics(JS::Realm& realm);

@@ -344,32 +344,32 @@ private:
     ValueAttributeMode value_attribute_mode() const;
 
     void update_placeholder_visibility();
-    GC::Ptr<DOM::Element> m_placeholder_element;
-    GC::Ptr<DOM::Text> m_placeholder_text_node;
+    GC::MemberPtr<DOM::Element> m_placeholder_element;
+    GC::MemberPtr<DOM::Text> m_placeholder_text_node;
 
     void update_button_input_shadow_tree();
 
     void update_text_input_shadow_tree();
-    GC::Ptr<DOM::Element> m_inner_text_element;
-    GC::Ptr<DOM::Text> m_text_node;
+    GC::MemberPtr<DOM::Element> m_inner_text_element;
+    GC::MemberPtr<DOM::Text> m_text_node;
     bool m_checked { false };
-    GC::Ptr<DOM::Element> m_up_button_element;
-    GC::Ptr<DOM::Element> m_down_button_element;
+    GC::MemberPtr<DOM::Element> m_up_button_element;
+    GC::MemberPtr<DOM::Element> m_down_button_element;
 
     void update_color_well_element();
-    GC::Ptr<DOM::Element> m_color_well_element;
+    GC::MemberPtr<DOM::Element> m_color_well_element;
 
     void update_file_input_shadow_tree();
-    GC::Ptr<DOM::Element> m_file_button;
-    GC::Ptr<DOM::Element> m_file_label;
+    GC::MemberPtr<DOM::Element> m_file_button;
+    GC::MemberPtr<DOM::Element> m_file_label;
 
     void update_slider_shadow_tree_elements();
-    GC::Ptr<DOM::Element> m_slider_runnable_track;
-    GC::Ptr<DOM::Element> m_slider_progress_element;
-    GC::Ptr<DOM::Element> m_slider_thumb;
+    GC::MemberPtr<DOM::Element> m_slider_runnable_track;
+    GC::MemberPtr<DOM::Element> m_slider_progress_element;
+    GC::MemberPtr<DOM::Element> m_slider_thumb;
 
     GC::Ptr<DecodedImageData> image_data() const;
-    GC::Ptr<SharedResourceRequest> m_resource_request;
+    GC::MemberPtr<SharedResourceRequest> m_resource_request;
     SelectedCoordinate m_selected_coordinate;
 
     Optional<Regex<ECMA262>> compiled_pattern_regular_expression() const;
@@ -393,10 +393,10 @@ private:
     // https://html.spec.whatwg.org/multipage/input.html#the-input-element:legacy-pre-activation-behavior
     bool m_before_legacy_pre_activation_behavior_checked { false };
     bool m_before_legacy_pre_activation_behavior_indeterminate { false };
-    GC::Ptr<HTMLInputElement> m_legacy_pre_activation_behavior_checked_element_in_group;
+    GC::MemberPtr<HTMLInputElement> m_legacy_pre_activation_behavior_checked_element_in_group;
 
     // https://html.spec.whatwg.org/multipage/input.html#concept-input-type-file-selected
-    GC::Ptr<FileAPI::FileList> m_selected_files;
+    GC::MemberPtr<FileAPI::FileList> m_selected_files;
 
     TypeAttributeState m_type { TypeAttributeState::Text };
     Utf16String m_value;

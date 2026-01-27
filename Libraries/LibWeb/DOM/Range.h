@@ -156,7 +156,7 @@ private:
 
     bool partially_contains_node(GC::Ref<Node>) const;
 
-    GC::Ptr<Selection::Selection> m_associated_selection;
+    GC::MemberPtr<Selection::Selection> m_associated_selection;
 };
 
 }

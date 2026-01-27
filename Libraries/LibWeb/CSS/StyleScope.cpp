@@ -94,7 +94,7 @@ void StyleScope::build_rule_cache()
     m_style_invalidation_data = make<StyleInvalidationData>();
 
     if (auto user_style_source = document().page().user_style(); user_style_source.has_value()) {
-        m_user_style_sheet = GC::make_root(parse_css_stylesheet(CSS::Parser::ParsingParams(document()), user_style_source.value()));
+        m_user_style_sheet = parse_css_stylesheet(CSS::Parser::ParsingParams(document()), user_style_source.value());
     }
 
     build_qualified_layer_names_cache();

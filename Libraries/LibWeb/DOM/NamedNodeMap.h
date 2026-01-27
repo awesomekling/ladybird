@@ -67,7 +67,7 @@ private:
 
     void remove_attribute_at_index(size_t attribute_index);
 
-    GC::Ref<DOM::Element> m_element;
+    GC::MemberRef<DOM::Element> m_element;
     Vector<GC::Ref<Attr>> m_attributes;
 };
 

@@ -145,9 +145,9 @@ protected:
 
 private:
     NonnullOwnPtr<JS::ExecutionContext> m_realm_execution_context;
-    GC::Ptr<ModuleMap> m_module_map;
+    GC::MemberPtr<ModuleMap> m_module_map;
 
-    GC::Ptr<EventLoop> m_responsible_event_loop;
+    GC::MemberPtr<EventLoop> m_responsible_event_loop;
 
     // https://fetch.spec.whatwg.org/#concept-fetch-record
     // A fetch group holds an ordered list of fetch records
@@ -155,7 +155,7 @@ private:
 
     // https://storage.spec.whatwg.org/#api
     // Each environment settings object has an associated StorageManager object.
-    GC::Ptr<StorageAPI::StorageManager> m_storage_manager;
+    GC::MemberPtr<StorageAPI::StorageManager> m_storage_manager;
 
     // https://w3c.github.io/ServiceWorker/#environment-settings-object-service-worker-registration-object-map
     // An environment settings object has a service worker registration object map,

@@ -85,14 +85,14 @@ private:
     void read_from_transport();
 
     // The HTML spec implies(!) that this is MessagePort.[[RemotePort]]
-    GC::Ptr<MessagePort> m_remote_port;
+    GC::MemberPtr<MessagePort> m_remote_port;
 
     // https://html.spec.whatwg.org/multipage/web-messaging.html#has-been-shipped
     bool m_has_been_shipped { false };
 
     OwnPtr<IPC::Transport> m_transport;
 
-    GC::Ptr<DOM::EventTarget> m_worker_event_target;
+    GC::MemberPtr<DOM::EventTarget> m_worker_event_target;
 
     bool m_enabled { false };
 };

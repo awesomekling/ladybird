@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/MemberPtr.h>
 #include <LibGC/Ptr.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/PlatformObject.h>
@@ -46,9 +47,9 @@ protected:
     virtual void visit_edges(Visitor& visitor) override;
 
 private:
-    GC::Ref<Key> m_key;
+    GC::MemberRef<Key> m_key;
     JS::Value m_value;
-    GC::Ref<Key> m_primary_key;
+    GC::MemberRef<Key> m_primary_key;
 };
 
 }
