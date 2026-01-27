@@ -336,16 +336,19 @@ ThrowCompletionOr<Reference> VM::get_identifier_reference(Environment* environme
 
         // Note: This is an optimization for looking up the same reference.
         Optional<EnvironmentCoordinate> environment_coordinate;
-        if (index.has_value()) {
+        Optional<u32> environment_binding_index;
+        if (index.has_value() && environment->is_declarative_environment()) {
             VERIFY(hops <= NumericLimits<u32>::max());
             VERIFY(index.value() <= NumericLimits<u32>::max());
-            environment_coordinate = EnvironmentCoordinate { .hops = static_cast<u32>(hops), .index = static_cast<u32>(index.value()) };
+            environment_binding_index = static_cast<u32>(index.value());
+            if (!environment->is_permanently_screwed_by_eval())
+                environment_coordinate = EnvironmentCoordinate { .hops = static_cast<u32>(hops), .index = static_cast<u32>(index.value()) };
         }
 
         // 3. If exists is true, then
         if (exists) {
             // a. Return the Reference Record { [[Base]]: env, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
-            return Reference { *environment, move(name), strict, environment_coordinate };
+            return Reference { *environment, move(name), strict, environment_coordinate, environment_binding_index };
         }
 
         // 4. Else,
