@@ -485,10 +485,11 @@ NO_SANITIZE_ADDRESS void Heap::gather_conservative_roots(HashMap<Cell*, HeapRoot
 
 class MarkingVisitor final : public Cell::Visitor {
 public:
-    explicit MarkingVisitor(Heap& heap, HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks)
+    explicit MarkingVisitor(Heap& heap, HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks, Heap::CollectionScope scope)
         : Visitor(Kind::Marking, this)
         , m_heap(heap)
         , m_all_live_heap_blocks(all_live_heap_blocks)
+        , m_scope(scope)
     {
         m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
         for (auto* root : roots.keys()) {
@@ -496,9 +497,16 @@ public:
         }
     }
 
+    ALWAYS_INLINE bool should_skip_cell(Cell& cell) const
+    {
+        if (m_scope == Heap::CollectionScope::Eden)
+            return cell.cell_state() == Cell::CellState::OldBlack;
+        return cell.is_marked();
+    }
+
     void visit_impl(Cell& cell)
     {
-        if (cell.is_marked())
+        if (should_skip_cell(cell))
             return;
         dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
 
@@ -514,7 +522,7 @@ public:
             if (!value.is_cell())
                 continue;
             auto& cell = value.as_cell();
-            if (cell.is_marked())
+            if (should_skip_cell(cell))
                 continue;
             dbgln_if(HEAP_DEBUG, "  ! {}", &cell);
 
@@ -532,7 +540,7 @@ public:
             add_possible_value(possible_pointers, raw_pointer_sized_values[i], HeapRoot { .type = HeapRoot::Type::HeapFunctionCapturedPointer }, m_min_block_address, m_max_block_address);
 
         for_each_cell_among_possible_pointers(m_all_live_heap_blocks, possible_pointers, [&](Cell* cell, FlatPtr) {
-            if (cell->is_marked())
+            if (should_skip_cell(*cell))
                 return;
             if (cell->state() != Cell::State::Live)
                 return;
@@ -552,15 +560,16 @@ private:
     Heap& m_heap;
     Vector<Ref<Cell>> m_work_queue;
     HashTable<HeapBlock*> const& m_all_live_heap_blocks;
+    Heap::CollectionScope m_scope;
     FlatPtr m_min_block_address;
     FlatPtr m_max_block_address;
 };
 
-void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks, CollectionScope)
+void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks, CollectionScope scope)
 {
     dbgln_if(HEAP_DEBUG, "mark_live_cells:");
 
-    MarkingVisitor visitor(*this, roots, all_live_heap_blocks);
+    MarkingVisitor visitor(*this, roots, all_live_heap_blocks, scope);
     visitor.mark_all_live_cells();
 
     for (auto& inverse_root : m_uprooted_cells)
@@ -569,13 +578,15 @@ void Heap::mark_live_cells(HashMap<Cell*, HeapRoot> const& roots, HashTable<Heap
     m_uprooted_cells.clear();
 }
 
-void Heap::finalize_unmarked_cells(CollectionScope)
+void Heap::finalize_unmarked_cells(CollectionScope scope)
 {
     for_each_block([&](auto& block) {
         if (!block.overrides_finalize())
             return IterationDecision::Continue;
-        block.template for_each_cell_in_state<Cell::State::Live>([](Cell* cell) {
-            if (!cell->is_marked())
+        if (scope == CollectionScope::Eden && !block.has_eden_cells())
+            return IterationDecision::Continue;
+        block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
+            if (cell->cell_state() == Cell::CellState::NewWhite)
                 cell->finalize();
         });
         return IterationDecision::Continue;
@@ -598,7 +609,7 @@ void Heap::sweep_weak_blocks()
     }
 }
 
-void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measurement_timer, CollectionScope)
+void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measurement_timer, CollectionScope scope)
 {
     dbgln_if(HEAP_DEBUG, "sweep_dead_cells:");
     Vector<HeapBlock*, 32> empty_blocks;
@@ -610,21 +621,28 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
     size_t live_cell_bytes = 0;
 
     for_each_block([&](auto& block) {
+        if (scope == CollectionScope::Eden && !block.has_eden_cells())
+            return IterationDecision::Continue;
+
         bool block_has_live_cells = false;
         bool block_was_full = block.is_full();
         block.template for_each_cell_in_state<Cell::State::Live>([&](Cell* cell) {
-            if (!cell->is_marked()) {
+            if (cell->cell_state() == Cell::CellState::NewWhite) {
                 dbgln_if(HEAP_DEBUG, "  ~ {}", cell);
                 block.deallocate(cell);
                 ++collected_cells;
                 collected_cell_bytes += block.cell_size();
             } else {
-                cell->set_cell_state(Cell::CellState::NewWhite);
+                if (scope == CollectionScope::Full)
+                    cell->set_cell_state(Cell::CellState::NewWhite);
                 block_has_live_cells = true;
                 ++live_cells;
                 live_cell_bytes += block.cell_size();
             }
         });
+
+        block.set_has_eden_cells(false);
+
         if (!block_has_live_cells)
             empty_blocks.append(&block);
         else if (block_was_full != block.is_full())
