@@ -128,6 +128,7 @@ ThrowCompletionOr<void> DeclarativeEnvironment::initialize_binding_direct(VM& vm
 
     // 3. Set the bound value for N in envRec to V.
     binding.value = value;
+    write_barrier();
 
     // 4. Record that the binding for N in envRec has been initialized.
     binding.initialized = true;
@@ -178,6 +179,7 @@ ThrowCompletionOr<void> DeclarativeEnvironment::set_mutable_binding_direct(VM& v
 
     if (binding.mutable_) {
         binding.value = value;
+        write_barrier();
     } else {
         if (strict)
             return vm.throw_completion<TypeError>(ErrorType::InvalidAssignToConst);

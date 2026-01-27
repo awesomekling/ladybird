@@ -1263,6 +1263,7 @@ Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
     if (property_key.is_number()) {
         auto index = property_key.as_number();
         m_indexed_properties.put(index, value, attributes);
+        write_barrier();
         return {};
     }
 
@@ -1283,6 +1284,7 @@ Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
         else
             set_shape(*m_shape->create_put_transition(property_key, attributes));
         m_storage.append(value);
+        write_barrier();
         return m_storage.size() - 1;
     }
 
@@ -1294,6 +1296,7 @@ Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
     }
 
     m_storage[metadata->offset] = value;
+    write_barrier();
     return metadata->offset;
 }
 

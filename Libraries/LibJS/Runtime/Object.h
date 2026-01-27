@@ -268,11 +268,19 @@ public:
     virtual void visit_edges(Cell::Visitor&) override;
 
     Value get_direct(size_t index) const { return m_storage[index]; }
-    void put_direct(size_t index, Value value) { m_storage[index] = value; }
+    void put_direct(size_t index, Value value)
+    {
+        m_storage[index] = value;
+        write_barrier();
+    }
 
     IndexedProperties const& indexed_properties() const { return m_indexed_properties; }
     IndexedProperties& indexed_properties() { return m_indexed_properties; }
-    void set_indexed_property_elements(Vector<Value>&& values) { m_indexed_properties = IndexedProperties(move(values)); }
+    void set_indexed_property_elements(Vector<Value>&& values)
+    {
+        m_indexed_properties = IndexedProperties(move(values));
+        write_barrier();
+    }
 
     Shape& shape() { return *m_shape; }
     Shape const& shape() const { return *m_shape; }

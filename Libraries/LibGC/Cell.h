@@ -247,6 +247,16 @@ public:
 
     ALWAYS_INLINE Heap& heap() const { return HeapBlockBase::from_cell(this)->heap(); }
 
+    // Fire a write barrier on this cell. Call this after storing a pointer
+    // to a GC-managed object into a field of this cell.
+    // Transitions the cell from OldBlack to OldGray so that eden collections
+    // will re-trace it.
+    ALWAYS_INLINE void write_barrier()
+    {
+        if (m_cell_state == CellState::OldBlack)
+            m_cell_state = CellState::OldGray;
+    }
+
 protected:
     Cell() = default;
 
