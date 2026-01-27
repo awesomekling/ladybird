@@ -20,6 +20,7 @@
 #include <LibGC/HeapBlock.h>
 #include <LibGC/NanBoxedValue.h>
 #include <LibGC/Root.h>
+#include <LibGC/RootsCollector.h>
 #include <LibGC/Weak.h>
 #include <LibGC/WeakInlines.h>
 #include <setjmp.h>
@@ -121,7 +122,8 @@ static void for_each_cell_among_possible_pointers(HashTable<HeapBlock*> const& a
 class GraphConstructorVisitor final : public Cell::Visitor {
 public:
     explicit GraphConstructorVisitor(Heap& heap, HashMap<Cell*, HeapRoot> const& roots)
-        : m_heap(heap)
+        : Visitor(Kind::GraphConstructor, this)
+        , m_heap(heap)
     {
         m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
         m_heap.for_each_block([&](auto& block) {
@@ -139,7 +141,7 @@ public:
         }
     }
 
-    virtual void visit_impl(Cell& cell) override
+    void visit_impl(Cell& cell)
     {
         if (m_node_being_visited)
             m_node_being_visited->edges.set(reinterpret_cast<FlatPtr>(&cell));
@@ -150,13 +152,13 @@ public:
         m_work_queue.append(cell);
     }
 
-    virtual void visit_impl(ReadonlySpan<NanBoxedValue> values) override
+    void visit_impl(ReadonlySpan<NanBoxedValue> values)
     {
         for (auto const& value : values)
             visit(value);
     }
 
-    virtual void visit_possible_values(ReadonlyBytes bytes) override
+    void visit_possible_values(ReadonlyBytes bytes)
     {
         HashMap<FlatPtr, HeapRoot> possible_pointers;
 
@@ -477,7 +479,8 @@ NO_SANITIZE_ADDRESS void Heap::gather_conservative_roots(HashMap<Cell*, HeapRoot
 class MarkingVisitor final : public Cell::Visitor {
 public:
     explicit MarkingVisitor(Heap& heap, HashMap<Cell*, HeapRoot> const& roots, HashTable<HeapBlock*> const& all_live_heap_blocks)
-        : m_heap(heap)
+        : Visitor(Kind::Marking, this)
+        , m_heap(heap)
         , m_all_live_heap_blocks(all_live_heap_blocks)
     {
         m_heap.find_min_and_max_block_addresses(m_min_block_address, m_max_block_address);
@@ -486,7 +489,7 @@ public:
         }
     }
 
-    virtual void visit_impl(Cell& cell) override
+    void visit_impl(Cell& cell)
     {
         if (cell.is_marked())
             return;
@@ -496,7 +499,7 @@ public:
         m_work_queue.append(cell);
     }
 
-    virtual void visit_impl(ReadonlySpan<NanBoxedValue> values) override
+    void visit_impl(ReadonlySpan<NanBoxedValue> values)
     {
         m_work_queue.grow_capacity(m_work_queue.size() + values.size());
 
@@ -513,7 +516,7 @@ public:
         }
     }
 
-    virtual void visit_possible_values(ReadonlyBytes bytes) override
+    void visit_possible_values(ReadonlyBytes bytes)
     {
         HashMap<FlatPtr, HeapRoot> possible_pointers;
 
@@ -700,6 +703,54 @@ WeakImpl* Heap::create_weak_impl(void* ptr)
     }
 
     return new_weak_impl;
+}
+
+void Cell::Visitor::visit_impl(Cell& cell)
+{
+    switch (m_kind) {
+    case Kind::Marking:
+        static_cast<MarkingVisitor*>(m_self)->visit_impl(cell);
+        return;
+    case Kind::GraphConstructor:
+        static_cast<GraphConstructorVisitor*>(m_self)->visit_impl(cell);
+        return;
+    case Kind::RootsCollector:
+        static_cast<RootsCollector*>(m_self)->visit_impl(cell);
+        return;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void Cell::Visitor::visit_impl(ReadonlySpan<NanBoxedValue> values)
+{
+    switch (m_kind) {
+    case Kind::Marking:
+        static_cast<MarkingVisitor*>(m_self)->visit_impl(values);
+        return;
+    case Kind::GraphConstructor:
+        static_cast<GraphConstructorVisitor*>(m_self)->visit_impl(values);
+        return;
+    case Kind::RootsCollector:
+        static_cast<RootsCollector*>(m_self)->visit_impl(values);
+        return;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void Cell::Visitor::visit_possible_values(ReadonlyBytes bytes)
+{
+    switch (m_kind) {
+    case Kind::Marking:
+        static_cast<MarkingVisitor*>(m_self)->visit_possible_values(bytes);
+        return;
+    case Kind::GraphConstructor:
+        static_cast<GraphConstructorVisitor*>(m_self)->visit_possible_values(bytes);
+        return;
+    case Kind::RootsCollector:
+        static_cast<RootsCollector*>(m_self)->visit_possible_values(bytes);
+        return;
+    }
+    VERIFY_NOT_REACHED();
 }
 
 }

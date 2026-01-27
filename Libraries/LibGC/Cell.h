@@ -63,6 +63,12 @@ public:
 
     class GC_API Visitor {
     public:
+        enum class Kind {
+            Marking,
+            GraphConstructor,
+            RootsCollector,
+        };
+
         void visit(Cell* cell)
         {
             if (cell)
@@ -191,12 +197,21 @@ public:
         {
         }
 
-        virtual void visit_possible_values(ReadonlyBytes) = 0;
+        void visit_possible_values(ReadonlyBytes);
 
     protected:
-        virtual void visit_impl(Cell&) = 0;
-        virtual void visit_impl(ReadonlySpan<NanBoxedValue>) = 0;
-        virtual ~Visitor() = default;
+        explicit Visitor(Kind kind, void* self)
+            : m_kind(kind)
+            , m_self(self)
+        {
+        }
+
+        void visit_impl(Cell&);
+        void visit_impl(ReadonlySpan<NanBoxedValue>);
+
+    private:
+        Kind m_kind;
+        void* m_self;
     } SWIFT_UNSAFE_REFERENCE;
 
     virtual void visit_edges(Visitor&) { }
