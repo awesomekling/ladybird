@@ -289,13 +289,10 @@ void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
     for (auto finalization_registry : m_finalization_registry_cleanup_jobs)
         roots.set(finalization_registry, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
 
-    auto gather_roots_from_execution_context_stack = [&roots](Vector<ExecutionContext*> const& stack) {
-        for (auto const& execution_context : stack) {
-            GC::RootsCollector visitor;
+    GC::RootsCollector visitor(roots, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
+    auto gather_roots_from_execution_context_stack = [&visitor](Vector<ExecutionContext*> const& stack) {
+        for (auto const& execution_context : stack)
             execution_context->visit_edges(visitor);
-            for (auto cell : visitor.roots)
-                roots.set(cell, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
-        }
     };
     gather_roots_from_execution_context_stack(m_execution_context_stack);
     for (auto& saved_stack : m_saved_execution_context_stacks)

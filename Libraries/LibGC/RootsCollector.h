@@ -6,29 +6,31 @@
 
 #pragma once
 
-#include <AK/HashTable.h>
+#include <AK/HashMap.h>
 #include <LibGC/Cell.h>
+#include <LibGC/HeapRoot.h>
 #include <LibGC/NanBoxedValue.h>
-#include <LibGC/Ptr.h>
 
 namespace GC {
 
 struct RootsCollector : public Cell::Visitor {
-    RootsCollector()
+    explicit RootsCollector(HashMap<Cell*, HeapRoot>& roots, HeapRoot root)
         : Visitor(Kind::RootsCollector, this)
+        , m_roots(roots)
+        , m_root(root)
     {
     }
 
     void visit_impl(Cell& cell)
     {
-        roots.set(&cell);
+        m_roots.set(&cell, m_root);
     }
 
     void visit_impl(ReadonlySpan<NanBoxedValue> values)
     {
         for (auto const& value : values) {
             if (value.is_cell())
-                roots.set(value.as_cell());
+                m_roots.set(&value.as_cell(), m_root);
         }
     }
 
@@ -37,7 +39,9 @@ struct RootsCollector : public Cell::Visitor {
         VERIFY_NOT_REACHED();
     }
 
-    HashTable<Ptr<Cell>> roots;
+private:
+    HashMap<Cell*, HeapRoot>& m_roots;
+    HeapRoot m_root;
 };
 
 }
