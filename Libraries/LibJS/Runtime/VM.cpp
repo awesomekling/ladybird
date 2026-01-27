@@ -14,6 +14,7 @@
 #include <AK/StringBuilder.h>
 #include <AK/Time.h>
 #include <LibFileSystem/FileSystem.h>
+#include <LibGC/RootsCollector.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -254,28 +255,6 @@ Utf16String const& VM::error_message(ErrorMessage type) const
     return message;
 }
 
-struct ExecutionContextRootsCollector : public Cell::Visitor {
-    virtual void visit_impl(GC::Cell& cell) override
-    {
-        roots.set(&cell);
-    }
-
-    virtual void visit_impl(ReadonlySpan<GC::NanBoxedValue> values) override
-    {
-        for (auto const& value : values) {
-            if (value.is_cell())
-                roots.set(value.as_cell());
-        }
-    }
-
-    virtual void visit_possible_values(ReadonlyBytes) override
-    {
-        VERIFY_NOT_REACHED();
-    }
-
-    HashTable<GC::Ptr<GC::Cell>> roots;
-};
-
 void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
 {
     roots.set(m_empty_string, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
@@ -312,7 +291,7 @@ void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
 
     auto gather_roots_from_execution_context_stack = [&roots](Vector<ExecutionContext*> const& stack) {
         for (auto const& execution_context : stack) {
-            ExecutionContextRootsCollector visitor;
+            GC::RootsCollector visitor;
             execution_context->visit_edges(visitor);
             for (auto cell : visitor.roots)
                 roots.set(cell, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
