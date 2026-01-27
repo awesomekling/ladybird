@@ -280,6 +280,10 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
         if (print_report)
             collection_measurement_timer.start();
 
+        // NB: Eden collections are not yet enabled because write barriers
+        //     have not been added to all GC pointer store sites. Once
+        //     comprehensive barriers are in place (via MemberPtr migration
+        //     or Clang plugin enforcement), change this to Eden.
         auto const scope = CollectionScope::Full;
 
         if (collection_type == CollectionType::CollectGarbage) {
@@ -293,7 +297,8 @@ void Heap::collect_garbage(CollectionType collection_type, bool print_report)
             mark_live_cells(roots, all_live_heap_blocks, scope);
         }
         finalize_unmarked_cells(scope);
-        sweep_weak_blocks();
+        if (scope == CollectionScope::Full)
+            sweep_weak_blocks();
         sweep_dead_cells(print_report, collection_measurement_timer, scope);
 
         if (print_report)
