@@ -329,35 +329,33 @@ void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
 // 9.1.2.1 GetIdentifierReference ( env, name, strict ), https://tc39.es/ecma262/#sec-getidentifierreference
 ThrowCompletionOr<Reference> VM::get_identifier_reference(Environment* environment, Utf16FlyString name, Strict strict, size_t hops)
 {
+    for (; environment; environment = environment->outer_environment(), ++hops) {
+        // 2. Let exists be ? env.HasBinding(name).
+        Optional<size_t> index;
+        auto exists = TRY(environment->has_binding(name, &index));
+
+        // Note: This is an optimization for looking up the same reference.
+        Optional<EnvironmentCoordinate> environment_coordinate;
+        if (index.has_value()) {
+            VERIFY(hops <= NumericLimits<u32>::max());
+            VERIFY(index.value() <= NumericLimits<u32>::max());
+            environment_coordinate = EnvironmentCoordinate { .hops = static_cast<u32>(hops), .index = static_cast<u32>(index.value()) };
+        }
+
+        // 3. If exists is true, then
+        if (exists) {
+            // a. Return the Reference Record { [[Base]]: env, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
+            return Reference { *environment, move(name), strict, environment_coordinate };
+        }
+
+        // 4. Else,
+        //    a. Let outer be env.[[OuterEnv]].
+        //    b. Return ? GetIdentifierReference(outer, name, strict).
+    }
+
     // 1. If env is the value null, then
-    if (!environment) {
-        // a. Return the Reference Record { [[Base]]: unresolvable, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
-        return Reference { Reference::BaseType::Unresolvable, move(name), strict };
-    }
-
-    // 2. Let exists be ? env.HasBinding(name).
-    Optional<size_t> index;
-    auto exists = TRY(environment->has_binding(name, &index));
-
-    // Note: This is an optimization for looking up the same reference.
-    Optional<EnvironmentCoordinate> environment_coordinate;
-    if (index.has_value()) {
-        VERIFY(hops <= NumericLimits<u32>::max());
-        VERIFY(index.value() <= NumericLimits<u32>::max());
-        environment_coordinate = EnvironmentCoordinate { .hops = static_cast<u32>(hops), .index = static_cast<u32>(index.value()) };
-    }
-
-    // 3. If exists is true, then
-    if (exists) {
-        // a. Return the Reference Record { [[Base]]: env, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
-        return Reference { *environment, move(name), strict, environment_coordinate };
-    }
-    // 4. Else,
-    else {
-        // a. Let outer be env.[[OuterEnv]].
-        // b. Return ? GetIdentifierReference(outer, name, strict).
-        return get_identifier_reference(environment->outer_environment(), move(name), strict, hops + 1);
-    }
+    //    a. Return the Reference Record { [[Base]]: unresolvable, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
+    return Reference { Reference::BaseType::Unresolvable, move(name), strict };
 }
 
 // 9.4.2 ResolveBinding ( name [ , env ] ), https://tc39.es/ecma262/#sec-resolvebinding
