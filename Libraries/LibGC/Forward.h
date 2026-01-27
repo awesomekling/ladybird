@@ -28,6 +28,12 @@ class Function;
 template<typename T>
 class HeapHashTable;
 
+template<typename T>
+class MemberPtr;
+
+template<typename T>
+class MemberRef;
+
 template<class T>
 class Root;
 

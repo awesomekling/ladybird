@@ -112,6 +112,19 @@ public:
         }
 
         template<typename T>
+        void visit(MemberPtr<T> cell)
+        {
+            if (cell)
+                visit_impl(const_cast<RemoveConst<T>&>(*cell.ptr()));
+        }
+
+        template<typename T>
+        void visit(MemberRef<T> cell)
+        {
+            visit_impl(const_cast<RemoveConst<T>&>(*cell.ptr()));
+        }
+
+        template<typename T>
         void visit(ReadonlySpan<T> span)
         {
             for (auto& value : span)
