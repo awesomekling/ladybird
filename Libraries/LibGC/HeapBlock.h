@@ -24,8 +24,16 @@ class GC_API HeapBlock : public HeapBlockBase {
     AK_MAKE_NONCOPYABLE(HeapBlock);
     AK_MAKE_NONMOVABLE(HeapBlock);
 
+    struct FreelistEntry final : public Cell {
+        GC_CELL(FreelistEntry, Cell);
+
+        RawPtr<FreelistEntry> next;
+    };
+
 public:
     using HeapBlockBase::BLOCK_SIZE;
+    static constexpr size_t min_possible_cell_size = sizeof(FreelistEntry);
+
     static NonnullOwnPtr<HeapBlock> create_with_cell_size(Heap&, CellAllocator&, size_t cell_size, StringView class_name, bool overrides_must_survive_garbage_collection, bool overrides_finalize);
 
     size_t cell_size() const { return m_cell_size; }
@@ -76,11 +84,36 @@ public:
     {
         if (pointer < reinterpret_cast<FlatPtr>(m_storage))
             return nullptr;
-        size_t cell_index = (pointer - reinterpret_cast<FlatPtr>(m_storage)) / m_cell_size;
+        size_t index = (pointer - reinterpret_cast<FlatPtr>(m_storage)) / m_cell_size;
         auto end = has_lazy_freelist() ? m_next_lazy_freelist_index : cell_count();
-        if (cell_index >= end)
+        if (index >= end)
             return nullptr;
-        return cell(cell_index);
+        return cell(index);
+    }
+
+    size_t cell_index(Cell const* cell) const
+    {
+        return (reinterpret_cast<FlatPtr>(cell) - reinterpret_cast<FlatPtr>(m_storage)) / m_cell_size;
+    }
+
+    bool is_marked(size_t index) const
+    {
+        return m_mark_bitmap[index / 64] & (1ULL << (index % 64));
+    }
+
+    void set_marked(size_t index)
+    {
+        m_mark_bitmap[index / 64] |= (1ULL << (index % 64));
+    }
+
+    void clear_marked(size_t index)
+    {
+        m_mark_bitmap[index / 64] &= ~(1ULL << (index % 64));
+    }
+
+    void clear_all_marks()
+    {
+        __builtin_memset(m_mark_bitmap, 0, sizeof(m_mark_bitmap));
     }
 
     bool is_valid_cell_pointer(Cell const* cell)
@@ -100,12 +133,6 @@ private:
 
     bool has_lazy_freelist() const { return m_next_lazy_freelist_index < cell_count(); }
 
-    struct FreelistEntry final : public Cell {
-        GC_CELL(FreelistEntry, Cell);
-
-        RawPtr<FreelistEntry> next;
-    };
-
     Cell* cell(size_t index)
     {
         return reinterpret_cast<Cell*>(&m_storage[index * cell_size()]);
@@ -119,10 +146,14 @@ private:
     bool m_overrides_finalize { false };
 
     Ptr<FreelistEntry> m_freelist;
-    alignas(__BIGGEST_ALIGNMENT__) u8 m_storage[];
 
-public:
-    static constexpr size_t min_possible_cell_size = sizeof(FreelistEntry);
+    static constexpr size_t estimated_header_size = 128;
+    static constexpr size_t max_cell_count = (BLOCK_SIZE - estimated_header_size) / min_possible_cell_size;
+    static constexpr size_t mark_bitmap_word_count = (max_cell_count + 63) / 64;
+
+    u64 m_mark_bitmap[mark_bitmap_word_count] {};
+
+    alignas(__BIGGEST_ALIGNMENT__) u8 m_storage[];
 };
 
 }
