@@ -32,7 +32,7 @@ private:
 
     static void rename_uses_in_block(BasicBlock&, Vector<Value*> const&, Value&, size_t);
     void propagate_phi_to_successors(BasicBlock&, Value&, Vector<Value*> const&, u32, HashTable<BasicBlock*>&);
-    Value* find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited);
+    Value* find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited, int depth = 0);
 
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);
     void define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block);

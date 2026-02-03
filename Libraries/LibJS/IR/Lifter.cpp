@@ -678,13 +678,13 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case InitializeLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeLexicalBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_set_binding(block, op.identifier(), value);
+        m_function->build_initialize_binding(block, op.identifier(), value);
         break;
     }
     case InitializeVariableBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeVariableBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_set_binding(block, op.identifier(), value);
+        m_function->build_initialize_binding(block, op.identifier(), value);
         break;
     }
     case DeleteVariable: {
@@ -970,8 +970,12 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
 
-    // Environment creation ops (no IR needed, affects runtime)
-    case CreateVariable:
+    // Environment creation ops
+    case CreateVariable: {
+        auto const& op = static_cast<Bytecode::Op::CreateVariable const&>(instruction);
+        m_function->build_create_variable(block, op.identifier(), op.mode(), op.is_immutable(), op.is_global(), op.is_strict());
+        break;
+    }
     case CreateMutableBinding:
     case CreateImmutableBinding:
     case CreateLexicalEnvironment:
@@ -1432,17 +1436,28 @@ void Lifter::propagate_phi_to_successors(BasicBlock& block, Value& phi, Vector<V
     }
 }
 
-Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited)
+Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited, int depth)
 {
+    constexpr bool debug_reaching = false;
+
+    if constexpr (debug_reaching)
+        dbgln("{}find_reaching_definition: block={}, operand={}, merge={}", String::repeated(' ', depth * 2).release_value(), block.name(), operand_raw, merge_point ? merge_point->name() : "null"_string);
+
     // If we've reached the merge point we're computing phis for, stop
     // This handles back edges in loops - the value on the back edge is undefined
     // until we create the phi, so we return nullptr to indicate "same as other edges"
-    if (&block == merge_point)
+    if (&block == merge_point) {
+        if constexpr (debug_reaching)
+            dbgln("{}  -> hit merge point, returning nullptr", String::repeated(' ', depth * 2).release_value());
         return nullptr;
+    }
 
     // If we've already visited this block (cycle), return nullptr to avoid infinite loops
-    if (visited.contains(&block))
+    if (visited.contains(&block)) {
+        if constexpr (debug_reaching)
+            dbgln("{}  -> already visited, returning nullptr", String::repeated(' ', depth * 2).release_value());
         return nullptr;
+    }
     visited.set(&block);
 
     // Check if this block actually defines the operand
@@ -1452,19 +1467,40 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
         auto block_defs = m_block_definitions.get(&block);
         if (block_defs.has_value()) {
             auto value = block_defs->get(operand_raw);
-            if (value.has_value())
+            if (value.has_value()) {
+                if constexpr (debug_reaching)
+                    dbgln("{}  -> found definition v{} in this block", String::repeated(' ', depth * 2).release_value(), (*value)->index());
                 return *value;
+            }
         }
     }
 
     // This block doesn't define it - look at predecessors
     auto preds = m_predecessors.get(&block);
-    if (!preds.has_value() || preds->is_empty())
+    if (!preds.has_value() || preds->is_empty()) {
+        // This is the entry block with no predecessors.
+        // Even if the operand wasn't explicitly written here, it might have a value
+        // from being read (e.g., a constant or parameter that was auto-created).
+        auto block_defs = m_block_definitions.get(&block);
+        if (block_defs.has_value()) {
+            auto value = block_defs->get(operand_raw);
+            if (value.has_value()) {
+                if constexpr (debug_reaching)
+                    dbgln("{}  -> entry block has definition v{} (from read)", String::repeated(' ', depth * 2).release_value(), (*value)->index());
+                return *value;
+            }
+        }
+        if constexpr (debug_reaching)
+            dbgln("{}  -> no predecessors and no definition, returning nullptr", String::repeated(' ', depth * 2).release_value());
         return nullptr;
+    }
+
+    if constexpr (debug_reaching)
+        dbgln("{}  -> {} predecessors, tracing back", String::repeated(' ', depth * 2).release_value(), preds->size());
 
     // If there's exactly one predecessor, trace back through it
     if (preds->size() == 1) {
-        return find_reaching_definition(*(*preds)[0], operand_raw, merge_point, visited);
+        return find_reaching_definition(*(*preds)[0], operand_raw, merge_point, visited, depth + 1);
     }
 
     // Multiple predecessors means this is another merge point
@@ -1472,7 +1508,7 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
     Value* common_value = nullptr;
     for (auto* pred : *preds) {
         HashTable<BasicBlock*> pred_visited = visited;
-        auto* value = find_reaching_definition(*pred, operand_raw, merge_point, pred_visited);
+        auto* value = find_reaching_definition(*pred, operand_raw, merge_point, pred_visited, depth + 1);
         if (!value)
             continue;
         if (!common_value) {
@@ -1480,20 +1516,33 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
         } else if (value != common_value) {
             // Different values on different paths - this would need a phi
             // For now, just return one of them (the first one found)
+            if constexpr (debug_reaching)
+                dbgln("{}  -> different values on paths, returning v{}", String::repeated(' ', depth * 2).release_value(), common_value->index());
             return common_value;
         }
+    }
+    if constexpr (debug_reaching) {
+        if (common_value)
+            dbgln("{}  -> common value v{}", String::repeated(' ', depth * 2).release_value(), common_value->index());
+        else
+            dbgln("{}  -> no common value found", String::repeated(' ', depth * 2).release_value());
     }
     return common_value;
 }
 
 void Lifter::insert_phi_nodes()
 {
+    constexpr bool debug_phi = true;
+
     // For each block with multiple predecessors, check if any written operand
     // has different definitions coming from different predecessors
     for (auto& block : m_function->basic_blocks()) {
         auto preds = m_predecessors.get(block.ptr());
         if (!preds.has_value() || preds->size() <= 1)
             continue;
+
+        if constexpr (debug_phi)
+            dbgln("insert_phi_nodes: block {} has {} predecessors", block->name(), preds->size());
 
         // For each operand that was written to somewhere
         for (auto raw : m_written_operands) {
@@ -1502,14 +1551,22 @@ void Lifter::insert_phi_nodes()
             Vector<BasicBlock*> incoming_blocks;
             bool need_phi = false;
             Value* first_value = nullptr;
+            bool has_missing_def = false;
 
             for (auto* pred : *preds) {
                 // Find the actual reaching definition, tracing back through the CFG
                 // Pass the current block as merge_point to stop when we hit back edges
                 HashTable<BasicBlock*> visited;
                 auto* value = find_reaching_definition(*pred, raw, block.ptr(), visited);
-                if (!value)
+                if (!value) {
+                    has_missing_def = true;
+                    if constexpr (debug_phi)
+                        dbgln("  operand {}: no definition from pred {}", raw, pred->name());
                     continue;
+                }
+
+                if constexpr (debug_phi)
+                    dbgln("  operand {}: definition v{} from pred {}", raw, value->index(), pred->name());
 
                 if (!first_value) {
                     first_value = value;
@@ -1521,8 +1578,53 @@ void Lifter::insert_phi_nodes()
                 incoming_blocks.append(pred);
             }
 
+            // If some predecessors don't have a definition, handle them based on context:
+            // - If we have a consistent value from other predecessors, use that (loop-invariant case)
+            // - Otherwise, use undefined (uninitialized variable case)
+            if (has_missing_def && !incoming_values.is_empty()) {
+                // Check if all existing incoming values are the same (loop-invariant)
+                bool all_same = true;
+                for (size_t i = 1; i < incoming_values.size(); ++i) {
+                    if (incoming_values[i] != incoming_values[0]) {
+                        all_same = false;
+                        break;
+                    }
+                }
+
+                for (auto* pred : *preds) {
+                    // Check if this predecessor is already in incoming_blocks
+                    bool found = false;
+                    for (auto* existing_block : incoming_blocks) {
+                        if (existing_block == pred) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        if (all_same && first_value) {
+                            // Loop-invariant: use the same value from the forward edge
+                            incoming_values.append(first_value);
+                            incoming_blocks.append(pred);
+                            // No need to set need_phi since all values are the same
+                            if constexpr (debug_phi)
+                                dbgln("  operand {}: using loop-invariant v{} from pred {}", raw, first_value->index(), pred->name());
+                        } else {
+                            // Different values on paths - use undefined for missing
+                            auto& undefined_value = m_function->create_constant(JS::js_undefined());
+                            incoming_values.append(&undefined_value);
+                            incoming_blocks.append(pred);
+                            need_phi = true;
+                            if constexpr (debug_phi)
+                                dbgln("  operand {}: adding undefined from pred {}", raw, pred->name());
+                        }
+                    }
+                }
+            }
+
             // If different predecessors have different definitions, insert a phi node
             if (need_phi && incoming_values.size() > 1) {
+                if constexpr (debug_phi)
+                    dbgln("  -> creating phi for operand {} with {} incoming values", raw, incoming_values.size());
                 auto& phi = m_function->build_phi(*block, incoming_values, incoming_blocks);
 
                 // Rename uses in the current block (skip the phi at index 0)
@@ -1545,10 +1647,14 @@ void Lifter::insert_phi_nodes()
 
 void Lifter::fix_reaching_definitions()
 {
+    constexpr bool debug_fix = false;
+
     // After phi construction, fix operand references in each block to use the
     // correct reaching definitions. This is needed because the initial lifting
     // processed blocks in sequential order, which may not match the CFG order.
     for (auto& block : m_function->basic_blocks()) {
+        if constexpr (debug_fix)
+            dbgln("fix_reaching_definitions: processing block {}", block->name());
         // Compute reaching definitions at the start of this block
         HashMap<u32, Value*> current_defs;
 
@@ -1565,13 +1671,37 @@ void Lifter::fix_reaching_definitions()
             continue;
 
         // For each written operand, find its reaching definition at this block
+        // Only use a reaching definition if all predecessors agree on the same value
         for (auto raw : m_written_operands) {
-            HashTable<BasicBlock*> visited;
-            // Use the first predecessor to find the reaching definition
-            // (for multiple preds with different defs, there should be a phi)
-            auto* reaching = find_reaching_definition(*(*preds)[0], raw, block.ptr(), visited);
-            if (reaching)
-                current_defs.set(raw, reaching);
+            Value* common_reaching = nullptr;
+            bool all_agree = true;
+            size_t missing_count = 0;
+
+            for (auto* pred : *preds) {
+                HashTable<BasicBlock*> visited;
+                auto* reaching = find_reaching_definition(*pred, raw, block.ptr(), visited);
+                if (!reaching) {
+                    ++missing_count;
+                    continue;
+                }
+                if (!common_reaching) {
+                    common_reaching = reaching;
+                } else if (reaching != common_reaching) {
+                    // Different predecessors have different definitions
+                    // There should be a phi for this, so don't set a single reaching def
+                    all_agree = false;
+                    break;
+                }
+            }
+
+            if (all_agree && common_reaching)
+                current_defs.set(raw, common_reaching);
+
+            if constexpr (debug_fix) {
+                if (missing_count > 0 && common_reaching) {
+                    dbgln("  operand {}: {} of {} preds have no def, using v{}", raw, missing_count, preds->size(), common_reaching->index());
+                }
+            }
         }
 
         // Check if any phis define values that should update current_defs
@@ -1608,6 +1738,8 @@ void Lifter::fix_reaching_definitions()
                 auto current = current_defs.get(operand_raw);
                 if (current.has_value() && *current != operand_value) {
                     // Replace with the correct definition
+                    if constexpr (debug_fix)
+                        dbgln("  fixing operand {} of {}: v{} -> v{}", i, opcode_to_string(instruction->opcode()), operand_value->index(), (*current)->index());
                     instruction->set_operand(i, *current);
                 }
             }
