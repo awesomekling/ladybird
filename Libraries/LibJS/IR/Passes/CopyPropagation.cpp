@@ -38,8 +38,12 @@ bool CopyPropagation::run(Function& function)
         return false;
 
     // Replace uses of copied values with their sources
+    // NB: Skip phi nodes since their operands represent values from specific predecessors,
+    // and propagating through them would break SSA semantics
     for (auto& block : function.basic_blocks()) {
         for (auto& instruction : block->instructions()) {
+            if (instruction->opcode() == Opcode::Phi)
+                continue;
             for (size_t i = 0; i < instruction->operands().size(); ++i) {
                 auto* operand = instruction->operands()[i];
 

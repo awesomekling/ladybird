@@ -1373,10 +1373,14 @@ void Lifter::compute_block_predecessors()
     // Build predecessor lists by examining each block's successors
     for (auto& block : m_function->basic_blocks()) {
         for (auto& instruction : block->instructions()) {
-            if (instruction->true_target())
+            if (instruction->true_target()) {
                 m_predecessors.ensure(instruction->true_target()).append(block.ptr());
-            if (instruction->false_target() && instruction->false_target() != instruction->true_target())
+                instruction->true_target()->add_predecessor(block.ptr());
+            }
+            if (instruction->false_target() && instruction->false_target() != instruction->true_target()) {
                 m_predecessors.ensure(instruction->false_target()).append(block.ptr());
+                instruction->false_target()->add_predecessor(block.ptr());
+            }
         }
     }
 }

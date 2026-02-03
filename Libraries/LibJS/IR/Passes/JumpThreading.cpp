@@ -88,6 +88,41 @@ bool JumpThreading::run(Function& function)
                 // Update predecessor lists
                 thread_target->add_predecessor(pred_block);
                 block->remove_predecessor(pred_block);
+
+                // Update phi nodes in the target block to include the threaded predecessor
+                for (auto& instr : thread_target->instructions()) {
+                    if (instr->opcode() != Opcode::Phi)
+                        continue;
+
+                    // Find the value this phi expects from the bypassed block
+                    Value* value_from_bypassed = nullptr;
+                    for (size_t j = 0; j < instr->phi_predecessors().size(); ++j) {
+                        if (instr->phi_predecessors()[j] == block.ptr()) {
+                            value_from_bypassed = instr->operands()[j];
+                            break;
+                        }
+                    }
+
+                    if (!value_from_bypassed)
+                        continue;
+
+                    // If value_from_bypassed is a phi in the bypassed block, we need to
+                    // find what value that phi receives from pred_block
+                    Value* value_for_pred = value_from_bypassed;
+                    if (value_from_bypassed->defining_instruction() && value_from_bypassed->defining_instruction()->opcode() == Opcode::Phi && value_from_bypassed->defining_instruction()->parent_block() == block.ptr()) {
+                        // This is a phi in the bypassed block - find the value from pred_block
+                        auto* bypassed_phi = value_from_bypassed->defining_instruction();
+                        for (size_t k = 0; k < bypassed_phi->phi_predecessors().size(); ++k) {
+                            if (bypassed_phi->phi_predecessors()[k] == pred_block) {
+                                value_for_pred = bypassed_phi->operands()[k];
+                                break;
+                            }
+                        }
+                    }
+
+                    instr->add_phi_operand(pred_block, value_for_pred);
+                }
+
                 changed = true;
             }
         }

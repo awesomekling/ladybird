@@ -642,7 +642,8 @@ void Lowerer::lower_blocks()
                 bool true_has_phis = target_has_phis(*true_target);
                 bool false_has_phis = target_has_phis(*false_target);
 
-                size_t true_index, false_index;
+                size_t true_index = 0;
+                size_t false_index = 0;
 
                 if (true_has_phis && false_has_phis) {
                     // Critical edges: both targets have phis, so we need trampolines
