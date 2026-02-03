@@ -151,6 +151,8 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
 
             if (IR::g_dump_ir) {
                 auto ir_function = IR::Lifter::lift(*executable);
+                if (IR::g_optimize_ir)
+                    IR::optimize(*ir_function);
                 outln("{}", IR::dump(*ir_function));
             }
         }

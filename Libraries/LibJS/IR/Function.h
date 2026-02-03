@@ -26,6 +26,7 @@ public:
     GC::Ptr<Bytecode::Executable const> source_executable() const { return m_source_executable; }
 
     Vector<NonnullOwnPtr<BasicBlock>> const& basic_blocks() const { return m_basic_blocks; }
+    Vector<NonnullOwnPtr<BasicBlock>>& basic_blocks() { return m_basic_blocks; }
     Vector<NonnullOwnPtr<Value>> const& values() const { return m_values; }
     Vector<Value*> const& parameters() const { return m_parameters; }
 

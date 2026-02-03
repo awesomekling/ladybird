@@ -9,12 +9,19 @@
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Passes/ConstantBranchFolding.h>
+#include <LibJS/IR/Passes/ConstantFolding.h>
+#include <LibJS/IR/Passes/CopyPropagation.h>
+#include <LibJS/IR/Passes/DeadBlockElimination.h>
+#include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS::IR {
 
 bool g_dump_ir = false;
+bool g_optimize_ir = false;
+bool g_dump_ir_between_passes = false;
 
 void dump(Value const& value, StringBuilder& builder)
 {
@@ -196,6 +203,51 @@ String dump(Function const& function)
     StringBuilder builder;
     dump(function, builder);
     return MUST(builder.to_string());
+}
+
+static void run_pass(Pass& pass, Function& function, bool& changed)
+{
+    bool pass_changed = pass.run(function);
+    if (pass_changed) {
+        changed = true;
+        if (g_dump_ir_between_passes)
+            outln("=== After {} ===\n{}", pass.name(), dump(function));
+    }
+}
+
+void optimize(Function& function)
+{
+    if (g_dump_ir_between_passes)
+        outln("=== Before optimization ===\n{}", dump(function));
+
+    // Run optimization passes until no more changes (with safety limit)
+    constexpr size_t max_iterations = 10;
+    for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
+        bool changed = false;
+
+        // Copy propagation first - enables other optimizations
+        CopyPropagation copy_prop;
+        run_pass(copy_prop, function, changed);
+
+        // Constant folding - evaluate constant expressions
+        ConstantFolding const_fold;
+        run_pass(const_fold, function, changed);
+
+        // Constant branch folding - simplify branches on constants
+        ConstantBranchFolding branch_fold;
+        run_pass(branch_fold, function, changed);
+
+        // Dead code elimination - remove unused instructions
+        DeadCodeElimination dce;
+        run_pass(dce, function, changed);
+
+        // Dead block elimination - remove unreachable blocks
+        DeadBlockElimination dbe;
+        run_pass(dbe, function, changed);
+
+        if (!changed)
+            break;
+    }
 }
 
 }

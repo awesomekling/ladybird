@@ -831,6 +831,8 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(s_dump_ast, "Dump the AST", "dump-ast", 'A');
     args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
     args_parser.add_option(JS::IR::g_dump_ir, "Dump the IR", "dump-ir", 'I');
+    args_parser.add_option(JS::IR::g_optimize_ir, "Optimize the IR (use with --dump-ir)", "optimize-ir", 'O');
+    args_parser.add_option(JS::IR::g_dump_ir_between_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
     args_parser.add_option(s_as_module, "Treat as module", "as-module", 'm');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');
     args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'i');
