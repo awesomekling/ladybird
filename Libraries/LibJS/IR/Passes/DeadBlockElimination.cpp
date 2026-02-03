@@ -102,21 +102,36 @@ bool DeadBlockElimination::run(Function& function)
         }
     }
 
-    // For each phi in live blocks that references a dead block, remove that entry
+    // Clean up all references to dead blocks in live blocks
     for (auto& block : function.basic_blocks()) {
         if (!reachable.contains(block.ptr()))
             continue;
 
-        for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                continue;
+        // Remove dead blocks from predecessor lists
+        for (auto* dead_block : dead_blocks)
+            block->remove_predecessor(dead_block);
 
-            // Check each phi predecessor
-            for (size_t i = instruction->phi_predecessors().size(); i > 0; --i) {
-                auto* pred = instruction->phi_predecessors()[i - 1];
-                if (!reachable.contains(pred))
-                    instruction->remove_phi_operand(i - 1);
+        // Clean up exception_handler and finalizer references
+        if (block->exception_handler() && !reachable.contains(block->exception_handler()))
+            block->set_exception_handler(nullptr);
+        if (block->finalizer() && !reachable.contains(block->finalizer()))
+            block->set_finalizer(nullptr);
+
+        for (auto& instruction : block->instructions()) {
+            // Clean up phi predecessors
+            if (instruction->opcode() == Opcode::Phi) {
+                for (size_t i = instruction->phi_predecessors().size(); i > 0; --i) {
+                    auto* pred = instruction->phi_predecessors()[i - 1];
+                    if (!reachable.contains(pred))
+                        instruction->remove_phi_operand(i - 1);
+                }
             }
+
+            // Clean up terminator targets (shouldn't happen for well-formed IR, but be safe)
+            if (instruction->true_target() && !reachable.contains(instruction->true_target()))
+                instruction->set_true_target(nullptr);
+            if (instruction->false_target() && !reachable.contains(instruction->false_target()))
+                instruction->set_false_target(nullptr);
         }
     }
 

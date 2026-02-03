@@ -117,6 +117,44 @@ bool EmptyBlockElimination::run(Function& function)
         }
     } while (eliminated_any);
 
+    // Collect blocks to remove
+    HashTable<BasicBlock*> blocks_to_remove;
+    for (auto& block : function.basic_blocks()) {
+        if (block->instructions().is_empty())
+            blocks_to_remove.set(block.ptr());
+    }
+
+    // Clean up ALL references to blocks being removed
+    for (auto& block : function.basic_blocks()) {
+        if (blocks_to_remove.contains(block.ptr()))
+            continue;
+
+        // Clean up exception_handler and finalizer references
+        if (block->exception_handler() && blocks_to_remove.contains(block->exception_handler()))
+            block->set_exception_handler(nullptr);
+        if (block->finalizer() && blocks_to_remove.contains(block->finalizer()))
+            block->set_finalizer(nullptr);
+
+        // Clean up predecessor lists
+        for (auto* removed : blocks_to_remove)
+            block->remove_predecessor(removed);
+
+        // Clean up phi predecessors and terminator targets
+        for (auto& instr : block->instructions()) {
+            // Clean up terminator targets
+            if (instr->true_target() && blocks_to_remove.contains(instr->true_target()))
+                instr->set_true_target(nullptr);
+            if (instr->false_target() && blocks_to_remove.contains(instr->false_target()))
+                instr->set_false_target(nullptr);
+
+            // Clean up phi predecessors (iterate backwards for safe removal)
+            for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
+                if (blocks_to_remove.contains(instr->phi_predecessors()[i - 1]))
+                    instr->remove_phi_operand(i - 1);
+            }
+        }
+    }
+
     // Remove empty blocks
     function.basic_blocks().remove_all_matching([](auto const& block) {
         return block->instructions().is_empty();
