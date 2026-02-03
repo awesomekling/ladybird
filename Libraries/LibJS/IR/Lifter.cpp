@@ -1458,6 +1458,11 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
 {
     constexpr bool debug_reaching = false;
 
+    // Limit search depth to avoid exponential blowup on complex CFGs
+    constexpr int max_depth = 10;
+    if (depth > max_depth)
+        return nullptr;
+
     if constexpr (debug_reaching)
         dbgln("{}find_reaching_definition: block={}, operand={}, merge={}", String::repeated(' ', depth * 2).release_value(), block.name(), operand_raw, merge_point ? merge_point->name() : "null"_string);
 
@@ -1558,7 +1563,6 @@ void Lifter::insert_phi_nodes()
         auto preds = m_predecessors.get(block.ptr());
         if (!preds.has_value() || preds->size() <= 1)
             continue;
-
         if constexpr (debug_phi)
             dbgln("insert_phi_nodes: block {} has {} predecessors", block->name(), preds->size());
 
