@@ -98,10 +98,8 @@ bool EmptyBlockElimination::run(Function& function)
                     instr->add_phi_operand(pred, value_from_empty);
                 }
 
-                // Remove the entry for the empty block by rebuilding the phi
-                // (We need mutable access to phi_predecessors which we don't have,
-                // so we'll mark it for later cleanup or just leave it - the extra
-                // entry won't affect correctness since the block is unreachable)
+                // Remove the entry for the empty block
+                instr->remove_phi_operand(empty_index);
             }
 
             // Update predecessor lists
