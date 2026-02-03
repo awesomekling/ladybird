@@ -1454,34 +1454,39 @@ void Lifter::propagate_phi_to_successors(BasicBlock& block, Value& phi, Vector<V
     }
 }
 
-Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited, int depth)
+Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited)
 {
     constexpr bool debug_reaching = false;
 
-    // Limit search depth to avoid exponential blowup on complex CFGs
-    constexpr int max_depth = 10;
-    if (depth > max_depth)
-        return nullptr;
-
     if constexpr (debug_reaching)
-        dbgln("{}find_reaching_definition: block={}, operand={}, merge={}", String::repeated(' ', depth * 2).release_value(), block.name(), operand_raw, merge_point ? merge_point->name() : "null"_string);
+        dbgln("find_reaching_definition: block={}, operand={}, merge={}", block.name(), operand_raw, merge_point ? merge_point->name() : "null"_string);
 
     // If we've reached the merge point we're computing phis for, stop
     // This handles back edges in loops - the value on the back edge is undefined
     // until we create the phi, so we return nullptr to indicate "same as other edges"
     if (&block == merge_point) {
         if constexpr (debug_reaching)
-            dbgln("{}  -> hit merge point, returning nullptr", String::repeated(' ', depth * 2).release_value());
+            dbgln("  -> hit merge point, returning nullptr");
         return nullptr;
     }
 
     // If we've already visited this block (cycle), return nullptr to avoid infinite loops
     if (visited.contains(&block)) {
         if constexpr (debug_reaching)
-            dbgln("{}  -> already visited, returning nullptr", String::repeated(' ', depth * 2).release_value());
+            dbgln("  -> already visited, returning nullptr");
         return nullptr;
     }
     visited.set(&block);
+
+    // Check the memoization cache (keyed by block pointer and operand)
+    // We use a combined key: high 32 bits = block index (approximated), low 32 bits = operand
+    u64 cache_key = (reinterpret_cast<uintptr_t>(&block) << 16) ^ operand_raw;
+    if (m_reaching_def_computed.contains(cache_key)) {
+        auto cached = m_reaching_def_cache.get(cache_key);
+        if constexpr (debug_reaching)
+            dbgln("  -> cache hit: {}", cached.has_value() ? String::formatted("v{}", (*cached)->index()).release_value() : "nullptr"_string);
+        return cached.value_or(nullptr);
+    }
 
     // Check if this block actually defines the operand
     auto actual_defs = m_block_actual_definitions.get(&block);
@@ -1492,7 +1497,9 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
             auto value = block_defs->get(operand_raw);
             if (value.has_value()) {
                 if constexpr (debug_reaching)
-                    dbgln("{}  -> found definition v{} in this block", String::repeated(' ', depth * 2).release_value(), (*value)->index());
+                    dbgln("  -> found definition v{} in this block", (*value)->index());
+                m_reaching_def_cache.set(cache_key, *value);
+                m_reaching_def_computed.set(cache_key);
                 return *value;
             }
         }
@@ -1509,21 +1516,28 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
             auto value = block_defs->get(operand_raw);
             if (value.has_value()) {
                 if constexpr (debug_reaching)
-                    dbgln("{}  -> entry block has definition v{} (from read)", String::repeated(' ', depth * 2).release_value(), (*value)->index());
+                    dbgln("  -> entry block has definition v{} (from read)", (*value)->index());
+                m_reaching_def_cache.set(cache_key, *value);
+                m_reaching_def_computed.set(cache_key);
                 return *value;
             }
         }
         if constexpr (debug_reaching)
-            dbgln("{}  -> no predecessors and no definition, returning nullptr", String::repeated(' ', depth * 2).release_value());
+            dbgln("  -> no predecessors and no definition, returning nullptr");
+        m_reaching_def_cache.set(cache_key, nullptr);
+        m_reaching_def_computed.set(cache_key);
         return nullptr;
     }
 
     if constexpr (debug_reaching)
-        dbgln("{}  -> {} predecessors, tracing back", String::repeated(' ', depth * 2).release_value(), preds->size());
+        dbgln("  -> {} predecessors, tracing back", preds->size());
 
     // If there's exactly one predecessor, trace back through it
     if (preds->size() == 1) {
-        return find_reaching_definition(*(*preds)[0], operand_raw, merge_point, visited, depth + 1);
+        auto* result = find_reaching_definition(*(*preds)[0], operand_raw, merge_point, visited);
+        m_reaching_def_cache.set(cache_key, result);
+        m_reaching_def_computed.set(cache_key);
+        return result;
     }
 
     // Multiple predecessors means this is another merge point
@@ -1531,7 +1545,7 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
     Value* common_value = nullptr;
     for (auto* pred : *preds) {
         HashTable<BasicBlock*> pred_visited = visited;
-        auto* value = find_reaching_definition(*pred, operand_raw, merge_point, pred_visited, depth + 1);
+        auto* value = find_reaching_definition(*pred, operand_raw, merge_point, pred_visited);
         if (!value)
             continue;
         if (!common_value) {
@@ -1540,16 +1554,20 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
             // Different values on different paths - this would need a phi
             // For now, just return one of them (the first one found)
             if constexpr (debug_reaching)
-                dbgln("{}  -> different values on paths, returning v{}", String::repeated(' ', depth * 2).release_value(), common_value->index());
+                dbgln("  -> different values on paths, returning v{}", common_value->index());
+            m_reaching_def_cache.set(cache_key, common_value);
+            m_reaching_def_computed.set(cache_key);
             return common_value;
         }
     }
     if constexpr (debug_reaching) {
         if (common_value)
-            dbgln("{}  -> common value v{}", String::repeated(' ', depth * 2).release_value(), common_value->index());
+            dbgln("  -> common value v{}", common_value->index());
         else
-            dbgln("{}  -> no common value found", String::repeated(' ', depth * 2).release_value());
+            dbgln("  -> no common value found");
     }
+    m_reaching_def_cache.set(cache_key, common_value);
+    m_reaching_def_computed.set(cache_key);
     return common_value;
 }
 
@@ -1563,6 +1581,10 @@ void Lifter::insert_phi_nodes()
         auto preds = m_predecessors.get(block.ptr());
         if (!preds.has_value() || preds->size() <= 1)
             continue;
+
+        // Clear the reaching definition cache for each new merge point
+        clear_reaching_definition_cache();
+
         if constexpr (debug_phi)
             dbgln("insert_phi_nodes: block {} has {} predecessors", block->name(), preds->size());
 
@@ -1682,6 +1704,9 @@ void Lifter::fix_reaching_definitions()
     // correct reaching definitions. This is needed because the initial lifting
     // processed blocks in sequential order, which may not match the CFG order.
     for (auto& block : m_function->basic_blocks()) {
+        // Clear the reaching definition cache for each new merge point
+        clear_reaching_definition_cache();
+
         if constexpr (debug_fix)
             dbgln("fix_reaching_definitions: processing block {}", block->name());
         // Compute reaching definitions at the start of this block

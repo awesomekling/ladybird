@@ -32,7 +32,12 @@ private:
 
     static void rename_uses_in_block(BasicBlock&, Vector<Value*> const&, Value&, size_t);
     void propagate_phi_to_successors(BasicBlock&, Value&, Vector<Value*> const&, u32, HashTable<BasicBlock*>&);
-    Value* find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited, int depth = 0);
+    Value* find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited);
+    void clear_reaching_definition_cache()
+    {
+        m_reaching_def_cache.clear();
+        m_reaching_def_computed.clear();
+    }
 
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);
     void define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block);
@@ -61,6 +66,12 @@ private:
 
     // Block predecessors (computed after control flow is connected)
     HashMap<BasicBlock*, Vector<BasicBlock*>> m_predecessors;
+
+    // Cache for reaching definitions: (block, operand) -> Value*
+    // Uses nullptr to indicate "no definition found" (which is different from "not cached")
+    // We use a separate set to track which entries have been computed
+    HashMap<u64, Value*> m_reaching_def_cache;
+    HashTable<u64> m_reaching_def_computed;
 };
 
 }
