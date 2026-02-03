@@ -29,6 +29,9 @@ private:
     void compute_block_predecessors();
     u32 address_to_block_index(size_t address) const;
 
+    static void rename_uses_in_block(BasicBlock&, Vector<Value*> const&, Value&, size_t);
+    void propagate_phi_to_successors(BasicBlock&, Value&, Vector<Value*> const&, u32, HashTable<BasicBlock*>&);
+
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);
     void define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block);
 

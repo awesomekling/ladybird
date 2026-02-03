@@ -1111,6 +1111,11 @@ void Lifter::connect_control_flow()
         if (ir_block.is_terminated())
             continue;
 
+        // Restore this block's definitions so get_or_create_value_for_operand works correctly
+        auto block_defs = m_block_definitions.get(&ir_block);
+        if (block_defs.has_value())
+            m_current_definitions = *block_defs;
+
         size_t start_offset = m_executable.basic_block_start_offsets[block_index];
         size_t end_offset = (block_index + 1 < m_executable.basic_block_start_offsets.size())
             ? m_executable.basic_block_start_offsets[block_index + 1]
@@ -1302,6 +1307,68 @@ void Lifter::compute_block_predecessors()
     }
 }
 
+void Lifter::rename_uses_in_block(BasicBlock& block, Vector<Value*> const& old_values, Value& new_value, size_t start_index) // static
+{
+    for (size_t i = start_index; i < block.instructions().size(); ++i) {
+        auto& instruction = block.instructions()[i];
+        for (size_t op_idx = 0; op_idx < instruction->operands().size(); ++op_idx) {
+            auto* operand = instruction->operands()[op_idx];
+            for (auto* old_value : old_values) {
+                if (operand == old_value) {
+                    instruction->set_operand(op_idx, &new_value);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void Lifter::propagate_phi_to_successors(BasicBlock& block, Value& phi, Vector<Value*> const& incoming_values, u32 operand_raw, HashTable<BasicBlock*>& visited)
+{
+    // Get the block's terminator to find successors
+    auto* terminator = block.last_instruction();
+    if (!terminator)
+        return;
+
+    BasicBlock* successors[2] = { terminator->true_target(), terminator->false_target() };
+
+    for (auto* successor : successors) {
+        if (!successor || visited.contains(successor))
+            continue;
+
+        // Check if this successor redefines the operand - if so, don't propagate further
+        auto successor_defs = m_block_definitions.get(successor);
+        bool redefines = false;
+        if (successor_defs.has_value()) {
+            // Check if any instruction in this block defines the operand
+            for (auto const& instruction : successor->instructions()) {
+                if (instruction->opcode() == Opcode::Phi)
+                    continue; // Skip phis, they're not redefinitions in this sense
+                if (instruction->result()) {
+                    // Check if this instruction's result is what's mapped for this operand
+                    auto def = successor_defs->get(operand_raw);
+                    if (def.has_value() && *def == instruction->result()) {
+                        // This block redefines the operand, but we still want to update
+                        // uses BEFORE the redefinition
+                        redefines = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        visited.set(successor);
+
+        // Rename uses in this successor block
+        rename_uses_in_block(*successor, incoming_values, phi, 0);
+
+        // If the block doesn't redefine the variable, propagate to its successors
+        if (!redefines) {
+            propagate_phi_to_successors(*successor, phi, incoming_values, operand_raw, visited);
+        }
+    }
+}
+
 void Lifter::insert_phi_nodes()
 {
     // For each block with multiple predecessors, check if any written operand
@@ -1342,20 +1409,13 @@ void Lifter::insert_phi_nodes()
             if (need_phi && incoming_values.size() > 1) {
                 auto& phi = m_function->build_phi(*block, incoming_values, incoming_blocks);
 
-                // Rename uses: replace any use of the incoming values with the phi result
-                // Skip the phi instruction itself (it's at index 0 after prepend)
-                for (size_t i = 1; i < block->instructions().size(); ++i) {
-                    auto& instruction = block->instructions()[i];
-                    for (size_t op_idx = 0; op_idx < instruction->operands().size(); ++op_idx) {
-                        auto* operand = instruction->operands()[op_idx];
-                        for (auto* incoming : incoming_values) {
-                            if (operand == incoming) {
-                                instruction->set_operand(op_idx, &phi);
-                                break;
-                            }
-                        }
-                    }
-                }
+                // Rename uses in the current block (skip the phi at index 0)
+                rename_uses_in_block(*block, incoming_values, phi, 1);
+
+                // Propagate the phi result to dominated successor blocks
+                HashTable<BasicBlock*> visited;
+                visited.set(block.ptr());
+                propagate_phi_to_successors(*block, phi, incoming_values, raw, visited);
 
                 // Update the block's definitions to use the phi result
                 auto block_defs = m_block_definitions.get(block.ptr());
