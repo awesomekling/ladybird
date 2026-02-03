@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -22,6 +23,18 @@ void Value::add_use(Instruction* instruction)
 void Value::remove_use(Instruction* instruction)
 {
     m_uses.remove_first_matching([instruction](auto* i) { return i == instruction; });
+}
+
+void Value::replace_all_uses_with(Value* replacement)
+{
+    // Make a copy since we're modifying the use list as we iterate
+    auto uses_copy = m_uses;
+    for (auto* instruction : uses_copy) {
+        for (size_t i = 0; i < instruction->operands().size(); ++i) {
+            if (instruction->operands()[i] == this)
+                instruction->set_operand(i, replacement);
+        }
+    }
 }
 
 NonnullOwnPtr<Value> Value::create_for_instruction(u32 index)

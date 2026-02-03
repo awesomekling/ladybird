@@ -40,6 +40,7 @@ public:
     Vector<Instruction*> const& uses() const { return m_uses; }
     void add_use(Instruction* instruction);
     void remove_use(Instruction* instruction);
+    void replace_all_uses_with(Value* replacement);
 
     JS::Value constant_value() const
     {

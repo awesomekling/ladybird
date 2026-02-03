@@ -21,6 +21,7 @@ set(SOURCES
     IR/Function.cpp
     IR/Instruction.cpp
     IR/Lifter.cpp
+    IR/Passes/AlgebraicSimplification.cpp
     IR/Passes/BlockMerging.cpp
     IR/Passes/ConstantBranchFolding.cpp
     IR/Passes/ConstantFolding.cpp
