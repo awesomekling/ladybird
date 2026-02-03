@@ -27,8 +27,12 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.lift_basic_blocks();
     lifter.connect_control_flow();
     lifter.compute_block_predecessors();
-    lifter.insert_phi_nodes();
-    lifter.fix_reaching_definitions();
+
+    // SSA construction using a two-phase approach:
+    // Phase 1: Place placeholder phis at all join points for all written operands
+    // Phase 2: Fill in phi operands now that all phis exist
+    lifter.place_phi_nodes();
+    lifter.fill_phi_operands();
     return move(lifter.m_function);
 }
 
@@ -1379,433 +1383,187 @@ void Lifter::compute_block_predecessors()
     }
 }
 
-void Lifter::rename_uses_in_block(BasicBlock& block, Vector<Value*> const& old_values, Value& new_value, size_t start_index) // static
+// Phase 1: Place placeholder phis at all join points for all written operands
+void Lifter::place_phi_nodes()
 {
-    // Track which old_values are still valid for replacement.
-    // Once an instruction redefines a value (produces it as result), we stop
-    // replacing uses of that value because subsequent uses should refer to the
-    // new definition, not the phi.
-    HashTable<Value const*> active_old_values;
-    for (auto* v : old_values)
-        active_old_values.set(v);
-
-    for (size_t i = start_index; i < block.instructions().size(); ++i) {
-        auto& instruction = block.instructions()[i];
-
-        // First, replace operand uses with the phi result (if the old value is still active)
-        for (size_t op_idx = 0; op_idx < instruction->operands().size(); ++op_idx) {
-            auto* operand = instruction->operands()[op_idx];
-            if (operand && active_old_values.contains(operand)) {
-                instruction->set_operand(op_idx, &new_value);
-            }
-        }
-
-        // Then, check if this instruction's result is one of the old_values.
-        // If so, this block redefines that value, so stop replacing uses of it.
-        if (instruction->result()) {
-            active_old_values.remove(instruction->result());
-        }
-    }
-}
-
-void Lifter::propagate_phi_to_successors(BasicBlock& block, Value& phi, Vector<Value*> const& incoming_values, u32 operand_raw, HashTable<BasicBlock*>& visited)
-{
-    // Get the block's terminator to find successors
-    auto* terminator = block.last_instruction();
-    if (!terminator)
-        return;
-
-    BasicBlock* successors[2] = { terminator->true_target(), terminator->false_target() };
-
-    for (auto* successor : successors) {
-        if (!successor || visited.contains(successor))
-            continue;
-
-        // Check if this successor redefines the operand - if so, don't propagate further
-        auto successor_defs = m_block_definitions.get(successor);
-        bool redefines = false;
-        if (successor_defs.has_value()) {
-            // Check if any instruction in this block defines the operand
-            for (auto const& instruction : successor->instructions()) {
-                if (instruction->opcode() == Opcode::Phi)
-                    continue; // Skip phis, they're not redefinitions in this sense
-                if (instruction->result()) {
-                    // Check if this instruction's result is what's mapped for this operand
-                    auto def = successor_defs->get(operand_raw);
-                    if (def.has_value() && *def == instruction->result()) {
-                        // This block redefines the operand, but we still want to update
-                        // uses BEFORE the redefinition
-                        redefines = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        visited.set(successor);
-
-        // Rename uses in this successor block
-        rename_uses_in_block(*successor, incoming_values, phi, 0);
-
-        // If the block doesn't redefine the variable, propagate to its successors
-        if (!redefines) {
-            propagate_phi_to_successors(*successor, phi, incoming_values, operand_raw, visited);
-        }
-    }
-}
-
-Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, BasicBlock* merge_point, HashTable<BasicBlock*>& visited)
-{
-    constexpr bool debug_reaching = false;
-
-    if constexpr (debug_reaching)
-        dbgln("find_reaching_definition: block={}, operand={}, merge={}", block.name(), operand_raw, merge_point ? merge_point->name() : "null"_string);
-
-    // If we've reached the merge point we're computing phis for, stop
-    // This handles back edges in loops - the value on the back edge is undefined
-    // until we create the phi, so we return nullptr to indicate "same as other edges"
-    if (&block == merge_point) {
-        if constexpr (debug_reaching)
-            dbgln("  -> hit merge point, returning nullptr");
-        return nullptr;
-    }
-
-    // If we've already visited this block (cycle), return nullptr to avoid infinite loops
-    if (visited.contains(&block)) {
-        if constexpr (debug_reaching)
-            dbgln("  -> already visited, returning nullptr");
-        return nullptr;
-    }
-    visited.set(&block);
-
-    // Check the memoization cache (keyed by block pointer and operand)
-    // We use a combined key: high 32 bits = block index (approximated), low 32 bits = operand
-    u64 cache_key = (reinterpret_cast<uintptr_t>(&block) << 16) ^ operand_raw;
-    if (m_reaching_def_computed.contains(cache_key)) {
-        auto cached = m_reaching_def_cache.get(cache_key);
-        if constexpr (debug_reaching)
-            dbgln("  -> cache hit: {}", cached.has_value() ? String::formatted("v{}", (*cached)->index()).release_value() : "nullptr"_string);
-        return cached.value_or(nullptr);
-    }
-
-    // Check if this block actually defines the operand
-    auto actual_defs = m_block_actual_definitions.get(&block);
-    if (actual_defs.has_value() && actual_defs->contains(operand_raw)) {
-        // This block defines it - get the value from the block's definitions
-        auto block_defs = m_block_definitions.get(&block);
-        if (block_defs.has_value()) {
-            auto value = block_defs->get(operand_raw);
-            if (value.has_value()) {
-                if constexpr (debug_reaching)
-                    dbgln("  -> found definition v{} in this block", (*value)->index());
-                m_reaching_def_cache.set(cache_key, *value);
-                m_reaching_def_computed.set(cache_key);
-                return *value;
-            }
-        }
-    }
-
-    // This block doesn't define it - look at predecessors
-    auto preds = m_predecessors.get(&block);
-    if (!preds.has_value() || preds->is_empty()) {
-        // This is the entry block with no predecessors.
-        // Even if the operand wasn't explicitly written here, it might have a value
-        // from being read (e.g., a constant or parameter that was auto-created).
-        auto block_defs = m_block_definitions.get(&block);
-        if (block_defs.has_value()) {
-            auto value = block_defs->get(operand_raw);
-            if (value.has_value()) {
-                if constexpr (debug_reaching)
-                    dbgln("  -> entry block has definition v{} (from read)", (*value)->index());
-                m_reaching_def_cache.set(cache_key, *value);
-                m_reaching_def_computed.set(cache_key);
-                return *value;
-            }
-        }
-        if constexpr (debug_reaching)
-            dbgln("  -> no predecessors and no definition, returning nullptr");
-        m_reaching_def_cache.set(cache_key, nullptr);
-        m_reaching_def_computed.set(cache_key);
-        return nullptr;
-    }
-
-    if constexpr (debug_reaching)
-        dbgln("  -> {} predecessors, tracing back", preds->size());
-
-    // If there's exactly one predecessor, trace back through it
-    if (preds->size() == 1) {
-        auto* result = find_reaching_definition(*(*preds)[0], operand_raw, merge_point, visited);
-        m_reaching_def_cache.set(cache_key, result);
-        m_reaching_def_computed.set(cache_key);
-        return result;
-    }
-
-    // Multiple predecessors means this is another merge point
-    // We need to check if ALL paths lead to the same definition
-    Value* common_value = nullptr;
-    for (auto* pred : *preds) {
-        HashTable<BasicBlock*> pred_visited = visited;
-        auto* value = find_reaching_definition(*pred, operand_raw, merge_point, pred_visited);
-        if (!value)
-            continue;
-        if (!common_value) {
-            common_value = value;
-        } else if (value != common_value) {
-            // Different values on different paths - this would need a phi
-            // For now, just return one of them (the first one found)
-            if constexpr (debug_reaching)
-                dbgln("  -> different values on paths, returning v{}", common_value->index());
-            m_reaching_def_cache.set(cache_key, common_value);
-            m_reaching_def_computed.set(cache_key);
-            return common_value;
-        }
-    }
-    if constexpr (debug_reaching) {
-        if (common_value)
-            dbgln("  -> common value v{}", common_value->index());
-        else
-            dbgln("  -> no common value found");
-    }
-    m_reaching_def_cache.set(cache_key, common_value);
-    m_reaching_def_computed.set(cache_key);
-    return common_value;
-}
-
-void Lifter::insert_phi_nodes()
-{
-    constexpr bool debug_phi = false;
-
-    // For each block with multiple predecessors, check if any written operand
-    // has different definitions coming from different predecessors
     for (auto& block : m_function->basic_blocks()) {
         auto preds = m_predecessors.get(block.ptr());
         if (!preds.has_value() || preds->size() <= 1)
             continue;
 
-        // Clear the reaching definition cache for each new merge point
-        clear_reaching_definition_cache();
-
-        if constexpr (debug_phi)
-            dbgln("insert_phi_nodes: block {} has {} predecessors", block->name(), preds->size());
-
-        // For each operand that was written to somewhere
+        // This is a join point - place a phi for each written operand
         for (auto raw : m_written_operands) {
-            // Collect definitions from each predecessor
-            Vector<Value*> incoming_values;
-            Vector<BasicBlock*> incoming_blocks;
-            bool need_phi = false;
-            Value* first_value = nullptr;
-            bool has_missing_def = false;
-
-            for (auto* pred : *preds) {
-                // Find the actual reaching definition, tracing back through the CFG
-                // Pass the current block as merge_point to stop when we hit back edges
-                HashTable<BasicBlock*> visited;
-                auto* value = find_reaching_definition(*pred, raw, block.ptr(), visited);
-                if (!value) {
-                    has_missing_def = true;
-                    if constexpr (debug_phi)
-                        dbgln("  operand {}: no definition from pred {}", raw, pred->name());
-                    continue;
-                }
-
-                if constexpr (debug_phi)
-                    dbgln("  operand {}: definition v{} from pred {}", raw, value->index(), pred->name());
-
-                if (!first_value) {
-                    first_value = value;
-                } else if (value != first_value) {
-                    need_phi = true;
-                }
-
-                incoming_values.append(value);
-                incoming_blocks.append(pred);
+            // Create an empty phi (we'll fill operands in phase 2)
+            Vector<Value*> empty_values;
+            Vector<BasicBlock*> empty_blocks;
+            for (size_t i = 0; i < preds->size(); ++i) {
+                empty_values.append(nullptr);
+                empty_blocks.append((*preds)[i]);
             }
 
-            // If some predecessors don't have a definition, handle them based on context:
-            // - If we have a consistent value from the FIRST predecessor (forward edge) and
-            //   the missing definitions are from back edges, use that value (loop-invariant case)
-            // - Otherwise, use undefined (uninitialized variable case)
-            if (has_missing_def && !incoming_values.is_empty()) {
-                // Check if all existing incoming values are the same (potential loop-invariant)
-                bool all_same = true;
-                for (size_t i = 1; i < incoming_values.size(); ++i) {
-                    if (incoming_values[i] != incoming_values[0]) {
-                        all_same = false;
-                        break;
-                    }
-                }
+            auto& phi = m_function->build_phi(*block, empty_values, empty_blocks);
+            m_phi_map.set(make_phi_key(block.ptr(), raw), &phi);
+            m_value_to_operand_raw.set(&phi, raw);
 
-                // Check if the first predecessor (forward edge) has a definition
-                // If not, this isn't a loop-invariant case - the variable is first defined in the loop
-                bool first_pred_has_def = !incoming_blocks.is_empty() && incoming_blocks[0] == (*preds)[0];
-
-                for (auto* pred : *preds) {
-                    // Check if this predecessor is already in incoming_blocks
-                    bool found = false;
-                    for (auto* existing_block : incoming_blocks) {
-                        if (existing_block == pred) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        if (all_same && first_value && first_pred_has_def) {
-                            // Loop-invariant: the variable is defined before the loop and
-                            // not modified inside, so back edges carry the same value
-                            incoming_values.append(first_value);
-                            incoming_blocks.append(pred);
-                            // No need to set need_phi since all values are the same
-                            if constexpr (debug_phi)
-                                dbgln("  operand {}: using loop-invariant v{} from pred {}", raw, first_value->index(), pred->name());
-                        } else {
-                            // Either different values on paths, or the first predecessor
-                            // doesn't have a definition - use undefined for missing
-                            auto& undefined_value = m_function->create_constant(JS::js_undefined());
-                            incoming_values.append(&undefined_value);
-                            incoming_blocks.append(pred);
-                            need_phi = true;
-                            if constexpr (debug_phi)
-                                dbgln("  operand {}: adding undefined from pred {}", raw, pred->name());
-                        }
-                    }
-                }
-            }
-
-            // If different predecessors have different definitions, insert a phi node
-            if (need_phi && incoming_values.size() > 1) {
-                if constexpr (debug_phi)
-                    dbgln("  -> creating phi for operand {} with {} incoming values", raw, incoming_values.size());
-                auto& phi = m_function->build_phi(*block, incoming_values, incoming_blocks);
-
-                // Rename uses in the current block (skip the phi at index 0)
-                rename_uses_in_block(*block, incoming_values, phi, 1);
-
-                // Propagate the phi result to dominated successor blocks
-                HashTable<BasicBlock*> visited;
-                visited.set(block.ptr());
-                propagate_phi_to_successors(*block, phi, incoming_values, raw, visited);
-
-                // Update the block's definitions to use the phi result
-                auto block_defs = m_block_definitions.get(block.ptr());
-                if (block_defs.has_value()) {
-                    block_defs->set(raw, &phi);
-                }
+            // Update m_block_definitions to include the phi value, UNLESS the block
+            // has an actual definition that would override it. This ensures successors
+            // inherit the correct value.
+            auto actual_defs = m_block_actual_definitions.get(block.ptr());
+            if (!actual_defs.has_value() || !actual_defs->contains(raw)) {
+                m_block_definitions.ensure(block.ptr()).set(raw, &phi);
             }
         }
     }
 }
 
-void Lifter::fix_reaching_definitions()
+// Phase 2: Fill in phi operands by finding reaching definitions
+void Lifter::fill_phi_operands()
 {
-    constexpr bool debug_fix = false;
-
-    // After phi construction, fix operand references in each block to use the
-    // correct reaching definitions. This is needed because the initial lifting
-    // processed blocks in sequential order, which may not match the CFG order.
     for (auto& block : m_function->basic_blocks()) {
-        // Clear the reaching definition cache for each new merge point
-        clear_reaching_definition_cache();
-
-        if constexpr (debug_fix)
-            dbgln("fix_reaching_definitions: processing block {}", block->name());
-        // Compute reaching definitions at the start of this block
-        HashMap<u32, Value*> current_defs;
-
-        // For entry block, start with empty definitions
-        if (block.ptr() == m_function->entry_block()) {
-            // Entry block starts with no definitions
-            // But it shouldn't have wrong references since it's first
-            continue;
-        }
-
-        // For other blocks, compute reaching defs from predecessors
         auto preds = m_predecessors.get(block.ptr());
-        if (!preds.has_value() || preds->is_empty())
+        if (!preds.has_value() || preds->size() <= 1)
             continue;
 
-        // For each written operand, find its reaching definition at this block
-        // Only use a reaching definition if all predecessors agree on the same value
-        for (auto raw : m_written_operands) {
-            Value* common_reaching = nullptr;
-            bool all_agree = true;
-            size_t missing_count = 0;
-
-            for (auto* pred : *preds) {
-                HashTable<BasicBlock*> visited;
-                auto* reaching = find_reaching_definition(*pred, raw, block.ptr(), visited);
-                if (!reaching) {
-                    ++missing_count;
-                    continue;
-                }
-                if (!common_reaching) {
-                    common_reaching = reaching;
-                } else if (reaching != common_reaching) {
-                    // Different predecessors have different definitions
-                    // There should be a phi for this, so don't set a single reaching def
-                    all_agree = false;
-                    break;
-                }
-            }
-
-            if (all_agree && common_reaching)
-                current_defs.set(raw, common_reaching);
-
-            if constexpr (debug_fix) {
-                if (missing_count > 0 && common_reaching) {
-                    dbgln("  operand {}: {} of {} preds have no def, using v{}", raw, missing_count, preds->size(), common_reaching->index());
-                }
-            }
-        }
-
-        // Check if any phis define values that should update current_defs
+        // For each phi in this block, fill in its operands
         for (auto& instruction : block->instructions()) {
             if (instruction->opcode() != Opcode::Phi)
-                break;
-            if (instruction->result()) {
-                auto result_raw_opt = m_value_to_operand_raw.get(instruction->result());
-                if (result_raw_opt.has_value())
-                    current_defs.set(*result_raw_opt, instruction->result());
-            }
-        }
+                break; // Phis are at the start
 
-        // Now walk through instructions and fix operand references
-        for (auto& instruction : block->instructions()) {
-            // Skip phi nodes - they're correct by construction
-            if (instruction->opcode() == Opcode::Phi)
+            auto operand_raw_opt = m_value_to_operand_raw.get(instruction->result());
+            if (!operand_raw_opt.has_value())
                 continue;
 
-            // Check each operand BEFORE processing the result
-            for (size_t i = 0; i < instruction->operands().size(); ++i) {
-                auto* operand_value = instruction->operands()[i];
-                if (!operand_value)
-                    continue;
+            auto operand_raw = *operand_raw_opt;
 
-                // Check if this value was created for a bytecode operand
-                auto operand_raw_opt = m_value_to_operand_raw.get(operand_value);
-                if (!operand_raw_opt.has_value())
-                    continue;
+            // Find reaching definition from each predecessor
+            for (size_t i = 0; i < preds->size(); ++i) {
+                auto* pred = (*preds)[i];
+                HashTable<BasicBlock*> visited;
+                auto* reaching = find_reaching_def_for_phi(*pred, operand_raw, visited);
 
-                auto operand_raw = *operand_raw_opt;
-
-                // Check if the current definition is different
-                auto current = current_defs.get(operand_raw);
-                if (current.has_value() && *current != operand_value) {
-                    // Replace with the correct definition
-                    if constexpr (debug_fix)
-                        dbgln("  fixing operand {} of {}: v{} -> v{}", i, opcode_to_string(instruction->opcode()), operand_value->index(), (*current)->index());
-                    instruction->set_operand(i, *current);
+                if (!reaching) {
+                    // No definition found - use undefined
+                    reaching = &m_function->create_constant(JS::js_undefined());
                 }
-            }
 
-            // Update current_defs if this instruction defines a value
-            if (instruction->result()) {
-                auto result_raw_opt = m_value_to_operand_raw.get(instruction->result());
-                if (result_raw_opt.has_value())
-                    current_defs.set(*result_raw_opt, instruction->result());
+                instruction->set_operand(i, reaching);
             }
         }
     }
+
+    // Now fix up uses in non-phi instructions to use the correct reaching definitions
+    // We need to process blocks in a way that predecessors are processed before successors.
+    // Since we may not have computed dominance order, we do multiple passes until stable.
+    bool changed = true;
+    while (changed) {
+        changed = false;
+
+        for (auto& block : m_function->basic_blocks()) {
+            // Build a map of current definitions at this point
+            HashMap<u32, Value*> current_defs;
+
+            // Start with reaching defs from predecessors (for single-predecessor blocks)
+            // or the phi results (for join points)
+            auto preds = m_predecessors.get(block.ptr());
+            if (preds.has_value() && preds->size() == 1) {
+                // Single predecessor - inherit its definitions
+                auto pred_defs = m_block_definitions.get((*preds)[0]);
+                if (pred_defs.has_value())
+                    current_defs = *pred_defs;
+            }
+
+            // Process phis first - they define values for this block
+            for (auto& instruction : block->instructions()) {
+                if (instruction->opcode() != Opcode::Phi)
+                    break;
+
+                auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+                if (raw_opt.has_value())
+                    current_defs.set(*raw_opt, instruction->result());
+            }
+
+            // Now fix operand references in non-phi instructions
+            for (auto& instruction : block->instructions()) {
+                if (instruction->opcode() == Opcode::Phi)
+                    continue;
+
+                for (size_t i = 0; i < instruction->operands().size(); ++i) {
+                    auto* operand_value = instruction->operands()[i];
+                    if (!operand_value)
+                        continue;
+
+                    auto raw_opt = m_value_to_operand_raw.get(operand_value);
+                    if (!raw_opt.has_value())
+                        continue;
+
+                    auto current = current_defs.get(*raw_opt);
+                    if (current.has_value() && *current != operand_value) {
+                        instruction->set_operand(i, *current);
+                        changed = true;
+                    }
+                }
+
+                // Update current_defs if this instruction defines a value
+                if (instruction->result()) {
+                    auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+                    if (raw_opt.has_value())
+                        current_defs.set(*raw_opt, instruction->result());
+                }
+            }
+
+            // Update m_block_definitions so successor blocks can inherit correctly
+            m_block_definitions.set(block.ptr(), current_defs);
+        }
+    }
+}
+
+// Find reaching definition for filling phi operands
+// This is simpler than the old version because all phis are already placed
+Value* Lifter::find_reaching_def_for_phi(BasicBlock& from_block, u32 operand_raw, HashTable<BasicBlock*>& visited)
+{
+    // If we've already visited this block, we have a cycle - return nullptr
+    if (visited.contains(&from_block))
+        return nullptr;
+    visited.set(&from_block);
+
+    // First check if this block actually defines the operand (non-phi definition)
+    // This takes priority because it's the value at the END of the block
+    auto actual_defs = m_block_actual_definitions.get(&from_block);
+    if (actual_defs.has_value() && actual_defs->contains(operand_raw)) {
+        auto block_defs = m_block_definitions.get(&from_block);
+        if (block_defs.has_value()) {
+            auto value = block_defs->get(operand_raw);
+            if (value.has_value())
+                return *value;
+        }
+    }
+
+    // If not defined in this block, check if there's a phi at entry
+    // The phi merges incoming values from predecessors
+    auto phi = m_phi_map.get(make_phi_key(&from_block, operand_raw));
+    if (phi.has_value())
+        return *phi;
+
+    // No actual definition here - trace back through predecessors
+    auto preds = m_predecessors.get(&from_block);
+    if (!preds.has_value() || preds->is_empty()) {
+        // Entry block with no definition - check for initial values (constants, parameters)
+        auto block_defs = m_block_definitions.get(&from_block);
+        if (block_defs.has_value()) {
+            auto value = block_defs->get(operand_raw);
+            if (value.has_value())
+                return *value;
+        }
+        return nullptr;
+    }
+
+    // For single predecessor, just trace back
+    if (preds->size() == 1)
+        return find_reaching_def_for_phi(*(*preds)[0], operand_raw, visited);
+
+    // Multiple predecessors - this should have a phi (placed in phase 1)
+    // If we get here, something is wrong - return nullptr
+    return nullptr;
 }
 
 }
