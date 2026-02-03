@@ -15,6 +15,8 @@
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadBlockElimination.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
+#include <LibJS/IR/Passes/EmptyBlockElimination.h>
+#include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
@@ -238,6 +240,10 @@ void optimize(Function& function)
         ConstantBranchFolding branch_fold;
         run_pass(branch_fold, function, changed);
 
+        // Jump threading - thread jumps through blocks with constant phi inputs
+        JumpThreading jump_thread;
+        run_pass(jump_thread, function, changed);
+
         // Dead code elimination - remove unused instructions
         DeadCodeElimination dce;
         run_pass(dce, function, changed);
@@ -245,6 +251,10 @@ void optimize(Function& function)
         // Dead block elimination - remove unreachable blocks
         DeadBlockElimination dbe;
         run_pass(dbe, function, changed);
+
+        // Empty block elimination - remove blocks that only jump
+        EmptyBlockElimination ebe;
+        run_pass(ebe, function, changed);
 
         // Block merging - merge linear chains of blocks
         BlockMerging block_merge;

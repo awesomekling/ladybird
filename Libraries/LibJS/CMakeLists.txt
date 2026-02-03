@@ -27,6 +27,8 @@ set(SOURCES
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadBlockElimination.cpp
     IR/Passes/DeadCodeElimination.cpp
+    IR/Passes/EmptyBlockElimination.cpp
+    IR/Passes/JumpThreading.cpp
     IR/Value.cpp
     Console.cpp
     Contrib/Test262/262Object.cpp
