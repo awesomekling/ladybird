@@ -65,6 +65,10 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
             auto index = get_or_add_constant(constant_value);
             return Bytecode::Operand(Bytecode::Operand::Type::Constant, index);
         }
+        if (value.is_parameter()) {
+            // For parameters, create an argument operand
+            return Bytecode::Operand(Bytecode::Operand::Type::Argument, value.parameter_index());
+        }
         return allocate_register();
     }();
 
@@ -560,11 +564,13 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
         while (!it.at_end()) {
             auto& instruction = const_cast<Bytecode::Instruction&>(*it);
 
-            // Offset constant operands to flat indices
-            // NB: Layout is [registers | constants] (no locals in lowered code)
-            instruction.visit_operands([number_of_registers](Bytecode::Operand& operand) {
+            // Offset constant and argument operands to flat indices
+            // NB: Layout is [registers | constants | arguments] (no locals in lowered code)
+            instruction.visit_operands([number_of_registers, number_of_constants](Bytecode::Operand& operand) {
                 if (operand.type() == Bytecode::Operand::Type::Constant) {
                     operand.offset_index_by(number_of_registers);
+                } else if (operand.type() == Bytecode::Operand::Type::Argument) {
+                    operand.offset_index_by(number_of_registers + number_of_constants);
                 }
             });
 

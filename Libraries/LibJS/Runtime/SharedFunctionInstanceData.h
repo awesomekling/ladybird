@@ -98,6 +98,10 @@ public:
     ConstructorKind m_constructor_kind : 1 { ConstructorKind::Base };        // [[ConstructorKind]]
     bool m_is_class_constructor : 1 { false };                               // [[IsClassConstructor]]
 
+    // Tiered compilation
+    mutable u32 m_call_count { 0 };
+    mutable bool m_tiered_up { false };
+
 private:
     virtual void visit_edges(Visitor&) override;
 };

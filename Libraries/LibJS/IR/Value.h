@@ -48,6 +48,12 @@ public:
         return m_constant_value;
     }
 
+    u32 parameter_index() const
+    {
+        VERIFY(is_parameter());
+        return m_parameter_index;
+    }
+
     void set_type(Type type) { m_type = type; }
 
     static NonnullOwnPtr<Value> create_for_instruction(u32 index);
@@ -60,6 +66,7 @@ private:
     Kind m_kind;
     Type m_type { Type::Unknown };
     u32 m_index { 0 };
+    u32 m_parameter_index { 0 };
     Instruction* m_defining_instruction { nullptr };
     Vector<Instruction*> m_uses;
     JS::Value m_constant_value;

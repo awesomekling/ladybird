@@ -45,9 +45,7 @@ NonnullOwnPtr<Value> Value::create_for_instruction(u32 index)
 NonnullOwnPtr<Value> Value::create_for_parameter(u32 index, u32 parameter_index)
 {
     auto value = adopt_own(*new Value(Kind::Parameter, index));
-    // NB: For parameters, we don't set anything special - they are just values
-    // without a defining instruction.
-    (void)parameter_index;
+    value->m_parameter_index = parameter_index;
     return value;
 }
 

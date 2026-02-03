@@ -283,6 +283,9 @@ public:
 
     void set_dynamic_imports_allowed(bool value) { m_dynamic_imports_allowed = value; }
 
+    void set_tier_up_threshold(u32 threshold) { m_tier_up_threshold = threshold; }
+    u32 tier_up_threshold() const { return m_tier_up_threshold; }
+
     Function<void(Promise&, Promise::RejectionOperation)> host_promise_rejection_tracker;
     Function<ThrowCompletionOr<Value>(JobCallback&, Value, ReadonlySpan<Value>)> host_call_job_callback;
     Function<void(FinalizationRegistry&)> host_enqueue_finalization_registry_cleanup_job;
@@ -366,6 +369,9 @@ private:
     OwnPtr<Bytecode::Interpreter> m_bytecode_interpreter;
 
     bool m_dynamic_imports_allowed { false };
+
+    // Tiered compilation threshold (0 = disabled)
+    u32 m_tier_up_threshold { 0 };
 };
 
 template<typename GlobalObjectType, typename... Args>

@@ -822,6 +822,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool disable_debug_printing = false;
     bool use_test262_global = false;
     bool parse_only = false;
+    u32 tier_up_threshold = 0;
     StringView evaluate_script;
     Vector<StringView> script_paths;
 
@@ -834,6 +835,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(JS::IR::g_optimize_ir, "Optimize the IR (use with --dump-ir)", "optimize-ir", 'O');
     args_parser.add_option(JS::IR::g_dump_ir_between_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
     args_parser.add_option(JS::IR::g_lower_ir, "Lower IR back to bytecode and execute", "lower-ir", 'L');
+    args_parser.add_option(tier_up_threshold, "Tier up functions after N calls (0 = disabled)", "tier-up-threshold", 'T', "count");
     args_parser.add_option(s_as_module, "Treat as module", "as-module", 'm');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');
     args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'i');
@@ -855,6 +857,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     g_vm_storage.get() = JS::VM::create();
     g_vm = g_vm_storage->ptr();
     g_vm->set_dynamic_imports_allowed(true);
+    g_vm->set_tier_up_threshold(tier_up_threshold);
 
     if (!disable_debug_printing) {
         // NOTE: These will print out both warnings when using something like Promise.reject().catch(...) -

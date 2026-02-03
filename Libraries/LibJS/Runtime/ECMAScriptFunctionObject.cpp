@@ -13,6 +13,13 @@
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Dump.h>
+#include <LibJS/IR/Function.h>
+#include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Lifter.h>
+#include <LibJS/IR/Lowerer.h>
+#include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/AsyncFunctionDriverWrapper.h>
@@ -254,14 +261,26 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
 
 ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals_count, size_t& constants_count, size_t& argument_count)
 {
-    auto& executable = shared_data().m_executable;
+    auto& data = const_cast<SharedFunctionInstanceData&>(shared_data());
+    auto& executable = data.m_executable;
     if (!executable) {
         if (is_module_wrapper()) {
             executable = TRY(Bytecode::compile(vm(), ecmascript_code(), kind(), name()));
         } else {
-            executable = TRY(Bytecode::compile(vm(), shared_data(), Bytecode::BuiltinAbstractOperationsEnabled::No));
+            executable = TRY(Bytecode::compile(vm(), data, Bytecode::BuiltinAbstractOperationsEnabled::No));
         }
     }
+
+    // Tiered compilation: after N calls, optimize the bytecode via IR
+    if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up) {
+        if (++data.m_call_count >= threshold) {
+            data.m_tiered_up = true;
+            auto ir_function = IR::Lifter::lift(*executable);
+            IR::optimize(*ir_function);
+            executable = IR::Lowerer::lower(vm(), *ir_function);
+        }
+    }
+
     registers_and_locals_count = executable->registers_and_locals_count;
     constants_count = executable->constants.size();
     argument_count = max(argument_count, formal_parameters().size());

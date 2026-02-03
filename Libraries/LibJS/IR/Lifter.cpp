@@ -96,8 +96,11 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
         // Get the constant from the executable
         auto constant = m_executable.constants[decoded_operand.index()];
         value = &m_function->create_constant(constant);
+    } else if (decoded_operand.type() == Bytecode::Operand::Type::Argument) {
+        // For arguments, create a parameter value to preserve the argument index
+        value = &m_function->create_parameter(decoded_operand.index());
     } else {
-        // For registers/locals/arguments, create a register value
+        // For registers/locals, create a register value
         // NB: In full SSA, phi nodes would be inserted at merge points
         value = &m_function->create_register_value();
     }
@@ -385,9 +388,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PostfixIncrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
         // dst gets the OLD value (that's what postfix returns)
-        auto& result = m_function->build_postfix_increment(block, src);
-        define_operand(op.dst(), result, block);
-        // src also gets MUTATED to src + 1 - create a new SSA value for it
+        auto& old_value = m_function->build_move(block, src);
+        define_operand(op.dst(), old_value, block);
+        // src gets MUTATED to src + 1 - create a new SSA value for it
         auto& incremented = m_function->build_increment(block, src);
         define_operand(op.src(), incremented, block);
         break;
@@ -396,9 +399,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PostfixDecrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
         // dst gets the OLD value (that's what postfix returns)
-        auto& result = m_function->build_postfix_decrement(block, src);
-        define_operand(op.dst(), result, block);
-        // src also gets MUTATED to src - 1 - create a new SSA value for it
+        auto& old_value = m_function->build_move(block, src);
+        define_operand(op.dst(), old_value, block);
+        // src gets MUTATED to src - 1 - create a new SSA value for it
         auto& decremented = m_function->build_decrement(block, src);
         define_operand(op.src(), decremented, block);
         break;
@@ -1347,16 +1350,29 @@ void Lifter::compute_block_predecessors()
 
 void Lifter::rename_uses_in_block(BasicBlock& block, Vector<Value*> const& old_values, Value& new_value, size_t start_index) // static
 {
+    // Track which old_values are still valid for replacement.
+    // Once an instruction redefines a value (produces it as result), we stop
+    // replacing uses of that value because subsequent uses should refer to the
+    // new definition, not the phi.
+    HashTable<Value const*> active_old_values;
+    for (auto* v : old_values)
+        active_old_values.set(v);
+
     for (size_t i = start_index; i < block.instructions().size(); ++i) {
         auto& instruction = block.instructions()[i];
+
+        // First, replace operand uses with the phi result (if the old value is still active)
         for (size_t op_idx = 0; op_idx < instruction->operands().size(); ++op_idx) {
             auto* operand = instruction->operands()[op_idx];
-            for (auto* old_value : old_values) {
-                if (operand == old_value) {
-                    instruction->set_operand(op_idx, &new_value);
-                    break;
-                }
+            if (operand && active_old_values.contains(operand)) {
+                instruction->set_operand(op_idx, &new_value);
             }
+        }
+
+        // Then, check if this instruction's result is one of the old_values.
+        // If so, this block redefines that value, so stop replacing uses of it.
+        if (instruction->result()) {
+            active_old_values.remove(instruction->result());
         }
     }
 }
