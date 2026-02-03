@@ -321,7 +321,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Object creation
     case Opcode::NewObject:
-        emit<Bytecode::Op::NewObjectWithNoPrototype>(dst());
+        emit<Bytecode::Op::NewObject>(dst(), instruction.cache_index());
         break;
 
     // Postfix increment/decrement (dst gets old value, src gets mutated)
@@ -369,15 +369,30 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
-    // Not yet implemented - skip for now
+    // NewFunction
     case Opcode::NewFunction:
-    case Opcode::Construct:
+        emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), OptionalNone {});
+        break;
+
+    // Construct (variable-length arguments)
+    case Opcode::Construct: {
+        // IR Construct operands: [callee, arg0, arg1, ...]
+        auto callee = operand(0);
+        size_t arg_count = instruction.operands().size() - 1;
+        Vector<Bytecode::Operand> args;
+        for (size_t i = 0; i < arg_count; ++i)
+            args.append(operand(i + 1));
+        emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(arg_count, dst(), callee, Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
+    // Iterators - these are complex multi-output ops, emit simplified versions
     case Opcode::GetIterator:
     case Opcode::IteratorNext:
     case Opcode::IteratorNextUnpack:
     case Opcode::IteratorClose:
     case Opcode::IteratorToArray:
-        // These need special handling for variable-length operands or complex state
+        // TODO: These need special handling for multi-output behavior
         break;
     }
 }

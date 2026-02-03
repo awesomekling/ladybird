@@ -416,6 +416,19 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
     return result;
 }
 
+Value& Function::build_new_function(BasicBlock& block)
+{
+    auto instruction = Instruction::create(Opcode::NewFunction);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Function);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Special
 Value& Function::build_in(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::In, lhs, rhs); }
 Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::InstanceOf, lhs, rhs); }

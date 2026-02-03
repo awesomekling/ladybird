@@ -120,6 +120,7 @@ public:
     // Object creation
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
+    Value& build_new_function(BasicBlock& block);
 
     // Iterators
     Value& build_get_iterator(BasicBlock& block, Value& iterable);

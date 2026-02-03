@@ -703,6 +703,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case NewObject: {
         auto const& op = static_cast<Bytecode::Op::NewObject const&>(instruction);
         auto& result = m_function->build_new_object(block);
+        result.defining_instruction()->set_cache_index(op.cache_index());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -742,8 +743,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewFunction: {
         auto const& op = static_cast<Bytecode::Op::NewFunction const&>(instruction);
-        // NB: NewFunction creates a new function object. For now, track it as a generic value.
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_new_function(block);
+        result.defining_instruction()->set_function_node(&op.function_node());
+        result.defining_instruction()->set_lhs_name(op.lhs_name());
         define_operand(op.dst(), result, block);
         break;
     }
