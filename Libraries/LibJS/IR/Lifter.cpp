@@ -396,6 +396,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case JumpIf:
     case JumpTrue:
     case JumpFalse:
+    case JumpGreaterThan:
+    case JumpGreaterThanEquals:
+    case JumpLessThan:
+    case JumpLessThanEquals:
+    case JumpLooselyEquals:
+    case JumpLooselyInequals:
+    case JumpStrictlyEquals:
+    case JumpStrictlyInequals:
+    case JumpNullish:
+    case JumpUndefined:
         // These are handled later when we connect control flow
         break;
 
@@ -1135,6 +1145,109 @@ void Lifter::connect_control_flow()
             }
             break;
         }
+
+        // Optimized comparison jumps
+        case JumpGreaterThan: {
+            auto const& op = static_cast<Bytecode::Op::JumpGreaterThan const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_greater_than(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpGreaterThanEquals: {
+            auto const& op = static_cast<Bytecode::Op::JumpGreaterThanEquals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_greater_than_equals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpLessThan: {
+            auto const& op = static_cast<Bytecode::Op::JumpLessThan const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_less_than(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpLessThanEquals: {
+            auto const& op = static_cast<Bytecode::Op::JumpLessThanEquals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_less_than_equals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpLooselyEquals: {
+            auto const& op = static_cast<Bytecode::Op::JumpLooselyEquals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_loosely_equals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpLooselyInequals: {
+            auto const& op = static_cast<Bytecode::Op::JumpLooselyInequals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_loosely_inequals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpStrictlyEquals: {
+            auto const& op = static_cast<Bytecode::Op::JumpStrictlyEquals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_strictly_equals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpStrictlyInequals: {
+            auto const& op = static_cast<Bytecode::Op::JumpStrictlyInequals const&>(*last_instruction);
+            auto& lhs = get_or_create_value_for_operand(op.lhs());
+            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& condition = m_function->build_strictly_inequals(ir_block, lhs, rhs);
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpNullish: {
+            auto const& op = static_cast<Bytecode::Op::JumpNullish const&>(*last_instruction);
+            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            // NB: JumpNullish jumps if null or undefined - we'd need a proper IsNullish check
+            // For now, treat as a branch on the condition
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+        case JumpUndefined: {
+            auto const& op = static_cast<Bytecode::Op::JumpUndefined const&>(*last_instruction);
+            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
+            // NB: JumpUndefined jumps if undefined - we'd need a proper IsUndefined check
+            // For now, treat as a branch on the condition
+            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+
         default:
             // If not terminated by a known terminator, fall through to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
