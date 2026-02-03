@@ -47,6 +47,18 @@ void Lifter::lift_basic_blocks()
             ? m_executable.basic_block_start_offsets[block_index + 1]
             : m_executable.bytecode.size();
 
+        // Set exception handler based on bytecode exception handler table
+        if (auto handlers = m_executable.exception_handlers_for_offset(start_offset); handlers.has_value()) {
+            if (handlers->handler_offset.has_value()) {
+                auto handler_block_index = address_to_block_index(handlers->handler_offset.value());
+                ir_block.set_exception_handler(m_block_map.get(handler_block_index).value());
+            }
+            if (handlers->finalizer_offset.has_value()) {
+                auto finalizer_block_index = address_to_block_index(handlers->finalizer_offset.value());
+                ir_block.set_finalizer(m_block_map.get(finalizer_block_index).value());
+            }
+        }
+
         auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
         Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
 
