@@ -741,6 +741,9 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
     executable->registers_and_locals_and_constants_count = number_of_registers + number_of_constants;
     executable->argument_index_base = number_of_registers + number_of_constants;
 
+    // Copy length_identifier for GetLength instruction support
+    executable->length_identifier = source_executable->length_identifier;
+
     return executable;
 }
 
