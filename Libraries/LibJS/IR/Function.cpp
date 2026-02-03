@@ -415,6 +415,43 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
 Value& Function::build_in(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::In, lhs, rhs); }
 Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::InstanceOf, lhs, rhs); }
 
+// Iterators
+Value& Function::build_get_iterator(BasicBlock& block, Value& iterable)
+{
+    return build_unary_op(block, Opcode::GetIterator, iterable);
+}
+
+Value& Function::build_iterator_next(BasicBlock& block, Value& iterator)
+{
+    return build_unary_op(block, Opcode::IteratorNext, iterator);
+}
+
+Value& Function::build_iterator_next_unpack(BasicBlock& block, Value& iterator)
+{
+    return build_unary_op(block, Opcode::IteratorNextUnpack, iterator);
+}
+
+void Function::build_iterator_close(BasicBlock& block, Value& iterator)
+{
+    auto instruction = Instruction::create(Opcode::IteratorClose);
+    instruction->add_operand(&iterator);
+    block.append(move(instruction));
+}
+
+Value& Function::build_iterator_to_array(BasicBlock& block, Value& iterator)
+{
+    auto instruction = Instruction::create(Opcode::IteratorToArray);
+    instruction->add_operand(&iterator);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Array);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Copy
 Value& Function::build_move(BasicBlock& block, Value& source)
 {

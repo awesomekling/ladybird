@@ -107,8 +107,13 @@ enum class Opcode : u8 {
     // Special
     In,
     InstanceOf,
+
+    // Iterators
     GetIterator,
     IteratorNext,
+    IteratorNextUnpack,
+    IteratorClose,
+    IteratorToArray,
 
     // Copy
     Move,

@@ -119,6 +119,13 @@ public:
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
 
+    // Iterators
+    Value& build_get_iterator(BasicBlock& block, Value& iterable);
+    Value& build_iterator_next(BasicBlock& block, Value& iterator);
+    Value& build_iterator_next_unpack(BasicBlock& block, Value& iterator);
+    void build_iterator_close(BasicBlock& block, Value& iterator);
+    Value& build_iterator_to_array(BasicBlock& block, Value& iterator);
+
     // Special
     Value& build_in(BasicBlock& block, Value& lhs, Value& rhs);
     Value& build_instance_of(BasicBlock& block, Value& lhs, Value& rhs);

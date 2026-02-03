@@ -642,6 +642,43 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
 
+    // Iterators
+    case GetIterator: {
+        auto const& op = static_cast<Bytecode::Op::GetIterator const&>(instruction);
+        auto& iterable = get_or_create_value_for_operand(op.iterable());
+        auto& result = m_function->build_get_iterator(block, iterable);
+        // NB: GetIterator writes to 3 destinations. We track the iterator object as the main result.
+        m_operand_to_value.set(op.dst_iterator_object().raw(), &result);
+        break;
+    }
+    case IteratorNext: {
+        auto const& op = static_cast<Bytecode::Op::IteratorNext const&>(instruction);
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& result = m_function->build_iterator_next(block, iterator);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case IteratorNextUnpack: {
+        auto const& op = static_cast<Bytecode::Op::IteratorNextUnpack const&>(instruction);
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& result = m_function->build_iterator_next_unpack(block, iterator);
+        m_operand_to_value.set(op.dst_value().raw(), &result);
+        break;
+    }
+    case IteratorClose: {
+        auto const& op = static_cast<Bytecode::Op::IteratorClose const&>(instruction);
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        m_function->build_iterator_close(block, iterator);
+        break;
+    }
+    case IteratorToArray: {
+        auto const& op = static_cast<Bytecode::Op::IteratorToArray const&>(instruction);
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& result = m_function->build_iterator_to_array(block, iterator);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
     // Environment creation ops (no IR needed, affects runtime)
     case CreateVariable:
     case CreateMutableBinding:

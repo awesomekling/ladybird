@@ -181,6 +181,12 @@ char const* opcode_to_string(Opcode opcode)
         return "GetIterator";
     case Opcode::IteratorNext:
         return "IteratorNext";
+    case Opcode::IteratorNextUnpack:
+        return "IteratorNextUnpack";
+    case Opcode::IteratorClose:
+        return "IteratorClose";
+    case Opcode::IteratorToArray:
+        return "IteratorToArray";
     case Opcode::Move:
         return "Move";
     }
