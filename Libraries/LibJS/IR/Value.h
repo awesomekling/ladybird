@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2026, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/NonnullOwnPtr.h>
+#include <AK/Vector.h>
+#include <LibJS/Export.h>
+#include <LibJS/IR/Forward.h>
+#include <LibJS/IR/Type.h>
+#include <LibJS/Runtime/Value.h>
+
+namespace JS::IR {
+
+class JS_API Value {
+    AK_MAKE_NONCOPYABLE(Value);
+    AK_MAKE_NONMOVABLE(Value);
+
+public:
+    enum class Kind : u8 {
+        Instruction,
+        Parameter,
+        Constant,
+    };
+
+    Kind kind() const { return m_kind; }
+    Type type() const { return m_type; }
+    u32 index() const { return m_index; }
+
+    bool is_instruction() const { return m_kind == Kind::Instruction; }
+    bool is_parameter() const { return m_kind == Kind::Parameter; }
+    bool is_constant() const { return m_kind == Kind::Constant; }
+
+    Instruction* defining_instruction() const { return m_defining_instruction; }
+    void set_defining_instruction(Instruction* instruction) { m_defining_instruction = instruction; }
+
+    Vector<Instruction*> const& uses() const { return m_uses; }
+    void add_use(Instruction* instruction);
+    void remove_use(Instruction* instruction);
+
+    JS::Value constant_value() const
+    {
+        VERIFY(is_constant());
+        return m_constant_value;
+    }
+
+    void set_type(Type type) { m_type = type; }
+
+    static NonnullOwnPtr<Value> create_for_instruction(u32 index);
+    static NonnullOwnPtr<Value> create_for_parameter(u32 index, u32 parameter_index);
+    static NonnullOwnPtr<Value> create_for_constant(u32 index, JS::Value constant);
+
+private:
+    Value(Kind kind, u32 index);
+
+    Kind m_kind;
+    Type m_type { Type::Unknown };
+    u32 m_index { 0 };
+    Instruction* m_defining_instruction { nullptr };
+    Vector<Instruction*> m_uses;
+    JS::Value m_constant_value;
+};
+
+}

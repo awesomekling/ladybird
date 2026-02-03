@@ -330,6 +330,18 @@ template<typename T>
 requires(!IsLvalueReference<T>)
 class ThrowCompletionOr;
 
+namespace IR {
+
+class BasicBlock;
+class Function;
+class Instruction;
+class Value;
+
+enum class Opcode : u8;
+enum class Type : u8;
+
+}
+
 namespace Bytecode {
 
 class BasicBlock;

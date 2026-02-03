@@ -16,6 +16,11 @@ set(SOURCES
     Bytecode/RegexTable.cpp
     Bytecode/ScopedOperand.cpp
     Bytecode/StringTable.cpp
+    IR/BasicBlock.cpp
+    IR/Dump.cpp
+    IR/Function.cpp
+    IR/Instruction.cpp
+    IR/Value.cpp
     Console.cpp
     Contrib/Test262/262Object.cpp
     Contrib/Test262/AgentObject.cpp
