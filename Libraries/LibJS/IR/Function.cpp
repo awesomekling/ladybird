@@ -511,7 +511,8 @@ Value& Function::build_phi(BasicBlock& block, Vector<Value*> values, Vector<Basi
     result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
-    block.append(move(instruction));
+    // Phi nodes go at the start of the block (before other instructions)
+    block.prepend(move(instruction));
     return result;
 }
 

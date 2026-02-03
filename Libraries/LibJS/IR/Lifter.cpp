@@ -25,6 +25,8 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     Lifter lifter(executable);
     lifter.lift_basic_blocks();
     lifter.connect_control_flow();
+    lifter.compute_block_predecessors();
+    lifter.insert_phi_nodes();
     return move(lifter.m_function);
 }
 
@@ -39,6 +41,9 @@ void Lifter::lift_basic_blocks()
     }
 
     // Second pass: lift instructions from each basic block
+    // NB: We don't clear definitions between blocks - this is a simplification
+    // that lets values flow through. Proper SSA would require phi node insertion
+    // at merge points with dominator-based definition resolution.
     for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
         auto& ir_block = *m_block_map.get(static_cast<u32>(block_index)).value();
 
@@ -66,15 +71,18 @@ void Lifter::lift_basic_blocks()
             lift_instruction(*it, ir_block);
             ++it;
         }
+
+        // Save this block's definitions (snapshot at end of block)
+        m_block_definitions.set(&ir_block, m_current_definitions);
     }
 }
 
-Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand)
+Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block)
 {
     auto raw = operand.raw();
 
-    // Check if we already have a value for this operand
-    if (auto it = m_operand_to_value.find(raw); it != m_operand_to_value.end())
+    // Check if we already have a value for this operand in the current block
+    if (auto it = m_current_definitions.find(raw); it != m_current_definitions.end())
         return *it->value;
 
     // Decode the operand to get the real type (operands are stored in a flat space)
@@ -89,20 +97,22 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand)
         value = &m_function->create_constant(constant);
     } else {
         // For registers/locals/arguments, create a register value
-        // NB: This is a simplification - in full SSA we'd need phi nodes
+        // NB: In full SSA, phi nodes would be inserted at merge points
         value = &m_function->create_register_value();
     }
 
-    m_operand_to_value.set(raw, value);
+    m_current_definitions.set(raw, value);
     return *value;
+
+    (void)block; // Will be used for phi node resolution
 }
 
-Value& Lifter::create_value_for_destination(Bytecode::Operand operand)
+void Lifter::define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block)
 {
-    // For SSA, each write creates a new value
-    // We update the mapping to point to the new value
-    // NB: This is handled by the instruction creation, which returns the result value
-    return get_or_create_value_for_operand(operand);
+    auto raw = operand.raw();
+    m_current_definitions.set(raw, &value);
+    m_written_operands.set(raw);
+    (void)block; // Will be used for tracking per-block definitions
 }
 
 void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlock& block)
@@ -113,293 +123,301 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Arithmetic binary ops
     case Add: {
         auto const& op = static_cast<Bytecode::Op::Add const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_add(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Sub: {
         auto const& op = static_cast<Bytecode::Op::Sub const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_sub(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Mul: {
         auto const& op = static_cast<Bytecode::Op::Mul const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_mul(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Div: {
         auto const& op = static_cast<Bytecode::Op::Div const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_div(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Mod: {
         auto const& op = static_cast<Bytecode::Op::Mod const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_mod(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Exp: {
         auto const& op = static_cast<Bytecode::Op::Exp const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_exp(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Bitwise binary ops
     case BitwiseAnd: {
         auto const& op = static_cast<Bytecode::Op::BitwiseAnd const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_bitwise_and(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case BitwiseOr: {
         auto const& op = static_cast<Bytecode::Op::BitwiseOr const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_bitwise_or(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case BitwiseXor: {
         auto const& op = static_cast<Bytecode::Op::BitwiseXor const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_bitwise_xor(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case LeftShift: {
         auto const& op = static_cast<Bytecode::Op::LeftShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_left_shift(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case RightShift: {
         auto const& op = static_cast<Bytecode::Op::RightShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_right_shift(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case UnsignedRightShift: {
         auto const& op = static_cast<Bytecode::Op::UnsignedRightShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_unsigned_right_shift(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Comparison ops
     case LessThan: {
         auto const& op = static_cast<Bytecode::Op::LessThan const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_less_than(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case LessThanEquals: {
         auto const& op = static_cast<Bytecode::Op::LessThanEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_less_than_equals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GreaterThan: {
         auto const& op = static_cast<Bytecode::Op::GreaterThan const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_greater_than(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GreaterThanEquals: {
         auto const& op = static_cast<Bytecode::Op::GreaterThanEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_greater_than_equals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case LooselyEquals: {
         auto const& op = static_cast<Bytecode::Op::LooselyEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_loosely_equals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case StrictlyEquals: {
         auto const& op = static_cast<Bytecode::Op::StrictlyEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_strictly_equals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case LooselyInequals: {
         auto const& op = static_cast<Bytecode::Op::LooselyInequals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_loosely_inequals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case StrictlyInequals: {
         auto const& op = static_cast<Bytecode::Op::StrictlyInequals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_strictly_inequals(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Unary ops
     case BitwiseNot: {
         auto const& op = static_cast<Bytecode::Op::BitwiseNot const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_bitwise_not(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case UnaryMinus: {
         auto const& op = static_cast<Bytecode::Op::UnaryMinus const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_negate(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case UnaryPlus: {
         auto const& op = static_cast<Bytecode::Op::UnaryPlus const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_unary_plus(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Not: {
         auto const& op = static_cast<Bytecode::Op::Not const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_not(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Typeof: {
         auto const& op = static_cast<Bytecode::Op::Typeof const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_typeof(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ToBoolean: {
         auto const& op = static_cast<Bytecode::Op::ToBoolean const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_to_boolean(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ToObject: {
         auto const& op = static_cast<Bytecode::Op::ToObject const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_to_object(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ToString: {
         auto const& op = static_cast<Bytecode::Op::ToString const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_to_string(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ToInt32: {
         auto const& op = static_cast<Bytecode::Op::ToInt32 const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_to_int32(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ToLength: {
         auto const& op = static_cast<Bytecode::Op::ToLength const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_to_length(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case TypeofBinding: {
         auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
         auto& result = m_function->build_typeof_binding(block, op.identifier());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Increment/Decrement
     case Increment: {
         auto const& op = static_cast<Bytecode::Op::Increment const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.dst());
+        auto& src = get_or_create_value_for_operand(op.dst(), block);
         auto& result = m_function->build_increment(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case Decrement: {
         auto const& op = static_cast<Bytecode::Op::Decrement const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.dst());
+        auto& src = get_or_create_value_for_operand(op.dst(), block);
         auto& result = m_function->build_decrement(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case PostfixIncrement: {
         auto const& op = static_cast<Bytecode::Op::PostfixIncrement const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
+        // dst gets the OLD value (that's what postfix returns)
         auto& result = m_function->build_postfix_increment(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
+        // src also gets MUTATED to src + 1 - create a new SSA value for it
+        auto& incremented = m_function->build_increment(block, src);
+        define_operand(op.src(), incremented, block);
         break;
     }
     case PostfixDecrement: {
         auto const& op = static_cast<Bytecode::Op::PostfixDecrement const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
+        // dst gets the OLD value (that's what postfix returns)
         auto& result = m_function->build_postfix_decrement(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
+        // src also gets MUTATED to src - 1 - create a new SSA value for it
+        auto& decremented = m_function->build_decrement(block, src);
+        define_operand(op.src(), decremented, block);
         break;
     }
 
     // String ops
     case ConcatString: {
         auto const& op = static_cast<Bytecode::Op::ConcatString const&>(instruction);
-        auto& dst = get_or_create_value_for_operand(op.dst());
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& dst = get_or_create_value_for_operand(op.dst(), block);
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_concat_string(block, dst, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Move
     case Mov: {
         auto const& op = static_cast<Bytecode::Op::Mov const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src());
+        auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_move(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -423,21 +441,21 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
 
     case Return: {
         auto const& op = static_cast<Bytecode::Op::Return const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.value());
+        auto& value = get_or_create_value_for_operand(op.value(), block);
         m_function->build_return(block, value);
         break;
     }
 
     case Throw: {
         auto const& op = static_cast<Bytecode::Op::Throw const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_throw(block, value);
         break;
     }
 
     case End: {
         auto const& op = static_cast<Bytecode::Op::End const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.value());
+        auto& value = get_or_create_value_for_operand(op.value(), block);
         m_function->build_return(block, value);
         break;
     }
@@ -445,31 +463,31 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Property access
     case GetById: {
         auto const& op = static_cast<Bytecode::Op::GetById const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_by_id(block, base, op.property());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetByValue: {
         auto const& op = static_cast<Bytecode::Op::GetByValue const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& result = m_function->build_get_by_value(block, base, property);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case PutNormalById: {
         auto const& op = static_cast<Bytecode::Op::PutNormalById const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
         break;
     }
     case PutNormalByValue: {
         auto const& op = static_cast<Bytecode::Op::PutNormalByValue const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
@@ -477,109 +495,109 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // WithThis property access variants
     case GetByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetByIdWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_by_id(block, base, op.property());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetByValueWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& result = m_function->build_get_by_value(block, base, property);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case PutNormalByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutNormalByIdWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
         break;
     }
     case PutNormalByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutNormalByValueWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
     case DeleteByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::DeleteByIdWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_delete_by_id(block, base, op.property());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case DeleteByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::DeleteByValueWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& result = m_function->build_delete_by_value(block, base, property);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     case DeleteById: {
         auto const& op = static_cast<Bytecode::Op::DeleteById const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_delete_by_id(block, base, op.property());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case DeleteByValue: {
         auto const& op = static_cast<Bytecode::Op::DeleteByValue const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& result = m_function->build_delete_by_value(block, base, property);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Other Put variants (for object literals, classes, etc.)
     case PutOwnById: {
         auto const& op = static_cast<Bytecode::Op::PutOwnById const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
         break;
     }
     case PutOwnByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutOwnByIdWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
         break;
     }
     case PutOwnByValue: {
         auto const& op = static_cast<Bytecode::Op::PutOwnByValue const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
     case PutOwnByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutOwnByValueWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
-        auto& property = get_or_create_value_for_operand(op.property());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
     case InitObjectLiteralProperty: {
         auto const& op = static_cast<Bytecode::Op::InitObjectLiteralProperty const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.object());
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& base = get_or_create_value_for_operand(op.object(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
         break;
     }
     case CreateDataPropertyOrThrow: {
         auto const& op = static_cast<Bytecode::Op::CreateDataPropertyOrThrow const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.object());
-        auto& property = get_or_create_value_for_operand(op.property());
-        auto& value = get_or_create_value_for_operand(op.value());
+        auto& base = get_or_create_value_for_operand(op.object(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& value = get_or_create_value_for_operand(op.value(), block);
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
@@ -606,18 +624,18 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // In/InstanceOf
     case In: {
         auto const& op = static_cast<Bytecode::Op::In const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_in(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case InstanceOf: {
         auto const& op = static_cast<Bytecode::Op::InstanceOf const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs());
-        auto& rhs = get_or_create_value_for_operand(op.rhs());
+        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
         auto& result = m_function->build_instance_of(block, lhs, rhs);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -625,54 +643,54 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetBinding: {
         auto const& op = static_cast<Bytecode::Op::GetBinding const&>(instruction);
         auto& result = m_function->build_get_binding(block, op.identifier());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetInitializedBinding: {
         auto const& op = static_cast<Bytecode::Op::GetInitializedBinding const&>(instruction);
         auto& result = m_function->build_get_binding(block, op.identifier());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case SetLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::SetLexicalBinding const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_binding(block, op.identifier(), value);
         break;
     }
     case SetVariableBinding: {
         auto const& op = static_cast<Bytecode::Op::SetVariableBinding const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_binding(block, op.identifier(), value);
         break;
     }
     case InitializeLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeLexicalBinding const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_binding(block, op.identifier(), value);
         break;
     }
     case InitializeVariableBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeVariableBinding const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_binding(block, op.identifier(), value);
         break;
     }
     case DeleteVariable: {
         auto const& op = static_cast<Bytecode::Op::DeleteVariable const&>(instruction);
         auto& result = m_function->build_delete_variable(block, op.identifier());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetGlobal: {
         auto const& op = static_cast<Bytecode::Op::GetGlobal const&>(instruction);
         auto& result = m_function->build_get_global(block, op.identifier());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case SetGlobal: {
         auto const& op = static_cast<Bytecode::Op::SetGlobal const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.src());
+        auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_global(block, op.identifier(), value);
         break;
     }
@@ -681,16 +699,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case NewObject: {
         auto const& op = static_cast<Bytecode::Op::NewObject const&>(instruction);
         auto& result = m_function->build_new_object(block);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewArray: {
         auto const& op = static_cast<Bytecode::Op::NewArray const&>(instruction);
         Vector<Value*> elements;
         for (auto operand : op.elements())
-            elements.append(&get_or_create_value_for_operand(operand));
+            elements.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_function->build_new_array(block, elements.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewPrimitiveArray: {
@@ -699,163 +717,163 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         for (auto value : op.elements())
             elements.append(&m_function->create_constant(value));
         auto& result = m_function->build_new_array(block, elements.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewArrayWithLength: {
         auto const& op = static_cast<Bytecode::Op::NewArrayWithLength const&>(instruction);
-        auto& length = get_or_create_value_for_operand(op.array_length());
+        auto& length = get_or_create_value_for_operand(op.array_length(), block);
         // Use build_new_array with no elements for now; length is tracked separately
         Vector<Value*> elements;
         auto& result = m_function->build_new_array(block, elements.span());
         (void)length; // TODO: Properly handle array length
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewObjectWithNoPrototype: {
         auto const& op = static_cast<Bytecode::Op::NewObjectWithNoPrototype const&>(instruction);
         auto& result = m_function->build_new_object(block);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewFunction: {
         auto const& op = static_cast<Bytecode::Op::NewFunction const&>(instruction);
         // NB: NewFunction creates a new function object. For now, track it as a generic value.
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewRegExp: {
         auto const& op = static_cast<Bytecode::Op::NewRegExp const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewTypeError: {
         auto const& op = static_cast<Bytecode::Op::NewTypeError const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case NewClass: {
         auto const& op = static_cast<Bytecode::Op::NewClass const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Calls
     case Call: {
         auto const& op = static_cast<Bytecode::Op::Call const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         Vector<Value*> args;
         for (auto operand : op.arguments())
-            args.append(&get_or_create_value_for_operand(operand));
+            args.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_function->build_call(block, callee, this_value, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallBuiltin: {
         auto const& op = static_cast<Bytecode::Op::CallBuiltin const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         Vector<Value*> args;
         for (auto operand : op.arguments())
-            args.append(&get_or_create_value_for_operand(operand));
+            args.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_function->build_call(block, callee, this_value, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallConstruct: {
         auto const& op = static_cast<Bytecode::Op::CallConstruct const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
         Vector<Value*> args;
         for (auto operand : op.arguments())
-            args.append(&get_or_create_value_for_operand(operand));
+            args.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_function->build_construct(block, callee, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::CallWithArgumentArray const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& this_value = get_or_create_value_for_operand(op.this_value());
-        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
         // NB: In full implementation, we'd need to handle spreading the array
         Vector<Value*> args { &args_array };
         auto& result = m_function->build_call(block, callee, this_value, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallConstructWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::CallConstructWithArgumentArray const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
         Vector<Value*> args { &args_array };
         auto& result = m_function->build_construct(block, callee, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallDirectEval: {
         auto const& op = static_cast<Bytecode::Op::CallDirectEval const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         Vector<Value*> args;
         for (auto operand : op.arguments())
-            args.append(&get_or_create_value_for_operand(operand));
+            args.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_function->build_call(block, callee, this_value, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CallDirectEvalWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::CallDirectEvalWithArgumentArray const&>(instruction);
-        auto& callee = get_or_create_value_for_operand(op.callee());
-        auto& this_value = get_or_create_value_for_operand(op.this_value());
-        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
         Vector<Value*> args { &args_array };
         auto& result = m_function->build_call(block, callee, this_value, args.span());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Additional property access
     case GetLength: {
         auto const& op = static_cast<Bytecode::Op::GetLength const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_length(block, base);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetLengthWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetLengthWithThis const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_length(block, base);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetMethod: {
         auto const& op = static_cast<Bytecode::Op::GetMethod const&>(instruction);
-        auto& object = get_or_create_value_for_operand(op.object());
+        auto& object = get_or_create_value_for_operand(op.object(), block);
         auto& result = m_function->build_get_by_id(block, object, op.property());
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetNewTarget: {
         auto const& op = static_cast<Bytecode::Op::GetNewTarget const&>(instruction);
         // GetNewTarget returns a special value from the execution context
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetCalleeAndThisFromEnvironment: {
         auto const& op = static_cast<Bytecode::Op::GetCalleeAndThisFromEnvironment const&>(instruction);
         // This instruction writes to both callee and this_value operands
         auto& callee_result = m_function->build_get_binding(block, op.identifier());
-        m_operand_to_value.set(op.callee().raw(), &callee_result);
+        define_operand(op.callee(), callee_result, block);
         // this_value is typically undefined for function calls
         auto& this_result = m_function->create_register_value();
-        m_operand_to_value.set(op.this_value().raw(), &this_result);
+        define_operand(op.this_value(), this_result, block);
         break;
     }
     case ResolveThisBinding: {
@@ -864,46 +882,46 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case GetObjectPropertyIterator: {
         auto const& op = static_cast<Bytecode::Op::GetObjectPropertyIterator const&>(instruction);
-        auto& object = get_or_create_value_for_operand(op.object());
+        auto& object = get_or_create_value_for_operand(op.object(), block);
         auto& result = m_function->build_get_iterator(block, object);
-        m_operand_to_value.set(op.dst_iterator_object().raw(), &result);
+        define_operand(op.dst_iterator_object(), result, block);
         break;
     }
 
     // Iterators
     case GetIterator: {
         auto const& op = static_cast<Bytecode::Op::GetIterator const&>(instruction);
-        auto& iterable = get_or_create_value_for_operand(op.iterable());
+        auto& iterable = get_or_create_value_for_operand(op.iterable(), block);
         auto& result = m_function->build_get_iterator(block, iterable);
         // NB: GetIterator writes to 3 destinations. We track the iterator object as the main result.
-        m_operand_to_value.set(op.dst_iterator_object().raw(), &result);
+        define_operand(op.dst_iterator_object(), result, block);
         break;
     }
     case IteratorNext: {
         auto const& op = static_cast<Bytecode::Op::IteratorNext const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
         auto& result = m_function->build_iterator_next(block, iterator);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case IteratorNextUnpack: {
         auto const& op = static_cast<Bytecode::Op::IteratorNextUnpack const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
         auto& result = m_function->build_iterator_next_unpack(block, iterator);
-        m_operand_to_value.set(op.dst_value().raw(), &result);
+        define_operand(op.dst_value(), result, block);
         break;
     }
     case IteratorClose: {
         auto const& op = static_cast<Bytecode::Op::IteratorClose const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
         m_function->build_iterator_close(block, iterator);
         break;
     }
     case IteratorToArray: {
         auto const& op = static_cast<Bytecode::Op::IteratorToArray const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object());
+        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
         auto& result = m_function->build_iterator_to_array(block, iterator);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -925,7 +943,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::Catch const&>(instruction);
         // Catch puts the caught exception into the destination
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case EnterUnwindContext:
@@ -949,17 +967,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::ArrayAppend const&>(instruction);
         // ArrayAppend mutates dst array in place, adding src
         // Track both operands for data flow
-        (void)get_or_create_value_for_operand(op.dst());
-        (void)get_or_create_value_for_operand(op.src());
+        (void)get_or_create_value_for_operand(op.dst(), block);
+        (void)get_or_create_value_for_operand(op.src(), block);
         break;
     }
 
     // Object spread/rest
     case CopyObjectExcludingProperties: {
         auto const& op = static_cast<Bytecode::Op::CopyObjectExcludingProperties const&>(instruction);
-        auto& from = get_or_create_value_for_operand(op.from_object());
+        auto& from = get_or_create_value_for_operand(op.from_object(), block);
         auto& result = m_function->build_move(block, from);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -968,14 +986,14 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::CreateArguments const&>(instruction);
         if (op.dst().has_value()) {
             auto& result = m_function->create_register_value();
-            m_operand_to_value.set(op.dst().value().raw(), &result);
+            define_operand(op.dst().value(), result, block);
         }
         break;
     }
     case CreateRestParams: {
         auto const& op = static_cast<Bytecode::Op::CreateRestParams const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -983,28 +1001,28 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetImportMeta: {
         auto const& op = static_cast<Bytecode::Op::GetImportMeta const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case ImportCall: {
         auto const& op = static_cast<Bytecode::Op::ImportCall const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case GetTemplateObject: {
         auto const& op = static_cast<Bytecode::Op::GetTemplateObject const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
     // Private fields
     case GetPrivateById: {
         auto const& op = static_cast<Bytecode::Op::GetPrivateById const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.base());
+        auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_move(block, base);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case PutPrivateById:
@@ -1017,13 +1035,13 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case ResolveSuperBase: {
         auto const& op = static_cast<Bytecode::Op::ResolveSuperBase const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case SuperCallWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::SuperCallWithArgumentArray const&>(instruction);
         auto& result = m_function->create_register_value();
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -1039,16 +1057,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Type checks
     case IsCallable: {
         auto const& op = static_cast<Bytecode::Op::IsCallable const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_move(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
     case IsConstructor: {
         auto const& op = static_cast<Bytecode::Op::IsConstructor const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value());
+        auto& src = get_or_create_value_for_operand(op.value(), block);
         auto& result = m_function->build_move(block, src);
-        m_operand_to_value.set(op.dst().raw(), &result);
+        define_operand(op.dst(), result, block);
         break;
     }
 
@@ -1121,7 +1139,7 @@ void Lifter::connect_control_flow()
         }
         case JumpIf: {
             auto const& op = static_cast<Bytecode::Op::JumpIf const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
             m_function->build_branch(ir_block, condition, *true_target, *false_target);
@@ -1129,7 +1147,7 @@ void Lifter::connect_control_flow()
         }
         case JumpTrue: {
             auto const& op = static_cast<Bytecode::Op::JumpTrue const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
             // JumpTrue only has one target - we need to find the fallthrough
             auto* target = m_block_map.get(address_to_block_index(op.target().address())).value();
             // Fallthrough to next block
@@ -1144,7 +1162,7 @@ void Lifter::connect_control_flow()
         }
         case JumpFalse: {
             auto const& op = static_cast<Bytecode::Op::JumpFalse const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* target = m_block_map.get(address_to_block_index(op.target().address())).value();
             // Fallthrough to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
@@ -1161,8 +1179,8 @@ void Lifter::connect_control_flow()
         // Optimized comparison jumps
         case JumpGreaterThan: {
             auto const& op = static_cast<Bytecode::Op::JumpGreaterThan const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_greater_than(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1171,8 +1189,8 @@ void Lifter::connect_control_flow()
         }
         case JumpGreaterThanEquals: {
             auto const& op = static_cast<Bytecode::Op::JumpGreaterThanEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_greater_than_equals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1181,8 +1199,8 @@ void Lifter::connect_control_flow()
         }
         case JumpLessThan: {
             auto const& op = static_cast<Bytecode::Op::JumpLessThan const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_less_than(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1191,8 +1209,8 @@ void Lifter::connect_control_flow()
         }
         case JumpLessThanEquals: {
             auto const& op = static_cast<Bytecode::Op::JumpLessThanEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_less_than_equals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1201,8 +1219,8 @@ void Lifter::connect_control_flow()
         }
         case JumpLooselyEquals: {
             auto const& op = static_cast<Bytecode::Op::JumpLooselyEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_loosely_equals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1211,8 +1229,8 @@ void Lifter::connect_control_flow()
         }
         case JumpLooselyInequals: {
             auto const& op = static_cast<Bytecode::Op::JumpLooselyInequals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_loosely_inequals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1221,8 +1239,8 @@ void Lifter::connect_control_flow()
         }
         case JumpStrictlyEquals: {
             auto const& op = static_cast<Bytecode::Op::JumpStrictlyEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_strictly_equals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1231,8 +1249,8 @@ void Lifter::connect_control_flow()
         }
         case JumpStrictlyInequals: {
             auto const& op = static_cast<Bytecode::Op::JumpStrictlyInequals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs());
-            auto& rhs = get_or_create_value_for_operand(op.rhs());
+            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
+            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
             auto& condition = m_function->build_strictly_inequals(ir_block, lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
@@ -1241,7 +1259,7 @@ void Lifter::connect_control_flow()
         }
         case JumpNullish: {
             auto const& op = static_cast<Bytecode::Op::JumpNullish const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
             // NB: JumpNullish jumps if null or undefined - we'd need a proper IsNullish check
@@ -1251,7 +1269,7 @@ void Lifter::connect_control_flow()
         }
         case JumpUndefined: {
             auto const& op = static_cast<Bytecode::Op::JumpUndefined const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition());
+            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
             // NB: JumpUndefined jumps if undefined - we'd need a proper IsUndefined check
@@ -1271,10 +1289,82 @@ void Lifter::connect_control_flow()
     }
 }
 
+void Lifter::compute_block_predecessors()
+{
+    // Build predecessor lists by examining each block's successors
+    for (auto& block : m_function->basic_blocks()) {
+        for (auto& instruction : block->instructions()) {
+            if (instruction->true_target())
+                m_predecessors.ensure(instruction->true_target()).append(block.ptr());
+            if (instruction->false_target() && instruction->false_target() != instruction->true_target())
+                m_predecessors.ensure(instruction->false_target()).append(block.ptr());
+        }
+    }
+}
+
 void Lifter::insert_phi_nodes()
 {
-    // TODO: Implement proper SSA phi node insertion using dominance frontiers
-    // For now, we're using a simplified approach that doesn't require full SSA
+    // For each block with multiple predecessors, check if any written operand
+    // has different definitions coming from different predecessors
+    for (auto& block : m_function->basic_blocks()) {
+        auto preds = m_predecessors.get(block.ptr());
+        if (!preds.has_value() || preds->size() <= 1)
+            continue;
+
+        // For each operand that was written to somewhere
+        for (auto raw : m_written_operands) {
+            // Collect definitions from each predecessor
+            Vector<Value*> incoming_values;
+            Vector<BasicBlock*> incoming_blocks;
+            bool need_phi = false;
+            Value* first_value = nullptr;
+
+            for (auto* pred : *preds) {
+                auto pred_defs = m_block_definitions.get(pred);
+                if (!pred_defs.has_value())
+                    continue;
+
+                auto value = pred_defs->get(raw);
+                if (!value.has_value())
+                    continue;
+
+                if (!first_value) {
+                    first_value = *value;
+                } else if (*value != first_value) {
+                    need_phi = true;
+                }
+
+                incoming_values.append(*value);
+                incoming_blocks.append(pred);
+            }
+
+            // If different predecessors have different definitions, insert a phi node
+            if (need_phi && incoming_values.size() > 1) {
+                auto& phi = m_function->build_phi(*block, incoming_values, incoming_blocks);
+
+                // Rename uses: replace any use of the incoming values with the phi result
+                // Skip the phi instruction itself (it's at index 0 after prepend)
+                for (size_t i = 1; i < block->instructions().size(); ++i) {
+                    auto& instruction = block->instructions()[i];
+                    for (size_t op_idx = 0; op_idx < instruction->operands().size(); ++op_idx) {
+                        auto* operand = instruction->operands()[op_idx];
+                        for (auto* incoming : incoming_values) {
+                            if (operand == incoming) {
+                                instruction->set_operand(op_idx, &phi);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Update the block's definitions to use the phi result
+                auto block_defs = m_block_definitions.get(block.ptr());
+                if (block_defs.has_value()) {
+                    block_defs->set(raw, &phi);
+                }
+            }
+        }
+    }
 }
 
 }

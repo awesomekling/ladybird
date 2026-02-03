@@ -26,6 +26,12 @@ void BasicBlock::append(NonnullOwnPtr<Instruction> instruction)
     m_instructions.append(move(instruction));
 }
 
+void BasicBlock::prepend(NonnullOwnPtr<Instruction> instruction)
+{
+    instruction->set_parent_block(this);
+    m_instructions.prepend(move(instruction));
+}
+
 Instruction* BasicBlock::last_instruction() const
 {
     if (m_instructions.is_empty())

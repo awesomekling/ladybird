@@ -31,6 +31,7 @@ public:
     Vector<NonnullOwnPtr<Instruction>>& instructions() { return m_instructions; }
 
     void append(NonnullOwnPtr<Instruction> instruction);
+    void prepend(NonnullOwnPtr<Instruction> instruction);
     Instruction* last_instruction() const;
 
     Vector<BasicBlock*> const& predecessors() const { return m_predecessors; }
