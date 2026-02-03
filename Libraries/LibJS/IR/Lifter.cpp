@@ -492,10 +492,40 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+    case GetInitializedBinding: {
+        auto const& op = static_cast<Bytecode::Op::GetInitializedBinding const&>(instruction);
+        auto& result = m_function->build_get_binding(block, op.identifier());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
     case SetLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::SetLexicalBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src());
         m_function->build_set_binding(block, op.identifier(), value);
+        break;
+    }
+    case SetVariableBinding: {
+        auto const& op = static_cast<Bytecode::Op::SetVariableBinding const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_set_binding(block, op.identifier(), value);
+        break;
+    }
+    case InitializeLexicalBinding: {
+        auto const& op = static_cast<Bytecode::Op::InitializeLexicalBinding const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_set_binding(block, op.identifier(), value);
+        break;
+    }
+    case InitializeVariableBinding: {
+        auto const& op = static_cast<Bytecode::Op::InitializeVariableBinding const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_set_binding(block, op.identifier(), value);
+        break;
+    }
+    case DeleteVariable: {
+        auto const& op = static_cast<Bytecode::Op::DeleteVariable const&>(instruction);
+        auto& result = m_function->build_delete_variable(block, op.identifier());
+        m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
     case GetGlobal: {
@@ -611,6 +641,19 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+
+    // Environment creation ops (no IR needed, affects runtime)
+    case CreateVariable:
+    case CreateMutableBinding:
+    case CreateImmutableBinding:
+    case CreateLexicalEnvironment:
+    case CreateVariableEnvironment:
+    case CreatePrivateEnvironment:
+    case LeaveLexicalEnvironment:
+    case LeavePrivateEnvironment:
+    case EnterObjectEnvironment:
+        // These affect the environment but don't produce IR values
+        break;
 
     // TODO: Handle more opcodes as needed
     default:

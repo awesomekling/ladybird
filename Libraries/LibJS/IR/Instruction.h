@@ -97,6 +97,7 @@ enum class Opcode : u8 {
     SetBinding,
     GetGlobal,
     SetGlobal,
+    DeleteVariable,
 
     // Object creation
     NewObject,

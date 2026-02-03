@@ -165,6 +165,8 @@ char const* opcode_to_string(Opcode opcode)
         return "GetGlobal";
     case Opcode::SetGlobal:
         return "SetGlobal";
+    case Opcode::DeleteVariable:
+        return "DeleteVariable";
     case Opcode::NewObject:
         return "NewObject";
     case Opcode::NewArray:

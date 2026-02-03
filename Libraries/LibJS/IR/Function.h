@@ -113,6 +113,7 @@ public:
     void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
+    Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
 
     // Object creation
     Value& build_new_object(BasicBlock& block);

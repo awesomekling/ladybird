@@ -368,6 +368,20 @@ void Function::build_set_global(BasicBlock& block, Bytecode::IdentifierTableInde
     block.append(move(instruction));
 }
 
+Value& Function::build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
+{
+    auto instruction = Instruction::create(Opcode::DeleteVariable);
+    instruction->set_identifier_index(identifier);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Boolean);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Object creation
 Value& Function::build_new_object(BasicBlock& block)
 {
