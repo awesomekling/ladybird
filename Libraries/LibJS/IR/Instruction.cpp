@@ -157,6 +157,8 @@ char const* opcode_to_string(Opcode opcode)
         return "HasProperty";
     case Opcode::Call:
         return "Call";
+    case Opcode::CallDirectEval:
+        return "CallDirectEval";
     case Opcode::Construct:
         return "Construct";
     case Opcode::GetBinding:

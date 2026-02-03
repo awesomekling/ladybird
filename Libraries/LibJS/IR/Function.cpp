@@ -323,6 +323,23 @@ Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value,
     return result;
 }
 
+Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
+{
+    auto instruction = Instruction::create(Opcode::CallDirectEval);
+    instruction->add_operand(&callee);
+    instruction->add_operand(&this_value);
+    for (auto* arg : arguments)
+        instruction->add_operand(arg);
+    instruction->set_expression_string(expression_string);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments)
 {
     auto instruction = Instruction::create(Opcode::Construct);

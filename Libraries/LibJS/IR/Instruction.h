@@ -101,6 +101,7 @@ enum class Opcode : u8 {
 
     // Calls
     Call,
+    CallDirectEval,
     Construct,
 
     // Environment
@@ -268,6 +269,10 @@ public:
     u32 capacity() const { return m_capacity; }
     void set_capacity(u32 capacity) { m_capacity = capacity; }
 
+    // For CallDirectEval
+    Optional<Bytecode::StringTableIndex> expression_string() const { return m_expression_string; }
+    void set_expression_string(Optional<Bytecode::StringTableIndex> index) { m_expression_string = index; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -309,6 +314,9 @@ private:
     Bytecode::StringTableIndex m_regex_source_index;
     Bytecode::StringTableIndex m_regex_flags_index;
     Bytecode::RegexTableIndex m_regex_index;
+
+    // For CallDirectEval
+    Optional<Bytecode::StringTableIndex> m_expression_string;
 };
 
 }

@@ -445,6 +445,19 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
+    // CallDirectEval (variable-length arguments)
+    case Opcode::CallDirectEval: {
+        // IR CallDirectEval operands: [callee, this_value, arg0, arg1, ...]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        size_t arg_count = instruction.operands().size() - 2;
+        Vector<Bytecode::Operand> args;
+        for (size_t i = 0; i < arg_count; ++i)
+            args.append(operand(i + 2));
+        emit_with_extra_operand_slots<Bytecode::Op::CallDirectEval>(arg_count, dst(), callee, this_value, instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
     // NewArray (variable-length elements)
     case Opcode::NewArray: {
         Vector<Bytecode::Operand> elements;

@@ -841,7 +841,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         Vector<Value*> args;
         for (auto operand : op.arguments())
             args.append(&get_or_create_value_for_operand(operand, block));
-        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        auto& result = m_function->build_call_direct_eval(block, callee, this_value, args.span(), op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -851,7 +851,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
         Vector<Value*> args { &args_array };
-        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        auto& result = m_function->build_call_direct_eval(block, callee, this_value, args.span(), op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }

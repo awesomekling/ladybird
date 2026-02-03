@@ -112,6 +112,7 @@ public:
 
     // Calls
     Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
+    Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
 
     // Environment
