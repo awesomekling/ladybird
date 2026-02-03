@@ -898,6 +898,145 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         // These affect the environment but don't produce IR values
         break;
 
+    // Exception handling
+    case Catch: {
+        auto const& op = static_cast<Bytecode::Op::Catch const&>(instruction);
+        // Catch puts the caught exception into the destination
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case EnterUnwindContext:
+    case LeaveUnwindContext:
+    case ContinuePendingUnwind:
+    case LeaveFinally:
+    case ScheduleJump:
+    case RestoreScheduledJump:
+        // Exception handling control flow - no IR values produced
+        break;
+
+    // Throw guard ops
+    case ThrowIfNotObject:
+    case ThrowIfNullish:
+    case ThrowIfTDZ:
+        // These are guard instructions that may throw but produce no value
+        break;
+
+    // Array operations
+    case ArrayAppend: {
+        auto const& op = static_cast<Bytecode::Op::ArrayAppend const&>(instruction);
+        // ArrayAppend mutates dst array in place, adding src
+        // Track both operands for data flow
+        (void)get_or_create_value_for_operand(op.dst());
+        (void)get_or_create_value_for_operand(op.src());
+        break;
+    }
+
+    // Object spread/rest
+    case CopyObjectExcludingProperties: {
+        auto const& op = static_cast<Bytecode::Op::CopyObjectExcludingProperties const&>(instruction);
+        auto& from = get_or_create_value_for_operand(op.from_object());
+        auto& result = m_function->build_move(block, from);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Arguments and rest params
+    case CreateArguments: {
+        auto const& op = static_cast<Bytecode::Op::CreateArguments const&>(instruction);
+        if (op.dst().has_value()) {
+            auto& result = m_function->create_register_value();
+            m_operand_to_value.set(op.dst().value().raw(), &result);
+        }
+        break;
+    }
+    case CreateRestParams: {
+        auto const& op = static_cast<Bytecode::Op::CreateRestParams const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Module/Import related
+    case GetImportMeta: {
+        auto const& op = static_cast<Bytecode::Op::GetImportMeta const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case ImportCall: {
+        auto const& op = static_cast<Bytecode::Op::ImportCall const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetTemplateObject: {
+        auto const& op = static_cast<Bytecode::Op::GetTemplateObject const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Private fields
+    case GetPrivateById: {
+        auto const& op = static_cast<Bytecode::Op::GetPrivateById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& result = m_function->build_move(block, base);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case PutPrivateById:
+    case HasPrivateId:
+    case AddPrivateName:
+        // Private field operations - no result value for most
+        break;
+
+    // Super
+    case ResolveSuperBase: {
+        auto const& op = static_cast<Bytecode::Op::ResolveSuperBase const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case SuperCallWithArgumentArray: {
+        auto const& op = static_cast<Bytecode::Op::SuperCallWithArgumentArray const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Async/Await/Yield (terminators, handled in control flow)
+    case Await:
+    case Yield:
+    case PrepareYield:
+    case CreateAsyncFromSyncIterator:
+    case AsyncIteratorClose:
+        // Async/generator control flow - no result value
+        break;
+
+    // Type checks
+    case IsCallable: {
+        auto const& op = static_cast<Bytecode::Op::IsCallable const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.value());
+        auto& result = m_function->build_move(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case IsConstructor: {
+        auto const& op = static_cast<Bytecode::Op::IsConstructor const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.value());
+        auto& result = m_function->build_move(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Completion tracking (for finally blocks)
+    case GetCompletionFields:
+    case SetCompletionType:
+    case CacheObjectShape:
+        // Runtime bookkeeping - no IR values
+        break;
+
     // TODO: Handle more opcodes as needed
     default:
         // For unhandled opcodes, we skip them for now
