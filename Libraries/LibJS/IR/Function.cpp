@@ -476,6 +476,21 @@ Value& Function::build_move(BasicBlock& block, Value& source)
     return build_unary_op(block, Opcode::Move, source);
 }
 
+// Tuple extraction
+Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
+{
+    auto instruction = Instruction::create(Opcode::ExtractValue);
+    instruction->add_operand(&tuple);
+    instruction->set_extract_index(index);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Control flow
 void Function::build_jump(BasicBlock& from, BasicBlock& to)
 {

@@ -13,6 +13,7 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lowerer.h>
 #include <LibJS/IR/Value.h>
+#include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/EnvironmentCoordinate.h>
 #include <LibJS/Runtime/VM.h>
 
@@ -69,6 +70,23 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 
     m_value_to_operand.set(&value, operand);
     return operand;
+}
+
+Bytecode::Operand Lowerer::allocate_tuple_registers(Value const& tuple, u32 count)
+{
+    // Allocate consecutive registers for tuple elements
+    auto base = Bytecode::Operand(Bytecode::Register(m_next_register));
+    m_next_register += count;
+    m_tuple_base_operand.set(&tuple, base);
+    return base;
+}
+
+Bytecode::Operand Lowerer::operand_for_tuple_element(Value const& tuple, u32 index)
+{
+    auto it = m_tuple_base_operand.find(&tuple);
+    VERIFY(it != m_tuple_base_operand.end());
+    auto base_index = it->value.index();
+    return Bytecode::Operand(Bytecode::Register(base_index + index));
 }
 
 template<typename OpType, typename... Args>
@@ -386,14 +404,58 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
-    // Iterators - these are complex multi-output ops, emit simplified versions
-    case Opcode::GetIterator:
-    case Opcode::IteratorNext:
-    case Opcode::IteratorNextUnpack:
-    case Opcode::IteratorClose:
-    case Opcode::IteratorToArray:
-        // TODO: These need special handling for multi-output behavior
+    // Iterators
+    case Opcode::GetIterator: {
+        // GetIterator produces a tuple of (iterator_object, iterator_next, iterator_done)
+        // Allocate 3 consecutive registers for the tuple result
+        auto tuple_base = allocate_tuple_registers(*instruction.result(), 3);
+        auto iterable = operand(0);
+        emit<Bytecode::Op::GetIterator>(
+            Bytecode::Operand(Bytecode::Register(tuple_base.index())),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 1)),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 2)),
+            iterable,
+            instruction.iterator_hint());
         break;
+    }
+    case Opcode::IteratorNext: {
+        // Operands: [iterator_object, iterator_next, iterator_done]
+        emit<Bytecode::Op::IteratorNext>(dst(), operand(0), operand(1), operand(2));
+        break;
+    }
+    case Opcode::IteratorNextUnpack: {
+        // IteratorNextUnpack produces a tuple of (value, done)
+        // Allocate 2 consecutive registers for the result
+        auto tuple_base = allocate_tuple_registers(*instruction.result(), 2);
+        // Operands: [iterator_object, iterator_next, iterator_done]
+        emit<Bytecode::Op::IteratorNextUnpack>(
+            Bytecode::Operand(Bytecode::Register(tuple_base.index())),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 1)),
+            operand(0), operand(1), operand(2));
+        break;
+    }
+    case Opcode::IteratorClose: {
+        // Operands: [iterator_object, iterator_next, iterator_done]
+        // NB: Using Normal completion type since we don't track completion in IR
+        emit<Bytecode::Op::IteratorClose>(operand(0), operand(1), operand(2), Completion::Type::Normal, OptionalNone {});
+        break;
+    }
+    case Opcode::IteratorToArray: {
+        // Operands: [iterator_object, iterator_next, iterator_done]
+        emit<Bytecode::Op::IteratorToArray>(dst(), operand(0), operand(1), operand(2));
+        break;
+    }
+
+    // Tuple extraction
+    case Opcode::ExtractValue: {
+        // Get the tuple operand and extract the element at the given index
+        auto* tuple_value = instruction.operands()[0];
+        auto element_reg = operand_for_tuple_element(*tuple_value, instruction.extract_index());
+        // Map the result to this register
+        if (instruction.result())
+            m_value_to_operand.set(instruction.result(), element_reg);
+        break;
+    }
     }
 }
 

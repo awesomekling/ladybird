@@ -36,6 +36,8 @@ private:
 
     Bytecode::Operand operand_for_value(Value const&);
     Bytecode::Operand allocate_register();
+    Bytecode::Operand allocate_tuple_registers(Value const&, u32 count);
+    Bytecode::Operand operand_for_tuple_element(Value const& tuple, u32 index);
     u32 get_or_add_constant(JS::Value);
 
     VM& m_vm;
@@ -43,6 +45,7 @@ private:
     Vector<NonnullOwnPtr<Bytecode::BasicBlock>> m_bytecode_blocks;
     Bytecode::BasicBlock* m_current_block { nullptr };
     HashMap<Value const*, Bytecode::Operand> m_value_to_operand;
+    HashMap<Value const*, Bytecode::Operand> m_tuple_base_operand;
     HashMap<BasicBlock const*, size_t> m_ir_block_to_bytecode_index;
     Vector<JS::Value> m_constants;
     u32 m_next_register { Bytecode::Register::reserved_register_count };

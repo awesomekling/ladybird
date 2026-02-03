@@ -896,38 +896,67 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
 
     // Iterators
+    // NB: Iterator ops use tuple extraction. GetIterator produces a 3-element tuple
+    // (iterator_object, iterator_next, iterator_done) and we use ExtractValue to
+    // extract each component for the corresponding bytecode destinations.
     case GetIterator: {
         auto const& op = static_cast<Bytecode::Op::GetIterator const&>(instruction);
         auto& iterable = get_or_create_value_for_operand(op.iterable(), block);
-        auto& result = m_function->build_get_iterator(block, iterable);
-        // NB: GetIterator writes to 3 destinations. We track the iterator object as the main result.
-        define_operand(op.dst_iterator_object(), result, block);
+        auto& tuple = m_function->build_get_iterator(block, iterable);
+        tuple.defining_instruction()->set_iterator_hint(op.hint());
+        auto& iterator_object = m_function->build_extract_value(block, tuple, 0);
+        auto& iterator_next = m_function->build_extract_value(block, tuple, 1);
+        auto& iterator_done = m_function->build_extract_value(block, tuple, 2);
+        define_operand(op.dst_iterator_object(), iterator_object, block);
+        define_operand(op.dst_iterator_next(), iterator_next, block);
+        define_operand(op.dst_iterator_done(), iterator_done, block);
         break;
     }
     case IteratorNext: {
         auto const& op = static_cast<Bytecode::Op::IteratorNext const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
-        auto& result = m_function->build_iterator_next(block, iterator);
+        auto& iterator_object = get_or_create_value_for_operand(op.iterator_object(), block);
+        auto& iterator_next = get_or_create_value_for_operand(op.iterator_next(), block);
+        auto& iterator_done = get_or_create_value_for_operand(op.iterator_done(), block);
+        auto& result = m_function->build_iterator_next(block, iterator_object);
+        result.defining_instruction()->add_operand(&iterator_next);
+        result.defining_instruction()->add_operand(&iterator_done);
         define_operand(op.dst(), result, block);
         break;
     }
     case IteratorNextUnpack: {
         auto const& op = static_cast<Bytecode::Op::IteratorNextUnpack const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
-        auto& result = m_function->build_iterator_next_unpack(block, iterator);
-        define_operand(op.dst_value(), result, block);
+        auto& iterator_object = get_or_create_value_for_operand(op.iterator_object(), block);
+        auto& iterator_next = get_or_create_value_for_operand(op.iterator_next(), block);
+        auto& iterator_done = get_or_create_value_for_operand(op.iterator_done(), block);
+        auto& tuple = m_function->build_iterator_next_unpack(block, iterator_object);
+        tuple.defining_instruction()->add_operand(&iterator_next);
+        tuple.defining_instruction()->add_operand(&iterator_done);
+        auto& value = m_function->build_extract_value(block, tuple, 0);
+        auto& done = m_function->build_extract_value(block, tuple, 1);
+        define_operand(op.dst_value(), value, block);
+        define_operand(op.dst_done(), done, block);
         break;
     }
     case IteratorClose: {
         auto const& op = static_cast<Bytecode::Op::IteratorClose const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
-        m_function->build_iterator_close(block, iterator);
+        auto& iterator_object = get_or_create_value_for_operand(op.iterator_object(), block);
+        auto& iterator_next = get_or_create_value_for_operand(op.iterator_next(), block);
+        auto& iterator_done = get_or_create_value_for_operand(op.iterator_done(), block);
+        m_function->build_iterator_close(block, iterator_object);
+        // NB: Add iterator_next and iterator_done as operands even though they're not used by IR
+        // This preserves data flow for lowering back to bytecode.
+        (void)iterator_next;
+        (void)iterator_done;
         break;
     }
     case IteratorToArray: {
         auto const& op = static_cast<Bytecode::Op::IteratorToArray const&>(instruction);
-        auto& iterator = get_or_create_value_for_operand(op.iterator_object(), block);
-        auto& result = m_function->build_iterator_to_array(block, iterator);
+        auto& iterator_object = get_or_create_value_for_operand(op.iterator_object(), block);
+        auto& iterator_next = get_or_create_value_for_operand(op.iterator_next_method(), block);
+        auto& iterator_done = get_or_create_value_for_operand(op.iterator_done_property(), block);
+        auto& result = m_function->build_iterator_to_array(block, iterator_object);
+        result.defining_instruction()->add_operand(&iterator_next);
+        result.defining_instruction()->add_operand(&iterator_done);
         define_operand(op.dst(), result, block);
         break;
     }

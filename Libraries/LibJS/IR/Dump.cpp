@@ -128,6 +128,12 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         }
         break;
 
+    case Opcode::ExtractValue:
+        for (auto* operand : instruction.operands())
+            append_operand(operand);
+        builder.appendff(", {}", instruction.extract_index());
+        break;
+
     default:
         for (auto* operand : instruction.operands())
             append_operand(operand);

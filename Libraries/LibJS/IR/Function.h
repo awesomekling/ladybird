@@ -136,6 +136,9 @@ public:
     // Copy
     Value& build_move(BasicBlock& block, Value& source);
 
+    // Tuple extraction
+    Value& build_extract_value(BasicBlock& block, Value& tuple, u32 index);
+
     // Control flow (void, no result)
     void build_jump(BasicBlock& from, BasicBlock& to);
     void build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false);

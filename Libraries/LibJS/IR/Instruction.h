@@ -12,6 +12,7 @@
 #include <LibJS/Bytecode/PropertyKeyTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/Runtime/Iterator.h>
 
 namespace JS {
 
@@ -124,6 +125,9 @@ enum class Opcode : u8 {
 
     // Copy
     Move,
+
+    // Tuple extraction (for multi-output instructions)
+    ExtractValue,
 };
 
 constexpr bool is_terminator_opcode(Opcode opcode)
@@ -153,6 +157,7 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::Not:
     case Opcode::Typeof:
     case Opcode::Move:
+    case Opcode::ExtractValue:
         return false;
     default:
         return true;
@@ -207,6 +212,14 @@ public:
     Optional<Bytecode::IdentifierTableIndex> lhs_name() const { return m_lhs_name; }
     void set_lhs_name(Optional<Bytecode::IdentifierTableIndex> name) { m_lhs_name = name; }
 
+    // For ExtractValue - which element to extract from a tuple
+    u32 extract_index() const { return m_extract_index; }
+    void set_extract_index(u32 index) { m_extract_index = index; }
+
+    // For GetIterator - sync or async
+    IteratorHint iterator_hint() const { return m_iterator_hint; }
+    void set_iterator_hint(IteratorHint hint) { m_iterator_hint = hint; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -229,6 +242,8 @@ private:
     Bytecode::PropertyKeyTableIndex m_property_key_index;
     Bytecode::IdentifierTableIndex m_identifier_index;
     u32 m_cache_index { 0 };
+    u32 m_extract_index { 0 };
+    IteratorHint m_iterator_hint { IteratorHint::Sync };
     FunctionNode const* m_function_node { nullptr };
     Optional<Bytecode::IdentifierTableIndex> m_lhs_name;
 };

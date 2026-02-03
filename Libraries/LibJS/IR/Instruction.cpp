@@ -191,6 +191,8 @@ char const* opcode_to_string(Opcode opcode)
         return "IteratorToArray";
     case Opcode::Move:
         return "Move";
+    case Opcode::ExtractValue:
+        return "ExtractValue";
     }
     VERIFY_NOT_REACHED();
 }
