@@ -109,6 +109,7 @@ enum class Opcode : u8 {
     ConstructWithArgumentArray,
 
     // Environment
+    GetCalleeAndThisFromEnvironment,
     CreateVariable,
     CreateLexicalEnvironment,
     CreateMutableBinding,

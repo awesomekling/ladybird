@@ -119,6 +119,7 @@ public:
     Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
 
     // Environment
+    Value& build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);
     Value& build_create_lexical_environment(BasicBlock& block, u32 capacity);
     void build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);

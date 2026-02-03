@@ -886,12 +886,12 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case GetCalleeAndThisFromEnvironment: {
         auto const& op = static_cast<Bytecode::Op::GetCalleeAndThisFromEnvironment const&>(instruction);
-        // This instruction writes to both callee and this_value operands
-        auto& callee_result = m_function->build_get_binding(block, op.identifier());
-        define_operand(op.callee(), callee_result, block);
-        // this_value is typically undefined for function calls
-        auto& this_result = m_function->create_register_value();
-        define_operand(op.this_value(), this_result, block);
+        // This instruction produces a tuple of (callee, this_value)
+        auto& tuple = m_function->build_get_callee_and_this_from_environment(block, op.identifier());
+        auto& callee = m_function->build_extract_value(block, tuple, 0);
+        auto& this_value = m_function->build_extract_value(block, tuple, 1);
+        define_operand(op.callee(), callee, block);
+        define_operand(op.this_value(), this_value, block);
         break;
     }
     case ResolveThisBinding: {

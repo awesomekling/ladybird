@@ -359,6 +359,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     // Environment
+    case Opcode::GetCalleeAndThisFromEnvironment: {
+        // This produces a tuple of (callee, this_value)
+        // Allocate 2 consecutive registers for the tuple result
+        auto tuple_base = allocate_tuple_registers(*instruction.result(), 2);
+        emit<Bytecode::Op::GetCalleeAndThisFromEnvironment>(
+            Bytecode::Operand(Bytecode::Register(tuple_base.index())),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 1)),
+            instruction.identifier_index());
+        break;
+    }
     case Opcode::CreateVariable:
         emit<Bytecode::Op::CreateVariable>(instruction.identifier_index(), instruction.environment_mode(), instruction.is_immutable(), instruction.is_global(), instruction.is_strict());
         break;

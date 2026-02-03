@@ -408,6 +408,20 @@ Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& c
 }
 
 // Environment
+Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
+{
+    auto instruction = Instruction::create(Opcode::GetCalleeAndThisFromEnvironment);
+    instruction->set_identifier_index(identifier);
+
+    // This produces a tuple of (callee, this_value)
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 void Function::build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict)
 {
     auto instruction = Instruction::create(Opcode::CreateVariable);
