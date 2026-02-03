@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/NumericLimits.h>
+#include <AK/StdLibExtras.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/IR/BasicBlock.h>
@@ -11,6 +13,7 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lowerer.h>
 #include <LibJS/IR/Value.h>
+#include <LibJS/Runtime/EnvironmentCoordinate.h>
 #include <LibJS/Runtime/VM.h>
 
 namespace JS::IR {
@@ -74,6 +77,17 @@ void Lowerer::emit(Args&&... args)
     VERIFY(m_current_block);
     size_t slot_offset = m_current_block->size();
     m_current_block->grow(sizeof(OpType));
+    void* slot = m_current_block->data() + slot_offset;
+    new (slot) OpType(forward<Args>(args)...);
+}
+
+template<typename OpType, typename... Args>
+void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&... args)
+{
+    VERIFY(m_current_block);
+    size_t size_to_allocate = round_up_to_power_of_two(sizeof(OpType) + extra_operand_slots * sizeof(Bytecode::Operand), alignof(void*));
+    size_t slot_offset = m_current_block->size();
+    m_current_block->grow(size_to_allocate);
     void* slot = m_current_block->data() + slot_offset;
     new (slot) OpType(forward<Args>(args)...);
 }
@@ -249,6 +263,74 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::ConcatString:
         emit<Bytecode::Op::ConcatString>(dst(), operand(0));
         break;
+    case Opcode::GetLength:
+        emit<Bytecode::Op::GetLength>(dst(), operand(0), OptionalNone {}, instruction.cache_index());
+        break;
+
+    // Property access
+    case Opcode::GetById:
+        emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), OptionalNone {}, instruction.cache_index());
+        break;
+    case Opcode::GetByValue:
+        emit<Bytecode::Op::GetByValue>(dst(), operand(0), operand(1), OptionalNone {});
+        break;
+    case Opcode::PutById:
+        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), OptionalNone {});
+        break;
+    case Opcode::PutByValue:
+        emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), OptionalNone {});
+        break;
+    case Opcode::DeleteById:
+        emit<Bytecode::Op::DeleteById>(dst(), operand(0), instruction.property_key_index());
+        break;
+    case Opcode::DeleteByValue:
+        emit<Bytecode::Op::DeleteByValue>(dst(), operand(0), operand(1));
+        break;
+    case Opcode::HasProperty:
+        emit<Bytecode::Op::In>(dst(), operand(1), operand(0));
+        break;
+
+    // Environment
+    case Opcode::GetBinding:
+        emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
+        break;
+    case Opcode::SetBinding:
+        // NB: Using InitializeLexicalBinding since we don't track the init vs set distinction in IR
+        emit<Bytecode::Op::InitializeLexicalBinding>(instruction.identifier_index(), operand(0));
+        break;
+    case Opcode::GetGlobal:
+        emit<Bytecode::Op::GetGlobal>(dst(), instruction.identifier_index(), instruction.cache_index());
+        break;
+    case Opcode::SetGlobal:
+        emit<Bytecode::Op::SetGlobal>(instruction.identifier_index(), operand(0), instruction.cache_index());
+        break;
+    case Opcode::DeleteVariable:
+        emit<Bytecode::Op::DeleteVariable>(dst(), instruction.identifier_index());
+        break;
+    case Opcode::TypeofBinding:
+        emit<Bytecode::Op::TypeofBinding>(dst(), instruction.identifier_index());
+        break;
+
+    // In/InstanceOf
+    case Opcode::In:
+        emit<Bytecode::Op::In>(dst(), operand(0), operand(1));
+        break;
+    case Opcode::InstanceOf:
+        emit<Bytecode::Op::InstanceOf>(dst(), operand(0), operand(1));
+        break;
+
+    // Object creation
+    case Opcode::NewObject:
+        emit<Bytecode::Op::NewObjectWithNoPrototype>(dst());
+        break;
+
+    // Postfix increment/decrement (dst gets old value, src gets mutated)
+    case Opcode::PostfixIncrement:
+        emit<Bytecode::Op::PostfixIncrement>(dst(), operand(0));
+        break;
+    case Opcode::PostfixDecrement:
+        emit<Bytecode::Op::PostfixDecrement>(dst(), operand(0));
+        break;
 
     // Control flow - handled separately
     case Opcode::Jump:
@@ -258,9 +340,44 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         // These are terminators, handled in lower_blocks
         break;
 
-    // Property access and other ops need more context from the source executable
-    // For now, skip them
-    default:
+    // Opcodes that don't produce bytecode (side-effect only in IR)
+    case Opcode::LoadConstant:
+    case Opcode::LoadUndefined:
+    case Opcode::LoadNull:
+        // Constants are handled by operand_for_value - no explicit lowering needed
+        break;
+
+    // Call (variable-length arguments)
+    case Opcode::Call: {
+        // IR Call operands: [callee, this_value, arg0, arg1, ...]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        size_t arg_count = instruction.operands().size() - 2;
+        Vector<Bytecode::Operand> args;
+        for (size_t i = 0; i < arg_count; ++i)
+            args.append(operand(i + 2));
+        emit_with_extra_operand_slots<Bytecode::Op::Call>(arg_count, dst(), callee, this_value, Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
+    // NewArray (variable-length elements)
+    case Opcode::NewArray: {
+        Vector<Bytecode::Operand> elements;
+        for (size_t i = 0; i < instruction.operands().size(); ++i)
+            elements.append(operand(i));
+        emit_with_extra_operand_slots<Bytecode::Op::NewArray>(elements.size(), dst(), ReadonlySpan<Bytecode::Operand> { elements });
+        break;
+    }
+
+    // Not yet implemented - skip for now
+    case Opcode::NewFunction:
+    case Opcode::Construct:
+    case Opcode::GetIterator:
+    case Opcode::IteratorNext:
+    case Opcode::IteratorNextUnpack:
+    case Opcode::IteratorClose:
+    case Opcode::IteratorToArray:
+        // These need special handling for variable-length operands or complex state
         break;
     }
 }
@@ -392,9 +509,16 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
         label.set_address(block_offsets.get(block).value());
     }
 
-    // Create new tables by copying from source (we don't modify them)
+    // Copy tables from source executable
     auto identifier_table = make<Bytecode::IdentifierTable>();
+    for (auto const& identifier : source_executable->identifier_table->identifiers())
+        identifier_table->insert(identifier);
+
     auto property_key_table = make<Bytecode::PropertyKeyTable>();
+    for (auto const& key : source_executable->property_key_table->property_keys())
+        property_key_table->insert(key);
+
+    // NB: String and regex tables are not exposed for iteration, create empty ones for now
     auto string_table = make<Bytecode::StringTable>();
     auto regex_table = make<Bytecode::RegexTable>();
 
@@ -408,15 +532,25 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
         move(regex_table),
         move(constants),
         source_executable->source_code,
-        0, // property lookup caches
-        0, // global variable caches
-        0, // template object caches
-        0, // object shape caches
+        source_executable->property_lookup_caches.size(),
+        source_executable->global_variable_caches.size(),
+        source_executable->template_object_caches.size(),
+        source_executable->object_shape_caches.size(),
         number_of_registers,
         source_executable->is_strict_mode ? Strict::Yes : Strict::No);
 
     executable->basic_block_start_offsets = move(basic_block_start_offsets);
     executable->name = source_executable->name;
+
+    // Copy cache contents from source executable to preserve cached information
+    for (size_t i = 0; i < source_executable->property_lookup_caches.size(); ++i)
+        executable->property_lookup_caches[i] = source_executable->property_lookup_caches[i];
+    for (size_t i = 0; i < source_executable->global_variable_caches.size(); ++i)
+        executable->global_variable_caches[i] = source_executable->global_variable_caches[i];
+    for (size_t i = 0; i < source_executable->template_object_caches.size(); ++i)
+        executable->template_object_caches[i] = source_executable->template_object_caches[i];
+    for (size_t i = 0; i < source_executable->object_shape_caches.size(); ++i)
+        executable->object_shape_caches[i] = source_executable->object_shape_caches[i];
 
     // Set up register/constant/argument counts
     // NB: No locals in lowered code, so registers_and_locals_count == number_of_registers

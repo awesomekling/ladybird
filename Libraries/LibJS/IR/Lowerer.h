@@ -31,6 +31,9 @@ private:
     template<typename OpType, typename... Args>
     void emit(Args&&... args);
 
+    template<typename OpType, typename... Args>
+    void emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&... args);
+
     Bytecode::Operand operand_for_value(Value const&);
     Bytecode::Operand allocate_register();
     u32 get_or_add_constant(JS::Value);

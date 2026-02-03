@@ -291,6 +291,45 @@ def generate_class(op: OpDef) -> str:
             lines.append(f"        for (size_t i = 0; i < {span_param}.size(); ++i)")
             lines.append(f"            {af.name}[i] = {span_param}[i];")
     lines.append("    }")
+
+    # Generate a second constructor for ops with Operand arrays that takes ReadonlySpan<Operand>
+    # This is useful for the IR lowerer which doesn't have access to ScopedOperand
+    has_operand_array = any(af.type.strip() == "Operand" for af in arrays)
+    if has_operand_array:
+        lines.append("")
+        # Build params with Operand instead of ScopedOperand
+        alt_ctor_params: List[str] = []
+        for f in op.fields:
+            if f.is_array:
+                continue
+            if f.type.strip() == "EnvironmentCoordinate":
+                continue
+            if f.name in count_fields:
+                continue
+            if f.name == "m_length":
+                continue
+            alt_ctor_params.append(f"{f.type} {mname_to_param(f.name)}")
+
+        for af in arrays:
+            span_param = mname_to_param(af.name)
+            elem_t = af.type.strip()
+            # Use Operand directly instead of ScopedOperand
+            alt_ctor_params.append(f"ReadonlySpan<{elem_t}> {span_param}")
+
+        lines.append(f"    {op.name}({', '.join(alt_ctor_params)})")
+        # Same initializer list
+        if init_entries:
+            lines.append(f"        : {init_entries[0]}")
+            for entry in init_entries[1:]:
+                lines.append(f"        , {entry}")
+        lines.append("    {")
+        # Simpler copy loop since types match directly
+        for af in arrays:
+            span_param = span_param_for_array[af.name]
+            lines.append(f"        for (size_t i = 0; i < {span_param}.size(); ++i)")
+            lines.append(f"            {af.name}[i] = {span_param}[i];")
+        lines.append("    }")
+
     lines.append("")
 
     ret_type = execute_return_type(op)

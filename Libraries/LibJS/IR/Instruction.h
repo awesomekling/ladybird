@@ -192,6 +192,9 @@ public:
     Bytecode::IdentifierTableIndex identifier_index() const { return m_identifier_index; }
     void set_identifier_index(Bytecode::IdentifierTableIndex index) { m_identifier_index = index; }
 
+    u32 cache_index() const { return m_cache_index; }
+    void set_cache_index(u32 index) { m_cache_index = index; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -213,6 +216,7 @@ private:
     // Instruction-specific indices
     Bytecode::PropertyKeyTableIndex m_property_key_index;
     Bytecode::IdentifierTableIndex m_identifier_index;
+    u32 m_cache_index { 0 };
 };
 
 }

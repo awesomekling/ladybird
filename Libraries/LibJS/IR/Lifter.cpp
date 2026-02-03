@@ -465,6 +465,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_by_id(block, base, op.property());
+        result.defining_instruction()->set_cache_index(op.cache_index());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -481,6 +482,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
+        block.instructions().last()->set_cache_index(op.cache_index());
         break;
     }
     case PutNormalByValue: {
@@ -685,6 +687,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetGlobal: {
         auto const& op = static_cast<Bytecode::Op::GetGlobal const&>(instruction);
         auto& result = m_function->build_get_global(block, op.identifier());
+        result.defining_instruction()->set_cache_index(op.cache_index());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -692,6 +695,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::SetGlobal const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_global(block, op.identifier(), value);
+        block.instructions().last()->set_cache_index(op.cache_index());
         break;
     }
 
@@ -842,6 +846,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetLength const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_length(block, base);
+        result.defining_instruction()->set_cache_index(op.cache_index());
         define_operand(op.dst(), result, block);
         break;
     }
