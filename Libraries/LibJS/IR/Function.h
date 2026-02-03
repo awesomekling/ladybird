@@ -122,6 +122,8 @@ public:
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
     Value& build_new_function(BasicBlock& block);
+    void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot);
+    void build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index);
 
     // Iterators
     Value& build_get_iterator(BasicBlock& block, Value& iterable);

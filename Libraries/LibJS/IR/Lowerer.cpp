@@ -400,6 +400,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), OptionalNone {});
         break;
 
+    case Opcode::InitObjectLiteralProperty:
+        emit<Bytecode::Op::InitObjectLiteralProperty>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.property_slot());
+        break;
+
+    case Opcode::CacheObjectShape:
+        emit<Bytecode::Op::CacheObjectShape>(operand(0), instruction.cache_index());
+        break;
+
     // Construct (variable-length arguments)
     case Opcode::Construct: {
         // IR Construct operands: [callee, arg0, arg1, ...]

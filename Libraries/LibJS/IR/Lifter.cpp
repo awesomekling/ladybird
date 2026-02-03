@@ -599,9 +599,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case InitObjectLiteralProperty: {
         auto const& op = static_cast<Bytecode::Op::InitObjectLiteralProperty const&>(instruction);
-        auto& base = get_or_create_value_for_operand(op.object(), block);
+        auto& object = get_or_create_value_for_operand(op.object(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_put_by_id(block, base, op.property(), value);
+        m_function->build_init_object_literal_property(block, object, op.property(), value, op.shape_cache_index(), op.property_slot());
         break;
     }
     case CreateDataPropertyOrThrow: {
@@ -1118,9 +1118,14 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Completion tracking (for finally blocks)
     case GetCompletionFields:
     case SetCompletionType:
-    case CacheObjectShape:
         // Runtime bookkeeping - no IR values
         break;
+    case CacheObjectShape: {
+        auto const& op = static_cast<Bytecode::Op::CacheObjectShape const&>(instruction);
+        auto& object = get_or_create_value_for_operand(op.object(), block);
+        m_function->build_cache_object_shape(block, object, op.cache_index());
+        break;
+    }
 
     // TODO: Handle more opcodes as needed
     default:

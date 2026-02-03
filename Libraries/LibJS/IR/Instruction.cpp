@@ -175,6 +175,10 @@ char const* opcode_to_string(Opcode opcode)
         return "NewArray";
     case Opcode::NewFunction:
         return "NewFunction";
+    case Opcode::InitObjectLiteralProperty:
+        return "InitObjectLiteralProperty";
+    case Opcode::CacheObjectShape:
+        return "CacheObjectShape";
     case Opcode::In:
         return "In";
     case Opcode::InstanceOf:

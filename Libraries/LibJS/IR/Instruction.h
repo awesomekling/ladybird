@@ -111,6 +111,8 @@ enum class Opcode : u8 {
     NewObject,
     NewArray,
     NewFunction,
+    InitObjectLiteralProperty,
+    CacheObjectShape,
 
     // Special
     In,
@@ -158,6 +160,8 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::Typeof:
     case Opcode::Move:
     case Opcode::ExtractValue:
+    case Opcode::InitObjectLiteralProperty:
+    case Opcode::CacheObjectShape:
         return false;
     default:
         return true;
@@ -206,6 +210,9 @@ public:
     u32 cache_index() const { return m_cache_index; }
     void set_cache_index(u32 index) { m_cache_index = index; }
 
+    u32 property_slot() const { return m_property_slot; }
+    void set_property_slot(u32 slot) { m_property_slot = slot; }
+
     // For NewFunction - reference to the AST node
     FunctionNode const* function_node() const { return m_function_node; }
     void set_function_node(FunctionNode const* node) { m_function_node = node; }
@@ -242,6 +249,7 @@ private:
     Bytecode::PropertyKeyTableIndex m_property_key_index;
     Bytecode::IdentifierTableIndex m_identifier_index;
     u32 m_cache_index { 0 };
+    u32 m_property_slot { 0 };
     u32 m_extract_index { 0 };
     IteratorHint m_iterator_hint { IteratorHint::Sync };
     FunctionNode const* m_function_node { nullptr };

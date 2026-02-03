@@ -440,6 +440,27 @@ Value& Function::build_new_function(BasicBlock& block)
     return result;
 }
 
+void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot)
+{
+    auto instruction = Instruction::create(Opcode::InitObjectLiteralProperty);
+    instruction->add_operand(&object);
+    instruction->add_operand(&value);
+    instruction->set_property_key_index(property);
+    instruction->set_cache_index(shape_cache_index);
+    instruction->set_property_slot(property_slot);
+
+    block.append(move(instruction));
+}
+
+void Function::build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index)
+{
+    auto instruction = Instruction::create(Opcode::CacheObjectShape);
+    instruction->add_operand(&object);
+    instruction->set_cache_index(cache_index);
+
+    block.append(move(instruction));
+}
+
 // Special
 Value& Function::build_in(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::In, lhs, rhs); }
 Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::InstanceOf, lhs, rhs); }
