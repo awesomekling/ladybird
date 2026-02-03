@@ -9,6 +9,7 @@
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Passes/BlockMerging.h>
 #include <LibJS/IR/Passes/ConstantBranchFolding.h>
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
@@ -244,6 +245,10 @@ void optimize(Function& function)
         // Dead block elimination - remove unreachable blocks
         DeadBlockElimination dbe;
         run_pass(dbe, function, changed);
+
+        // Block merging - merge linear chains of blocks
+        BlockMerging block_merge;
+        run_pass(block_merge, function, changed);
 
         if (!changed)
             break;

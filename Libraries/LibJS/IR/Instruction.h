@@ -183,6 +183,7 @@ public:
     // For Phi nodes
     Vector<BasicBlock*> const& phi_predecessors() const { return m_phi_predecessors; }
     void add_phi_operand(BasicBlock* predecessor, Value* value);
+    void set_phi_predecessor(size_t index, BasicBlock* block) { m_phi_predecessors[index] = block; }
 
     // Instruction-specific indices (reuse bytecode tables)
     Bytecode::PropertyKeyTableIndex property_key_index() const { return m_property_key_index; }
