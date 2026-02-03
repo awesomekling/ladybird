@@ -225,6 +225,11 @@ Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& prope
     return result;
 }
 
+Value& Function::build_get_length(BasicBlock& block, Value& base)
+{
+    return build_unary_op(block, Opcode::GetLength, base);
+}
+
 void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value)
 {
     auto instruction = Instruction::create(Opcode::PutById);

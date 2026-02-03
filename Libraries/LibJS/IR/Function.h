@@ -98,6 +98,7 @@ public:
     // Property access
     Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
     Value& build_get_by_value(BasicBlock& block, Value& base, Value& property);
+    Value& build_get_length(BasicBlock& block, Value& base);
     void build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value);
     void build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value);
     Value& build_delete_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);

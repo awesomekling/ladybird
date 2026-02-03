@@ -82,6 +82,7 @@ enum class Opcode : u8 {
     // Property access
     GetById,
     GetByValue,
+    GetLength,
     PutById,
     PutByValue,
     DeleteById,

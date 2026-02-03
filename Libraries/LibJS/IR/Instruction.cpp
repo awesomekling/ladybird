@@ -143,6 +143,8 @@ char const* opcode_to_string(Opcode opcode)
         return "GetById";
     case Opcode::GetByValue:
         return "GetByValue";
+    case Opcode::GetLength:
+        return "GetLength";
     case Opcode::PutById:
         return "PutById";
     case Opcode::PutByValue:

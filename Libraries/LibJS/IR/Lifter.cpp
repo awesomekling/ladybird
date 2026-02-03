@@ -566,6 +566,47 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+    case NewArrayWithLength: {
+        auto const& op = static_cast<Bytecode::Op::NewArrayWithLength const&>(instruction);
+        auto& length = get_or_create_value_for_operand(op.array_length());
+        // Use build_new_array with no elements for now; length is tracked separately
+        Vector<Value*> elements;
+        auto& result = m_function->build_new_array(block, elements.span());
+        (void)length; // TODO: Properly handle array length
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewObjectWithNoPrototype: {
+        auto const& op = static_cast<Bytecode::Op::NewObjectWithNoPrototype const&>(instruction);
+        auto& result = m_function->build_new_object(block);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewFunction: {
+        auto const& op = static_cast<Bytecode::Op::NewFunction const&>(instruction);
+        // NB: NewFunction creates a new function object. For now, track it as a generic value.
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewRegExp: {
+        auto const& op = static_cast<Bytecode::Op::NewRegExp const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewTypeError: {
+        auto const& op = static_cast<Bytecode::Op::NewTypeError const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewClass: {
+        auto const& op = static_cast<Bytecode::Op::NewClass const&>(instruction);
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
 
     // Calls
     case Call: {
@@ -639,6 +680,57 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         Vector<Value*> args { &args_array };
         auto& result = m_function->build_call(block, callee, this_value, args.span());
         m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Additional property access
+    case GetLength: {
+        auto const& op = static_cast<Bytecode::Op::GetLength const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& result = m_function->build_get_length(block, base);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetLengthWithThis: {
+        auto const& op = static_cast<Bytecode::Op::GetLengthWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& result = m_function->build_get_length(block, base);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetMethod: {
+        auto const& op = static_cast<Bytecode::Op::GetMethod const&>(instruction);
+        auto& object = get_or_create_value_for_operand(op.object());
+        auto& result = m_function->build_get_by_id(block, object, op.property());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetNewTarget: {
+        auto const& op = static_cast<Bytecode::Op::GetNewTarget const&>(instruction);
+        // GetNewTarget returns a special value from the execution context
+        auto& result = m_function->create_register_value();
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetCalleeAndThisFromEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::GetCalleeAndThisFromEnvironment const&>(instruction);
+        // This instruction writes to both callee and this_value operands
+        auto& callee_result = m_function->build_get_binding(block, op.identifier());
+        m_operand_to_value.set(op.callee().raw(), &callee_result);
+        // this_value is typically undefined for function calls
+        auto& this_result = m_function->create_register_value();
+        m_operand_to_value.set(op.this_value().raw(), &this_result);
+        break;
+    }
+    case ResolveThisBinding: {
+        // ResolveThisBinding doesn't produce a value itself, it's a side-effect op
+        break;
+    }
+    case GetObjectPropertyIterator: {
+        auto const& op = static_cast<Bytecode::Op::GetObjectPropertyIterator const&>(instruction);
+        auto& object = get_or_create_value_for_operand(op.object());
+        auto& result = m_function->build_get_iterator(block, object);
+        m_operand_to_value.set(op.dst_iterator_object().raw(), &result);
         break;
     }
 
