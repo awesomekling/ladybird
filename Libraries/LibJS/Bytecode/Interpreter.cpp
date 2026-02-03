@@ -24,6 +24,7 @@
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lifter.h>
+#include <LibJS/IR/Lowerer.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
@@ -149,11 +150,19 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
             if (g_dump_bytecode)
                 executable->dump();
 
-            if (IR::g_dump_ir) {
+            if (IR::g_dump_ir || IR::g_lower_ir) {
                 auto ir_function = IR::Lifter::lift(*executable);
                 if (IR::g_optimize_ir)
                     IR::optimize(*ir_function);
-                outln("{}", IR::dump(*ir_function));
+                if (IR::g_dump_ir)
+                    outln("{}", IR::dump(*ir_function));
+                if (IR::g_lower_ir) {
+                    executable = IR::Lowerer::lower(vm, *ir_function);
+                    if (g_dump_bytecode) {
+                        outln("=== Lowered bytecode ===");
+                        executable->dump();
+                    }
+                }
             }
         }
     }

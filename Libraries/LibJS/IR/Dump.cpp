@@ -28,6 +28,7 @@ namespace JS::IR {
 bool g_dump_ir = false;
 bool g_optimize_ir = false;
 bool g_dump_ir_between_passes = false;
+bool g_lower_ir = false;
 
 void dump(Value const& value, StringBuilder& builder)
 {
