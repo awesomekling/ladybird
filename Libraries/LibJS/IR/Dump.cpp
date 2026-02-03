@@ -21,7 +21,7 @@ void dump(Value const& value, StringBuilder& builder)
     builder.appendff("v{}", value.index());
 }
 
-void dump(Instruction const& instruction, StringBuilder& builder)
+static void dump_instruction(Instruction const& instruction, StringBuilder& builder, Bytecode::Executable const* executable)
 {
     if (instruction.result()) {
         dump(*instruction.result(), builder);
@@ -91,6 +91,29 @@ void dump(Instruction const& instruction, StringBuilder& builder)
         builder.append(']');
         break;
 
+    case Opcode::GetGlobal:
+    case Opcode::SetGlobal:
+    case Opcode::GetBinding:
+    case Opcode::SetBinding:
+        if (executable && instruction.identifier_index().is_valid()) {
+            auto name = executable->identifier_table->get(instruction.identifier_index());
+            builder.appendff(" {}", name);
+        }
+        for (auto* operand : instruction.operands())
+            append_operand(operand);
+        break;
+
+    case Opcode::GetById:
+    case Opcode::PutById:
+    case Opcode::DeleteById:
+        for (auto* operand : instruction.operands())
+            append_operand(operand);
+        if (executable && instruction.property_key_index().is_valid()) {
+            auto name = executable->property_key_table->get(instruction.property_key_index());
+            builder.appendff(".{}", name);
+        }
+        break;
+
     default:
         for (auto* operand : instruction.operands())
             append_operand(operand);
@@ -98,7 +121,12 @@ void dump(Instruction const& instruction, StringBuilder& builder)
     }
 }
 
-void dump(BasicBlock const& block, StringBuilder& builder)
+void dump(Instruction const& instruction, StringBuilder& builder)
+{
+    dump_instruction(instruction, builder, nullptr);
+}
+
+static void dump_block(BasicBlock const& block, StringBuilder& builder, Bytecode::Executable const* executable)
 {
     if (block.name().is_empty())
         builder.appendff("block{}:", block.index());
@@ -114,9 +142,14 @@ void dump(BasicBlock const& block, StringBuilder& builder)
 
     for (auto const& instruction : block.instructions()) {
         builder.append("    "sv);
-        dump(*instruction, builder);
+        dump_instruction(*instruction, builder, executable);
         builder.append('\n');
     }
+}
+
+void dump(BasicBlock const& block, StringBuilder& builder)
+{
+    dump_block(block, builder, nullptr);
 }
 
 void dump(Function const& function, StringBuilder& builder)
@@ -131,8 +164,9 @@ void dump(Function const& function, StringBuilder& builder)
 
     builder.append("):\n"sv);
 
+    auto* executable = function.source_executable().ptr();
     for (auto const& block : function.basic_blocks()) {
-        dump(*block, builder);
+        dump_block(*block, builder, executable);
     }
 }
 

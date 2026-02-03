@@ -39,6 +39,15 @@ Value& Function::create_parameter(u32 parameter_index)
     return ref;
 }
 
+Value& Function::create_register_value()
+{
+    // Creates a value for a bytecode register/local that isn't a real parameter
+    auto value = Value::create_for_instruction(m_next_value_index++);
+    auto& ref = *value;
+    m_values.append(move(value));
+    return ref;
+}
+
 Value& Function::create_constant(JS::Value constant)
 {
     auto value = Value::create_for_constant(m_next_value_index++, constant);

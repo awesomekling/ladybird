@@ -37,6 +37,7 @@ public:
 
     // Factory methods for values
     Value& create_parameter(u32 parameter_index);
+    Value& create_register_value();
     Value& create_constant(JS::Value constant);
 
     // Instruction builders that return result Value&

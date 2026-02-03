@@ -65,17 +65,20 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand)
     if (auto it = m_operand_to_value.find(raw); it != m_operand_to_value.end())
         return *it->value;
 
+    // Decode the operand to get the real type (operands are stored in a flat space)
+    auto decoded_operand = m_executable.original_operand_from_raw(raw);
+
     // Create a new value for this operand
     Value* value = nullptr;
 
-    if (operand.is_constant()) {
+    if (decoded_operand.is_constant()) {
         // Get the constant from the executable
-        auto constant = m_executable.constants[operand.index()];
+        auto constant = m_executable.constants[decoded_operand.index()];
         value = &m_function->create_constant(constant);
     } else {
-        // For registers/locals/arguments, create a parameter-like value
+        // For registers/locals/arguments, create a register value
         // NB: This is a simplification - in full SSA we'd need phi nodes
-        value = &m_function->create_parameter(operand.index());
+        value = &m_function->create_register_value();
     }
 
     m_operand_to_value.set(raw, value);
