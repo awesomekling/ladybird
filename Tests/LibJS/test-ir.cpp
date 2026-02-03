@@ -248,3 +248,6 @@ TEST_CASE(def_use_chains)
     EXPECT_EQ(param.uses().size(), 2u);
     EXPECT_EQ(negated.uses().size(), 1u);
 }
+
+// NB: Full lifter integration tests will be added when we integrate with the js binary,
+// as they require proper VM setup and compiled bytecode.

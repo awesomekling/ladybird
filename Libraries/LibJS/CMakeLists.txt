@@ -20,6 +20,7 @@ set(SOURCES
     IR/Dump.cpp
     IR/Function.cpp
     IR/Instruction.cpp
+    IR/Lifter.cpp
     IR/Value.cpp
     Console.cpp
     Contrib/Test262/262Object.cpp
