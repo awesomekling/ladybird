@@ -54,17 +54,22 @@ bool BlockMerging::run(Function& function)
                 continue;
 
             // Merge B into A:
-            // 1. Remove the Jump from A
+            // 1. Capture B's successors before modifying anything
+            auto* b_terminator = block_b->last_instruction();
+            BasicBlock* b_true_target = b_terminator ? b_terminator->true_target() : nullptr;
+            BasicBlock* b_false_target = b_terminator ? b_terminator->false_target() : nullptr;
+
+            // 2. Remove the Jump from A
             block_a->instructions().remove(block_a->instructions().size() - 1);
 
-            // 2. Move all instructions from B to A
+            // 3. Move all instructions from B to A
             for (auto& instruction : block_b->instructions()) {
                 instruction->set_parent_block(block_a.ptr());
                 block_a->instructions().append(move(instruction));
             }
             block_b->instructions().clear();
 
-            // 3. Update all references to B to point to A
+            // 4. Update all references to B to point to A
             for (auto& other_block : function.basic_blocks()) {
                 for (auto& instruction : other_block->instructions()) {
                     if (instruction->true_target() == block_b)
@@ -79,11 +84,17 @@ bool BlockMerging::run(Function& function)
                     }
                 }
 
-                // Update predecessor lists
+                // Update predecessor lists: remove B
                 other_block->remove_predecessor(block_b);
             }
 
-            // 4. Copy B's exception handler/finalizer to A if A doesn't have them
+            // 5. Add A to the predecessor lists of B's former successors
+            if (b_true_target && b_true_target != block_b)
+                b_true_target->add_predecessor(block_a.ptr());
+            if (b_false_target && b_false_target != block_b && b_false_target != b_true_target)
+                b_false_target->add_predecessor(block_a.ptr());
+
+            // 6. Copy B's exception handler/finalizer to A if A doesn't have them
             if (!block_a->exception_handler() && block_b->exception_handler())
                 block_a->set_exception_handler(block_b->exception_handler());
             if (!block_a->finalizer() && block_b->finalizer())
