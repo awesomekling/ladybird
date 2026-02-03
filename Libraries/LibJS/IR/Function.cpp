@@ -39,6 +39,17 @@ Value& Function::create_parameter(u32 parameter_index)
     return ref;
 }
 
+Value& Function::create_this()
+{
+    if (m_this_value)
+        return *m_this_value;
+    auto value = Value::create_for_this(m_next_value_index++);
+    auto& ref = *value;
+    m_values.append(move(value));
+    m_this_value = &ref;
+    return ref;
+}
+
 Value& Function::create_register_value()
 {
     // Creates a value for a bytecode register/local that isn't a real parameter

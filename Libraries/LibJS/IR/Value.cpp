@@ -77,4 +77,9 @@ NonnullOwnPtr<Value> Value::create_for_constant(u32 index, JS::Value constant)
     return value;
 }
 
+NonnullOwnPtr<Value> Value::create_for_this(u32 index)
+{
+    return adopt_own(*new Value(Kind::This, index));
+}
+
 }

@@ -24,6 +24,7 @@ public:
         Instruction,
         Parameter,
         Constant,
+        This,
     };
 
     Kind kind() const { return m_kind; }
@@ -33,6 +34,7 @@ public:
     bool is_instruction() const { return m_kind == Kind::Instruction; }
     bool is_parameter() const { return m_kind == Kind::Parameter; }
     bool is_constant() const { return m_kind == Kind::Constant; }
+    bool is_this() const { return m_kind == Kind::This; }
 
     Instruction* defining_instruction() const { return m_defining_instruction; }
     void set_defining_instruction(Instruction* instruction) { m_defining_instruction = instruction; }
@@ -59,6 +61,7 @@ public:
     static NonnullOwnPtr<Value> create_for_instruction(u32 index);
     static NonnullOwnPtr<Value> create_for_parameter(u32 index, u32 parameter_index);
     static NonnullOwnPtr<Value> create_for_constant(u32 index, JS::Value constant);
+    static NonnullOwnPtr<Value> create_for_this(u32 index);
 
 private:
     Value(Kind kind, u32 index);

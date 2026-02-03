@@ -69,6 +69,10 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
             // For parameters, create an argument operand
             return Bytecode::Operand(Bytecode::Operand::Type::Argument, value.parameter_index());
         }
+        if (value.is_this()) {
+            // For this, use the this register
+            return Bytecode::Operand(Bytecode::Register::this_value());
+        }
         return allocate_register();
     }();
 

@@ -6,6 +6,7 @@
 
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Op.h>
+#include <LibJS/Bytecode/Register.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -99,6 +100,9 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
     } else if (decoded_operand.type() == Bytecode::Operand::Type::Argument) {
         // For arguments, create a parameter value to preserve the argument index
         value = &m_function->create_parameter(decoded_operand.index());
+    } else if (decoded_operand.is_register() && decoded_operand.index() == Bytecode::Register::this_value().index()) {
+        // For the this register, create a special this value
+        value = &m_function->create_this();
     } else {
         // For registers/locals, create a register value
         // NB: In full SSA, phi nodes would be inserted at merge points
