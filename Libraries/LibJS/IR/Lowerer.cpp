@@ -143,6 +143,41 @@ void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock co
     }
 }
 
+bool Lowerer::target_has_phis(BasicBlock const& target) const
+{
+    if (target.instructions().is_empty())
+        return false;
+    return target.instructions().first()->opcode() == Opcode::Phi;
+}
+
+size_t Lowerer::get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to)
+{
+    // Create a unique key for this edge
+    auto from_idx = m_ir_block_to_bytecode_index.get(&from).value();
+    auto to_idx = m_ir_block_to_bytecode_index.get(&to).value();
+    u64 edge_key = (static_cast<u64>(from_idx) << 32) | static_cast<u64>(to_idx);
+
+    // Check if we already have a trampoline for this edge
+    if (auto it = m_edge_to_trampoline.find(edge_key); it != m_edge_to_trampoline.end())
+        return it->value;
+
+    // Create a new trampoline block
+    auto trampoline_idx = m_bytecode_blocks.size();
+    auto trampoline = Bytecode::BasicBlock::create(static_cast<u32>(trampoline_idx),
+        String::formatted("trampoline_{}_{}", from.name(), to.name()).release_value_but_fixme_should_propagate_errors());
+    m_bytecode_blocks.append(move(trampoline));
+    m_edge_to_trampoline.set(edge_key, trampoline_idx);
+
+    // Emit phi moves and jump in the trampoline block
+    auto* saved_block = m_current_block;
+    m_current_block = m_bytecode_blocks[trampoline_idx].ptr();
+    emit_phi_moves_for_successor(from, to);
+    emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(to_idx) });
+    m_current_block = saved_block;
+
+    return trampoline_idx;
+}
+
 void Lowerer::lower_instruction(Instruction const& instruction)
 {
     auto dst = [&]() -> Bytecode::Operand {
@@ -286,9 +321,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     // String
-    case Opcode::ConcatString:
-        emit<Bytecode::Op::ConcatString>(dst(), operand(0));
+    case Opcode::ConcatString: {
+        auto d = dst();
+        auto base = operand(0);
+        auto to_append = operand(1);
+        // Bytecode ConcatString expects dst to already contain the base string
+        if (d != base)
+            emit<Bytecode::Op::Mov>(d, base);
+        emit<Bytecode::Op::ConcatString>(d, to_append);
         break;
+    }
     case Opcode::GetLength:
         emit<Bytecode::Op::GetLength>(dst(), operand(0), OptionalNone {}, instruction.cache_index());
         break;
@@ -317,12 +359,17 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     // Environment
+    case Opcode::CreateVariable:
+        emit<Bytecode::Op::CreateVariable>(instruction.identifier_index(), instruction.environment_mode(), instruction.is_immutable(), instruction.is_global(), instruction.is_strict());
+        break;
     case Opcode::GetBinding:
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
         break;
-    case Opcode::SetBinding:
-        // NB: Using InitializeLexicalBinding since we don't track the init vs set distinction in IR
+    case Opcode::InitializeBinding:
         emit<Bytecode::Op::InitializeLexicalBinding>(instruction.identifier_index(), operand(0));
+        break;
+    case Opcode::SetBinding:
+        emit<Bytecode::Op::SetLexicalBinding>(instruction.identifier_index(), operand(0));
         break;
     case Opcode::GetGlobal:
         emit<Bytecode::Op::GetGlobal>(dst(), instruction.identifier_index(), instruction.cache_index());
@@ -517,21 +564,39 @@ void Lowerer::lower_blocks()
             auto* true_target = terminator->true_target();
             auto* false_target = terminator->false_target();
 
-            // Emit phi moves before the branch
-            // NB: This is a simplification - in reality we'd need to emit moves
-            // only along the taken edge, which requires critical edge splitting
-            if (true_target)
-                emit_phi_moves_for_successor(*ir_block, *true_target);
-            if (false_target && false_target != true_target)
-                emit_phi_moves_for_successor(*ir_block, *false_target);
+            if (true_target && false_target && false_target != true_target) {
+                // Both targets exist and are different - check if we need critical edge splitting
+                bool true_has_phis = target_has_phis(*true_target);
+                bool false_has_phis = target_has_phis(*false_target);
 
-            if (true_target && false_target) {
-                auto true_index = m_ir_block_to_bytecode_index.get(true_target).value();
-                auto false_index = m_ir_block_to_bytecode_index.get(false_target).value();
+                size_t true_index, false_index;
+
+                if (true_has_phis && false_has_phis) {
+                    // Critical edges: both targets have phis, so we need trampolines
+                    // to avoid phi move conflicts
+                    true_index = get_or_create_trampoline(*ir_block, *true_target);
+                    false_index = get_or_create_trampoline(*ir_block, *false_target);
+                } else if (true_has_phis) {
+                    // Only true target has phis - emit moves before branch, use trampoline for true
+                    true_index = get_or_create_trampoline(*ir_block, *true_target);
+                    false_index = m_ir_block_to_bytecode_index.get(false_target).value();
+                } else if (false_has_phis) {
+                    // Only false target has phis - emit moves before branch, use trampoline for false
+                    true_index = m_ir_block_to_bytecode_index.get(true_target).value();
+                    false_index = get_or_create_trampoline(*ir_block, *false_target);
+                } else {
+                    // Neither target has phis - no phi moves needed
+                    true_index = m_ir_block_to_bytecode_index.get(true_target).value();
+                    false_index = m_ir_block_to_bytecode_index.get(false_target).value();
+                }
+
                 emit<Bytecode::Op::JumpIf>(condition,
                     Bytecode::Label { static_cast<u32>(true_index) },
                     Bytecode::Label { static_cast<u32>(false_index) });
             } else if (true_target) {
+                // Only one target (unconditional after condition eval, or same target)
+                if (target_has_phis(*true_target))
+                    emit_phi_moves_for_successor(*ir_block, *true_target);
                 auto target_index = m_ir_block_to_bytecode_index.get(true_target).value();
                 emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
