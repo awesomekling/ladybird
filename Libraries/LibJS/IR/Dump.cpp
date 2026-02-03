@@ -11,6 +11,7 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/AlgebraicSimplification.h>
 #include <LibJS/IR/Passes/BlockMerging.h>
+#include <LibJS/IR/Passes/CommonSubexpressionElimination.h>
 #include <LibJS/IR/Passes/ConstantBranchFolding.h>
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
@@ -240,6 +241,10 @@ void optimize(Function& function)
         // Algebraic simplification - x + 0 → x, x * 1 → x, etc.
         AlgebraicSimplification alg_simp;
         run_pass(alg_simp, function, changed);
+
+        // Common subexpression elimination - reuse computed values
+        CommonSubexpressionElimination cse;
+        run_pass(cse, function, changed);
 
         // Constant branch folding - simplify branches on constants
         ConstantBranchFolding branch_fold;

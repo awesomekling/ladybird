@@ -23,6 +23,7 @@ set(SOURCES
     IR/Lifter.cpp
     IR/Passes/AlgebraicSimplification.cpp
     IR/Passes/BlockMerging.cpp
+    IR/Passes/CommonSubexpressionElimination.cpp
     IR/Passes/ConstantBranchFolding.cpp
     IR/Passes/ConstantFolding.cpp
     IR/Passes/CopyPropagation.cpp
