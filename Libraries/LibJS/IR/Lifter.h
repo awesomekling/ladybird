@@ -25,6 +25,7 @@ private:
     void lift_instruction(Bytecode::Instruction const&, BasicBlock&);
     void insert_phi_nodes();
     void connect_control_flow();
+    u32 address_to_block_index(size_t address) const;
 
     Value& get_or_create_value_for_operand(Bytecode::Operand operand);
     Value& create_value_for_destination(Bytecode::Operand operand);

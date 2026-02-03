@@ -19,6 +19,12 @@
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/Bytecode/PropertyAccess.h>
 #include <LibJS/Export.h>
+#include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Dump.h>
+#include <LibJS/IR/Function.h>
+#include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Lifter.h>
+#include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/Array.h>
@@ -142,6 +148,11 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
 
             if (g_dump_bytecode)
                 executable->dump();
+
+            if (IR::g_dump_ir) {
+                auto ir_function = IR::Lifter::lift(*executable);
+                outln("{}", IR::dump(*ir_function));
+            }
         }
     }
 

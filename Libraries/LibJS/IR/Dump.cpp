@@ -14,6 +14,8 @@
 
 namespace JS::IR {
 
+bool g_dump_ir = false;
+
 void dump(Value const& value, StringBuilder& builder)
 {
     builder.appendff("v{}", value.index());

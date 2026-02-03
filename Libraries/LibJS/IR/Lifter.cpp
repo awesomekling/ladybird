@@ -464,6 +464,22 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
 }
 
+u32 Lifter::address_to_block_index(size_t address) const
+{
+    // Find the basic block that contains this address
+    for (size_t i = 0; i < m_executable.basic_block_start_offsets.size(); ++i) {
+        if (m_executable.basic_block_start_offsets[i] == address)
+            return static_cast<u32>(i);
+    }
+    // If we didn't find an exact match, find the block that contains this address
+    for (size_t i = 0; i + 1 < m_executable.basic_block_start_offsets.size(); ++i) {
+        if (address >= m_executable.basic_block_start_offsets[i] && address < m_executable.basic_block_start_offsets[i + 1])
+            return static_cast<u32>(i);
+    }
+    // Default to the last block
+    return static_cast<u32>(m_executable.basic_block_start_offsets.size() - 1);
+}
+
 void Lifter::connect_control_flow()
 {
     // Second pass through instructions to connect control flow edges
@@ -496,15 +512,15 @@ void Lifter::connect_control_flow()
         switch (last_instruction->type()) {
         case Jump: {
             auto const& op = static_cast<Bytecode::Op::Jump const&>(*last_instruction);
-            auto* target = m_block_map.get(static_cast<u32>(op.target().basic_block_index())).value();
+            auto* target = m_block_map.get(address_to_block_index(op.target().address())).value();
             m_function->build_jump(ir_block, *target);
             break;
         }
         case JumpIf: {
             auto const& op = static_cast<Bytecode::Op::JumpIf const&>(*last_instruction);
             auto& condition = get_or_create_value_for_operand(op.condition());
-            auto* true_target = m_block_map.get(static_cast<u32>(op.true_target().basic_block_index())).value();
-            auto* false_target = m_block_map.get(static_cast<u32>(op.false_target().basic_block_index())).value();
+            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
+            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
             m_function->build_branch(ir_block, condition, *true_target, *false_target);
             break;
         }
@@ -512,7 +528,7 @@ void Lifter::connect_control_flow()
             auto const& op = static_cast<Bytecode::Op::JumpTrue const&>(*last_instruction);
             auto& condition = get_or_create_value_for_operand(op.condition());
             // JumpTrue only has one target - we need to find the fallthrough
-            auto* target = m_block_map.get(static_cast<u32>(op.target().basic_block_index())).value();
+            auto* target = m_block_map.get(address_to_block_index(op.target().address())).value();
             // Fallthrough to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
                 auto* fallthrough = m_block_map.get(static_cast<u32>(block_index + 1)).value();
@@ -526,7 +542,7 @@ void Lifter::connect_control_flow()
         case JumpFalse: {
             auto const& op = static_cast<Bytecode::Op::JumpFalse const&>(*last_instruction);
             auto& condition = get_or_create_value_for_operand(op.condition());
-            auto* target = m_block_map.get(static_cast<u32>(op.target().basic_block_index())).value();
+            auto* target = m_block_map.get(address_to_block_index(op.target().address())).value();
             // Fallthrough to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
                 auto* fallthrough = m_block_map.get(static_cast<u32>(block_index + 1)).value();

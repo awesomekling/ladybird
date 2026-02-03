@@ -12,6 +12,8 @@
 
 namespace JS::IR {
 
+JS_API extern bool g_dump_ir;
+
 JS_API void dump(Function const&, StringBuilder&);
 JS_API void dump(BasicBlock const&, StringBuilder&);
 JS_API void dump(Instruction const&, StringBuilder&);

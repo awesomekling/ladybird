@@ -18,6 +18,8 @@
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Console.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
+#include <LibJS/IR/Dump.h>
+#include <LibJS/IR/Lifter.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Print.h>
 #include <LibJS/Runtime/ConsoleObject.h>
@@ -828,6 +830,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(parse_only, "Parse only", "parse-only", 'p');
     args_parser.add_option(s_dump_ast, "Dump the AST", "dump-ast", 'A');
     args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
+    args_parser.add_option(JS::IR::g_dump_ir, "Dump the IR", "dump-ir", 'I');
     args_parser.add_option(s_as_module, "Treat as module", "as-module", 'm');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');
     args_parser.add_option(s_strip_ansi, "Disable ANSI colors", "disable-ansi-colors", 'i');
