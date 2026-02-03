@@ -15,6 +15,12 @@ RegexTableIndex RegexTable::insert(ParsedRegex parsed_regex)
     return m_regexes.size() - 1;
 }
 
+RegexTableIndex RegexTable::insert(Regex<ECMA262> regex)
+{
+    m_regexes.append(move(regex));
+    return m_regexes.size() - 1;
+}
+
 Regex<ECMA262> const& RegexTable::get(RegexTableIndex index) const
 {
     return m_regexes[index.value()];

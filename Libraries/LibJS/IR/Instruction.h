@@ -11,6 +11,8 @@
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
+#include <LibJS/Bytecode/RegexTable.h>
+#include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 #include <LibJS/Runtime/Iterator.h>
@@ -118,6 +120,7 @@ enum class Opcode : u8 {
     NewObject,
     NewArray,
     NewFunction,
+    NewRegExp,
     InitObjectLiteralProperty,
     CacheObjectShape,
 
@@ -235,6 +238,14 @@ public:
     Optional<Bytecode::IdentifierTableIndex> lhs_name() const { return m_lhs_name; }
     void set_lhs_name(Optional<Bytecode::IdentifierTableIndex> name) { m_lhs_name = name; }
 
+    // For NewRegExp
+    Bytecode::StringTableIndex regex_source_index() const { return m_regex_source_index; }
+    void set_regex_source_index(Bytecode::StringTableIndex index) { m_regex_source_index = index; }
+    Bytecode::StringTableIndex regex_flags_index() const { return m_regex_flags_index; }
+    void set_regex_flags_index(Bytecode::StringTableIndex index) { m_regex_flags_index = index; }
+    Bytecode::RegexTableIndex regex_index() const { return m_regex_index; }
+    void set_regex_index(Bytecode::RegexTableIndex index) { m_regex_index = index; }
+
     // For ExtractValue - which element to extract from a tuple
     u32 extract_index() const { return m_extract_index; }
     void set_extract_index(u32 index) { m_extract_index = index; }
@@ -293,6 +304,11 @@ private:
 
     // For CreateLexicalEnvironment
     u32 m_capacity { 0 };
+
+    // For NewRegExp
+    Bytecode::StringTableIndex m_regex_source_index;
+    Bytecode::StringTableIndex m_regex_flags_index;
+    Bytecode::RegexTableIndex m_regex_index;
 };
 
 }

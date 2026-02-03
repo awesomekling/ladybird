@@ -30,9 +30,11 @@ public:
     RegexTable() = default;
 
     RegexTableIndex insert(ParsedRegex);
+    RegexTableIndex insert(Regex<ECMA262>);
     Regex<ECMA262> const& get(RegexTableIndex) const;
     void dump() const;
     bool is_empty() const { return m_regexes.is_empty(); }
+    Vector<Regex<ECMA262>> const& regexes() const { return m_regexes; }
 
 private:
     Vector<Regex<ECMA262>> m_regexes;

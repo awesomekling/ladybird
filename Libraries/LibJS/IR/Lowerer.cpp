@@ -459,6 +459,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), OptionalNone {});
         break;
 
+    // NewRegExp
+    case Opcode::NewRegExp:
+        emit<Bytecode::Op::NewRegExp>(dst(), instruction.regex_source_index(), instruction.regex_flags_index(), instruction.regex_index());
+        break;
+
     case Opcode::InitObjectLiteralProperty:
         emit<Bytecode::Op::InitObjectLiteralProperty>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.property_slot());
         break;
@@ -690,9 +695,15 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
     for (auto const& key : source_executable->property_key_table->property_keys())
         property_key_table->insert(key);
 
-    // NB: String and regex tables are not exposed for iteration, create empty ones for now
+    // Copy string table from source executable
     auto string_table = make<Bytecode::StringTable>();
+    for (auto const& string : source_executable->string_table->strings())
+        string_table->insert(string);
+
+    // Copy regex table from source executable
     auto regex_table = make<Bytecode::RegexTable>();
+    for (auto const& regex : source_executable->regex_table->regexes())
+        regex_table->insert(regex);
 
     Vector<JS::Value> constants = move(lowerer.m_constants);
 

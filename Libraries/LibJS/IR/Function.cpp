@@ -498,6 +498,22 @@ Value& Function::build_new_function(BasicBlock& block)
     return result;
 }
 
+Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex)
+{
+    auto instruction = Instruction::create(Opcode::NewRegExp);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Object);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+    instruction->set_regex_source_index(source);
+    instruction->set_regex_flags_index(flags);
+    instruction->set_regex_index(regex);
+
+    block.append(move(instruction));
+    return result;
+}
+
 void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot)
 {
     auto instruction = Instruction::create(Opcode::InitObjectLiteralProperty);

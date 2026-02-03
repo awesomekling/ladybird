@@ -764,7 +764,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewRegExp: {
         auto const& op = static_cast<Bytecode::Op::NewRegExp const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_new_regexp(block, op.source_index(), op.flags_index(), op.regex_index());
         define_operand(op.dst(), result, block);
         break;
     }

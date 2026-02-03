@@ -12,6 +12,8 @@
 #include <LibGC/Ptr.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/Instruction.h>
+#include <LibJS/Bytecode/RegexTable.h>
+#include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 
@@ -129,6 +131,7 @@ public:
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
     Value& build_new_function(BasicBlock& block);
+    Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot);
     void build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index);
 
