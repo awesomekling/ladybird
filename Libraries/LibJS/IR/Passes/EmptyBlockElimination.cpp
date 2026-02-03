@@ -9,6 +9,7 @@
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/EmptyBlockElimination.h>
+#include <LibJS/IR/Value.h>
 
 namespace JS::IR {
 
@@ -93,9 +94,37 @@ bool EmptyBlockElimination::run(Function& function)
                     continue;
 
                 // For each predecessor of the empty block, add a phi entry
-                // with the same value the empty block contributed
+                // But only if that predecessor doesn't already have an entry
                 for (auto* pred : predecessors) {
-                    instr->add_phi_operand(pred, value_from_empty);
+                    bool already_has_entry = false;
+                    for (auto* existing_pred : instr->phi_predecessors()) {
+                        if (existing_pred == pred) {
+                            already_has_entry = true;
+                            break;
+                        }
+                    }
+                    if (already_has_entry)
+                        continue;
+
+                    // Find the correct value for this predecessor
+                    // If value_from_empty is defined by a phi in a predecessor-only block,
+                    // we need to trace what value that phi would contribute for this specific predecessor
+                    Value* value_for_pred = value_from_empty;
+                    if (value_from_empty && value_from_empty->defining_instruction()) {
+                        auto* def_instr = value_from_empty->defining_instruction();
+                        if (def_instr->opcode() == Opcode::Phi) {
+                            // The value is a phi - check if we can trace through to find
+                            // what value this specific predecessor would contribute
+                            for (size_t j = 0; j < def_instr->phi_predecessors().size(); ++j) {
+                                if (def_instr->phi_predecessors()[j] == pred) {
+                                    value_for_pred = def_instr->operands()[j];
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    instr->add_phi_operand(pred, value_for_pred);
                 }
 
                 // Remove the entry for the empty block

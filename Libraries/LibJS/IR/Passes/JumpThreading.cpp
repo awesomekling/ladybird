@@ -89,6 +89,18 @@ bool JumpThreading::run(Function& function)
                 thread_target->add_predecessor(pred_block);
                 block->remove_predecessor(pred_block);
 
+                // Remove phi operands in the bypassed block for the threaded predecessor
+                for (auto& instr : block->instructions()) {
+                    if (instr->opcode() != Opcode::Phi)
+                        break;
+                    for (size_t j = instr->phi_predecessors().size(); j > 0; --j) {
+                        if (instr->phi_predecessors()[j - 1] == pred_block) {
+                            instr->remove_phi_operand(j - 1);
+                            break;
+                        }
+                    }
+                }
+
                 // Update phi nodes in the target block to include the threaded predecessor
                 for (auto& instr : thread_target->instructions()) {
                     if (instr->opcode() != Opcode::Phi)
