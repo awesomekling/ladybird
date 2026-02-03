@@ -19,6 +19,7 @@
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/EmptyBlockElimination.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
+#include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
@@ -233,6 +234,10 @@ void optimize(Function& function)
         // Copy propagation first - enables other optimizations
         CopyPropagation copy_prop;
         run_pass(copy_prop, function, changed);
+
+        // Loop invariant code motion - hoist invariant computations out of loops
+        LoopInvariantCodeMotion licm;
+        run_pass(licm, function, changed);
 
         // Constant folding - evaluate constant expressions
         ConstantFolding const_fold;
