@@ -5,6 +5,7 @@
  */
 
 #include <AK/HashMap.h>
+#include <AK/NumericLimits.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -41,24 +42,37 @@ bool ConstantFolding::run(Function& function)
 
             auto const& operands = instruction->operands();
 
+            // Helper to create a JS value from an i64 result, converting to double if overflow
+            auto make_int_or_double = [](i64 result) -> JS::Value {
+                if (result >= NumericLimits<i32>::min() && result <= NumericLimits<i32>::max())
+                    return JS::Value(static_cast<i32>(result));
+                return JS::Value(static_cast<double>(result));
+            };
+
             switch (instruction->opcode()) {
             case Opcode::Add:
                 if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() + operands[1]->constant_value().as_i32());
+                    i64 lhs = operands[0]->constant_value().as_i32();
+                    i64 rhs = operands[1]->constant_value().as_i32();
+                    result_value = make_int_or_double(lhs + rhs);
                     can_fold = true;
                 }
                 break;
 
             case Opcode::Sub:
                 if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() - operands[1]->constant_value().as_i32());
+                    i64 lhs = operands[0]->constant_value().as_i32();
+                    i64 rhs = operands[1]->constant_value().as_i32();
+                    result_value = make_int_or_double(lhs - rhs);
                     can_fold = true;
                 }
                 break;
 
             case Opcode::Mul:
                 if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() * operands[1]->constant_value().as_i32());
+                    i64 lhs = operands[0]->constant_value().as_i32();
+                    i64 rhs = operands[1]->constant_value().as_i32();
+                    result_value = make_int_or_double(lhs * rhs);
                     can_fold = true;
                 }
                 break;
