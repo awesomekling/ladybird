@@ -8,6 +8,7 @@
 
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Vector.h>
+#include <LibJS/Bytecode/Builtins.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
@@ -101,8 +102,11 @@ enum class Opcode : u8 {
 
     // Calls
     Call,
+    CallBuiltin,
     CallDirectEval,
+    CallWithArgumentArray,
     Construct,
+    ConstructWithArgumentArray,
 
     // Environment
     CreateVariable,
@@ -269,9 +273,13 @@ public:
     u32 capacity() const { return m_capacity; }
     void set_capacity(u32 capacity) { m_capacity = capacity; }
 
-    // For CallDirectEval
+    // For CallDirectEval and other calls
     Optional<Bytecode::StringTableIndex> expression_string() const { return m_expression_string; }
     void set_expression_string(Optional<Bytecode::StringTableIndex> index) { m_expression_string = index; }
+
+    // For CallBuiltin
+    Bytecode::Builtin builtin() const { return m_builtin; }
+    void set_builtin(Bytecode::Builtin builtin) { m_builtin = builtin; }
 
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
@@ -315,8 +323,11 @@ private:
     Bytecode::StringTableIndex m_regex_flags_index;
     Bytecode::RegexTableIndex m_regex_index;
 
-    // For CallDirectEval
+    // For CallDirectEval and other calls
     Optional<Bytecode::StringTableIndex> m_expression_string;
+
+    // For CallBuiltin
+    Bytecode::Builtin m_builtin { Bytecode::Builtin::__Count };
 };
 
 }

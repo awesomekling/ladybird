@@ -800,7 +800,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         Vector<Value*> args;
         for (auto operand : op.arguments())
             args.append(&get_or_create_value_for_operand(operand, block));
-        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        auto& result = m_function->build_call_builtin(block, callee, this_value, args.span(), op.builtin(), op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -819,18 +819,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& callee = get_or_create_value_for_operand(op.callee(), block);
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
-        // NB: In full implementation, we'd need to handle spreading the array
-        Vector<Value*> args { &args_array };
-        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        auto& result = m_function->build_call_with_argument_array(block, callee, this_value, args_array, op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }
     case CallConstructWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::CallConstructWithArgumentArray const&>(instruction);
         auto& callee = get_or_create_value_for_operand(op.callee(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
-        Vector<Value*> args { &args_array };
-        auto& result = m_function->build_construct(block, callee, args.span());
+        auto& result = m_function->build_construct_with_argument_array(block, callee, this_value, args_array, op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }

@@ -112,8 +112,11 @@ public:
 
     // Calls
     Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
+    Value& build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
+    Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
 
     // Environment
     void build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);

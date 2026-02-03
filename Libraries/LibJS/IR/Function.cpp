@@ -323,6 +323,24 @@ Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value,
     return result;
 }
 
+Value& Function::build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string)
+{
+    auto instruction = Instruction::create(Opcode::CallBuiltin);
+    instruction->add_operand(&callee);
+    instruction->add_operand(&this_value);
+    for (auto* arg : arguments)
+        instruction->add_operand(arg);
+    instruction->set_builtin(builtin);
+    instruction->set_expression_string(expression_string);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
     auto instruction = Instruction::create(Opcode::CallDirectEval);
@@ -340,12 +358,45 @@ Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value&
     return result;
 }
 
+Value& Function::build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
+{
+    auto instruction = Instruction::create(Opcode::CallWithArgumentArray);
+    instruction->add_operand(&callee);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&arguments);
+    instruction->set_expression_string(expression_string);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments)
 {
     auto instruction = Instruction::create(Opcode::Construct);
     instruction->add_operand(&callee);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Object);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
+{
+    auto instruction = Instruction::create(Opcode::ConstructWithArgumentArray);
+    instruction->add_operand(&callee);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&arguments);
+    instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);

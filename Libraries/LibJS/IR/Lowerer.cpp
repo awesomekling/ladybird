@@ -445,6 +445,19 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
+    // CallBuiltin (variable-length arguments)
+    case Opcode::CallBuiltin: {
+        // IR CallBuiltin operands: [callee, this_value, arg0, arg1, ...]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        size_t arg_count = instruction.operands().size() - 2;
+        Vector<Bytecode::Operand> args;
+        for (size_t i = 0; i < arg_count; ++i)
+            args.append(operand(i + 2));
+        emit_with_extra_operand_slots<Bytecode::Op::CallBuiltin>(arg_count, dst(), callee, this_value, instruction.builtin(), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
     // CallDirectEval (variable-length arguments)
     case Opcode::CallDirectEval: {
         // IR CallDirectEval operands: [callee, this_value, arg0, arg1, ...]
@@ -455,6 +468,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         for (size_t i = 0; i < arg_count; ++i)
             args.append(operand(i + 2));
         emit_with_extra_operand_slots<Bytecode::Op::CallDirectEval>(arg_count, dst(), callee, this_value, instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
+    // CallWithArgumentArray
+    case Opcode::CallWithArgumentArray: {
+        // IR CallWithArgumentArray operands: [callee, this_value, arguments_array]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        auto arguments = operand(2);
+        emit<Bytecode::Op::CallWithArgumentArray>(dst(), callee, this_value, arguments, instruction.expression_string());
         break;
     }
 
@@ -494,6 +517,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         for (size_t i = 0; i < arg_count; ++i)
             args.append(operand(i + 1));
         emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(arg_count, dst(), callee, Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        break;
+    }
+
+    // ConstructWithArgumentArray
+    case Opcode::ConstructWithArgumentArray: {
+        // IR ConstructWithArgumentArray operands: [callee, this_value, arguments_array]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        auto arguments = operand(2);
+        emit<Bytecode::Op::CallConstructWithArgumentArray>(dst(), callee, this_value, arguments, instruction.expression_string());
         break;
     }
 
