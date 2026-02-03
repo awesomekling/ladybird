@@ -21,6 +21,13 @@ bool ConstantBranchFolding::run(Function& function)
         if (!last || last->opcode() != Opcode::Branch)
             continue;
 
+        // If both targets are the same, convert to unconditional jump
+        if (last->true_target() == last->false_target() && last->true_target() != nullptr) {
+            last->set_false_target(nullptr);
+            changed = true;
+            continue;
+        }
+
         // Branch has condition as first operand
         if (last->operands().is_empty())
             continue;
