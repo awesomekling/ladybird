@@ -171,6 +171,14 @@ char const* opcode_to_string(Opcode opcode)
         return "SetGlobal";
     case Opcode::CreateVariable:
         return "CreateVariable";
+    case Opcode::CreateLexicalEnvironment:
+        return "CreateLexicalEnvironment";
+    case Opcode::CreateMutableBinding:
+        return "CreateMutableBinding";
+    case Opcode::CreateImmutableBinding:
+        return "CreateImmutableBinding";
+    case Opcode::LeaveLexicalEnvironment:
+        return "LeaveLexicalEnvironment";
     case Opcode::DeleteVariable:
         return "DeleteVariable";
     case Opcode::NewObject:

@@ -103,6 +103,10 @@ enum class Opcode : u8 {
 
     // Environment
     CreateVariable,
+    CreateLexicalEnvironment,
+    CreateMutableBinding,
+    CreateImmutableBinding,
+    LeaveLexicalEnvironment,
     GetBinding,
     InitializeBinding,
     SetBinding,
@@ -165,6 +169,10 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::ExtractValue:
     case Opcode::InitObjectLiteralProperty:
     case Opcode::CacheObjectShape:
+    case Opcode::CreateLexicalEnvironment:
+    case Opcode::CreateMutableBinding:
+    case Opcode::CreateImmutableBinding:
+    case Opcode::LeaveLexicalEnvironment:
         return false;
     default:
         return true;
@@ -245,6 +253,10 @@ public:
     bool is_strict() const { return m_is_strict; }
     void set_is_strict(bool value) { m_is_strict = value; }
 
+    // For CreateLexicalEnvironment
+    u32 capacity() const { return m_capacity; }
+    void set_capacity(u32 capacity) { m_capacity = capacity; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -278,6 +290,9 @@ private:
     bool m_is_immutable { false };
     bool m_is_global { false };
     bool m_is_strict { false };
+
+    // For CreateLexicalEnvironment
+    u32 m_capacity { 0 };
 };
 
 }

@@ -976,12 +976,30 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_create_variable(block, op.identifier(), op.mode(), op.is_immutable(), op.is_global(), op.is_strict());
         break;
     }
-    case CreateMutableBinding:
-    case CreateImmutableBinding:
-    case CreateLexicalEnvironment:
+    case CreateLexicalEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::CreateLexicalEnvironment const&>(instruction);
+        auto& result = m_function->build_create_lexical_environment(block, op.capacity());
+        if (op.dst().has_value())
+            define_operand(*op.dst(), result, block);
+        break;
+    }
+    case CreateMutableBinding: {
+        auto const& op = static_cast<Bytecode::Op::CreateMutableBinding const&>(instruction);
+        auto& env = get_or_create_value_for_operand(op.environment(), block);
+        m_function->build_create_mutable_binding(block, env, op.identifier(), op.can_be_deleted());
+        break;
+    }
+    case CreateImmutableBinding: {
+        auto const& op = static_cast<Bytecode::Op::CreateImmutableBinding const&>(instruction);
+        auto& env = get_or_create_value_for_operand(op.environment(), block);
+        m_function->build_create_immutable_binding(block, env, op.identifier(), op.strict_binding());
+        break;
+    }
+    case LeaveLexicalEnvironment:
+        m_function->build_leave_lexical_environment(block);
+        break;
     case CreateVariableEnvironment:
     case CreatePrivateEnvironment:
-    case LeaveLexicalEnvironment:
     case LeavePrivateEnvironment:
     case EnterObjectEnvironment:
         // These affect the environment but don't produce IR values

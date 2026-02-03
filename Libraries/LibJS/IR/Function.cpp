@@ -352,6 +352,43 @@ void Function::build_create_variable(BasicBlock& block, Bytecode::IdentifierTabl
     block.append(move(instruction));
 }
 
+Value& Function::build_create_lexical_environment(BasicBlock& block, u32 capacity)
+{
+    auto instruction = Instruction::create(Opcode::CreateLexicalEnvironment);
+    instruction->set_capacity(capacity);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+void Function::build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict)
+{
+    auto instruction = Instruction::create(Opcode::CreateMutableBinding);
+    instruction->add_operand(&environment);
+    instruction->set_identifier_index(identifier);
+    instruction->set_is_strict(is_strict);
+    block.append(move(instruction));
+}
+
+void Function::build_create_immutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict)
+{
+    auto instruction = Instruction::create(Opcode::CreateImmutableBinding);
+    instruction->add_operand(&environment);
+    instruction->set_identifier_index(identifier);
+    instruction->set_is_strict(is_strict);
+    block.append(move(instruction));
+}
+
+void Function::build_leave_lexical_environment(BasicBlock& block)
+{
+    auto instruction = Instruction::create(Opcode::LeaveLexicalEnvironment);
+    block.append(move(instruction));
+}
+
 Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
     auto instruction = Instruction::create(Opcode::GetBinding);

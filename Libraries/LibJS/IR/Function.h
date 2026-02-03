@@ -114,6 +114,10 @@ public:
 
     // Environment
     void build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);
+    Value& build_create_lexical_environment(BasicBlock& block, u32 capacity);
+    void build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
+    void build_create_immutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
+    void build_leave_lexical_environment(BasicBlock& block);
     Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);

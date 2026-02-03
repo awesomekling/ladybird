@@ -362,6 +362,18 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::CreateVariable:
         emit<Bytecode::Op::CreateVariable>(instruction.identifier_index(), instruction.environment_mode(), instruction.is_immutable(), instruction.is_global(), instruction.is_strict());
         break;
+    case Opcode::CreateLexicalEnvironment:
+        emit<Bytecode::Op::CreateLexicalEnvironment>(dst(), instruction.capacity());
+        break;
+    case Opcode::CreateMutableBinding:
+        emit<Bytecode::Op::CreateMutableBinding>(operand(0), instruction.identifier_index(), instruction.is_strict());
+        break;
+    case Opcode::CreateImmutableBinding:
+        emit<Bytecode::Op::CreateImmutableBinding>(operand(0), instruction.identifier_index(), instruction.is_strict());
+        break;
+    case Opcode::LeaveLexicalEnvironment:
+        emit<Bytecode::Op::LeaveLexicalEnvironment>();
+        break;
     case Opcode::GetBinding:
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
         break;
