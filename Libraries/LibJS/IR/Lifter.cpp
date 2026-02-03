@@ -451,6 +451,54 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_put_by_value(block, base, property, value);
         break;
     }
+
+    // WithThis property access variants
+    case GetByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::GetByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& result = m_function->build_get_by_id(block, base, op.property());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case GetByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::GetByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& result = m_function->build_get_by_value(block, base, property);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case PutNormalByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutNormalByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_id(block, base, op.property(), value);
+        break;
+    }
+    case PutNormalByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutNormalByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_value(block, base, property, value);
+        break;
+    }
+    case DeleteByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::DeleteByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& result = m_function->build_delete_by_id(block, base, op.property());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case DeleteByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::DeleteByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& result = m_function->build_delete_by_value(block, base, property);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
     case DeleteById: {
         auto const& op = static_cast<Bytecode::Op::DeleteById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base());
@@ -466,6 +514,72 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+
+    // Other Put variants (for object literals, classes, etc.)
+    case PutOwnById: {
+        auto const& op = static_cast<Bytecode::Op::PutOwnById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_id(block, base, op.property(), value);
+        break;
+    }
+    case PutOwnByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutOwnByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_id(block, base, op.property(), value);
+        break;
+    }
+    case PutOwnByValue: {
+        auto const& op = static_cast<Bytecode::Op::PutOwnByValue const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_value(block, base, property, value);
+        break;
+    }
+    case PutOwnByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutOwnByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_value(block, base, property, value);
+        break;
+    }
+    case InitObjectLiteralProperty: {
+        auto const& op = static_cast<Bytecode::Op::InitObjectLiteralProperty const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.object());
+        auto& value = get_or_create_value_for_operand(op.src());
+        m_function->build_put_by_id(block, base, op.property(), value);
+        break;
+    }
+    case CreateDataPropertyOrThrow: {
+        auto const& op = static_cast<Bytecode::Op::CreateDataPropertyOrThrow const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.object());
+        auto& property = get_or_create_value_for_operand(op.property());
+        auto& value = get_or_create_value_for_operand(op.value());
+        m_function->build_put_by_value(block, base, property, value);
+        break;
+    }
+
+    // Getters/setters/prototypes (just track as puts for now)
+    case PutGetterById:
+    case PutGetterByIdWithThis:
+    case PutSetterById:
+    case PutSetterByIdWithThis:
+    case PutPrototypeById:
+    case PutPrototypeByIdWithThis:
+        // These define getters/setters/prototype - no result, just side effect
+        break;
+    case PutGetterByValue:
+    case PutGetterByValueWithThis:
+    case PutSetterByValue:
+    case PutSetterByValueWithThis:
+    case PutPrototypeByValue:
+    case PutPrototypeByValueWithThis:
+    case PutBySpread:
+        // These define properties with spread - no result, just side effect
+        break;
 
     // In/InstanceOf
     case In: {
