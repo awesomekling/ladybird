@@ -9,6 +9,7 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Vector.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
+#include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
@@ -101,7 +102,9 @@ enum class Opcode : u8 {
     Construct,
 
     // Environment
+    CreateVariable,
     GetBinding,
+    InitializeBinding,
     SetBinding,
     GetGlobal,
     SetGlobal,
@@ -227,6 +230,16 @@ public:
     IteratorHint iterator_hint() const { return m_iterator_hint; }
     void set_iterator_hint(IteratorHint hint) { m_iterator_hint = hint; }
 
+    // For CreateVariable
+    Bytecode::Op::EnvironmentMode environment_mode() const { return m_environment_mode; }
+    void set_environment_mode(Bytecode::Op::EnvironmentMode mode) { m_environment_mode = mode; }
+    bool is_immutable() const { return m_is_immutable; }
+    void set_is_immutable(bool value) { m_is_immutable = value; }
+    bool is_global() const { return m_is_global; }
+    void set_is_global(bool value) { m_is_global = value; }
+    bool is_strict() const { return m_is_strict; }
+    void set_is_strict(bool value) { m_is_strict = value; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -254,6 +267,12 @@ private:
     IteratorHint m_iterator_hint { IteratorHint::Sync };
     FunctionNode const* m_function_node { nullptr };
     Optional<Bytecode::IdentifierTableIndex> m_lhs_name;
+
+    // For CreateVariable
+    Bytecode::Op::EnvironmentMode m_environment_mode { Bytecode::Op::EnvironmentMode::Lexical };
+    bool m_is_immutable { false };
+    bool m_is_global { false };
+    bool m_is_strict { false };
 };
 
 }

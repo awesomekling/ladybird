@@ -340,6 +340,18 @@ Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> 
 }
 
 // Environment
+void Function::build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict)
+{
+    auto instruction = Instruction::create(Opcode::CreateVariable);
+    instruction->set_identifier_index(identifier);
+    instruction->set_environment_mode(mode);
+    instruction->set_is_immutable(is_immutable);
+    instruction->set_is_global(is_global);
+    instruction->set_is_strict(is_strict);
+
+    block.append(move(instruction));
+}
+
 Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
     auto instruction = Instruction::create(Opcode::GetBinding);
@@ -351,6 +363,15 @@ Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableI
 
     block.append(move(instruction));
     return result;
+}
+
+void Function::build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::InitializeBinding);
+    instruction->set_identifier_index(identifier);
+    instruction->add_operand(&value);
+
+    block.append(move(instruction));
 }
 
 void Function::build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)

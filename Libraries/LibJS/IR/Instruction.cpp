@@ -161,12 +161,16 @@ char const* opcode_to_string(Opcode opcode)
         return "Construct";
     case Opcode::GetBinding:
         return "GetBinding";
+    case Opcode::InitializeBinding:
+        return "InitializeBinding";
     case Opcode::SetBinding:
         return "SetBinding";
     case Opcode::GetGlobal:
         return "GetGlobal";
     case Opcode::SetGlobal:
         return "SetGlobal";
+    case Opcode::CreateVariable:
+        return "CreateVariable";
     case Opcode::DeleteVariable:
         return "DeleteVariable";
     case Opcode::NewObject:

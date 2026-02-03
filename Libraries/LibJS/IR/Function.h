@@ -11,6 +11,7 @@
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Bytecode/Executable.h>
+#include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 
@@ -112,7 +113,9 @@ public:
     Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
 
     // Environment
+    void build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);
     Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
