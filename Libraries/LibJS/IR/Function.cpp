@@ -122,11 +122,37 @@ Value& Function::build_strictly_inequals(BasicBlock& block, Value& lhs, Value& r
 
 // Type ops
 Value& Function::build_typeof(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Typeof, operand); }
+
+Value& Function::build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
+{
+    auto instruction = Instruction::create(Opcode::TypeofBinding);
+    instruction->set_identifier_index(identifier);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::String);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_to_boolean(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToBoolean, operand); }
 Value& Function::build_to_number(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToNumber, operand); }
 Value& Function::build_to_string(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToString, operand); }
 Value& Function::build_to_object(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToObject, operand); }
+Value& Function::build_to_int32(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToInt32, operand); }
+Value& Function::build_to_length(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToLength, operand); }
 Value& Function::build_not(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Not, operand); }
+
+// Increment/Decrement
+Value& Function::build_increment(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Increment, operand); }
+Value& Function::build_decrement(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Decrement, operand); }
+Value& Function::build_postfix_increment(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::PostfixIncrement, operand); }
+Value& Function::build_postfix_decrement(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::PostfixDecrement, operand); }
+
+// String ops
+Value& Function::build_concat_string(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::ConcatString, lhs, rhs); }
 
 // Constants
 Value& Function::build_load_constant(BasicBlock& block, JS::Value constant)

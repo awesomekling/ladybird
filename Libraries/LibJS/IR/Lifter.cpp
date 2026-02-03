@@ -321,6 +321,66 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+    case ToInt32: {
+        auto const& op = static_cast<Bytecode::Op::ToInt32 const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.value());
+        auto& result = m_function->build_to_int32(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case ToLength: {
+        auto const& op = static_cast<Bytecode::Op::ToLength const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.value());
+        auto& result = m_function->build_to_length(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case TypeofBinding: {
+        auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
+        auto& result = m_function->build_typeof_binding(block, op.identifier());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Increment/Decrement
+    case Increment: {
+        auto const& op = static_cast<Bytecode::Op::Increment const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.dst());
+        auto& result = m_function->build_increment(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case Decrement: {
+        auto const& op = static_cast<Bytecode::Op::Decrement const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.dst());
+        auto& result = m_function->build_decrement(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case PostfixIncrement: {
+        auto const& op = static_cast<Bytecode::Op::PostfixIncrement const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.src());
+        auto& result = m_function->build_postfix_increment(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case PostfixDecrement: {
+        auto const& op = static_cast<Bytecode::Op::PostfixDecrement const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.src());
+        auto& result = m_function->build_postfix_decrement(block, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // String ops
+    case ConcatString: {
+        auto const& op = static_cast<Bytecode::Op::ConcatString const&>(instruction);
+        auto& dst = get_or_create_value_for_operand(op.dst());
+        auto& src = get_or_create_value_for_operand(op.src());
+        auto& result = m_function->build_concat_string(block, dst, src);
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
 
     // Move
     case Mov: {

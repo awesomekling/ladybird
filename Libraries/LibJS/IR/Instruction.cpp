@@ -113,6 +113,8 @@ char const* opcode_to_string(Opcode opcode)
         return "StrictlyInequals";
     case Opcode::Typeof:
         return "Typeof";
+    case Opcode::TypeofBinding:
+        return "TypeofBinding";
     case Opcode::ToBoolean:
         return "ToBoolean";
     case Opcode::ToNumber:
@@ -121,8 +123,22 @@ char const* opcode_to_string(Opcode opcode)
         return "ToString";
     case Opcode::ToObject:
         return "ToObject";
+    case Opcode::ToInt32:
+        return "ToInt32";
+    case Opcode::ToLength:
+        return "ToLength";
     case Opcode::Not:
         return "Not";
+    case Opcode::Increment:
+        return "Increment";
+    case Opcode::Decrement:
+        return "Decrement";
+    case Opcode::PostfixIncrement:
+        return "PostfixIncrement";
+    case Opcode::PostfixDecrement:
+        return "PostfixDecrement";
+    case Opcode::ConcatString:
+        return "ConcatString";
     case Opcode::GetById:
         return "GetById";
     case Opcode::GetByValue:

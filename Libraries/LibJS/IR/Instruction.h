@@ -61,11 +61,23 @@ enum class Opcode : u8 {
 
     // Type ops
     Typeof,
+    TypeofBinding,
     ToBoolean,
     ToNumber,
     ToString,
     ToObject,
+    ToInt32,
+    ToLength,
     Not,
+
+    // Increment/Decrement
+    Increment,
+    Decrement,
+    PostfixIncrement,
+    PostfixDecrement,
+
+    // String ops
+    ConcatString,
 
     // Property access
     GetById,

@@ -72,11 +72,23 @@ public:
 
     // Type ops
     Value& build_typeof(BasicBlock& block, Value& operand);
+    Value& build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     Value& build_to_boolean(BasicBlock& block, Value& operand);
     Value& build_to_number(BasicBlock& block, Value& operand);
     Value& build_to_string(BasicBlock& block, Value& operand);
     Value& build_to_object(BasicBlock& block, Value& operand);
+    Value& build_to_int32(BasicBlock& block, Value& operand);
+    Value& build_to_length(BasicBlock& block, Value& operand);
     Value& build_not(BasicBlock& block, Value& operand);
+
+    // Increment/Decrement
+    Value& build_increment(BasicBlock& block, Value& operand);
+    Value& build_decrement(BasicBlock& block, Value& operand);
+    Value& build_postfix_increment(BasicBlock& block, Value& operand);
+    Value& build_postfix_decrement(BasicBlock& block, Value& operand);
+
+    // String ops
+    Value& build_concat_string(BasicBlock& block, Value& lhs, Value& rhs);
 
     // Constants
     Value& build_load_constant(BasicBlock& block, JS::Value constant);
