@@ -1532,7 +1532,7 @@ Value* Lifter::find_reaching_definition(BasicBlock& block, u32 operand_raw, Basi
 
 void Lifter::insert_phi_nodes()
 {
-    constexpr bool debug_phi = true;
+    constexpr bool debug_phi = false;
 
     // For each block with multiple predecessors, check if any written operand
     // has different definitions coming from different predecessors
@@ -1579,10 +1579,11 @@ void Lifter::insert_phi_nodes()
             }
 
             // If some predecessors don't have a definition, handle them based on context:
-            // - If we have a consistent value from other predecessors, use that (loop-invariant case)
+            // - If we have a consistent value from the FIRST predecessor (forward edge) and
+            //   the missing definitions are from back edges, use that value (loop-invariant case)
             // - Otherwise, use undefined (uninitialized variable case)
             if (has_missing_def && !incoming_values.is_empty()) {
-                // Check if all existing incoming values are the same (loop-invariant)
+                // Check if all existing incoming values are the same (potential loop-invariant)
                 bool all_same = true;
                 for (size_t i = 1; i < incoming_values.size(); ++i) {
                     if (incoming_values[i] != incoming_values[0]) {
@@ -1590,6 +1591,10 @@ void Lifter::insert_phi_nodes()
                         break;
                     }
                 }
+
+                // Check if the first predecessor (forward edge) has a definition
+                // If not, this isn't a loop-invariant case - the variable is first defined in the loop
+                bool first_pred_has_def = !incoming_blocks.is_empty() && incoming_blocks[0] == (*preds)[0];
 
                 for (auto* pred : *preds) {
                     // Check if this predecessor is already in incoming_blocks
@@ -1601,15 +1606,17 @@ void Lifter::insert_phi_nodes()
                         }
                     }
                     if (!found) {
-                        if (all_same && first_value) {
-                            // Loop-invariant: use the same value from the forward edge
+                        if (all_same && first_value && first_pred_has_def) {
+                            // Loop-invariant: the variable is defined before the loop and
+                            // not modified inside, so back edges carry the same value
                             incoming_values.append(first_value);
                             incoming_blocks.append(pred);
                             // No need to set need_phi since all values are the same
                             if constexpr (debug_phi)
                                 dbgln("  operand {}: using loop-invariant v{} from pred {}", raw, first_value->index(), pred->name());
                         } else {
-                            // Different values on paths - use undefined for missing
+                            // Either different values on paths, or the first predecessor
+                            // doesn't have a definition - use undefined for missing
                             auto& undefined_value = m_function->create_constant(JS::js_undefined());
                             incoming_values.append(&undefined_value);
                             incoming_blocks.append(pred);
