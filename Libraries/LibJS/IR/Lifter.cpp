@@ -518,6 +518,99 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_operand_to_value.set(op.dst().raw(), &result);
         break;
     }
+    case NewArray: {
+        auto const& op = static_cast<Bytecode::Op::NewArray const&>(instruction);
+        Vector<Value*> elements;
+        for (auto operand : op.elements())
+            elements.append(&get_or_create_value_for_operand(operand));
+        auto& result = m_function->build_new_array(block, elements.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case NewPrimitiveArray: {
+        auto const& op = static_cast<Bytecode::Op::NewPrimitiveArray const&>(instruction);
+        Vector<Value*> elements;
+        for (auto value : op.elements())
+            elements.append(&m_function->create_constant(value));
+        auto& result = m_function->build_new_array(block, elements.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+
+    // Calls
+    case Call: {
+        auto const& op = static_cast<Bytecode::Op::Call const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        Vector<Value*> args;
+        for (auto operand : op.arguments())
+            args.append(&get_or_create_value_for_operand(operand));
+        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallBuiltin: {
+        auto const& op = static_cast<Bytecode::Op::CallBuiltin const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        Vector<Value*> args;
+        for (auto operand : op.arguments())
+            args.append(&get_or_create_value_for_operand(operand));
+        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallConstruct: {
+        auto const& op = static_cast<Bytecode::Op::CallConstruct const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        Vector<Value*> args;
+        for (auto operand : op.arguments())
+            args.append(&get_or_create_value_for_operand(operand));
+        auto& result = m_function->build_construct(block, callee, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallWithArgumentArray: {
+        auto const& op = static_cast<Bytecode::Op::CallWithArgumentArray const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        // NB: In full implementation, we'd need to handle spreading the array
+        Vector<Value*> args { &args_array };
+        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallConstructWithArgumentArray: {
+        auto const& op = static_cast<Bytecode::Op::CallConstructWithArgumentArray const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        Vector<Value*> args { &args_array };
+        auto& result = m_function->build_construct(block, callee, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallDirectEval: {
+        auto const& op = static_cast<Bytecode::Op::CallDirectEval const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        Vector<Value*> args;
+        for (auto operand : op.arguments())
+            args.append(&get_or_create_value_for_operand(operand));
+        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
+    case CallDirectEvalWithArgumentArray: {
+        auto const& op = static_cast<Bytecode::Op::CallDirectEvalWithArgumentArray const&>(instruction);
+        auto& callee = get_or_create_value_for_operand(op.callee());
+        auto& this_value = get_or_create_value_for_operand(op.this_value());
+        auto& args_array = get_or_create_value_for_operand(op.arguments());
+        Vector<Value*> args { &args_array };
+        auto& result = m_function->build_call(block, callee, this_value, args.span());
+        m_operand_to_value.set(op.dst().raw(), &result);
+        break;
+    }
 
     // TODO: Handle more opcodes as needed
     default:
