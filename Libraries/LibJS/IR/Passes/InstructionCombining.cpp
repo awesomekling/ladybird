@@ -8,22 +8,43 @@
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/InstructionCombining.h>
+#include <LibJS/IR/Type.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
 
-// Returns the inverted comparison opcode, or nullopt if not a comparison
-static Optional<Opcode> inverted_comparison(Opcode opcode)
+// Check if a type is guaranteed to never be NaN
+static bool type_cannot_be_nan(Type type)
 {
+    switch (type) {
+    case Type::Int32:
+    case Type::Boolean:
+    case Type::Undefined: // undefined -> NaN, but that's caught at runtime
+    case Type::Null:      // null -> 0
+    case Type::String:    // strings are compared lexicographically, not as numbers
+    case Type::Object:
+    case Type::Function:
+    case Type::Array:
+    case Type::Symbol:
+    case Type::BigInt:
+        return true;
+    case Type::Number:  // Could be NaN
+    case Type::Unknown: // Could be anything
+        return false;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+// Returns the inverted comparison opcode if safe to invert.
+// For relational comparisons (<, >, <=, >=), inversion is only safe when
+// operands cannot be NaN, because !(NaN < x) != (NaN >= x).
+// For equality comparisons, inversion is always safe.
+static Optional<Opcode> inverted_comparison_if_safe(Instruction const& cmp_instr)
+{
+    auto opcode = cmp_instr.opcode();
+
     switch (opcode) {
-    case Opcode::LessThan:
-        return Opcode::GreaterThanEquals;
-    case Opcode::LessThanEquals:
-        return Opcode::GreaterThan;
-    case Opcode::GreaterThan:
-        return Opcode::LessThanEquals;
-    case Opcode::GreaterThanEquals:
-        return Opcode::LessThan;
+    // Equality comparisons are always safe to invert
     case Opcode::StrictlyEquals:
         return Opcode::StrictlyInequals;
     case Opcode::StrictlyInequals:
@@ -32,6 +53,37 @@ static Optional<Opcode> inverted_comparison(Opcode opcode)
         return Opcode::LooselyInequals;
     case Opcode::LooselyInequals:
         return Opcode::LooselyEquals;
+
+    // Relational comparisons: only safe if operands cannot be NaN
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals: {
+        auto const& operands = cmp_instr.operands();
+        if (operands.size() < 2)
+            return {};
+
+        // Both operands must be non-NaN types
+        bool lhs_safe = operands[0] && type_cannot_be_nan(operands[0]->type());
+        bool rhs_safe = operands[1] && type_cannot_be_nan(operands[1]->type());
+
+        if (!lhs_safe || !rhs_safe)
+            return {};
+
+        switch (opcode) {
+        case Opcode::LessThan:
+            return Opcode::GreaterThanEquals;
+        case Opcode::LessThanEquals:
+            return Opcode::GreaterThan;
+        case Opcode::GreaterThan:
+            return Opcode::LessThanEquals;
+        case Opcode::GreaterThanEquals:
+            return Opcode::LessThan;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
     default:
         return {};
     }
@@ -146,10 +198,10 @@ bool InstructionCombining::run(Function& function)
                 if (!not_input)
                     break;
 
-                // Check if the Not's input is a comparison we can invert
+                // Check if the Not's input is a comparison we can safely invert
                 auto* cmp_instr = not_input->defining_instruction();
                 if (cmp_instr && not_input->uses().size() == 1) {
-                    if (auto inverted = inverted_comparison(cmp_instr->opcode()); inverted.has_value()) {
+                    if (auto inverted = inverted_comparison_if_safe(*cmp_instr); inverted.has_value()) {
                         // Change the comparison opcode directly and use it as the branch condition
                         // This is safe because the comparison result is only used by the Not,
                         // which is only used by this Branch
