@@ -76,15 +76,10 @@ bool BlockMerging::run(Function& function)
                         instruction->set_true_target(block_a.ptr());
                     if (instruction->false_target() == block_b)
                         instruction->set_false_target(block_a.ptr());
-
-                    // Update phi predecessor references
-                    for (size_t i = 0; i < instruction->phi_predecessors().size(); ++i) {
-                        if (instruction->phi_predecessors()[i] == block_b)
-                            instruction->set_phi_predecessor(i, block_a.ptr());
-                    }
                 }
 
-                // Update predecessor lists: remove B
+                // Update phi predecessor references and predecessor lists
+                other_block->replace_phi_predecessor(block_b, block_a.ptr());
                 other_block->remove_predecessor(block_b);
             }
 
