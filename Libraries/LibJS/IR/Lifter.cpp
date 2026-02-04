@@ -1691,6 +1691,18 @@ void Lifter::fill_phi_operands()
     // to later definitions within the same block.
     HashMap<u32, Vector<Value*>> operand_stacks;
 
+    // Seed stacks with parameter values for arguments that may be reassigned.
+    // Function parameters are implicit definitions at the entry block, but since
+    // they aren't instruction results, the SSA renaming won't encounter them as
+    // definitions. We must seed them so that reaching definitions through paths
+    // that don't reassign the argument see the original parameter value instead
+    // of undefined.
+    for (auto* param : m_function->parameters()) {
+        u32 raw = m_executable.argument_index_base + param->parameter_index();
+        if (m_written_operands.contains(raw))
+            operand_stacks.ensure(raw).append(param);
+    }
+
     // Walk dominator tree starting from entry block
     if (m_function->entry_block())
         rename_ssa(*m_function->entry_block(), operand_stacks);
