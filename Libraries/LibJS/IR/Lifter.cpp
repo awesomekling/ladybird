@@ -1062,10 +1062,11 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& iterator_next = get_or_create_value_for_operand(op.iterator_next(), block);
         auto& iterator_done = get_or_create_value_for_operand(op.iterator_done(), block);
         m_function->build_iterator_close(block, iterator_object);
-        // NB: Add iterator_next and iterator_done as operands even though they're not used by IR
+        // NB: Add iterator_next and iterator_done as operands even though they're not used by IR.
         // This preserves data flow for lowering back to bytecode.
-        (void)iterator_next;
-        (void)iterator_done;
+        auto* instr = block.instructions().last().ptr();
+        instr->add_operand(&iterator_next);
+        instr->add_operand(&iterator_done);
         break;
     }
     case IteratorToArray: {
