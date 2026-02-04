@@ -118,6 +118,13 @@ NonnullOwnPtr<UnaryOpInstruction> UnaryOpInstruction::create(Opcode opcode, Valu
     return adopt_own(*new UnaryOpInstruction(opcode, operand));
 }
 
+void Instruction::set_result(Value* value)
+{
+    m_result = value;
+    if (value)
+        value->set_defining_instruction(this);
+}
+
 void Instruction::add_operand(Value* value)
 {
     m_operands.append(value);

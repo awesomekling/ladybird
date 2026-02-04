@@ -37,7 +37,6 @@ public:
     bool is_this() const { return m_kind == Kind::This; }
 
     Instruction* defining_instruction() const { return m_defining_instruction; }
-    void set_defining_instruction(Instruction* instruction) { m_defining_instruction = instruction; }
 
     Vector<Instruction*> const& uses() const { return m_uses; }
     void add_use(Instruction* instruction);
@@ -64,6 +63,10 @@ public:
     static NonnullOwnPtr<Value> create_for_this(ValueIndex index);
 
 private:
+    friend class Instruction;
+
+    void set_defining_instruction(Instruction* instruction) { m_defining_instruction = instruction; }
+
     Value(Kind kind, ValueIndex index);
 
     Kind m_kind;

@@ -89,7 +89,6 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     instruction->add_operand(&rhs);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     // Set known result types
@@ -130,7 +129,6 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
     instruction->add_operand(&operand);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     // Set known result types for type conversion and check operations
@@ -200,7 +198,6 @@ Value& Function::build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTab
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::String);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -235,7 +232,6 @@ Value& Function::build_load_constant(BasicBlock& block, JS::Value constant)
     instruction->add_operand(&constant_value);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -248,7 +244,6 @@ Value& Function::build_load_undefined(BasicBlock& block)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Undefined);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -261,7 +256,6 @@ Value& Function::build_load_null(BasicBlock& block)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Null);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -277,7 +271,6 @@ Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::Prope
     instruction->set_base_identifier(base_identifier);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -292,7 +285,6 @@ Value& Function::build_get_by_id_with_this(BasicBlock& block, Value& base, Value
     instruction->set_property_key_index(property);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -307,7 +299,6 @@ Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& prope
     instruction->set_base_identifier(base_identifier);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -322,7 +313,6 @@ Value& Function::build_get_by_value_with_this(BasicBlock& block, Value& base, Va
     instruction->add_operand(&property);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -362,7 +352,6 @@ Value& Function::build_delete_by_id(BasicBlock& block, Value& base, Bytecode::Pr
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Boolean);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -377,7 +366,6 @@ Value& Function::build_delete_by_value(BasicBlock& block, Value& base, Value& pr
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Boolean);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -392,7 +380,6 @@ Value& Function::build_has_property(BasicBlock& block, Value& object, Value& pro
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Boolean);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -406,7 +393,6 @@ Value& Function::build_get_private_by_id(BasicBlock& block, Value& base, Bytecod
     instruction->set_identifier_index(property);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -560,7 +546,6 @@ Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value,
         instruction->add_operand(arg);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -578,7 +563,6 @@ Value& Function::build_call_builtin(BasicBlock& block, Value& callee, Value& thi
     instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -595,7 +579,6 @@ Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value&
     instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -611,7 +594,6 @@ Value& Function::build_call_with_argument_array(BasicBlock& block, Value& callee
     instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -628,7 +610,6 @@ Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> 
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -645,7 +626,6 @@ Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& c
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -660,7 +640,6 @@ Value& Function::build_super_call_with_argument_array(BasicBlock& block, Value& 
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -674,7 +653,6 @@ Value& Function::build_import_call(BasicBlock& block, Value& specifier, Value& o
     instruction->add_operand(&options);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -689,7 +667,6 @@ Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, B
 
     // This produces a tuple of (callee, this_value)
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -714,7 +691,6 @@ Value& Function::build_create_lexical_environment(BasicBlock& block, u32 capacit
     instruction->set_capacity(capacity);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -762,7 +738,6 @@ Value& Function::build_resolve_super_base(BasicBlock& block)
 {
     auto instruction = Instruction::create(Opcode::ResolveSuperBase);
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
     block.append(move(instruction));
     return result;
@@ -774,7 +749,6 @@ Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableI
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -805,7 +779,6 @@ Value& Function::build_get_global(BasicBlock& block, Bytecode::IdentifierTableIn
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -828,7 +801,6 @@ Value& Function::build_delete_variable(BasicBlock& block, Bytecode::IdentifierTa
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Boolean);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -842,7 +814,6 @@ Value& Function::build_new_object(BasicBlock& block)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -857,7 +828,6 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Array);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -871,7 +841,6 @@ Value& Function::build_new_array_with_length(BasicBlock& block, Value& length)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Array);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -900,7 +869,6 @@ Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Val
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Function); // Classes are functions
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -913,7 +881,6 @@ Value& Function::build_new_function(BasicBlock& block)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Function);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -926,7 +893,6 @@ Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex 
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
     instruction->set_regex_source_index(source);
     instruction->set_regex_flags_index(flags);
@@ -969,7 +935,6 @@ Value& Function::build_create_arguments(BasicBlock& block, Bytecode::Op::Argumen
     instruction->set_is_immutable(is_immutable);
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
-    result.set_defining_instruction(instruction.ptr());
     block.append(move(instruction));
     return result;
 }
@@ -980,7 +945,6 @@ Value& Function::build_create_rest_params(BasicBlock& block, u32 rest_index)
     instruction->set_rest_index(rest_index);
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
-    result.set_defining_instruction(instruction.ptr());
     block.append(move(instruction));
     return result;
 }
@@ -990,7 +954,6 @@ Value& Function::build_get_new_target(BasicBlock& block)
     auto instruction = Instruction::create(Opcode::GetNewTarget);
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
-    result.set_defining_instruction(instruction.ptr());
     block.append(move(instruction));
     return result;
 }
@@ -1047,7 +1010,6 @@ Value& Function::build_iterator_to_array(BasicBlock& block, Value& iterator)
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Array);
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -1068,7 +1030,6 @@ Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
     instruction->set_extract_index(index);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -1125,7 +1086,6 @@ Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* contin
     // The result is the value passed to .next() when the generator resumes
     // For final yields (no continuation), the result is unused but we still create it
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -1141,7 +1101,6 @@ Value& Function::build_await(BasicBlock& block, Value& argument, BasicBlock& con
 
     // The result is the resolved value of the awaited promise
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -1156,7 +1115,6 @@ Value& Function::build_get_completion_fields(BasicBlock& block, Value& completio
     instruction->add_operand(&completion);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     block.append(move(instruction));
@@ -1174,7 +1132,6 @@ Value& Function::build_phi(BasicBlock& block, Vector<Value*> values, Vector<Basi
         instruction->add_phi_operand(predecessors[i], values[i]);
 
     auto& result = create_value_for_instruction();
-    result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
     // Phi nodes go at the start of the block (before other instructions)

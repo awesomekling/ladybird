@@ -1631,7 +1631,6 @@ void Lifter::connect_control_flow()
                 // The pre-created one is what the continuation block's instructions are using
                 if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
                     auto* yield_instr = auto_resume_value.defining_instruction();
-                    (*pre_created)->set_defining_instruction(yield_instr);
                     yield_instr->set_result(*pre_created);
                 }
             } else {
@@ -1652,7 +1651,6 @@ void Lifter::connect_control_flow()
             // Replace the auto-created result with our pre-created resume value
             if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
                 auto* await_instr = auto_resume_value.defining_instruction();
-                (*pre_created)->set_defining_instruction(await_instr);
                 await_instr->set_result(*pre_created);
             }
             break;

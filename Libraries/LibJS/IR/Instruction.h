@@ -336,7 +336,7 @@ public:
     void set_parent_block(BasicBlock* block) { m_parent_block = block; }
 
     Value* result() const { return m_result; }
-    void set_result(Value* value) { m_result = value; }
+    void set_result(Value* value);
 
     Vector<Value*> const& operands() const { return m_operands; }
     void add_operand(Value* value);
