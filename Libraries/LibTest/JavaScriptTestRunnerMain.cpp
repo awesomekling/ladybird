@@ -101,6 +101,7 @@ int main(int argc, char** argv)
     bool print_progress = false;
     bool print_json = false;
     bool per_file = false;
+    unsigned tier_up_threshold = 0;
     StringView specified_test_root;
     ByteString common_path;
     Vector<ByteString> test_globs;
@@ -127,6 +128,7 @@ int main(int argc, char** argv)
     args_parser.add_option(per_file, "Show detailed per-file results as JSON (implies -j)", "per-file");
     args_parser.add_option(g_collect_on_every_allocation, "Collect garbage after every allocation", "collect-often", 'g');
     args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
+    args_parser.add_option(tier_up_threshold, "Tier up to IR after N calls (0 = disabled)", "tier-up-threshold", 0, "N");
     args_parser.add_option(test_globs, "Only run tests matching the given glob", "filter", 'f', "glob");
     for (auto& entry : g_extra_args)
         args_parser.add_option(*entry.key, entry.value.get<0>().characters(), entry.value.get<1>().characters(), entry.value.get<2>());
@@ -198,6 +200,7 @@ int main(int argc, char** argv)
     if (!g_vm) {
         g_vm = JS::VM::create();
         g_vm->set_dynamic_imports_allowed(true);
+        g_vm->set_tier_up_threshold(tier_up_threshold);
 
         // Configure the test VM to support additional import attributes
         // This allows tests to use import attributes beyond just "type"
