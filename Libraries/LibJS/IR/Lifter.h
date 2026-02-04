@@ -28,7 +28,7 @@ private:
     void lift_instruction(Bytecode::Instruction const&, BasicBlock&);
     void place_phi_nodes();
     void fill_phi_operands();
-    Value* find_reaching_def_for_phi(BasicBlock& from_block, u32 operand_raw, HashTable<BasicBlock*>& visited);
+    void rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks);
     void connect_control_flow();
     void compute_block_predecessors();
     void compute_dominators();

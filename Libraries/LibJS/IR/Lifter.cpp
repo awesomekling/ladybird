@@ -728,11 +728,30 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_put_prototype_by_id(block, base, op.property(), prototype, op.base_identifier());
         break;
     }
-    case PutGetterByIdWithThis:
-    case PutSetterByIdWithThis:
-    case PutPrototypeByIdWithThis:
-        // TODO: Handle WithThis variants when needed
+    case PutGetterByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutGetterByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& getter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_getter_by_id_with_this(block, base, this_value, op.property(), getter);
         break;
+    }
+    case PutSetterByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutSetterByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& setter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_setter_by_id_with_this(block, base, this_value, op.property(), setter);
+        break;
+    }
+    case PutPrototypeByIdWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutPrototypeByIdWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& prototype = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_prototype_by_id_with_this(block, base, this_value, op.property(), prototype);
+        break;
+    }
     case PutGetterByValue: {
         auto const& op = static_cast<Bytecode::Op::PutGetterByValue const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
@@ -757,11 +776,33 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_put_prototype_by_value(block, base, property, prototype, op.base_identifier());
         break;
     }
-    case PutGetterByValueWithThis:
-    case PutSetterByValueWithThis:
-    case PutPrototypeByValueWithThis:
-        // TODO: Handle WithThis variants when needed
+    case PutGetterByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutGetterByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& getter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_getter_by_value_with_this(block, base, property, this_value, getter);
         break;
+    }
+    case PutSetterByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutSetterByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& setter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_setter_by_value_with_this(block, base, property, this_value, setter);
+        break;
+    }
+    case PutPrototypeByValueWithThis: {
+        auto const& op = static_cast<Bytecode::Op::PutPrototypeByValueWithThis const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& prototype = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_prototype_by_value_with_this(block, base, property, this_value, prototype);
+        break;
+    }
     case PutBySpread: {
         auto const& op = static_cast<Bytecode::Op::PutBySpread const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
@@ -875,10 +916,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case NewArrayWithLength: {
         auto const& op = static_cast<Bytecode::Op::NewArrayWithLength const&>(instruction);
         auto& length = get_or_create_value_for_operand(op.array_length(), block);
-        // Use build_new_array with no elements for now; length is tracked separately
-        Vector<Value*> elements;
-        auto& result = m_function->build_new_array(block, elements.span());
-        (void)length; // TODO: Properly handle array length
+        auto& result = m_function->build_new_array_with_length(block, length);
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1704,115 +1742,22 @@ void Lifter::place_phi_nodes()
     }
 }
 
-// Phase 2: Fill in phi operands by finding reaching definitions
+// Phase 2: Fill in phi operands and rename uses using dominator tree walk
+// This implements standard SSA renaming from Cytron et al.
 void Lifter::fill_phi_operands()
 {
-    for (auto& block : m_function->basic_blocks()) {
-        auto preds = m_predecessors.get(block.ptr());
-        if (!preds.has_value() || preds->size() <= 1)
-            continue;
-
-        // For each phi in this block, fill in its operands
-        for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break; // Phis are at the start
-
-            auto operand_raw_opt = m_value_to_operand_raw.get(instruction->result());
-            if (!operand_raw_opt.has_value())
-                continue;
-
-            auto operand_raw = *operand_raw_opt;
-
-            // Find reaching definition from each predecessor
-            for (size_t i = 0; i < preds->size(); ++i) {
-                auto* pred = (*preds)[i];
-                HashTable<BasicBlock*> visited;
-                auto* reaching = find_reaching_def_for_phi(*pred, operand_raw, visited);
-
-                if (!reaching) {
-                    // No definition found - this can happen for loop-carried values
-                    // where the variable isn't modified in the loop body.
-                    // In that case, the phi itself represents the loop-invariant value.
-                    // Use the phi's result as the reaching definition for back-edges.
-                    // NB: This is a heuristic; proper SSA would use dominator-based renaming.
-                    if (pred->index() > block->index()) {
-                        // This predecessor comes after the current block (back-edge)
-                        reaching = instruction->result();
-                    } else {
-                        // Forward edge with no definition - use undefined
-                        reaching = &m_function->create_constant(JS::js_undefined());
-                    }
-                }
-
-                instruction->set_operand(i, reaching);
-            }
+    // Initialize operand stacks with initial values from entry block
+    HashMap<u32, Vector<Value*>> operand_stacks;
+    auto entry_defs = m_block_definitions.get(m_function->entry_block());
+    if (entry_defs.has_value()) {
+        for (auto& [op_raw, value] : *entry_defs) {
+            operand_stacks.ensure(op_raw).append(value);
         }
     }
 
-    // Now fix up uses in non-phi instructions to use the correct reaching definitions
-    // We need to process blocks in a way that predecessors are processed before successors.
-    // Since we may not have computed dominance order, we do multiple passes until stable.
-    bool changed = true;
-    while (changed) {
-        changed = false;
-
-        for (auto& block : m_function->basic_blocks()) {
-            // Build a map of current definitions at this point
-            HashMap<u32, Value*> current_defs;
-
-            // Start with reaching defs from predecessors (for single-predecessor blocks)
-            // or the phi results (for join points)
-            auto preds = m_predecessors.get(block.ptr());
-            if (preds.has_value() && preds->size() == 1) {
-                // Single predecessor - inherit its definitions
-                auto pred_defs = m_block_definitions.get((*preds)[0]);
-                if (pred_defs.has_value())
-                    current_defs = *pred_defs;
-            }
-
-            // Process phis first - they define values for this block
-            for (auto& instruction : block->instructions()) {
-                if (instruction->opcode() != Opcode::Phi)
-                    break;
-
-                auto raw_opt = m_value_to_operand_raw.get(instruction->result());
-                if (raw_opt.has_value())
-                    current_defs.set(*raw_opt, instruction->result());
-            }
-
-            // Now fix operand references in non-phi instructions
-            for (auto& instruction : block->instructions()) {
-                if (instruction->opcode() == Opcode::Phi)
-                    continue;
-
-                for (size_t i = 0; i < instruction->operands().size(); ++i) {
-                    auto* operand_value = instruction->operands()[i];
-                    if (!operand_value)
-                        continue;
-
-                    auto raw_opt = m_value_to_operand_raw.get(operand_value);
-                    if (!raw_opt.has_value())
-                        continue;
-
-                    auto current = current_defs.get(*raw_opt);
-                    if (current.has_value() && *current != operand_value) {
-                        instruction->set_operand(i, *current);
-                        changed = true;
-                    }
-                }
-
-                // Update current_defs if this instruction defines a value
-                if (instruction->result()) {
-                    auto raw_opt = m_value_to_operand_raw.get(instruction->result());
-                    if (raw_opt.has_value())
-                        current_defs.set(*raw_opt, instruction->result());
-                }
-            }
-
-            // Update m_block_definitions so successor blocks can inherit correctly
-            m_block_definitions.set(block.ptr(), current_defs);
-        }
-    }
+    // Walk dominator tree starting from entry block
+    if (m_function->entry_block())
+        rename_ssa(*m_function->entry_block(), operand_stacks);
 
     // Compute phi types: if all incoming values have the same type, use that type
     for (auto& block : m_function->basic_blocks()) {
@@ -1848,53 +1793,131 @@ void Lifter::fill_phi_operands()
     }
 }
 
-// Find reaching definition for filling phi operands
-// This is simpler than the old version because all phis are already placed
-Value* Lifter::find_reaching_def_for_phi(BasicBlock& from_block, u32 operand_raw, HashTable<BasicBlock*>& visited)
+// Recursive SSA renaming using dominator tree walk
+void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
 {
-    // If we've already visited this block, we have a cycle - return nullptr
-    if (visited.contains(&from_block))
-        return nullptr;
-    visited.set(&from_block);
+    // Record stack sizes at entry so we can restore them on exit
+    HashMap<u32, size_t> entry_sizes;
+    for (auto& [op_raw, stack] : stacks) {
+        entry_sizes.set(op_raw, stack.size());
+    }
 
-    // First check if this block actually defines the operand (non-phi definition)
-    // This takes priority because it's the value at the END of the block
-    auto actual_defs = m_block_actual_definitions.get(&from_block);
-    if (actual_defs.has_value() && actual_defs->contains(operand_raw)) {
-        auto block_defs = m_block_definitions.get(&from_block);
-        if (block_defs.has_value()) {
-            auto value = block_defs->get(operand_raw);
-            if (value.has_value())
-                return *value;
+    // Process phis first - they define values at block entry
+    for (auto& instruction : block.instructions()) {
+        if (instruction->opcode() != Opcode::Phi)
+            break;
+
+        auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+        if (raw_opt.has_value()) {
+            stacks.ensure(*raw_opt).append(instruction->result());
+            if (!entry_sizes.contains(*raw_opt))
+                entry_sizes.set(*raw_opt, 0);
         }
     }
 
-    // If not defined in this block, check if there's a phi at entry
-    // The phi merges incoming values from predecessors
-    auto phi = m_phi_map.get(make_phi_key(&from_block, operand_raw));
-    if (phi.has_value())
-        return *phi;
+    // Rewrite operand uses in non-phi instructions and push new definitions
+    for (auto& instruction : block.instructions()) {
+        if (instruction->opcode() == Opcode::Phi)
+            continue;
 
-    // No actual definition here - trace back through predecessors
-    auto preds = m_predecessors.get(&from_block);
-    if (!preds.has_value() || preds->is_empty()) {
-        // Entry block with no definition - check for initial values (constants, parameters)
-        auto block_defs = m_block_definitions.get(&from_block);
-        if (block_defs.has_value()) {
-            auto value = block_defs->get(operand_raw);
-            if (value.has_value())
-                return *value;
+        // Rewrite operand uses to current stack top
+        for (size_t i = 0; i < instruction->operands().size(); ++i) {
+            auto* operand_value = instruction->operands()[i];
+            if (!operand_value)
+                continue;
+
+            auto raw_opt = m_value_to_operand_raw.get(operand_value);
+            if (!raw_opt.has_value())
+                continue;
+
+            auto stack_opt = stacks.get(*raw_opt);
+            if (stack_opt.has_value() && !stack_opt->is_empty()) {
+                auto* current = stack_opt->last();
+                if (current != operand_value)
+                    instruction->set_operand(i, current);
+            }
         }
-        return nullptr;
+
+        // If instruction defines a value, push it onto the stack
+        if (instruction->result()) {
+            auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+            if (raw_opt.has_value()) {
+                stacks.ensure(*raw_opt).append(instruction->result());
+                if (!entry_sizes.contains(*raw_opt))
+                    entry_sizes.set(*raw_opt, 0);
+            }
+        }
     }
 
-    // For single predecessor, just trace back
-    if (preds->size() == 1)
-        return find_reaching_def_for_phi(*(*preds)[0], operand_raw, visited);
+    // Fill phi operands in CFG successors
+    auto fill_phi_for_successor = [&](BasicBlock* succ) {
+        if (!succ)
+            return;
 
-    // Multiple predecessors - this should have a phi (placed in phase 1)
-    // If we get here, something is wrong - return nullptr
-    return nullptr;
+        // Find our index in the successor's predecessor list
+        size_t pred_index = SIZE_MAX;
+        auto const& phi_preds = succ->predecessors();
+        for (size_t i = 0; i < phi_preds.size(); ++i) {
+            if (phi_preds[i] == &block) {
+                pred_index = i;
+                break;
+            }
+        }
+        if (pred_index == SIZE_MAX)
+            return;
+
+        // Fill phi operands for this predecessor
+        for (auto& instruction : succ->instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                break;
+
+            auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+            if (!raw_opt.has_value())
+                continue;
+
+            // Get current value from stack
+            auto stack_opt = stacks.get(*raw_opt);
+            Value* reaching = nullptr;
+            if (stack_opt.has_value() && !stack_opt->is_empty()) {
+                reaching = stack_opt->last();
+            } else {
+                // No definition reaches here - use undefined
+                reaching = &m_function->create_constant(JS::js_undefined());
+            }
+
+            // Find the correct phi operand index (matches phi_predecessors order)
+            auto const& instr_phi_preds = instruction->phi_predecessors();
+            for (size_t i = 0; i < instr_phi_preds.size(); ++i) {
+                if (instr_phi_preds[i] == &block) {
+                    instruction->set_operand(i, reaching);
+                    break;
+                }
+            }
+        }
+    };
+
+    // Fill phis for all CFG successors
+    if (auto* last = block.last_instruction()) {
+        fill_phi_for_successor(last->true_target());
+        if (last->false_target() && last->false_target() != last->true_target())
+            fill_phi_for_successor(last->false_target());
+    }
+    // Also fill phis for exception edges
+    fill_phi_for_successor(block.exception_handler());
+    if (block.finalizer() != block.exception_handler())
+        fill_phi_for_successor(block.finalizer());
+
+    // Recurse to dominated children in the dominator tree
+    for (auto* child : m_dominators->dominator_children(&block)) {
+        rename_ssa(*child, stacks);
+    }
+
+    // Restore stack sizes (pop what we pushed in this block)
+    for (auto& [op_raw, target_size] : entry_sizes) {
+        auto& stack = stacks.ensure(op_raw);
+        while (stack.size() > target_size)
+            stack.take_last();
+    }
 }
 
 }
