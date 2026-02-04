@@ -561,15 +561,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetByIdWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_function->build_get_by_id(block, base, op.property());
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& result = m_function->build_get_by_id_with_this(block, base, this_value, op.property());
         define_operand(op.dst(), result, block);
         break;
     }
     case GetByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetByValueWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
-        auto& result = m_function->build_get_by_value(block, base, property);
+        auto& result = m_function->build_get_by_value_with_this(block, base, this_value, property);
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1135,7 +1137,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case ImportCall: {
         auto const& op = static_cast<Bytecode::Op::ImportCall const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& specifier = get_or_create_value_for_operand(op.specifier(), block);
+        auto& options = get_or_create_value_for_operand(op.options(), block);
+        auto& result = m_function->build_import_call(block, specifier, options);
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1163,7 +1167,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Super
     case ResolveSuperBase: {
         auto const& op = static_cast<Bytecode::Op::ResolveSuperBase const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_resolve_super_base(block);
         define_operand(op.dst(), result, block);
         break;
     }

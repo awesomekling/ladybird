@@ -155,8 +155,12 @@ char const* opcode_to_string(Opcode opcode)
         return "ConcatString";
     case Opcode::GetById:
         return "GetById";
+    case Opcode::GetByIdWithThis:
+        return "GetByIdWithThis";
     case Opcode::GetByValue:
         return "GetByValue";
+    case Opcode::GetByValueWithThis:
+        return "GetByValueWithThis";
     case Opcode::GetLength:
         return "GetLength";
     case Opcode::PutById:
@@ -183,6 +187,8 @@ char const* opcode_to_string(Opcode opcode)
         return "ConstructWithArgumentArray";
     case Opcode::SuperCallWithArgumentArray:
         return "SuperCallWithArgumentArray";
+    case Opcode::ImportCall:
+        return "ImportCall";
     case Opcode::GetCalleeAndThisFromEnvironment:
         return "GetCalleeAndThisFromEnvironment";
     case Opcode::GetBinding:
@@ -209,6 +215,8 @@ char const* opcode_to_string(Opcode opcode)
         return "DeleteVariable";
     case Opcode::ResolveThisBinding:
         return "ResolveThisBinding";
+    case Opcode::ResolveSuperBase:
+        return "ResolveSuperBase";
     case Opcode::NewObject:
         return "NewObject";
     case Opcode::NewArray:

@@ -96,7 +96,9 @@ enum class Opcode : u8 {
 
     // Property access
     GetById,
+    GetByIdWithThis,
     GetByValue,
+    GetByValueWithThis,
     GetLength,
     PutById,
     PutByValue,
@@ -112,6 +114,7 @@ enum class Opcode : u8 {
     Construct,
     ConstructWithArgumentArray,
     SuperCallWithArgumentArray,
+    ImportCall,
 
     // Environment
     GetCalleeAndThisFromEnvironment,
@@ -127,6 +130,7 @@ enum class Opcode : u8 {
     SetGlobal,
     DeleteVariable,
     ResolveThisBinding,
+    ResolveSuperBase,
 
     // Object creation
     NewObject,

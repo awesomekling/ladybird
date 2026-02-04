@@ -108,7 +108,9 @@ public:
 
     // Property access
     Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
+    Value& build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property);
     Value& build_get_by_value(BasicBlock& block, Value& base, Value& property);
+    Value& build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property);
     Value& build_get_length(BasicBlock& block, Value& base);
     void build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value);
     void build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value);
@@ -124,6 +126,7 @@ public:
     Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
     Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic);
+    Value& build_import_call(BasicBlock& block, Value& specifier, Value& options);
 
     // Environment
     Value& build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
@@ -139,6 +142,7 @@ public:
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_resolve_this_binding(BasicBlock& block);
+    Value& build_resolve_super_base(BasicBlock& block);
 
     // Object creation
     Value& build_new_object(BasicBlock& block);

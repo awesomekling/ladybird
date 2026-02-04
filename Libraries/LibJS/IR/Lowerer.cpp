@@ -512,8 +512,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::GetById:
         emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), OptionalNone {}, instruction.cache_index());
         break;
+    case Opcode::GetByIdWithThis:
+        emit<Bytecode::Op::GetByIdWithThis>(dst(), operand(0), instruction.property_key_index(), operand(1), instruction.cache_index());
+        break;
     case Opcode::GetByValue:
         emit<Bytecode::Op::GetByValue>(dst(), operand(0), operand(1), OptionalNone {});
+        break;
+    case Opcode::GetByValueWithThis:
+        // operands: base (0), this_value (1), property (2)
+        // constructor: dst, base, property, this_value
+        emit<Bytecode::Op::GetByValueWithThis>(dst(), operand(0), operand(2), operand(1));
         break;
     case Opcode::PutById:
         emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), OptionalNone {});
@@ -559,6 +567,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     case Opcode::ResolveThisBinding:
         emit<Bytecode::Op::ResolveThisBinding>();
+        break;
+    case Opcode::ResolveSuperBase:
+        emit<Bytecode::Op::ResolveSuperBase>(dst());
         break;
     case Opcode::GetBinding:
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
@@ -642,6 +653,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     case Opcode::SuperCallWithArgumentArray:
         emit<Bytecode::Op::SuperCallWithArgumentArray>(dst(), operand(0), instruction.is_synthetic());
+        break;
+    case Opcode::ImportCall:
+        emit<Bytecode::Op::ImportCall>(dst(), operand(0), operand(1));
         break;
 
     // Call (variable-length arguments)

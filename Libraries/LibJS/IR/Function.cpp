@@ -224,10 +224,40 @@ Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::Prope
     return result;
 }
 
+Value& Function::build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property)
+{
+    auto instruction = Instruction::create(Opcode::GetByIdWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->set_property_key_index(property);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& property)
 {
     auto instruction = Instruction::create(Opcode::GetByValue);
     instruction->add_operand(&base);
+    instruction->add_operand(&property);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property)
+{
+    auto instruction = Instruction::create(Opcode::GetByValueWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
     instruction->add_operand(&property);
 
     auto& result = create_value_for_instruction();
@@ -424,6 +454,20 @@ Value& Function::build_super_call_with_argument_array(BasicBlock& block, Value& 
     return result;
 }
 
+Value& Function::build_import_call(BasicBlock& block, Value& specifier, Value& options)
+{
+    auto instruction = Instruction::create(Opcode::ImportCall);
+    instruction->add_operand(&specifier);
+    instruction->add_operand(&options);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Environment
 Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
@@ -492,6 +536,16 @@ void Function::build_resolve_this_binding(BasicBlock& block)
 {
     auto instruction = Instruction::create(Opcode::ResolveThisBinding);
     block.append(move(instruction));
+}
+
+Value& Function::build_resolve_super_base(BasicBlock& block)
+{
+    auto instruction = Instruction::create(Opcode::ResolveSuperBase);
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+    block.append(move(instruction));
+    return result;
 }
 
 Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
