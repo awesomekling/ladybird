@@ -672,6 +672,18 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::ResolveSuperBase:
         emit<Bytecode::Op::ResolveSuperBase>(dst());
         break;
+    case Opcode::CreatePrivateEnvironment:
+        emit<Bytecode::Op::CreatePrivateEnvironment>();
+        break;
+    case Opcode::LeavePrivateEnvironment:
+        emit<Bytecode::Op::LeavePrivateEnvironment>();
+        break;
+    case Opcode::AddPrivateName:
+        emit<Bytecode::Op::AddPrivateName>(instruction.identifier_index());
+        break;
+    case Opcode::CreateVariableEnvironment:
+        emit<Bytecode::Op::CreateVariableEnvironment>(instruction.capacity());
+        break;
     case Opcode::GetBinding:
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
         break;

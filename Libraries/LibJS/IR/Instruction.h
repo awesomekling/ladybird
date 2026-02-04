@@ -147,6 +147,10 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     DeleteVariable,
     ResolveThisBinding,
     ResolveSuperBase,
+    CreatePrivateEnvironment,
+    LeavePrivateEnvironment,
+    AddPrivateName,
+    CreateVariableEnvironment,
 
     // Object creation
     NewObject,
@@ -331,6 +335,10 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::DeleteVariable)]                     = { "DeleteVariable",                     false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::ResolveThisBinding)]                 = { "ResolveThisBinding",                 false, true,  true,  false, false, false, false },
     [to_underlying(Opcode::ResolveSuperBase)]                   = { "ResolveSuperBase",                   false, true,  true,  false, false, false, true  },
+    [to_underlying(Opcode::CreatePrivateEnvironment)]           = { "CreatePrivateEnvironment",           false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::LeavePrivateEnvironment)]            = { "LeavePrivateEnvironment",            false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::AddPrivateName)]                     = { "AddPrivateName",                     false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::CreateVariableEnvironment)]          = { "CreateVariableEnvironment",          false, false, true,  false, false, false, false },
 
     // Object creation
     [to_underlying(Opcode::NewObject)]                          = { "NewObject",                          false, true,  true,  false, false, false, true  },

@@ -1095,10 +1095,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_enter_object_environment(block, object);
         break;
     }
-    case CreateVariableEnvironment:
+    case CreateVariableEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::CreateVariableEnvironment const&>(instruction);
+        m_function->build_create_variable_environment(block, op.capacity());
+        break;
+    }
     case CreatePrivateEnvironment:
+        m_function->build_create_private_environment(block);
+        break;
     case LeavePrivateEnvironment:
-        // These affect the environment but don't produce IR values
+        m_function->build_leave_private_environment(block);
         break;
 
     // Exception handling
@@ -1217,9 +1223,11 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.dst(), result, block);
         break;
     }
-    case AddPrivateName:
-        // Private field operations - adds name to private environment, no result value
+    case AddPrivateName: {
+        auto const& op = static_cast<Bytecode::Op::AddPrivateName const&>(instruction);
+        m_function->build_add_private_name(block, op.name());
         break;
+    }
 
     // Super
     case ResolveSuperBase: {

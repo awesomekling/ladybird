@@ -734,6 +734,32 @@ void Function::build_leave_lexical_environment(BasicBlock& block)
     block.append(move(instruction));
 }
 
+void Function::build_create_private_environment(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::CreatePrivateEnvironment>();
+    block.append(move(instruction));
+}
+
+void Function::build_leave_private_environment(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::LeavePrivateEnvironment>();
+    block.append(move(instruction));
+}
+
+void Function::build_add_private_name(BasicBlock& block, Bytecode::IdentifierTableIndex name)
+{
+    auto instruction = Instruction::create<Opcode::AddPrivateName>();
+    instruction->set_identifier_index(name);
+    block.append(move(instruction));
+}
+
+void Function::build_create_variable_environment(BasicBlock& block, u32 capacity)
+{
+    auto instruction = Instruction::create<Opcode::CreateVariableEnvironment>();
+    instruction->set_capacity(capacity);
+    block.append(move(instruction));
+}
+
 void Function::build_enter_object_environment(BasicBlock& block, Value& object)
 {
     auto instruction = Instruction::create<Opcode::EnterObjectEnvironment>();

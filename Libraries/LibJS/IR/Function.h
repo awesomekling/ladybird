@@ -159,6 +159,10 @@ public:
     [[nodiscard]] Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_resolve_this_binding(BasicBlock& block);
     [[nodiscard]] Value& build_resolve_super_base(BasicBlock& block);
+    void build_create_private_environment(BasicBlock& block);
+    void build_leave_private_environment(BasicBlock& block);
+    void build_add_private_name(BasicBlock& block, Bytecode::IdentifierTableIndex name);
+    void build_create_variable_environment(BasicBlock& block, u32 capacity);
 
     // Object creation
     [[nodiscard]] Value& build_new_object(BasicBlock& block);
