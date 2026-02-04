@@ -1,0 +1,90 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 10
+    Jump block2
+block0_split1:
+    v4:unknown = GetGlobal foo
+    Jump block3
+block0_split2:
+    v5:unknown = Call v4:unknown, undefined, undefined
+    Jump block4
+block0_split3:
+    End v5:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v3:unknown = Call v0:unknown, undefined, 10
+    v4:unknown = GetGlobal foo
+    v5:unknown = Call v4:unknown, undefined, undefined
+    End v5:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v3:unknown = Call v0:unknown, undefined, 10
+    v4:unknown = GetGlobal foo
+    v5:unknown = Call v4:unknown, undefined, undefined
+    End v5:unknown
+
+=== Before optimization ===
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    v1:int32 = Move 42
+    Jump block2
+block2:
+    v5:unknown = Phi [block0:v2:unknown, block1:v1:int32]
+    Return v5:unknown
+
+=== After CopyPropagation ===
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    v1:int32 = Move 42
+    Jump block2
+block2:
+    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
+    Return v5:unknown
+
+=== After ConstantFolding ===
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    v1:int32 = Move 42
+    Jump block2
+block2:
+    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
+    Return v5:unknown
+
+=== After DeadCodeElimination ===
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    Jump block2
+block2:
+    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
+    Return v5:unknown
+
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    Jump block2
+block2:
+    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
+    Return v5:unknown
