@@ -13,32 +13,6 @@
 
 namespace JS::IR {
 
-static bool is_hoistable(Opcode opcode)
-{
-    // Only hoist pure operations that don't have side effects
-    switch (opcode) {
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
-    case Opcode::Not:
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool LoopInvariantCodeMotion::run(Function& function)
 {
     bool changed = false;
@@ -103,7 +77,7 @@ bool LoopInvariantCodeMotion::run(Function& function)
                 if (!instruction->result())
                     continue;
 
-                if (!is_hoistable(instruction->opcode()))
+                if (!is_hoistable_opcode(instruction->opcode()))
                     continue;
 
                 // Check if all operands are defined outside the loop

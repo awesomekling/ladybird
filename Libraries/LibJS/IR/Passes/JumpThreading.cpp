@@ -70,7 +70,7 @@ bool JumpThreading::run(Function& function)
             auto* thread_target = take_true ? true_target : false_target;
 
             // Check if the bypassed block has side effects that must execute.
-            // We can't thread if the block creates environments, variables, etc.
+            // We can't thread if the block has observable side effects.
             bool bypassed_block_has_side_effects = false;
             for (auto& instr : block->instructions()) {
                 // Skip phi nodes and terminators
@@ -79,45 +79,10 @@ bool JumpThreading::run(Function& function)
                 if (instr->is_terminator())
                     continue;
 
-                // These opcodes have side effects that affect scope/bindings
-                // and must execute before any code that depends on them
-                switch (instr->opcode()) {
-                case Opcode::CreateLexicalEnvironment:
-                case Opcode::LeaveLexicalEnvironment:
-                case Opcode::EnterObjectEnvironment:
-                case Opcode::CreateVariable:
-                case Opcode::CreateMutableBinding:
-                case Opcode::CreateImmutableBinding:
-                case Opcode::InitializeBinding:
-                case Opcode::SetBinding:
-                case Opcode::SetGlobal:
-                case Opcode::PutById:
-                case Opcode::PutByValue:
-                case Opcode::PutPrivateById:
-                case Opcode::PutGetterById:
-                case Opcode::PutSetterById:
-                case Opcode::PutPrototypeById:
-                case Opcode::PutGetterByValue:
-                case Opcode::PutSetterByValue:
-                case Opcode::PutPrototypeByValue:
-                case Opcode::PutBySpread:
-                case Opcode::InitObjectLiteralProperty:
-                case Opcode::ArrayAppend:
-                case Opcode::Call:
-                case Opcode::CallBuiltin:
-                case Opcode::CallDirectEval:
-                case Opcode::CallWithArgumentArray:
-                case Opcode::Construct:
-                case Opcode::ConstructWithArgumentArray:
-                case Opcode::SuperCallWithArgumentArray:
-                case Opcode::IteratorClose:
+                if (has_side_effects_opcode(instr->opcode())) {
                     bypassed_block_has_side_effects = true;
                     break;
-                default:
-                    break;
                 }
-                if (bypassed_block_has_side_effects)
-                    break;
             }
 
             if (bypassed_block_has_side_effects)

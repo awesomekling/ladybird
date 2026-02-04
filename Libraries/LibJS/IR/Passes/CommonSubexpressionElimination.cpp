@@ -54,41 +54,6 @@ static bool is_commutative(Opcode opcode)
     }
 }
 
-static bool is_pure(Opcode opcode)
-{
-    // Only consider pure operations that don't have side effects
-    // and always produce the same result for the same inputs
-    switch (opcode) {
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals:
-    case Opcode::LooselyEquals:
-    case Opcode::StrictlyEquals:
-    case Opcode::LooselyInequals:
-    case Opcode::StrictlyInequals:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
-    case Opcode::Not:
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool CommonSubexpressionElimination::run(Function& function)
 {
     bool changed = false;
@@ -102,7 +67,7 @@ bool CommonSubexpressionElimination::run(Function& function)
             if (!instruction->result())
                 continue;
 
-            if (!is_pure(instruction->opcode()))
+            if (!is_pure_opcode(instruction->opcode()))
                 continue;
 
             auto const& operands = instruction->operands();

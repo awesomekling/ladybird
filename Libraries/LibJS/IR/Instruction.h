@@ -230,6 +230,113 @@ constexpr bool may_throw_opcode(Opcode opcode)
     }
 }
 
+// Does this opcode have observable side effects?
+// Used by dead code elimination to determine which instructions can be removed.
+constexpr bool has_side_effects_opcode(Opcode opcode)
+{
+    switch (opcode) {
+    // Pure arithmetic/logic - no side effects
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::BitwiseNot:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    case Opcode::LooselyEquals:
+    case Opcode::StrictlyEquals:
+    case Opcode::LooselyInequals:
+    case Opcode::StrictlyInequals:
+    case Opcode::Not:
+    case Opcode::Negate:
+    case Opcode::UnaryPlus:
+    case Opcode::Move:
+    case Opcode::Phi:
+    case Opcode::Increment:
+    case Opcode::Decrement:
+    case Opcode::PostfixIncrement:
+    case Opcode::PostfixDecrement:
+        return false;
+    // Everything else potentially has side effects
+    default:
+        return true;
+    }
+}
+
+// Is this opcode pure (no side effects, deterministic)?
+// Used by common subexpression elimination.
+constexpr bool is_pure_opcode(Opcode opcode)
+{
+    switch (opcode) {
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::BitwiseNot:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    case Opcode::LooselyEquals:
+    case Opcode::StrictlyEquals:
+    case Opcode::LooselyInequals:
+    case Opcode::StrictlyInequals:
+    case Opcode::Negate:
+    case Opcode::UnaryPlus:
+    case Opcode::Not:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Can this instruction be safely hoisted out of a loop?
+// Must be pure AND not throw (hoisting a throwing instruction changes exception order).
+constexpr bool is_hoistable_opcode(Opcode opcode)
+{
+    switch (opcode) {
+    // Pure non-throwing arithmetic - safe to hoist
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::BitwiseNot:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+    case Opcode::Negate:
+    case Opcode::UnaryPlus:
+    case Opcode::Not:
+        return true;
+    // Comparisons are pure but may throw (ToPrimitive), so not hoistable
+    default:
+        return false;
+    }
+}
+
 JS_API char const* opcode_to_string(Opcode opcode);
 
 class JS_API Instruction {
