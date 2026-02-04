@@ -123,14 +123,17 @@ bool InstructionCombining::run(Function& function)
                 break;
             }
 
-            // Negate (Negate x) → x
+            // Negate (Negate x) → x (only if x is Int32)
+            // NB: -(-0.0) = 0.0 ≠ -0.0, so this is only safe for Int32 which
+            //     cannot represent negative zero.
             case Opcode::Negate: {
                 if (operands.is_empty() || !operands[0])
                     break;
 
                 auto* inner = operands[0]->defining_instruction();
                 if (inner && inner->opcode() == Opcode::Negate) {
-                    if (auto* inner_operand = inner->operands()[0]) {
+                    if (auto* inner_operand = inner->operands()[0];
+                        inner_operand && inner_operand->type() == Type::Int32) {
                         result->replace_all_uses_with(inner_operand);
                         changed = true;
                     }
