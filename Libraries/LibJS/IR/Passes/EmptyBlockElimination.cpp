@@ -43,6 +43,45 @@ bool EmptyBlockElimination::run(Function& function)
             // Get predecessors of the empty block
             auto predecessors = block->predecessors();
 
+            // Don't eliminate if any predecessor would end up reaching the target
+            // via two different paths with different phi values
+            bool would_conflict = false;
+            for (auto* pred : predecessors) {
+                // Check if this predecessor already reaches the target directly
+                for (auto& instr : pred->instructions()) {
+                    if (instr->true_target() == target || instr->false_target() == target) {
+                        // This predecessor can reach target both directly and via empty block
+                        // Check if any phi in target would have different values for these paths
+                        for (auto& phi_instr : target->instructions()) {
+                            if (phi_instr->opcode() != Opcode::Phi)
+                                continue;
+
+                            Value* value_from_empty = nullptr;
+                            Value* value_from_direct = nullptr;
+
+                            for (size_t i = 0; i < phi_instr->phi_predecessors().size(); ++i) {
+                                if (phi_instr->phi_predecessors()[i] == block.ptr())
+                                    value_from_empty = phi_instr->operands()[i];
+                                if (phi_instr->phi_predecessors()[i] == pred)
+                                    value_from_direct = phi_instr->operands()[i];
+                            }
+
+                            if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
+                                would_conflict = true;
+                                break;
+                            }
+                        }
+                        if (would_conflict)
+                            break;
+                    }
+                }
+                if (would_conflict)
+                    break;
+            }
+
+            if (would_conflict)
+                continue;
+
             // Entry block has no predecessors - only eliminate if target has no phis
             // (otherwise the phi would have a dangling predecessor reference)
             if (is_entry) {

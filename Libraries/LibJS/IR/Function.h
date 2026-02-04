@@ -89,6 +89,8 @@ public:
     Value& build_to_int32(BasicBlock& block, Value& operand);
     Value& build_to_length(BasicBlock& block, Value& operand);
     Value& build_not(BasicBlock& block, Value& operand);
+    Value& build_is_undefined(BasicBlock& block, Value& operand);
+    Value& build_is_nullish(BasicBlock& block, Value& operand);
 
     // Increment/Decrement
     Value& build_increment(BasicBlock& block, Value& operand);

@@ -272,7 +272,8 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
     }
 
     // Tiered compilation: after N calls, optimize the bytecode via IR
-    if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up) {
+    // Skip functions with exception handlers for now - they require more complex control flow modeling
+    if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up && executable->exception_handlers.is_empty()) {
         if (++data.m_call_count >= threshold) {
             data.m_tiered_up = true;
             auto ir_function = IR::Lifter::lift(*executable);

@@ -155,6 +155,8 @@ Value& Function::build_to_object(BasicBlock& block, Value& operand) { return bui
 Value& Function::build_to_int32(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToInt32, operand); }
 Value& Function::build_to_length(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToLength, operand); }
 Value& Function::build_not(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Not, operand); }
+Value& Function::build_is_undefined(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::IsUndefined, operand); }
+Value& Function::build_is_nullish(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::IsNullish, operand); }
 
 // Increment/Decrement
 Value& Function::build_increment(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::Increment, operand); }

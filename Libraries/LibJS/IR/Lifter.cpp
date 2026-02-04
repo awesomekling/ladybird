@@ -1422,12 +1422,12 @@ void Lifter::connect_control_flow()
         }
         case JumpUndefined: {
             auto const& op = static_cast<Bytecode::Op::JumpUndefined const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
+            auto& value = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            // NB: JumpUndefined jumps if undefined - we'd need a proper IsUndefined check
-            // For now, treat as a branch on the condition
-            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            // JumpUndefined jumps to true_target if value is undefined
+            auto& is_undef = m_function->build_is_undefined(ir_block, value);
+            m_function->build_branch(ir_block, is_undef, *true_target, *false_target);
             break;
         }
 
@@ -1479,6 +1479,9 @@ void Lifter::connect_control_flow()
             }
             break;
         }
+
+        // Save updated definitions (terminators may read operands like parameters)
+        m_block_definitions.set(&ir_block, m_current_definitions);
     }
 }
 

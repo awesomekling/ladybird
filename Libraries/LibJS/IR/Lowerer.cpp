@@ -441,6 +441,22 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::Not:
         emit<Bytecode::Op::Not>(dst(), operand(0));
         break;
+    case Opcode::IsUndefined: {
+        auto undef_index = get_or_add_constant(js_undefined());
+        auto undef_operand = Bytecode::Operand(Bytecode::Operand::Type::Constant, undef_index);
+        emit<Bytecode::Op::StrictlyEquals>(dst(), operand(0), undef_operand);
+        break;
+    }
+    case Opcode::IsNullish: {
+        // Nullish means undefined or null
+        // We emit: (value === undefined) || (value === null)
+        // For simplicity, emit a series: temp = (value === undefined), result = temp || (value === null)
+        // Actually, let's just emit a LooselyEquals with null, which is true for both null and undefined
+        auto null_index = get_or_add_constant(js_null());
+        auto null_operand = Bytecode::Operand(Bytecode::Operand::Type::Constant, null_index);
+        emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), null_operand);
+        break;
+    }
     case Opcode::Typeof:
         emit<Bytecode::Op::Typeof>(dst(), operand(0));
         break;

@@ -82,6 +82,8 @@ enum class Opcode : u8 {
     ToInt32,
     ToLength,
     Not,
+    IsUndefined,
+    IsNullish,
 
     // Increment/Decrement
     Increment,
@@ -192,6 +194,8 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::ToBoolean:
     case Opcode::Not:
     case Opcode::Typeof:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
     case Opcode::Move:
     case Opcode::ExtractValue:
     case Opcode::InitObjectLiteralProperty:

@@ -139,6 +139,10 @@ char const* opcode_to_string(Opcode opcode)
         return "ToLength";
     case Opcode::Not:
         return "Not";
+    case Opcode::IsUndefined:
+        return "IsUndefined";
+    case Opcode::IsNullish:
+        return "IsNullish";
     case Opcode::Increment:
         return "Increment";
     case Opcode::Decrement:
