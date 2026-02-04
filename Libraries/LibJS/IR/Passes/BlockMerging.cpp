@@ -6,6 +6,7 @@
 
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/BlockMerging.h>
@@ -87,15 +88,14 @@ bool BlockMerging::run(Function& function)
                 }
 
                 // Update phi predecessor references and predecessor lists
-                other_block->replace_phi_predecessor(block_b, block_a.ptr());
-                other_block->remove_predecessor(block_b);
+                CFG::replace_predecessor(*other_block, *block_b, *block_a);
             }
 
             // 5. Add A to the predecessor lists of B's former successors
             if (b_true_target && b_true_target != block_b)
-                b_true_target->add_predecessor(block_a.ptr());
+                CFG::add_predecessor(*b_true_target, *block_a);
             if (b_false_target && b_false_target != block_b && b_false_target != b_true_target)
-                b_false_target->add_predecessor(block_a.ptr());
+                CFG::add_predecessor(*b_false_target, *block_a);
 
             merged_any = true;
             changed = true;

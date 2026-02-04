@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Value.h>
@@ -1078,15 +1079,15 @@ Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
 void Function::build_jump(BasicBlock& from, BasicBlock& to)
 {
     auto instruction = JumpInstruction::create(to);
-    to.add_predecessor(&from);
+    CFG::add_predecessor(to, from);
     from.append(move(instruction));
 }
 
 void Function::build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false)
 {
     auto instruction = BranchInstruction::create(&condition, if_true, if_false);
-    if_true.add_predecessor(&from);
-    if_false.add_predecessor(&from);
+    CFG::add_predecessor(if_true, from);
+    CFG::add_predecessor(if_false, from);
     from.append(move(instruction));
 }
 
@@ -1118,7 +1119,7 @@ Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* contin
     instruction->add_operand(&value);
     if (continuation) {
         instruction->set_true_target(continuation);
-        continuation->add_predecessor(&block);
+        CFG::add_predecessor(*continuation, block);
     }
 
     // The result is the value passed to .next() when the generator resumes
@@ -1136,7 +1137,7 @@ Value& Function::build_await(BasicBlock& block, Value& argument, BasicBlock& con
     auto instruction = TerminatorInstruction::create(Opcode::Await);
     instruction->add_operand(&argument);
     instruction->set_true_target(&continuation);
-    continuation.add_predecessor(&block);
+    CFG::add_predecessor(continuation, block);
 
     // The result is the resolved value of the awaited promise
     auto& result = create_value_for_instruction();

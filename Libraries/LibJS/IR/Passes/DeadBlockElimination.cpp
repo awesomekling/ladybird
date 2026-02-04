@@ -7,6 +7,7 @@
 #include <AK/HashTable.h>
 #include <AK/Queue.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/DeadBlockElimination.h>
@@ -122,34 +123,8 @@ bool DeadBlockElimination::run(Function& function)
         if (!reachable.contains(block.ptr()))
             continue;
 
-        // Remove dead blocks from predecessor lists
         for (auto* dead_block : dead_blocks)
-            block->remove_predecessor(dead_block);
-
-        // Clean up exception_handler and finalizer references
-        if (block->exception_handler() && !reachable.contains(block->exception_handler()))
-            block->set_exception_handler(nullptr);
-        if (block->finalizer() && !reachable.contains(block->finalizer()))
-            block->set_finalizer(nullptr);
-
-        // Clean up phi predecessors
-        for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break;
-            for (size_t i = instruction->phi_predecessors().size(); i > 0; --i) {
-                auto* pred = instruction->phi_predecessors()[i - 1];
-                if (!reachable.contains(pred))
-                    instruction->remove_phi_operand(i - 1);
-            }
-        }
-
-        // Clean up terminator targets (shouldn't happen for well-formed IR, but be safe)
-        if (auto* term = block->terminator()) {
-            if (term->true_target() && !reachable.contains(term->true_target()))
-                term->set_true_target(nullptr);
-            if (term->false_target() && !reachable.contains(term->false_target()))
-                term->set_false_target(nullptr);
-        }
+            CFG::remove_block_reference(*block, *dead_block);
     }
 
     // Clear operand uses for instructions in dead blocks before removing them,

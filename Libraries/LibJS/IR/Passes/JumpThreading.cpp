@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
@@ -142,55 +143,36 @@ bool JumpThreading::run(Function& function)
             }
 
             if (updated) {
-                // Update predecessor lists
-                thread_target->add_predecessor(pred_block);
-                block->remove_predecessor(pred_block);
-
-                // Remove phi operands in the bypassed block for the threaded predecessor
-                for (auto& instr : block->instructions()) {
-                    if (instr->opcode() != Opcode::Phi)
-                        break;
-                    for (size_t j = instr->phi_predecessors().size(); j > 0; --j) {
-                        if (instr->phi_predecessors()[j - 1] == pred_block) {
-                            instr->remove_phi_operand(j - 1);
-                            break;
-                        }
-                    }
-                }
-
-                // Update phi nodes in the target block to include the threaded predecessor
-                for (auto& instr : thread_target->instructions()) {
-                    if (instr->opcode() != Opcode::Phi)
-                        continue;
-
+                // Add pred_block to thread_target with traced phi values.
+                // Must be done before removing from block so we can trace through block's phis.
+                CFG::add_predecessor(*thread_target, *pred_block, [&](Instruction& phi_instr) -> Value* {
                     // Find the value this phi expects from the bypassed block
                     Value* value_from_bypassed = nullptr;
-                    for (size_t j = 0; j < instr->phi_predecessors().size(); ++j) {
-                        if (instr->phi_predecessors()[j] == block.ptr()) {
-                            value_from_bypassed = instr->operands()[j];
+                    for (size_t j = 0; j < phi_instr.phi_predecessors().size(); ++j) {
+                        if (phi_instr.phi_predecessors()[j] == block.ptr()) {
+                            value_from_bypassed = phi_instr.operands()[j];
                             break;
                         }
                     }
 
                     if (!value_from_bypassed)
-                        continue;
+                        return nullptr;
 
-                    // If value_from_bypassed is a phi in the bypassed block, we need to
-                    // find what value that phi receives from pred_block
-                    Value* value_for_pred = value_from_bypassed;
-                    if (value_from_bypassed->defining_instruction() && value_from_bypassed->defining_instruction()->opcode() == Opcode::Phi && value_from_bypassed->defining_instruction()->parent_block() == block.ptr()) {
-                        // This is a phi in the bypassed block - find the value from pred_block
-                        auto* bypassed_phi = value_from_bypassed->defining_instruction();
-                        for (size_t k = 0; k < bypassed_phi->phi_predecessors().size(); ++k) {
-                            if (bypassed_phi->phi_predecessors()[k] == pred_block) {
-                                value_for_pred = bypassed_phi->operands()[k];
-                                break;
-                            }
+                    // If value_from_bypassed is a phi in the bypassed block, trace to find
+                    // what value pred_block would contribute
+                    if (auto* def = value_from_bypassed->defining_instruction();
+                        def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
+                        for (size_t k = 0; k < def->phi_predecessors().size(); ++k) {
+                            if (def->phi_predecessors()[k] == pred_block)
+                                return def->operands()[k];
                         }
                     }
 
-                    instr->add_phi_operand(pred_block, value_for_pred);
-                }
+                    return value_from_bypassed;
+                });
+
+                // Remove pred_block from bypassed block (also removes phi operands)
+                CFG::remove_predecessor(*block, *pred_block);
 
                 changed = true;
             }

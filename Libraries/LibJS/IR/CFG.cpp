@@ -9,9 +9,9 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Value.h>
 
-namespace JS::IR::CFG {
+namespace JS::IR {
 
-void remove_predecessor(BasicBlock& block, BasicBlock& predecessor)
+void CFG::remove_predecessor(BasicBlock& block, BasicBlock& predecessor)
 {
     // Remove phi operands for this predecessor first (uses existing helper)
     block.remove_phi_operands_for_predecessor(&predecessor);
@@ -20,8 +20,12 @@ void remove_predecessor(BasicBlock& block, BasicBlock& predecessor)
     block.remove_predecessor(&predecessor);
 }
 
-void add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Function<Value*(Instruction&)> value_for_phi)
+void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Function<Value*(Instruction&)> value_for_phi)
 {
+    // Don't add duplicates
+    if (block.predecessors().contains_slow(&predecessor))
+        return;
+
     // Add to predecessor list
     block.add_predecessor(&predecessor);
 
@@ -35,7 +39,7 @@ void add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Function<Va
     }
 }
 
-void replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred)
+void CFG::replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred)
 {
     // Use existing helper which updates both predecessor list and phi predecessors
     block.replace_phi_predecessor(&old_pred, &new_pred);
@@ -45,7 +49,7 @@ void replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& ne
     block.add_predecessor(&new_pred);
 }
 
-void redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlock& new_target, AK::Function<Value*(Value*)> value_mapper)
+void CFG::redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlock& new_target, AK::Function<Value*(Value*)> value_mapper)
 {
     if (&old_target == &new_target)
         return;
@@ -90,10 +94,10 @@ void redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlock& n
     });
 }
 
-void remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_remove)
+void CFG::remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_remove)
 {
     // Remove from predecessor list (with phi updates)
-    remove_predecessor(live_block, block_to_remove);
+    CFG::remove_predecessor(live_block, block_to_remove);
 
     // Clear terminator targets
     auto* terminator = live_block.terminator();
@@ -111,4 +115,4 @@ void remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_remove)
         live_block.set_finalizer(nullptr);
 }
 
-} // namespace JS::IR::CFG
+} // namespace JS::IR

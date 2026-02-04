@@ -6,6 +6,7 @@
 
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/EmptyBlockElimination.h>
@@ -109,69 +110,36 @@ bool EmptyBlockElimination::run(Function& function)
             if (is_entry)
                 function.set_entry_block(target);
 
-            // Update phi nodes in the target block
-            for (auto& instr : target->instructions()) {
-                if (instr->opcode() != Opcode::Phi)
-                    continue;
-
-                // Find the value associated with the empty block
-                Value* value_from_empty = nullptr;
-                size_t empty_index = SIZE_MAX;
-
-                for (size_t i = 0; i < instr->phi_predecessors().size(); ++i) {
-                    if (instr->phi_predecessors()[i] == block.ptr()) {
-                        value_from_empty = instr->operands()[i];
-                        empty_index = i;
-                        break;
-                    }
-                }
-
-                if (empty_index == SIZE_MAX)
-                    continue;
-
-                // For each predecessor of the empty block, add a phi entry
-                // But only if that predecessor doesn't already have an entry
-                for (auto* pred : predecessors) {
-                    bool already_has_entry = false;
-                    for (auto* existing_pred : instr->phi_predecessors()) {
-                        if (existing_pred == pred) {
-                            already_has_entry = true;
+            // Add each predecessor of the empty block to target with traced phi values
+            for (auto* pred : predecessors) {
+                CFG::add_predecessor(*target, *pred, [&](Instruction& phi_instr) -> Value* {
+                    // Find the value this phi expects from the empty block
+                    Value* value_from_empty = nullptr;
+                    for (size_t i = 0; i < phi_instr.phi_predecessors().size(); ++i) {
+                        if (phi_instr.phi_predecessors()[i] == block.ptr()) {
+                            value_from_empty = phi_instr.operands()[i];
                             break;
                         }
                     }
-                    if (already_has_entry)
-                        continue;
 
-                    // Find the correct value for this predecessor
-                    // If value_from_empty is defined by a phi in a predecessor-only block,
-                    // we need to trace what value that phi would contribute for this specific predecessor
-                    Value* value_for_pred = value_from_empty;
-                    if (value_from_empty && value_from_empty->defining_instruction()) {
-                        auto* def_instr = value_from_empty->defining_instruction();
-                        if (def_instr->opcode() == Opcode::Phi) {
-                            // The value is a phi - check if we can trace through to find
-                            // what value this specific predecessor would contribute
-                            for (size_t j = 0; j < def_instr->phi_predecessors().size(); ++j) {
-                                if (def_instr->phi_predecessors()[j] == pred) {
-                                    value_for_pred = def_instr->operands()[j];
-                                    break;
-                                }
-                            }
+                    if (!value_from_empty)
+                        return nullptr;
+
+                    // If value_from_empty is a phi, trace to find what this pred would contribute
+                    if (auto* def = value_from_empty->defining_instruction();
+                        def && def->opcode() == Opcode::Phi) {
+                        for (size_t j = 0; j < def->phi_predecessors().size(); ++j) {
+                            if (def->phi_predecessors()[j] == pred)
+                                return def->operands()[j];
                         }
                     }
 
-                    instr->add_phi_operand(pred, value_for_pred);
-                }
-
-                // Remove the entry for the empty block
-                instr->remove_phi_operand(empty_index);
+                    return value_from_empty;
+                });
             }
 
-            // Update predecessor lists
-            for (auto* pred : predecessors) {
-                target->add_predecessor(pred);
-            }
-            target->remove_predecessor(block.ptr());
+            // Remove the empty block from target's predecessors (and phi operands)
+            CFG::remove_predecessor(*target, *block);
 
             // Clear the block's instructions (will be removed later)
             block->instructions().clear();
@@ -194,33 +162,8 @@ bool EmptyBlockElimination::run(Function& function)
         if (blocks_to_remove.contains(block.ptr()))
             continue;
 
-        // Clean up exception_handler and finalizer references
-        if (block->exception_handler() && blocks_to_remove.contains(block->exception_handler()))
-            block->set_exception_handler(nullptr);
-        if (block->finalizer() && blocks_to_remove.contains(block->finalizer()))
-            block->set_finalizer(nullptr);
-
-        // Clean up predecessor lists
         for (auto* removed : blocks_to_remove)
-            block->remove_predecessor(removed);
-
-        // Clean up terminator targets
-        if (auto* term = block->terminator()) {
-            if (term->true_target() && blocks_to_remove.contains(term->true_target()))
-                term->set_true_target(nullptr);
-            if (term->false_target() && blocks_to_remove.contains(term->false_target()))
-                term->set_false_target(nullptr);
-        }
-
-        // Clean up phi predecessors (iterate backwards for safe removal)
-        for (auto& instr : block->instructions()) {
-            if (instr->opcode() != Opcode::Phi)
-                break;
-            for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
-                if (blocks_to_remove.contains(instr->phi_predecessors()[i - 1]))
-                    instr->remove_phi_operand(i - 1);
-            }
-        }
+            CFG::remove_block_reference(*block, *removed);
     }
 
     // Remove empty blocks

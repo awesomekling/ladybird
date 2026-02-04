@@ -8,6 +8,7 @@
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/Bytecode/Register.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lifter.h>
@@ -1680,11 +1681,11 @@ void Lifter::compute_block_predecessors()
             continue;
         if (term->true_target()) {
             m_predecessors.ensure(term->true_target()).append(block.ptr());
-            term->true_target()->add_predecessor(block.ptr());
+            CFG::add_predecessor(*term->true_target(), *block);
         }
         if (term->false_target() && term->false_target() != term->true_target()) {
             m_predecessors.ensure(term->false_target()).append(block.ptr());
-            term->false_target()->add_predecessor(block.ptr());
+            CFG::add_predecessor(*term->false_target(), *block);
         }
     }
 
@@ -1703,13 +1704,13 @@ void Lifter::compute_block_predecessors()
             if (auto* handler = block->exception_handler()) {
                 if (!m_predecessors.ensure(handler).contains_slow(block.ptr())) {
                     m_predecessors.ensure(handler).append(block.ptr());
-                    handler->add_predecessor(block.ptr());
+                    CFG::add_predecessor(*handler, *block);
                 }
             }
             if (auto* finalizer = block->finalizer()) {
                 if (!m_predecessors.ensure(finalizer).contains_slow(block.ptr())) {
                     m_predecessors.ensure(finalizer).append(block.ptr());
-                    finalizer->add_predecessor(block.ptr());
+                    CFG::add_predecessor(*finalizer, *block);
                 }
             }
         }

@@ -39,14 +39,6 @@ public:
     TerminatorInstruction* terminator() const;
 
     Vector<BasicBlock*> const& predecessors() const { return m_predecessors; }
-    void add_predecessor(BasicBlock* block);
-    void remove_predecessor(BasicBlock* block);
-
-    // CFG update helpers for phi node consistency
-    // Remove phi operands for edges from the given predecessor
-    void remove_phi_operands_for_predecessor(BasicBlock* predecessor);
-    // Replace a predecessor in all phi nodes (used when merging blocks)
-    void replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred);
 
     // Exception handling (block-level)
     BasicBlock* exception_handler() const { return m_exception_handler; }
@@ -58,6 +50,14 @@ public:
     bool is_terminated() const;
 
 private:
+    friend class CFG;
+
+    // CFG mutation methods - only accessible through CFG:: helpers
+    void add_predecessor(BasicBlock* block);
+    void remove_predecessor(BasicBlock* block);
+    void remove_phi_operands_for_predecessor(BasicBlock* predecessor);
+    void replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred);
+
     BasicBlock(BlockIndex index, String name);
 
     BlockIndex m_index;

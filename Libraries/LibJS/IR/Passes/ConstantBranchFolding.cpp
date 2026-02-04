@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/ConstantBranchFolding.h>
@@ -61,11 +62,9 @@ bool ConstantBranchFolding::run(Function& function)
         term->set_true_target(target);
         term->set_false_target(nullptr);
 
-        // Remove phi operands and predecessor from the not-taken block
-        if (not_taken) {
-            not_taken->remove_phi_operands_for_predecessor(block.ptr());
-            not_taken->remove_predecessor(block.ptr());
-        }
+        // Remove this block from the not-taken block's predecessors
+        if (not_taken)
+            CFG::remove_predecessor(*not_taken, *block);
 
         changed = true;
     }
