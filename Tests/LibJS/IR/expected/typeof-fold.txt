@@ -1,0 +1,24 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
