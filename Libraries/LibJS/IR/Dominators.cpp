@@ -17,6 +17,7 @@ Dominators::Dominators(Function const& function)
     compute_reverse_postorder();
     compute_dominators();
     compute_dominance_frontiers();
+    compute_dominator_children();
 }
 
 void Dominators::compute_reverse_postorder()
@@ -45,6 +46,7 @@ void Dominators::compute_reverse_postorder()
         visited.set(block);
 
         // Push successors (will be processed before we return to this block)
+        // Include both control flow successors and exception edges
         bool has_unvisited_successor = false;
         if (auto* last = block->last_instruction()) {
             if (last->false_target() && !visited.contains(last->false_target())) {
@@ -55,6 +57,15 @@ void Dominators::compute_reverse_postorder()
                 stack.append(last->true_target());
                 has_unvisited_successor = true;
             }
+        }
+        // Exception handlers and finalizers are also successors for dominance computation
+        if (block->exception_handler() && !visited.contains(block->exception_handler())) {
+            stack.append(block->exception_handler());
+            has_unvisited_successor = true;
+        }
+        if (block->finalizer() && !visited.contains(block->finalizer())) {
+            stack.append(block->finalizer());
+            has_unvisited_successor = true;
         }
 
         if (!has_unvisited_successor) {
@@ -210,6 +221,29 @@ HashTable<BasicBlock*> const& Dominators::dominance_frontier(BasicBlock const* b
     static HashTable<BasicBlock*> empty;
     auto it = m_dominance_frontier.find(block);
     if (it == m_dominance_frontier.end())
+        return empty;
+    return it->value;
+}
+
+void Dominators::compute_dominator_children()
+{
+    // Build the dominator tree children by grouping blocks by their immediate dominator
+    for (auto* block : m_reverse_postorder) {
+        m_dominator_children.set(block, {});
+    }
+
+    for (auto* block : m_reverse_postorder) {
+        auto* idom = immediate_dominator(block);
+        if (idom)
+            m_dominator_children.find(idom)->value.append(block);
+    }
+}
+
+Vector<BasicBlock*> const& Dominators::dominator_children(BasicBlock const* block) const
+{
+    static Vector<BasicBlock*> empty;
+    auto it = m_dominator_children.find(block);
+    if (it == m_dominator_children.end())
         return empty;
     return it->value;
 }

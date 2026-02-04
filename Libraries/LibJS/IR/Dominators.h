@@ -34,14 +34,20 @@ public:
     // Returns all blocks in the function in reverse postorder (useful for dataflow)
     Vector<BasicBlock*> const& reverse_postorder() const { return m_reverse_postorder; }
 
+    // Returns the children of a block in the dominator tree
+    Vector<BasicBlock*> const& dominator_children(BasicBlock const* block) const;
+
 private:
     void compute_reverse_postorder();
     void compute_dominators();
     void compute_dominance_frontiers();
 
+    void compute_dominator_children();
+
     Function const& m_function;
     HashMap<BasicBlock const*, BasicBlock*> m_immediate_dominator;
     HashMap<BasicBlock const*, HashTable<BasicBlock*>> m_dominance_frontier;
+    HashMap<BasicBlock const*, Vector<BasicBlock*>> m_dominator_children;
     Vector<BasicBlock*> m_reverse_postorder;
 };
 
