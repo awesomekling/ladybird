@@ -135,6 +135,13 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                         "Instruction in block{} uses undefined value v{}",
                         block->index(), operand->index()));
                 }
+                // Check: Instruction-kind values must have a defining instruction
+                // This catches placeholder register values that weren't properly renamed
+                if (operand->is_instruction() && !operand->defining_instruction()) {
+                    report_error(ByteString::formatted(
+                        "Instruction in block{} uses v{} which has no defining instruction (likely SSA renaming failure)",
+                        block->index(), operand->index()));
+                }
             }
         }
 

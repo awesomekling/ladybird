@@ -52,7 +52,13 @@ Value& Function::create_this()
 
 Value& Function::create_register_value()
 {
-    // Creates a value for a bytecode register/local that isn't a real parameter
+    // Creates a placeholder value for a bytecode register/local.
+    // NB: The caller MUST either:
+    //   1. Set the operand mapping via Lifter::m_value_to_operand_raw so SSA
+    //      renaming can replace this placeholder with the reaching definition, OR
+    //   2. Call define_operand() which sets both m_current_definitions and the mapping
+    // Failure to do so will cause SSA renaming to skip this value, leaving it
+    // as a dangling placeholder that the verifier will catch.
     auto value = Value::create_for_instruction(m_next_value_index++);
     auto& ref = *value;
     m_values.append(move(value));
