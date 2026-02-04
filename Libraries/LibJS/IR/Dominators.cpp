@@ -176,7 +176,10 @@ void Dominators::compute_dominance_frontiers()
         for (auto* pred : preds) {
             auto* runner = pred;
             while (runner && runner != m_immediate_dominator.get(block).value_or(nullptr)) {
-                m_dominance_frontier.find(runner)->value.set(block);
+                auto it = m_dominance_frontier.find(runner);
+                if (it == m_dominance_frontier.end())
+                    break; // Predecessor not reachable from entry
+                it->value.set(block);
                 runner = m_immediate_dominator.get(runner).value_or(nullptr);
             }
         }
