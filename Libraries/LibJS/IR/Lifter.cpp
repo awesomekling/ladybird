@@ -1759,7 +1759,6 @@ void Lifter::place_phi_nodes()
             }
 
             auto& phi = m_function->build_phi(*block, empty_values, empty_blocks);
-            m_phi_map.set(make_phi_key(block, raw), &phi);
             m_value_to_operand_raw.set(&phi, raw);
 
             // Update m_block_definitions to include the phi value, UNLESS the block

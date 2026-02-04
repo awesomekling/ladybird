@@ -62,20 +62,11 @@ private:
     // Block predecessors (computed after control flow is connected)
     HashMap<BasicBlock*, Vector<BasicBlock*>> m_predecessors;
 
-    // Map from (block, operand) to phi value for that operand
-    // Used during SSA construction to find existing phis
-    HashMap<u64, Value*> m_phi_map;
-
     // Maps continuation block index -> resume value (for Yield/Await)
     HashMap<u32, Value*> m_continuation_resume_values;
 
     // Dominator information for proper SSA construction
     OwnPtr<Dominators> m_dominators;
-
-    static u64 make_phi_key(BasicBlock* block, u32 operand_raw)
-    {
-        return (reinterpret_cast<uintptr_t>(block) << 16) ^ operand_raw;
-    }
 };
 
 }
