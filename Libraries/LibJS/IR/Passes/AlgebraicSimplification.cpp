@@ -145,12 +145,16 @@ bool AlgebraicSimplification::run(Function& function)
 
             case Opcode::LeftShift:
             case Opcode::RightShift:
-            case Opcode::UnsignedRightShift:
-                // x << 0 → x, x >> 0 → x, x >>> 0 → x (only if x is already Int32)
+                // x << 0 → x, x >> 0 → x (only if x is already Int32)
                 if (operands.size() == 2) {
                     if (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32)
                         replacement = operands[0];
                 }
+                break;
+
+            case Opcode::UnsignedRightShift:
+                // NB: x >>> 0 cannot be simplified to x, even for Int32.
+                //     (-1) >>> 0 = 4294967295, which doesn't fit in Int32.
                 break;
 
             default:
