@@ -625,13 +625,24 @@ public:
 
     BasicBlock* true_target() const { return m_true_target; }
     BasicBlock* false_target() const { return m_false_target; }
-    void set_true_target(BasicBlock* block) { m_true_target = block; }
-    void set_false_target(BasicBlock* block) { m_false_target = block; }
 
 protected:
     explicit TerminatorInstruction(Opcode opcode);
 
+    // Protected so subclasses and friends can access, but not general code.
+    // Use subclass-specific APIs (set_target, set_true_branch, set_false_branch)
+    // for type-safe target mutation.
+    void set_true_target(BasicBlock* block) { m_true_target = block; }
+    void set_false_target(BasicBlock* block) { m_false_target = block; }
+
 private:
+    friend class CFG;
+    friend class Function;
+    friend class BlockMerging;
+    friend class EmptyBlockElimination;
+    friend class InstructionCombining;
+    friend class JumpThreading;
+
     BasicBlock* m_true_target { nullptr };
     BasicBlock* m_false_target { nullptr };
 };
