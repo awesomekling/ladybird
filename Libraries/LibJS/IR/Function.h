@@ -132,7 +132,7 @@ public:
     Value& build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
-    Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
+    Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
     Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic);
     Value& build_import_call(BasicBlock& block, Value& specifier, Value& options);

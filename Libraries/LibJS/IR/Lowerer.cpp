@@ -799,7 +799,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         Vector<Bytecode::Operand> args;
         for (size_t i = 0; i < arg_count; ++i)
             args.append(operand(i + 1));
-        emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(arg_count, dst(), callee, Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(arg_count, dst(), callee, instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 

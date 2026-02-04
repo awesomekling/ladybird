@@ -499,12 +499,13 @@ Value& Function::build_call_with_argument_array(BasicBlock& block, Value& callee
     return result;
 }
 
-Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments)
+Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
     auto instruction = Instruction::create(Opcode::Construct);
     instruction->add_operand(&callee);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
+    instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);

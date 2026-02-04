@@ -919,7 +919,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         Vector<Value*> args;
         for (auto operand : op.arguments())
             args.append(&get_or_create_value_for_operand(operand, block));
-        auto& result = m_function->build_construct(block, callee, args.span());
+        auto& result = m_function->build_construct(block, callee, args.span(), op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }
