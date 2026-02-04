@@ -1660,8 +1660,18 @@ void Lifter::fill_phi_operands()
                 auto* reaching = find_reaching_def_for_phi(*pred, operand_raw, visited);
 
                 if (!reaching) {
-                    // No definition found - use undefined
-                    reaching = &m_function->create_constant(JS::js_undefined());
+                    // No definition found - this can happen for loop-carried values
+                    // where the variable isn't modified in the loop body.
+                    // In that case, the phi itself represents the loop-invariant value.
+                    // Use the phi's result as the reaching definition for back-edges.
+                    // NB: This is a heuristic; proper SSA would use dominator-based renaming.
+                    if (pred->index() > block->index()) {
+                        // This predecessor comes after the current block (back-edge)
+                        reaching = instruction->result();
+                    } else {
+                        // Forward edge with no definition - use undefined
+                        reaching = &m_function->create_constant(JS::js_undefined());
+                    }
                 }
 
                 instruction->set_operand(i, reaching);
