@@ -349,6 +349,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         return Bytecode::Operand(Bytecode::Register(0)); // Dummy
     };
 
+    // Helper to collect variable-length operands starting from a given index
+    auto collect_varargs = [&](size_t start_index) -> Vector<Bytecode::Operand> {
+        Vector<Bytecode::Operand> args;
+        for (size_t i = start_index; i < instruction.operands().size(); ++i)
+            args.append(operand(i));
+        return args;
+    };
+
     switch (instruction.opcode()) {
     case Opcode::Phi:
         // Phi nodes are handled by emitting moves in predecessors
@@ -720,40 +728,25 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Call (variable-length arguments)
     case Opcode::Call: {
-        // IR Call operands: [callee, this_value, arg0, arg1, ...]
-        auto callee = operand(0);
-        auto this_value = operand(1);
-        size_t arg_count = instruction.operands().size() - 2;
-        Vector<Bytecode::Operand> args;
-        for (size_t i = 0; i < arg_count; ++i)
-            args.append(operand(i + 2));
-        emit_with_extra_operand_slots<Bytecode::Op::Call>(arg_count, dst(), callee, this_value, Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        // IR operands: [callee, this_value, arg0, arg1, ...]
+        auto args = collect_varargs(2);
+        emit_with_extra_operand_slots<Bytecode::Op::Call>(args.size(), dst(), operand(0), operand(1), Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 
     // CallBuiltin (variable-length arguments)
     case Opcode::CallBuiltin: {
-        // IR CallBuiltin operands: [callee, this_value, arg0, arg1, ...]
-        auto callee = operand(0);
-        auto this_value = operand(1);
-        size_t arg_count = instruction.operands().size() - 2;
-        Vector<Bytecode::Operand> args;
-        for (size_t i = 0; i < arg_count; ++i)
-            args.append(operand(i + 2));
-        emit_with_extra_operand_slots<Bytecode::Op::CallBuiltin>(arg_count, dst(), callee, this_value, instruction.builtin(), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        // IR operands: [callee, this_value, arg0, arg1, ...]
+        auto args = collect_varargs(2);
+        emit_with_extra_operand_slots<Bytecode::Op::CallBuiltin>(args.size(), dst(), operand(0), operand(1), instruction.builtin(), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 
     // CallDirectEval (variable-length arguments)
     case Opcode::CallDirectEval: {
-        // IR CallDirectEval operands: [callee, this_value, arg0, arg1, ...]
-        auto callee = operand(0);
-        auto this_value = operand(1);
-        size_t arg_count = instruction.operands().size() - 2;
-        Vector<Bytecode::Operand> args;
-        for (size_t i = 0; i < arg_count; ++i)
-            args.append(operand(i + 2));
-        emit_with_extra_operand_slots<Bytecode::Op::CallDirectEval>(arg_count, dst(), callee, this_value, instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        // IR operands: [callee, this_value, arg0, arg1, ...]
+        auto args = collect_varargs(2);
+        emit_with_extra_operand_slots<Bytecode::Op::CallDirectEval>(args.size(), dst(), operand(0), operand(1), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 
@@ -769,9 +762,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // NewArray (variable-length elements)
     case Opcode::NewArray: {
-        Vector<Bytecode::Operand> elements;
-        for (size_t i = 0; i < instruction.operands().size(); ++i)
-            elements.append(operand(i));
+        auto elements = collect_varargs(0);
         emit_with_extra_operand_slots<Bytecode::Op::NewArray>(elements.size(), dst(), ReadonlySpan<Bytecode::Operand> { elements });
         break;
     }
@@ -825,13 +816,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Construct (variable-length arguments)
     case Opcode::Construct: {
-        // IR Construct operands: [callee, arg0, arg1, ...]
-        auto callee = operand(0);
-        size_t arg_count = instruction.operands().size() - 1;
-        Vector<Bytecode::Operand> args;
-        for (size_t i = 0; i < arg_count; ++i)
-            args.append(operand(i + 1));
-        emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(arg_count, dst(), callee, instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
+        // IR operands: [callee, arg0, arg1, ...]
+        auto args = collect_varargs(1);
+        emit_with_extra_operand_slots<Bytecode::Op::CallConstruct>(args.size(), dst(), operand(0), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 
