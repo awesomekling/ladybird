@@ -240,19 +240,33 @@ block0:
     Jump block3
 block1:
     v4 = GetGlobal sum
-    v5 = GetGlobal x
-    v7 = Mul v5, 2
-    v8 = Add v4, v7
-    SetGlobal sum v8
+    Jump block8
+block2:
     v10 = Increment v17
     Jump block3
 block3:
-    v17 = Phi [block1:v10, block0:v1]
+    v17 = Phi [block2:v10, block0:v1]
     v11 = GetGlobal n
-    v13 = LessThan v17, v11
-    Branch v13, block1, block4
+    Jump block12
 block4:
     v12 = GetGlobal sum
+    Jump block13
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
     End v12
 
 function():
@@ -263,17 +277,31 @@ block0:
     Jump block3
 block1:
     v4 = GetGlobal sum
-    v5 = GetGlobal x
-    v7 = Mul v5, 2
-    v8 = Add v4, v7
-    SetGlobal sum v8
+    Jump block8
+block2:
     v10 = Increment v17
     Jump block3
 block3:
-    v17 = Phi [block1:v10, block0:v1]
+    v17 = Phi [block2:v10, block0:v1]
     v11 = GetGlobal n
-    v13 = LessThan v17, v11
-    Branch v13, block1, block4
+    Jump block12
 block4:
     v12 = GetGlobal sum
+    Jump block13
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
     End v12
