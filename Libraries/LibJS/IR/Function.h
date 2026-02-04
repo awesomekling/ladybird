@@ -44,80 +44,80 @@ public:
     BasicBlock& create_block(String name = {});
 
     // Factory methods for values
-    Value& create_parameter(u32 parameter_index);
-    Value& create_this();
-    Value& create_register_value();
-    Value& create_constant(JS::Value constant);
+    [[nodiscard]] Value& create_parameter(u32 parameter_index);
+    [[nodiscard]] Value& create_this();
+    [[nodiscard]] Value& create_register_value();
+    [[nodiscard]] Value& create_constant(JS::Value constant);
 
     // Instruction builders that return result Value&
     // Arithmetic
-    Value& build_add(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_sub(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_mul(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_div(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_mod(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_exp(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_negate(BasicBlock& block, Value& operand);
-    Value& build_unary_plus(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_add(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_sub(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_mul(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_div(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_mod(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_exp(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_negate(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_unary_plus(BasicBlock& block, Value& operand);
 
     // Bitwise
-    Value& build_bitwise_and(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_bitwise_or(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_bitwise_xor(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_bitwise_not(BasicBlock& block, Value& operand);
-    Value& build_left_shift(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_right_shift(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_unsigned_right_shift(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_bitwise_and(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_bitwise_or(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_bitwise_xor(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_bitwise_not(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_left_shift(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_right_shift(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_unsigned_right_shift(BasicBlock& block, Value& lhs, Value& rhs);
 
     // Comparison
-    Value& build_less_than(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_less_than_equals(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_greater_than(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_greater_than_equals(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_loosely_equals(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_strictly_equals(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_loosely_inequals(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_strictly_inequals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_less_than(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_less_than_equals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_greater_than(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_greater_than_equals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_loosely_equals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_strictly_equals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_loosely_inequals(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_strictly_inequals(BasicBlock& block, Value& lhs, Value& rhs);
 
     // Type ops
-    Value& build_typeof(BasicBlock& block, Value& operand);
-    Value& build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
-    Value& build_to_boolean(BasicBlock& block, Value& operand);
-    Value& build_to_number(BasicBlock& block, Value& operand);
-    Value& build_to_string(BasicBlock& block, Value& operand);
-    Value& build_to_object(BasicBlock& block, Value& operand);
-    Value& build_to_int32(BasicBlock& block, Value& operand);
-    Value& build_to_length(BasicBlock& block, Value& operand);
-    Value& build_not(BasicBlock& block, Value& operand);
-    Value& build_is_undefined(BasicBlock& block, Value& operand);
-    Value& build_is_nullish(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_typeof(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    [[nodiscard]] Value& build_to_boolean(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_number(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_string(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_object(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_int32(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_length(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_not(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_is_undefined(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_is_nullish(BasicBlock& block, Value& operand);
 
     // Increment/Decrement
-    Value& build_increment(BasicBlock& block, Value& operand);
-    Value& build_decrement(BasicBlock& block, Value& operand);
-    Value& build_postfix_increment(BasicBlock& block, Value& operand);
-    Value& build_postfix_decrement(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_increment(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_decrement(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_postfix_increment(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_postfix_decrement(BasicBlock& block, Value& operand);
 
     // String ops
-    Value& build_concat_string(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_concat_string(BasicBlock& block, Value& lhs, Value& rhs);
 
     // Constants
-    Value& build_load_constant(BasicBlock& block, JS::Value constant);
-    Value& build_load_undefined(BasicBlock& block);
-    Value& build_load_null(BasicBlock& block);
+    [[nodiscard]] Value& build_load_constant(BasicBlock& block, JS::Value constant);
+    [[nodiscard]] Value& build_load_undefined(BasicBlock& block);
+    [[nodiscard]] Value& build_load_null(BasicBlock& block);
 
     // Property access
-    Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
-    Value& build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property);
-    Value& build_get_by_value(BasicBlock& block, Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
-    Value& build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property);
-    Value& build_get_length(BasicBlock& block, Value& base);
+    [[nodiscard]] Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    [[nodiscard]] Value& build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property);
+    [[nodiscard]] Value& build_get_by_value(BasicBlock& block, Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    [[nodiscard]] Value& build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property);
+    [[nodiscard]] Value& build_get_length(BasicBlock& block, Value& base);
     void build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value);
     void build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value);
-    Value& build_delete_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
-    Value& build_delete_by_value(BasicBlock& block, Value& base, Value& property);
-    Value& build_has_property(BasicBlock& block, Value& object, Value& property);
-    Value& build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
+    [[nodiscard]] Value& build_delete_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
+    [[nodiscard]] Value& build_delete_by_value(BasicBlock& block, Value& base, Value& property);
+    [[nodiscard]] Value& build_has_property(BasicBlock& block, Value& object, Value& property);
+    [[nodiscard]] Value& build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
     void build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value);
     void build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
@@ -134,47 +134,47 @@ public:
     void build_put_by_spread(BasicBlock& block, Value& base, Value& source);
 
     // Calls
-    Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
-    Value& build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
-    Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
-    Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
-    Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
-    Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
-    Value& build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic);
-    Value& build_import_call(BasicBlock& block, Value& specifier, Value& options);
+    [[nodiscard]] Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
+    [[nodiscard]] Value& build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
+    [[nodiscard]] Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    [[nodiscard]] Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    [[nodiscard]] Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
+    [[nodiscard]] Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    [[nodiscard]] Value& build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic);
+    [[nodiscard]] Value& build_import_call(BasicBlock& block, Value& specifier, Value& options);
 
     // Environment
-    Value& build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    [[nodiscard]] Value& build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);
-    Value& build_create_lexical_environment(BasicBlock& block, u32 capacity);
+    [[nodiscard]] Value& build_create_lexical_environment(BasicBlock& block, u32 capacity);
     void build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
     void build_create_immutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
     void build_leave_lexical_environment(BasicBlock& block);
     void build_enter_object_environment(BasicBlock& block, Value& object);
-    Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    [[nodiscard]] Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
-    Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    [[nodiscard]] Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
-    Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    [[nodiscard]] Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_resolve_this_binding(BasicBlock& block);
-    Value& build_resolve_super_base(BasicBlock& block);
+    [[nodiscard]] Value& build_resolve_super_base(BasicBlock& block);
 
     // Object creation
-    Value& build_new_object(BasicBlock& block);
-    Value& build_new_array(BasicBlock& block, Span<Value*> elements);
-    Value& build_new_array_with_length(BasicBlock& block, Value& length);
+    [[nodiscard]] Value& build_new_object(BasicBlock& block);
+    [[nodiscard]] Value& build_new_array(BasicBlock& block, Span<Value*> elements);
+    [[nodiscard]] Value& build_new_array_with_length(BasicBlock& block, Value& length);
     void build_array_append(BasicBlock& block, Value& array, Value& value, bool is_spread);
-    Value& build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys);
-    Value& build_new_function(BasicBlock& block);
-    Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
+    [[nodiscard]] Value& build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys);
+    [[nodiscard]] Value& build_new_function(BasicBlock& block);
+    [[nodiscard]] Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot);
     void build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index);
 
     // Arguments
-    Value& build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable);
-    Value& build_create_rest_params(BasicBlock& block, u32 rest_index);
-    Value& build_get_new_target(BasicBlock& block);
+    [[nodiscard]] Value& build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable);
+    [[nodiscard]] Value& build_create_rest_params(BasicBlock& block, u32 rest_index);
+    [[nodiscard]] Value& build_get_new_target(BasicBlock& block);
 
     // Guard operations (may throw but produce no value)
     void build_throw_if_not_object(BasicBlock& block, Value& value);
@@ -182,21 +182,21 @@ public:
     void build_throw_if_tdz(BasicBlock& block, Value& value);
 
     // Iterators
-    Value& build_get_iterator(BasicBlock& block, Value& iterable);
-    Value& build_iterator_next(BasicBlock& block, Value& iterator);
-    Value& build_iterator_next_unpack(BasicBlock& block, Value& iterator);
+    [[nodiscard]] Value& build_get_iterator(BasicBlock& block, Value& iterable);
+    [[nodiscard]] Value& build_iterator_next(BasicBlock& block, Value& iterator);
+    [[nodiscard]] Value& build_iterator_next_unpack(BasicBlock& block, Value& iterator);
     void build_iterator_close(BasicBlock& block, Value& iterator);
-    Value& build_iterator_to_array(BasicBlock& block, Value& iterator);
+    [[nodiscard]] Value& build_iterator_to_array(BasicBlock& block, Value& iterator);
 
     // Special
-    Value& build_in(BasicBlock& block, Value& lhs, Value& rhs);
-    Value& build_instance_of(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_in(BasicBlock& block, Value& lhs, Value& rhs);
+    [[nodiscard]] Value& build_instance_of(BasicBlock& block, Value& lhs, Value& rhs);
 
     // Copy
-    Value& build_move(BasicBlock& block, Value& source);
+    [[nodiscard]] Value& build_move(BasicBlock& block, Value& source);
 
     // Tuple extraction
-    Value& build_extract_value(BasicBlock& block, Value& tuple, u32 index);
+    [[nodiscard]] Value& build_extract_value(BasicBlock& block, Value& tuple, u32 index);
 
     // Control flow (void, no result)
     void build_jump(BasicBlock& from, BasicBlock& to);
@@ -207,12 +207,12 @@ public:
 
     // Generators/Async - terminators with result (the resume value)
     // For Yield, continuation can be null for final yields (generator return)
-    Value& build_yield(BasicBlock& block, Value& value, BasicBlock* continuation);
-    Value& build_await(BasicBlock& block, Value& argument, BasicBlock& continuation);
-    Value& build_get_completion_fields(BasicBlock& block, Value& completion);
+    [[nodiscard]] Value& build_yield(BasicBlock& block, Value& value, BasicBlock* continuation);
+    [[nodiscard]] Value& build_await(BasicBlock& block, Value& argument, BasicBlock& continuation);
+    [[nodiscard]] Value& build_get_completion_fields(BasicBlock& block, Value& completion);
 
     // SSA
-    Value& build_phi(BasicBlock& block, Vector<Value*> values, Vector<BasicBlock*> predecessors);
+    [[nodiscard]] Value& build_phi(BasicBlock& block, Vector<Value*> values, Vector<BasicBlock*> predecessors);
 
 private:
     explicit Function(GC::Ptr<Bytecode::Executable const> source_executable);

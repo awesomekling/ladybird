@@ -1635,7 +1635,8 @@ void Lifter::connect_control_flow()
                 }
             } else {
                 // Final yield (return from generator) - emit Yield without continuation
-                m_function->build_yield(ir_block, value, nullptr);
+                // Result is intentionally unused since there's no continuation
+                (void)m_function->build_yield(ir_block, value, nullptr);
             }
             break;
         }
