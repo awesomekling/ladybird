@@ -61,9 +61,20 @@ bool ConstantBranchFolding::run(Function& function)
         last->set_true_target(target);
         last->set_false_target(nullptr);
 
-        // Remove predecessor from the not-taken block
-        if (not_taken)
+        // Remove phi operands and predecessor from the not-taken block
+        if (not_taken) {
+            for (auto& instr : not_taken->instructions()) {
+                if (instr->opcode() != Opcode::Phi)
+                    break;
+                for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
+                    if (instr->phi_predecessors()[i - 1] == block.ptr()) {
+                        instr->remove_phi_operand(i - 1);
+                        break;
+                    }
+                }
+            }
             not_taken->remove_predecessor(block.ptr());
+        }
 
         changed = true;
     }
