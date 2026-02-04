@@ -1,0 +1,168 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 42
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 42
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 42
+    End v3:unknown
+
+=== Before optimization ===
+function(v5:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    Jump block3
+block1:
+    v6:string = Typeof v5:unknown
+    v7:string = Move v6:string
+    Jump block2
+block2:
+    v8:int32 = Move v14:unknown
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v4:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v2:undefined, block2:v7:string]
+    v12:unknown = Phi [block0:v15:undefined, block2:v8:int32]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After CopyPropagation ===
+function(v5:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    Jump block3
+block1:
+    v6:string = Typeof v5:unknown
+    v7:string = Move v6:string
+    Jump block2
+block2:
+    v8:int32 = Move v14:unknown
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After LoopInvariantCodeMotion ===
+function(v5:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v6:string = Typeof v5:unknown
+    Jump block3
+block1:
+    v7:string = Move v6:string
+    Jump block2
+block2:
+    v8:int32 = Move v14:unknown
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After ConstantFolding ===
+function(v5:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v6:string = Typeof v5:unknown
+    Jump block3
+block1:
+    v7:string = Move v6:string
+    Jump block2
+block2:
+    v8:int32 = Move v14:unknown
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After DeadCodeElimination ===
+function(v5:unknown):
+block0:
+    v6:string = Typeof v5:unknown
+    Jump block3
+block1:
+    Jump block2
+block2:
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After EmptyBlockElimination ===
+function(v5:unknown):
+block0:
+    v6:string = Typeof v5:unknown
+    Jump block3
+block2:
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block2, block4
+block4:
+    Return v13:unknown
+
+function(v5:unknown):
+block0:
+    v6:string = Typeof v5:unknown
+    Jump block3
+block2:
+    v9:number = Increment v14:unknown
+    Jump block3
+block3:
+    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v11:boolean = LessThan v14:unknown, 10
+    Branch v11:boolean, block2, block4
+block4:
+    Return v13:unknown
