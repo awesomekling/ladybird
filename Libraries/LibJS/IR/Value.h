@@ -64,8 +64,8 @@ public:
             return cv.as_i32() != 0;
         if (cv.is_undefined() || cv.is_null())
             return false;
-        // NB: We don't handle doubles or strings here since they require
-        // more complex truthiness checks (0.0/-0.0/NaN vs empty string).
+        if (cv.is_double())
+            return !cv.is_nan() && cv.as_double() != 0;
         return {};
     }
 

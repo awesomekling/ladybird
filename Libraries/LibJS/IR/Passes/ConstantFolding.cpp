@@ -179,9 +179,11 @@ bool ConstantFolding::run(Function& function)
                 break;
 
             case Opcode::Not:
-                if (operands.size() == 1 && operands[0]->constant_value().is_boolean()) {
-                    result_value = JS::Value(!operands[0]->constant_value().as_bool());
-                    can_fold = true;
+                if (operands.size() == 1) {
+                    if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
+                        result_value = JS::Value(!*truthiness);
+                        can_fold = true;
+                    }
                 }
                 break;
 
