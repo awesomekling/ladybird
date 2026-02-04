@@ -11,6 +11,7 @@
 #include <LibCore/Environment.h>
 #include <LibCore/System.h>
 #include <LibFileSystem/FileSystem.h>
+#include <LibJS/IR/Dump.h>
 #include <LibTest/JavaScriptTestRunner.h>
 #include <signal.h>
 #include <stdio.h>
@@ -129,6 +130,7 @@ int main(int argc, char** argv)
     args_parser.add_option(per_file, "Show detailed per-file results as JSON (implies -j)", "per-file");
     args_parser.add_option(g_collect_on_every_allocation, "Collect garbage after every allocation", "collect-often", 'g');
     args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
+    args_parser.add_option(JS::IR::g_dump_ir, "Dump the IR", "dump-ir", 'I');
     args_parser.add_option(tier_up_threshold, "Tier up to IR after N calls (0 = disabled)", "tier-up-threshold", 0, "N");
     args_parser.add_option(max_failures, "Stop after N test failures (0 = unlimited)", "max-failures", 0, "N");
     args_parser.add_option(test_globs, "Only run tests matching the given glob", "filter", 'f', "glob");
