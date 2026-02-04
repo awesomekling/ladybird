@@ -49,13 +49,16 @@ public:
     // - Predecessor lists (removes from_block from old_target, adds to new_target)
     // - Phi operands (removes from old_target, adds to new_target with mapped values)
     //
-    // The `value_mapper` callback transforms phi values from old_target to new_target.
-    // If null, phi operands in new_target will be nullptr.
+    // The `value_mapper` callback is called for each phi in new_target with:
+    // - The phi instruction that needs a value
+    // - The old value from old_target's corresponding phi (if any, otherwise nullptr)
+    // The mapper should return the value to use for this phi's new predecessor operand.
+    // If value_mapper is null, phi operands in new_target will be nullptr.
     static void redirect_edge(
         BasicBlock& from_block,
         BasicBlock& old_target,
         BasicBlock& new_target,
-        AK::Function<Value*(Value*)> value_mapper = nullptr);
+        AK::Function<Value*(Instruction& phi, Value* old_value)> value_mapper = nullptr);
 
     // Remove all references to `block_to_remove` from `live_block`:
     // - Removes block_to_remove from predecessor list
