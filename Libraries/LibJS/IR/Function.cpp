@@ -751,6 +751,16 @@ Value& Function::build_create_rest_params(BasicBlock& block, u32 rest_index)
     return result;
 }
 
+Value& Function::build_get_new_target(BasicBlock& block)
+{
+    auto instruction = Instruction::create(Opcode::GetNewTarget);
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+    result.set_defining_instruction(instruction.ptr());
+    block.append(move(instruction));
+    return result;
+}
+
 // Iterators
 Value& Function::build_get_iterator(BasicBlock& block, Value& iterable)
 {

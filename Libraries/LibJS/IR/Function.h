@@ -157,6 +157,7 @@ public:
     // Arguments
     Value& build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable);
     Value& build_create_rest_params(BasicBlock& block, u32 rest_index);
+    Value& build_get_new_target(BasicBlock& block);
 
     // Iterators
     Value& build_get_iterator(BasicBlock& block, Value& iterable);

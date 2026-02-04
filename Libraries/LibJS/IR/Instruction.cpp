@@ -261,6 +261,8 @@ char const* opcode_to_string(Opcode opcode)
         return "CreateArguments";
     case Opcode::CreateRestParams:
         return "CreateRestParams";
+    case Opcode::GetNewTarget:
+        return "GetNewTarget";
     }
     VERIFY_NOT_REACHED();
 }

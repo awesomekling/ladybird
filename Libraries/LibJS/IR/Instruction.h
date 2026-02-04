@@ -167,6 +167,9 @@ enum class Opcode : u8 {
     // Arguments
     CreateArguments,
     CreateRestParams,
+
+    // New target
+    GetNewTarget,
 };
 
 constexpr bool is_terminator_opcode(Opcode opcode)

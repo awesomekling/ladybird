@@ -943,8 +943,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case GetNewTarget: {
         auto const& op = static_cast<Bytecode::Op::GetNewTarget const&>(instruction);
-        // GetNewTarget returns a special value from the execution context
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_get_new_target(block);
         define_operand(op.dst(), result, block);
         break;
     }
