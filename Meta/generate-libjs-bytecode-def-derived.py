@@ -294,7 +294,7 @@ def generate_class(op: OpDef) -> str:
 
     # Generate a second constructor for ops with Operand arrays that takes ReadonlySpan<Operand>
     # This is useful for the IR lowerer which doesn't have access to ScopedOperand
-    has_operand_array = any(af.type.strip() == "Operand" for af in arrays)
+    has_operand_array = any(af.type.strip() in ["Operand", "Optional<Operand>"] for af in arrays)
     if has_operand_array:
         lines.append("")
         # Build params with Operand instead of ScopedOperand

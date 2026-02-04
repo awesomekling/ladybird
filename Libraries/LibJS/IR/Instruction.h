@@ -20,6 +20,7 @@
 
 namespace JS {
 
+class ClassExpression;
 class FunctionNode;
 
 }
@@ -126,6 +127,7 @@ enum class Opcode : u8 {
     // Object creation
     NewObject,
     NewArray,
+    NewClass,
     NewFunction,
     NewRegExp,
     InitObjectLiteralProperty,
@@ -256,6 +258,10 @@ public:
     Optional<Bytecode::IdentifierTableIndex> lhs_name() const { return m_lhs_name; }
     void set_lhs_name(Optional<Bytecode::IdentifierTableIndex> name) { m_lhs_name = name; }
 
+    // For NewClass - reference to the AST node
+    ClassExpression const* class_expression() const { return m_class_expression; }
+    void set_class_expression(ClassExpression const* node) { m_class_expression = node; }
+
     // For NewRegExp
     Bytecode::StringTableIndex regex_source_index() const { return m_regex_source_index; }
     void set_regex_source_index(Bytecode::StringTableIndex index) { m_regex_source_index = index; }
@@ -320,6 +326,7 @@ private:
     u32 m_extract_index { 0 };
     IteratorHint m_iterator_hint { IteratorHint::Sync };
     FunctionNode const* m_function_node { nullptr };
+    ClassExpression const* m_class_expression { nullptr };
     Optional<Bytecode::IdentifierTableIndex> m_lhs_name;
 
     // For CreateVariable

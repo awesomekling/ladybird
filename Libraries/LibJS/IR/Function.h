@@ -135,6 +135,7 @@ public:
     // Object creation
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
+    Value& build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys);
     Value& build_new_function(BasicBlock& block);
     Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot);

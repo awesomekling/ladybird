@@ -567,6 +567,26 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
     return result;
 }
 
+Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys)
+{
+    auto instruction = Instruction::create(Opcode::NewClass);
+
+    // super_class is the first operand (may be null)
+    instruction->add_operand(super_class);
+
+    // element_keys follow
+    for (auto* key : element_keys)
+        instruction->add_operand(key);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Function); // Classes are functions
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_new_function(BasicBlock& block)
 {
     auto instruction = Instruction::create(Opcode::NewFunction);

@@ -609,6 +609,24 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
+    // NewClass
+    case Opcode::NewClass: {
+        // Operands: [super_class (may be null), element_key0, element_key1, ...]
+        Optional<Bytecode::Operand> super_class;
+        if (instruction.operands()[0])
+            super_class = operand(0);
+        size_t element_keys_count = instruction.operands().size() - 1;
+        Vector<Optional<Bytecode::Operand>> element_keys;
+        for (size_t i = 0; i < element_keys_count; ++i) {
+            if (instruction.operands()[i + 1])
+                element_keys.append(operand(i + 1));
+            else
+                element_keys.append(OptionalNone {});
+        }
+        emit_with_extra_operand_slots<Bytecode::Op::NewClass>(element_keys_count, dst(), super_class, *instruction.class_expression(), instruction.lhs_name(), ReadonlySpan<Optional<Bytecode::Operand>> { element_keys });
+        break;
+    }
+
     // NewFunction
     case Opcode::NewFunction:
         emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), OptionalNone {});

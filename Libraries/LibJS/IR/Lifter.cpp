@@ -822,7 +822,19 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewClass: {
         auto const& op = static_cast<Bytecode::Op::NewClass const&>(instruction);
-        auto& result = m_function->create_register_value();
+        Value* super_class = nullptr;
+        if (op.super_class().has_value())
+            super_class = &get_or_create_value_for_operand(op.super_class().value(), block);
+        Vector<Value*> element_keys;
+        for (size_t i = 0; i < op.element_keys_count(); ++i) {
+            if (op.element_keys()[i].has_value())
+                element_keys.append(&get_or_create_value_for_operand(op.element_keys()[i].value(), block));
+            else
+                element_keys.append(nullptr);
+        }
+        auto& result = m_function->build_new_class(block, super_class, element_keys.span());
+        result.defining_instruction()->set_class_expression(&op.class_expression());
+        result.defining_instruction()->set_lhs_name(op.lhs_name());
         define_operand(op.dst(), result, block);
         break;
     }
