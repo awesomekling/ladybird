@@ -31,6 +31,7 @@ enum class Opcode : u8 {
     Jump,
     Branch,
     Return,
+    End,
     Throw,
 
     // SSA
@@ -154,6 +155,7 @@ constexpr bool is_terminator_opcode(Opcode opcode)
     case Opcode::Jump:
     case Opcode::Branch:
     case Opcode::Return:
+    case Opcode::End:
     case Opcode::Throw:
         return true;
     default:
@@ -167,6 +169,7 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::Jump:
     case Opcode::Branch:
     case Opcode::Return:
+    case Opcode::End:
     case Opcode::Phi:
     case Opcode::LoadConstant:
     case Opcode::LoadUndefined:

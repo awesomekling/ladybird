@@ -469,7 +469,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case End: {
         auto const& op = static_cast<Bytecode::Op::End const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.value(), block);
-        m_function->build_return(block, value);
+        m_function->build_end(block, value);
         break;
     }
 

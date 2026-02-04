@@ -706,6 +706,13 @@ void Function::build_return(BasicBlock& block, Value& value)
     block.append(move(instruction));
 }
 
+void Function::build_end(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::End);
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
 void Function::build_throw(BasicBlock& block, Value& value)
 {
     auto instruction = Instruction::create(Opcode::Throw);

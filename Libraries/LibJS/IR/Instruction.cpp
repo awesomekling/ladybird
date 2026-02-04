@@ -55,6 +55,8 @@ char const* opcode_to_string(Opcode opcode)
         return "Branch";
     case Opcode::Return:
         return "Return";
+    case Opcode::End:
+        return "End";
     case Opcode::Throw:
         return "Throw";
     case Opcode::Phi:

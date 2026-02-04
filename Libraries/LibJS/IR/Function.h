@@ -161,6 +161,7 @@ public:
     void build_jump(BasicBlock& from, BasicBlock& to);
     void build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false);
     void build_return(BasicBlock& block, Value& value);
+    void build_end(BasicBlock& block, Value& value);
     void build_throw(BasicBlock& block, Value& value);
 
     // SSA

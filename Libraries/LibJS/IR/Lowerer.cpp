@@ -521,6 +521,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::Jump:
     case Opcode::Branch:
     case Opcode::Return:
+    case Opcode::End:
     case Opcode::Throw:
         // These are terminators, handled in lower_blocks
         break;
@@ -808,6 +809,11 @@ void Lowerer::lower_blocks()
         case Opcode::Return: {
             auto value = operand_for_value(*terminator->operands()[0]);
             emit<Bytecode::Op::Return>(value);
+            break;
+        }
+        case Opcode::End: {
+            auto value = operand_for_value(*terminator->operands()[0]);
+            emit<Bytecode::Op::End>(value);
             break;
         }
         case Opcode::Throw: {
