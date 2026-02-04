@@ -178,6 +178,33 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::Negate:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32()) {
+                        i32 val = v.as_i32();
+                        if (val == 0)
+                            result_value = JS::Value(-0.0);
+                        else
+                            result_value = make_int_or_double(-static_cast<i64>(val));
+                        can_fold = true;
+                    } else if (v.is_double()) {
+                        result_value = JS::Value(-v.as_double());
+                        can_fold = true;
+                    }
+                }
+                break;
+
+            case Opcode::UnaryPlus:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32() || v.is_double()) {
+                        result_value = v;
+                        can_fold = true;
+                    }
+                }
+                break;
+
             case Opcode::Not:
                 if (operands.size() == 1) {
                     if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {

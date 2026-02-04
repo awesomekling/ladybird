@@ -1,0 +1,124 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v6:number = Negate v5:int32
+    Jump block1
+block0_split0:
+    v7:number = Move v6:number
+    v8:number = UnaryPlus v5:int32
+    Jump block2
+block0_split1:
+    v9:number = Move v8:number
+    v10:number = Add v7:number, v9:number
+    Jump block3
+block0_split2:
+    Return v10:number
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v6:number = Negate 5
+    Jump block1
+block0_split0:
+    v7:number = Move v6:number
+    v8:number = UnaryPlus 5
+    Jump block2
+block0_split1:
+    v9:number = Move v8:number
+    v10:number = Add v6:number, v8:number
+    Jump block3
+block0_split2:
+    Return v10:number
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v6:number = Negate 5
+    Jump block1
+block0_split0:
+    v7:number = Move -5
+    v8:number = UnaryPlus 5
+    Jump block2
+block0_split1:
+    v9:number = Move 5
+    v10:number = Add -5, 5
+    Jump block3
+block0_split2:
+    Return v10:number
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
+    v10:number = Add -5, 5
+    Jump block3
+block0_split2:
+    Return v10:number
+
+=== After EmptyBlockElimination ===
+function():
+block0_split1:
+    v10:number = Add -5, 5
+    Jump block3
+block0_split2:
+    Return v10:number
+
+=== After BlockMerging ===
+function():
+block0_split1:
+    v10:number = Add -5, 5
+    Return v10:number
+
+=== After ConstantFolding ===
+function():
+block0_split1:
+    v10:number = Add -5, 5
+    Return 0
+
+=== After DeadCodeElimination ===
+function():
+block0_split1:
+    Return 0
+
+function():
+block0_split1:
+    Return 0
