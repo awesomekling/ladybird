@@ -190,11 +190,11 @@ bool InstructionCombining::run(Function& function)
                 // Check if the Not's input is a comparison we can safely invert
                 auto* cmp_instr = not_input->defining_instruction();
                 if (cmp_instr && not_input->uses().size() == 1) {
-                    if (auto inverted = inverted_comparison_if_safe(*cmp_instr); inverted.has_value()) {
-                        // Change the comparison opcode directly and use it as the branch condition
+                    if (inverted_comparison_if_safe(*cmp_instr).has_value()) {
+                        // Invert the comparison opcode and use it as the branch condition
                         // This is safe because the comparison result is only used by the Not,
                         // which is only used by this Branch
-                        cmp_instr->set_opcode(inverted.value());
+                        VERIFY(cmp_instr->try_invert_comparison());
                         branch->set_operand(0, not_input);
                         changed = true;
                         break;

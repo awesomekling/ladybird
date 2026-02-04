@@ -326,7 +326,11 @@ public:
     virtual ~Instruction() = default;
 
     Opcode opcode() const { return m_opcode; }
-    void set_opcode(Opcode opcode) { m_opcode = opcode; }
+
+    // Safe opcode mutation for comparison inversion.
+    // Returns true if the opcode was changed, false if not a comparison.
+    // This is the only safe way to mutate an opcode in-place.
+    bool try_invert_comparison();
 
     BasicBlock* parent_block() const { return m_parent_block; }
     void set_parent_block(BasicBlock* block) { m_parent_block = block; }
