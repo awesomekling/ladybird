@@ -276,9 +276,22 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
     if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up && executable->exception_handlers.is_empty()) {
         if (++data.m_call_count >= threshold) {
             data.m_tiered_up = true;
+            if (IR::g_dump_ir) {
+                outln("\033[34;1mTIER UP\033[0m: {}", name());
+                outln("BEFORE:");
+                executable->dump();
+            }
             auto ir_function = IR::Lifter::lift(*executable);
+            if (IR::g_dump_ir)
+                outln("IR BEFORE OPT:\n{}", IR::dump(*ir_function));
             IR::optimize(*ir_function);
+            if (IR::g_dump_ir)
+                outln("IR AFTER OPT:\n{}", IR::dump(*ir_function));
             executable = IR::Lowerer::lower(vm(), *ir_function);
+            if (IR::g_dump_ir) {
+                outln("AFTER:");
+                executable->dump();
+            }
         }
     }
 
