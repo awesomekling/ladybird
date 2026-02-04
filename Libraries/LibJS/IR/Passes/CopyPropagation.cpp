@@ -17,6 +17,39 @@ bool CopyPropagation::run(Function& function)
 {
     bool changed = false;
 
+    // Trivial phi elimination: if all operands of a phi are the same value,
+    // replace the phi result with that value.
+    // Example: v = Phi [block1: x, block2: x] → v = x
+    for (auto& block : function.basic_blocks()) {
+        for (auto& instruction : block->instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                continue;
+
+            auto const& operands = instruction->operands();
+            if (operands.is_empty())
+                continue;
+
+            // Check if all operands are the same (ignoring nulls)
+            Value* common_value = nullptr;
+            bool all_same = true;
+            for (auto* operand : operands) {
+                if (!operand)
+                    continue;
+                if (!common_value) {
+                    common_value = operand;
+                } else if (operand != common_value) {
+                    all_same = false;
+                    break;
+                }
+            }
+
+            if (all_same && common_value && instruction->result()) {
+                instruction->result()->replace_all_uses_with(common_value);
+                changed = true;
+            }
+        }
+    }
+
     // Build a map of copy relationships: if v1 = Move v0, then copies[v1] = v0
     // NB: We don't propagate through phi nodes since they represent merge points
     HashMap<Value*, Value*> copies;
