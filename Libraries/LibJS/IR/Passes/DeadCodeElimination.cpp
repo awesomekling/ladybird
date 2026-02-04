@@ -59,18 +59,46 @@ bool DeadCodeElimination::run(Function& function)
 {
     bool changed = false;
 
-    // Collect all used values
-    HashTable<Value*> used_values;
+    // Step 1: Find all "live roots" - values that must be kept because they:
+    // - Are used by instructions with side effects
+    // - Are used by terminators
+    // - Are results of instructions with side effects
+    HashTable<Value*> live_values;
+    Vector<Value*> worklist;
 
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
-            // All operands are used
-            for (auto* operand : instruction->operands())
-                used_values.set(operand);
+            bool is_live_root = instruction->is_terminator() || has_side_effects(instruction->opcode());
+
+            if (is_live_root) {
+                // All operands of live instructions are live
+                for (auto* operand : instruction->operands()) {
+                    if (operand && !live_values.contains(operand)) {
+                        live_values.set(operand);
+                        worklist.append(operand);
+                    }
+                }
+            }
         }
     }
 
-    // Remove dead instructions
+    // Step 2: Propagate liveness backwards through operand chains
+    // If a value is live, all values it depends on are also live
+    while (!worklist.is_empty()) {
+        auto* value = worklist.take_last();
+
+        // If this value is defined by an instruction, its operands are also live
+        if (auto* defining_instr = value->defining_instruction()) {
+            for (auto* operand : defining_instr->operands()) {
+                if (operand && !live_values.contains(operand)) {
+                    live_values.set(operand);
+                    worklist.append(operand);
+                }
+            }
+        }
+    }
+
+    // Step 3: Remove dead instructions (those whose results are not live)
     for (auto& block : function.basic_blocks()) {
         auto& instructions = block->instructions();
 
@@ -85,8 +113,8 @@ bool DeadCodeElimination::run(Function& function)
             if (has_side_effects(instruction->opcode()))
                 continue;
 
-            // If the result is not used, remove the instruction
-            if (!used_values.contains(instruction->result())) {
+            // If the result is not live, remove the instruction
+            if (!live_values.contains(instruction->result())) {
                 instructions.remove(i - 1);
                 changed = true;
             }
