@@ -107,8 +107,11 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     case Opcode::BitwiseXor:
     case Opcode::LeftShift:
     case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
         result.set_type(Type::Int32);
+        break;
+    // Unsigned right shift produces Uint32 which may not fit in Int32
+    case Opcode::UnsignedRightShift:
+        result.set_type(Type::Number);
         break;
     // Comparison and membership operations always produce Boolean
     case Opcode::LessThan:
