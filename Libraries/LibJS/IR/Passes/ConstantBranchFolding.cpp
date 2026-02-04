@@ -13,6 +13,22 @@
 
 namespace JS::IR {
 
+// Helper to replace the terminator with an unconditional jump
+static void replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)
+{
+    // Remove the old branch instruction
+    block.instructions().remove(block.instructions().size() - 1);
+
+    // Add a new jump instruction
+    auto jump = JumpInstruction::create(target);
+    jump->set_parent_block(&block);
+    block.instructions().append(move(jump));
+
+    // Remove this block from the not-taken block's predecessors
+    if (not_taken)
+        CFG::remove_predecessor(*not_taken, block);
+}
+
 bool ConstantBranchFolding::run(Function& function)
 {
     bool changed = false;
@@ -24,7 +40,7 @@ bool ConstantBranchFolding::run(Function& function)
 
         // If both targets are the same, convert to unconditional jump
         if (term->true_target() == term->false_target() && term->true_target() != nullptr) {
-            term->set_false_target(nullptr);
+            replace_branch_with_jump(*block, *term->true_target(), nullptr);
             changed = true;
             continue;
         }
@@ -40,20 +56,11 @@ bool ConstantBranchFolding::run(Function& function)
 
         bool take_true_branch = *truthiness;
 
-        // Convert Branch to Jump
         auto* target = take_true_branch ? term->true_target() : term->false_target();
         auto* not_taken = take_true_branch ? term->false_target() : term->true_target();
 
-        // Update the instruction to be a Jump
-        // NB: We can't easily change the opcode, so we update the targets instead
-        // and let dead block elimination clean up the unreachable block
-        term->set_true_target(target);
-        term->set_false_target(nullptr);
-
-        // Remove this block from the not-taken block's predecessors
-        if (not_taken)
-            CFG::remove_predecessor(*not_taken, *block);
-
+        // Replace Branch with Jump
+        replace_branch_with_jump(*block, *target, not_taken);
         changed = true;
     }
 

@@ -28,10 +28,7 @@ bool BlockMerging::run(Function& function)
                 continue;
 
             // Only merge if A ends with an unconditional jump
-            // (either Jump opcode, or Branch with false_target = nullptr from constant folding)
-            bool is_unconditional = terminator->opcode() == Opcode::Jump
-                || (terminator->opcode() == Opcode::Branch && terminator->false_target() == nullptr);
-            if (!is_unconditional)
+            if (terminator->opcode() != Opcode::Jump)
                 continue;
 
             auto* block_b = terminator->true_target();
