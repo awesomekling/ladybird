@@ -185,8 +185,18 @@ void Lowerer::compute_phi_coalescing()
                     continue;
                 }
 
-                // Standard coalescing: if operand's only use is this phi
-                if (operand->uses().size() == 1)
+                // Standard coalescing: if all of operand's non-phi uses are terminators
+                // (Branch, Return, etc.), then the operand is dead at the phi point.
+                bool can_coalesce = true;
+                for (auto* use : operand->uses()) {
+                    if (use == instruction.ptr()) // This phi
+                        continue;
+                    if (!use->is_terminator()) {
+                        can_coalesce = false;
+                        break;
+                    }
+                }
+                if (can_coalesce)
                     coalesce(operand, phi_result);
             }
         }
