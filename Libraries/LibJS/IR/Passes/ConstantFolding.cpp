@@ -118,6 +118,13 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::Exp:
+                if (both_numeric()) {
+                    result_value = JS::Value(pow(*numeric_to_double(operands[0]->constant_value()), *numeric_to_double(operands[1]->constant_value())));
+                    can_fold = true;
+                }
+                break;
+
             case Opcode::LessThan:
                 if (both_numeric()) {
                     result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) < *numeric_to_double(operands[1]->constant_value()));

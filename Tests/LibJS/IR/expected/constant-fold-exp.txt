@@ -1,0 +1,81 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 2
+    v7:int32 = Move 10
+    v8:number = Exp v5:int32, v7:int32
+    Jump block1
+block0_split0:
+    v9:number = Move v8:number
+    Return v9:number
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 2
+    v7:int32 = Move 10
+    v8:number = Exp 2, 10
+    Jump block1
+block0_split0:
+    v9:number = Move v8:number
+    Return v8:number
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 2
+    v7:int32 = Move 10
+    v8:number = Exp 2, 10
+    Jump block1
+block0_split0:
+    v9:number = Move 1024
+    Return 1024
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Return 1024
+
+=== After EmptyBlockElimination ===
+function():
+block0_split0:
+    Return 1024
+
+function():
+block0_split0:
+    Return 1024
