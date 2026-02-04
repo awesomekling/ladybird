@@ -109,6 +109,7 @@ enum class Opcode : u8 {
     CallWithArgumentArray,
     Construct,
     ConstructWithArgumentArray,
+    SuperCallWithArgumentArray,
 
     // Environment
     GetCalleeAndThisFromEnvironment,
@@ -315,6 +316,10 @@ public:
     u32 rest_index() const { return m_rest_index; }
     void set_rest_index(u32 index) { m_rest_index = index; }
 
+    // For SuperCallWithArgumentArray
+    bool is_synthetic() const { return m_is_synthetic; }
+    void set_is_synthetic(bool value) { m_is_synthetic = value; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -369,6 +374,9 @@ private:
 
     // For CreateRestParams
     u32 m_rest_index { 0 };
+
+    // For SuperCallWithArgumentArray
+    bool m_is_synthetic { false };
 };
 
 }

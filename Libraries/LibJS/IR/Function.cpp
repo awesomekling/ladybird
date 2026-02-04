@@ -407,6 +407,21 @@ Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& c
     return result;
 }
 
+Value& Function::build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic)
+{
+    auto instruction = Instruction::create(Opcode::SuperCallWithArgumentArray);
+    instruction->add_operand(&arguments);
+    instruction->set_is_synthetic(is_synthetic);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Object);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Environment
 Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {

@@ -1170,7 +1170,8 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case SuperCallWithArgumentArray: {
         auto const& op = static_cast<Bytecode::Op::SuperCallWithArgumentArray const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& arguments = get_or_create_value_for_operand(op.arguments(), block);
+        auto& result = m_function->build_super_call_with_argument_array(block, arguments, op.is_synthetic());
         define_operand(op.dst(), result, block);
         break;
     }

@@ -121,6 +121,7 @@ public:
     Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     Value& build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments);
     Value& build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    Value& build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic);
 
     // Environment
     Value& build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);

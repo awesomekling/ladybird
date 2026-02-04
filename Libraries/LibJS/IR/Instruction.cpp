@@ -177,6 +177,8 @@ char const* opcode_to_string(Opcode opcode)
         return "Construct";
     case Opcode::ConstructWithArgumentArray:
         return "ConstructWithArgumentArray";
+    case Opcode::SuperCallWithArgumentArray:
+        return "SuperCallWithArgumentArray";
     case Opcode::GetCalleeAndThisFromEnvironment:
         return "GetCalleeAndThisFromEnvironment";
     case Opcode::GetBinding:

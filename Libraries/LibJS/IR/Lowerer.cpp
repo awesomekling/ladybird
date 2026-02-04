@@ -624,6 +624,10 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::CreateRestParams>(dst(), instruction.rest_index());
         break;
 
+    case Opcode::SuperCallWithArgumentArray:
+        emit<Bytecode::Op::SuperCallWithArgumentArray>(dst(), operand(0), instruction.is_synthetic());
+        break;
+
     // Call (variable-length arguments)
     case Opcode::Call: {
         // IR Call operands: [callee, this_value, arg0, arg1, ...]
