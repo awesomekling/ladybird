@@ -265,9 +265,7 @@ Value& Function::build_load_null(BasicBlock& block)
 // Property access
 Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::GetById);
-    instruction->add_operand(&base);
-    instruction->set_property_key_index(property);
+    auto instruction = GetByIdInstruction::create(&base, property);
     instruction->set_base_identifier(base_identifier);
 
     auto& result = create_value_for_instruction();
@@ -539,9 +537,7 @@ void Function::build_put_by_spread(BasicBlock& block, Value& base, Value& source
 // Calls
 Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments)
 {
-    auto instruction = Instruction::create(Opcode::Call);
-    instruction->add_operand(&callee);
-    instruction->add_operand(&this_value);
+    auto instruction = CallInstruction::create(Opcode::Call, &callee, &this_value);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
 
@@ -554,9 +550,7 @@ Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value,
 
 Value& Function::build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string)
 {
-    auto instruction = Instruction::create(Opcode::CallBuiltin);
-    instruction->add_operand(&callee);
-    instruction->add_operand(&this_value);
+    auto instruction = CallInstruction::create(Opcode::CallBuiltin, &callee, &this_value);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
     instruction->set_builtin(builtin);
@@ -571,9 +565,7 @@ Value& Function::build_call_builtin(BasicBlock& block, Value& callee, Value& thi
 
 Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
-    auto instruction = Instruction::create(Opcode::CallDirectEval);
-    instruction->add_operand(&callee);
-    instruction->add_operand(&this_value);
+    auto instruction = CallInstruction::create(Opcode::CallDirectEval, &callee, &this_value);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
     instruction->set_expression_string(expression_string);
@@ -587,9 +579,7 @@ Value& Function::build_call_direct_eval(BasicBlock& block, Value& callee, Value&
 
 Value& Function::build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
-    auto instruction = Instruction::create(Opcode::CallWithArgumentArray);
-    instruction->add_operand(&callee);
-    instruction->add_operand(&this_value);
+    auto instruction = CallInstruction::create(Opcode::CallWithArgumentArray, &callee, &this_value);
     instruction->add_operand(&arguments);
     instruction->set_expression_string(expression_string);
 
