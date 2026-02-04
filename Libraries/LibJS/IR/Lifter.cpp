@@ -198,6 +198,9 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
         // For registers/locals, create a register value
         // NB: In full SSA, phi nodes would be inserted at merge points
         value = &m_function->create_register_value();
+        // NB: Register values need the operand mapping so SSA renaming can replace
+        // them with the proper reaching definition.
+        m_value_to_operand_raw.set(value, raw);
     }
 
     m_current_definitions.set(raw, value);
