@@ -918,6 +918,8 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::ThrowIfTDZ>(operand(0));
         break;
     }
+    // NB: No default case - all IR opcodes must be explicitly handled above.
+    // This ensures new opcodes cause a compile error rather than being silently skipped.
 }
 
 void Lowerer::lower_blocks()
