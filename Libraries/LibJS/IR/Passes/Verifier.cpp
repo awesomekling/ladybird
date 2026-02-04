@@ -88,6 +88,14 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                     break;
                 }
             }
+
+            // Check: Block must end with a terminator
+            auto* last_instr = block->instructions().last().ptr();
+            if (!last_instr->is_terminator()) {
+                report_error(ByteString::formatted(
+                    "Block{} does not end with a terminator",
+                    block->index()));
+            }
         }
 
         for (auto const& instr : block->instructions()) {
@@ -164,6 +172,58 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             report_error(ByteString::formatted(
                 "Block{} has finalizer not in function",
                 block->index()));
+        }
+
+        // Check: Successor edges must be reflected in predecessor lists
+        // (ensures CFG is consistent after transformations)
+        auto* term = block->last_instruction();
+        if (term) {
+            if (auto* true_target = term->true_target()) {
+                bool found = false;
+                for (auto* pred : true_target->predecessors()) {
+                    if (pred == block.ptr()) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    report_error(ByteString::formatted(
+                        "Block{} has successor block{} but is not in its predecessor list",
+                        block->index(), true_target->index()));
+                }
+            }
+            if (auto* false_target = term->false_target()) {
+                bool found = false;
+                for (auto* pred : false_target->predecessors()) {
+                    if (pred == block.ptr()) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    report_error(ByteString::formatted(
+                        "Block{} has successor block{} but is not in its predecessor list",
+                        block->index(), false_target->index()));
+                }
+            }
+        }
+    }
+
+    // Check: Use lists should only contain instructions still present in the function
+    // (catches stale references from dead block elimination or other passes)
+    HashTable<Instruction const*> all_instructions;
+    for (auto const& block : function.basic_blocks()) {
+        for (auto const& instr : block->instructions())
+            all_instructions.set(instr.ptr());
+    }
+
+    for (auto const& value : function.values()) {
+        for (auto const* use : value->uses()) {
+            if (!all_instructions.contains(use)) {
+                report_error(ByteString::formatted(
+                    "Value v{} has stale use pointing to removed instruction",
+                    value->index()));
+            }
         }
     }
 
