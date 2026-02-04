@@ -90,28 +90,32 @@ void Lifter::lift_basic_blocks()
     }
 
     // Second pass: lift instructions from each basic block
-    // NB: We don't clear definitions between blocks - this is a simplification
-    // that lets values flow through. Proper SSA would require phi node insertion
-    // at merge points with dominator-based definition resolution.
+    // We split IR blocks at may-throw instructions to ensure exception edges
+    // have correct reaching definitions (the state at the throw point, not end of block).
+    u32 split_counter = 0;
     for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
-        auto& ir_block = *m_block_map.get(static_cast<u32>(block_index)).value();
+        auto* current_block = m_block_map.get(static_cast<u32>(block_index)).value();
 
         size_t start_offset = m_executable.basic_block_start_offsets[block_index];
         size_t end_offset = (block_index + 1 < m_executable.basic_block_start_offsets.size())
             ? m_executable.basic_block_start_offsets[block_index + 1]
             : m_executable.bytecode.size();
 
-        // Set exception handler based on bytecode exception handler table
+        // Get exception handlers for this bytecode block
+        BasicBlock* exception_handler = nullptr;
+        BasicBlock* finalizer = nullptr;
         if (auto handlers = m_executable.exception_handlers_for_offset(start_offset); handlers.has_value()) {
             if (handlers->handler_offset.has_value()) {
                 auto handler_block_index = address_to_block_index(handlers->handler_offset.value());
-                ir_block.set_exception_handler(m_block_map.get(handler_block_index).value());
+                exception_handler = m_block_map.get(handler_block_index).value();
             }
             if (handlers->finalizer_offset.has_value()) {
                 auto finalizer_block_index = address_to_block_index(handlers->finalizer_offset.value());
-                ir_block.set_finalizer(m_block_map.get(finalizer_block_index).value());
+                finalizer = m_block_map.get(finalizer_block_index).value();
             }
         }
+        current_block->set_exception_handler(exception_handler);
+        current_block->set_finalizer(finalizer);
 
         // If this block is a Yield/Await continuation, set up the resume value
         // for the accumulator (reg0) so instructions in this block can use it
@@ -125,12 +129,44 @@ void Lifter::lift_basic_blocks()
         Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
 
         while (!it.at_end()) {
-            lift_instruction(*it, ir_block);
+            size_t instr_count_before = current_block->instructions().size();
+            lift_instruction(*it, *current_block);
             ++it;
+
+            // Check if we added any may-throw instructions
+            bool added_may_throw = false;
+            for (size_t i = instr_count_before; i < current_block->instructions().size(); ++i) {
+                if (may_throw_opcode(current_block->instructions()[i]->opcode())) {
+                    added_may_throw = true;
+                    break;
+                }
+            }
+
+            // If we added a may-throw instruction and there are more bytecode instructions,
+            // split the block to ensure the exception edge has correct reaching definitions.
+            // This way, values defined after the throw point won't incorrectly flow to handlers.
+            if (added_may_throw && !it.at_end()) {
+                // Save current block's definitions (this is the state at the throw point)
+                m_block_definitions.set(current_block, m_current_definitions);
+
+                // Create continuation block for remaining instructions
+                auto& continuation = m_function->create_block(
+                    String::formatted("block{}_split{}", block_index, split_counter++).release_value_but_fixme_should_propagate_errors());
+
+                // Continuation inherits exception handlers
+                continuation.set_exception_handler(exception_handler);
+                continuation.set_finalizer(finalizer);
+
+                // Emit fallthrough jump from current block to continuation
+                m_function->build_jump(*current_block, continuation);
+
+                // Continue lifting into continuation block
+                current_block = &continuation;
+            }
         }
 
-        // Save this block's definitions (snapshot at end of block)
-        m_block_definitions.set(&ir_block, m_current_definitions);
+        // Save final block's definitions (snapshot at end of block)
+        m_block_definitions.set(current_block, m_current_definitions);
     }
 }
 
