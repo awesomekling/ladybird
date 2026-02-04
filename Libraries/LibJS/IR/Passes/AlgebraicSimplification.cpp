@@ -64,16 +64,17 @@ bool AlgebraicSimplification::run(Function& function)
                 if (operands.size() == 2) {
                     if (is_constant_zero(operands[1]))
                         replacement = operands[0];
-                    // x - x → 0
-                    else if (operands[0] == operands[1])
+                    // x - x → 0 (only safe for Int32, since NaN - NaN = NaN)
+                    else if (operands[0] == operands[1] && operands[0]->type() == Type::Int32)
                         replacement = &function.create_constant(JS::Value(0));
                 }
                 break;
 
             case Opcode::Mul:
-                // x * 0 → 0, 0 * x → 0
+                // x * 0 → 0, 0 * x → 0 (only safe for Int32, since NaN * 0 = NaN)
                 if (operands.size() == 2) {
-                    if (is_constant_zero(operands[0]) || is_constant_zero(operands[1]))
+                    if ((is_constant_zero(operands[0]) && operands[1]->type() == Type::Int32)
+                        || (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32))
                         replacement = &function.create_constant(JS::Value(0));
                     // x * 1 → x, 1 * x → x
                     else if (is_constant_one(operands[1]))
