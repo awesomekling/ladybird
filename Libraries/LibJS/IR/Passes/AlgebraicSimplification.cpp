@@ -74,9 +74,9 @@ bool AlgebraicSimplification::run(Function& function)
                 break;
 
             case Opcode::Sub:
-                // x - 0 → x
+                // x - 0 → x (only for numeric types, since "5" - 0 = 5)
                 if (operands.size() == 2) {
-                    if (is_constant_zero(operands[1]))
+                    if (is_constant_zero(operands[1]) && is_numeric_type(operands[0]->type()))
                         replacement = operands[0];
                     // x - x → 0 (only safe for Int32, since NaN - NaN = NaN)
                     else if (operands[0] == operands[1] && operands[0]->type() == Type::Int32)
