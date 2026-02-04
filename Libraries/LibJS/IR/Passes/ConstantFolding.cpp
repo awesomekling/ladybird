@@ -302,6 +302,15 @@ bool ConstantFolding::run(Function& function)
                     } else if (v.is_double()) {
                         result_value = JS::Value(-v.as_double());
                         can_fold = true;
+                    } else if (v.is_boolean()) {
+                        result_value = v.as_bool() ? JS::Value(-1) : JS::Value(-0.0);
+                        can_fold = true;
+                    } else if (v.is_null()) {
+                        result_value = JS::Value(-0.0);
+                        can_fold = true;
+                    } else if (v.is_undefined()) {
+                        result_value = JS::Value(js_nan());
+                        can_fold = true;
                     }
                 }
                 break;
@@ -311,6 +320,15 @@ bool ConstantFolding::run(Function& function)
                     auto const& v = operands[0]->constant_value();
                     if (v.is_int32() || v.is_double()) {
                         result_value = v;
+                        can_fold = true;
+                    } else if (v.is_boolean()) {
+                        result_value = JS::Value(v.as_bool() ? 1 : 0);
+                        can_fold = true;
+                    } else if (v.is_null()) {
+                        result_value = JS::Value(0);
+                        can_fold = true;
+                    } else if (v.is_undefined()) {
+                        result_value = JS::Value(js_nan());
                         can_fold = true;
                     }
                 }

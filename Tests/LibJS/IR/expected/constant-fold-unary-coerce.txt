@@ -1,0 +1,170 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v9:boolean = Move true
+    v10:number = UnaryPlus v9:boolean
+    Jump block1
+block0_split0:
+    v11:number = Move v10:number
+    v12:number = Negate v9:boolean
+    Jump block2
+block0_split1:
+    v13:number = Move v12:number
+    v15:null = Move null
+    v16:number = UnaryPlus v15:null
+    Jump block3
+block0_split2:
+    v17:number = Move v16:number
+    v18:undefined = Move undefined
+    v19:number = UnaryPlus v18:undefined
+    Jump block4
+block0_split3:
+    v20:number = Move v19:number
+    v21:number = Add v11:number, v13:number
+    Jump block5
+block0_split4:
+    Return v21:number
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v9:boolean = Move true
+    v10:number = UnaryPlus true
+    Jump block1
+block0_split0:
+    v11:number = Move v10:number
+    v12:number = Negate true
+    Jump block2
+block0_split1:
+    v13:number = Move v12:number
+    v15:null = Move null
+    v16:number = UnaryPlus null
+    Jump block3
+block0_split2:
+    v17:number = Move v16:number
+    v18:undefined = Move undefined
+    v19:number = UnaryPlus undefined
+    Jump block4
+block0_split3:
+    v20:number = Move v19:number
+    v21:number = Add v10:number, v12:number
+    Jump block5
+block0_split4:
+    Return v21:number
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v9:boolean = Move true
+    v10:number = UnaryPlus true
+    Jump block1
+block0_split0:
+    v11:number = Move 1
+    v12:number = Negate true
+    Jump block2
+block0_split1:
+    v13:number = Move -1
+    v15:null = Move null
+    v16:number = UnaryPlus null
+    Jump block3
+block0_split2:
+    v17:number = Move 0
+    v18:undefined = Move undefined
+    v19:number = UnaryPlus undefined
+    Jump block4
+block0_split3:
+    v20:number = Move nan
+    v21:number = Add 1, -1
+    Jump block5
+block0_split4:
+    Return v21:number
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
+    Jump block3
+block0_split2:
+    Jump block4
+block0_split3:
+    v21:number = Add 1, -1
+    Jump block5
+block0_split4:
+    Return v21:number
+
+=== After EmptyBlockElimination ===
+function():
+block0_split3:
+    v21:number = Add 1, -1
+    Jump block5
+block0_split4:
+    Return v21:number
+
+=== After BlockMerging ===
+function():
+block0_split3:
+    v21:number = Add 1, -1
+    Return v21:number
+
+=== After ConstantFolding ===
+function():
+block0_split3:
+    v21:number = Add 1, -1
+    Return 0
+
+=== After DeadCodeElimination ===
+function():
+block0_split3:
+    Return 0
+
+function():
+block0_split3:
+    Return 0
