@@ -79,19 +79,23 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
 
     // Handle special opcodes
     switch (instruction.opcode()) {
-    case Opcode::Jump:
-        if (instruction.true_target())
-            builder.appendff(" block{}", instruction.true_target()->index());
+    case Opcode::Jump: {
+        auto const& jump = static_cast<TerminatorInstruction const&>(instruction);
+        if (jump.true_target())
+            builder.appendff(" block{}", jump.true_target()->index());
         break;
+    }
 
-    case Opcode::Branch:
+    case Opcode::Branch: {
+        auto const& branch = static_cast<TerminatorInstruction const&>(instruction);
         for (auto* operand : instruction.operands())
             append_operand(operand);
-        if (instruction.true_target())
-            builder.appendff(", block{}", instruction.true_target()->index());
-        if (instruction.false_target())
-            builder.appendff(", block{}", instruction.false_target()->index());
+        if (branch.true_target())
+            builder.appendff(", block{}", branch.true_target()->index());
+        if (branch.false_target())
+            builder.appendff(", block{}", branch.false_target()->index());
         break;
+    }
 
     case Opcode::Phi:
         builder.append(" ["sv);
@@ -137,12 +141,14 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
 
     case Opcode::Yield:
-    case Opcode::Await:
+    case Opcode::Await: {
+        auto const& term = static_cast<TerminatorInstruction const&>(instruction);
         for (auto* operand : instruction.operands())
             append_operand(operand);
-        if (instruction.true_target())
-            builder.appendff(", continuation: block{}", instruction.true_target()->index());
+        if (term.true_target())
+            builder.appendff(", continuation: block{}", term.true_target()->index());
         break;
+    }
 
     case Opcode::CreateArguments:
         builder.appendff(" kind:{}, immutable:{}", instruction.arguments_kind() == Bytecode::Op::ArgumentsKind::Mapped ? "mapped"sv : "unmapped"sv, instruction.is_immutable());

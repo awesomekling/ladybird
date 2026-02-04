@@ -28,8 +28,8 @@ bool EmptyBlockElimination::run(Function& function)
             if (block->instructions().size() != 1)
                 continue;
 
-            auto* jump = block->instructions()[0].ptr();
-            if (jump->opcode() != Opcode::Jump)
+            auto* jump = block->terminator();
+            if (!jump || jump->opcode() != Opcode::Jump)
                 continue;
 
             auto* target = jump->true_target();
@@ -48,31 +48,28 @@ bool EmptyBlockElimination::run(Function& function)
             bool would_conflict = false;
             for (auto* pred : predecessors) {
                 // Check if this predecessor already reaches the target directly
-                for (auto& instr : pred->instructions()) {
-                    if (instr->true_target() == target || instr->false_target() == target) {
-                        // This predecessor can reach target both directly and via empty block
-                        // Check if any phi in target would have different values for these paths
-                        for (auto& phi_instr : target->instructions()) {
-                            if (phi_instr->opcode() != Opcode::Phi)
-                                continue;
+                auto* pred_term = pred->terminator();
+                if (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target)) {
+                    // This predecessor can reach target both directly and via empty block
+                    // Check if any phi in target would have different values for these paths
+                    for (auto& phi_instr : target->instructions()) {
+                        if (phi_instr->opcode() != Opcode::Phi)
+                            continue;
 
-                            Value* value_from_empty = nullptr;
-                            Value* value_from_direct = nullptr;
+                        Value* value_from_empty = nullptr;
+                        Value* value_from_direct = nullptr;
 
-                            for (size_t i = 0; i < phi_instr->phi_predecessors().size(); ++i) {
-                                if (phi_instr->phi_predecessors()[i] == block.ptr())
-                                    value_from_empty = phi_instr->operands()[i];
-                                if (phi_instr->phi_predecessors()[i] == pred)
-                                    value_from_direct = phi_instr->operands()[i];
-                            }
-
-                            if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
-                                would_conflict = true;
-                                break;
-                            }
+                        for (size_t i = 0; i < phi_instr->phi_predecessors().size(); ++i) {
+                            if (phi_instr->phi_predecessors()[i] == block.ptr())
+                                value_from_empty = phi_instr->operands()[i];
+                            if (phi_instr->phi_predecessors()[i] == pred)
+                                value_from_direct = phi_instr->operands()[i];
                         }
-                        if (would_conflict)
+
+                        if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
+                            would_conflict = true;
                             break;
+                        }
                     }
                 }
                 if (would_conflict)
@@ -100,11 +97,11 @@ bool EmptyBlockElimination::run(Function& function)
 
             // Update all predecessors to jump to target instead
             for (auto* pred : predecessors) {
-                for (auto& instr : pred->instructions()) {
-                    if (instr->true_target() == block.ptr())
-                        instr->set_true_target(target);
-                    if (instr->false_target() == block.ptr())
-                        instr->set_false_target(target);
+                if (auto* pred_term = pred->terminator()) {
+                    if (pred_term->true_target() == block.ptr())
+                        pred_term->set_true_target(target);
+                    if (pred_term->false_target() == block.ptr())
+                        pred_term->set_false_target(target);
                 }
             }
 
@@ -207,15 +204,18 @@ bool EmptyBlockElimination::run(Function& function)
         for (auto* removed : blocks_to_remove)
             block->remove_predecessor(removed);
 
-        // Clean up phi predecessors and terminator targets
-        for (auto& instr : block->instructions()) {
-            // Clean up terminator targets
-            if (instr->true_target() && blocks_to_remove.contains(instr->true_target()))
-                instr->set_true_target(nullptr);
-            if (instr->false_target() && blocks_to_remove.contains(instr->false_target()))
-                instr->set_false_target(nullptr);
+        // Clean up terminator targets
+        if (auto* term = block->terminator()) {
+            if (term->true_target() && blocks_to_remove.contains(term->true_target()))
+                term->set_true_target(nullptr);
+            if (term->false_target() && blocks_to_remove.contains(term->false_target()))
+                term->set_false_target(nullptr);
+        }
 
-            // Clean up phi predecessors (iterate backwards for safe removal)
+        // Clean up phi predecessors (iterate backwards for safe removal)
+        for (auto& instr : block->instructions()) {
+            if (instr->opcode() != Opcode::Phi)
+                break;
             for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
                 if (blocks_to_remove.contains(instr->phi_predecessors()[i - 1]))
                     instr->remove_phi_operand(i - 1);

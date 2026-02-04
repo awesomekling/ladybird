@@ -945,7 +945,7 @@ void Lowerer::lower_blocks()
         }
 
         // Handle terminator
-        auto* terminator = ir_block->last_instruction();
+        auto* terminator = ir_block->terminator();
         if (!terminator)
             continue;
 

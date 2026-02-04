@@ -28,18 +28,33 @@ bool DeadBlockElimination::run(Function& function)
     while (!worklist.is_empty()) {
         auto* block = worklist.dequeue();
 
-        for (auto const& instruction : block->instructions()) {
-            if (auto* target = instruction->true_target()) {
+        // Check terminator targets
+        if (auto* term = block->terminator()) {
+            if (auto* target = term->true_target()) {
                 if (!reachable.contains(target)) {
                     reachable.set(target);
                     worklist.enqueue(target);
                 }
             }
-            if (auto* target = instruction->false_target()) {
+            if (auto* target = term->false_target()) {
                 if (!reachable.contains(target)) {
                     reachable.set(target);
                     worklist.enqueue(target);
                 }
+            }
+        }
+
+        // Also check exception handlers
+        if (auto* handler = block->exception_handler()) {
+            if (!reachable.contains(handler)) {
+                reachable.set(handler);
+                worklist.enqueue(handler);
+            }
+        }
+        if (auto* finalizer = block->finalizer()) {
+            if (!reachable.contains(finalizer)) {
+                reachable.set(finalizer);
+                worklist.enqueue(finalizer);
             }
         }
     }
@@ -117,21 +132,23 @@ bool DeadBlockElimination::run(Function& function)
         if (block->finalizer() && !reachable.contains(block->finalizer()))
             block->set_finalizer(nullptr);
 
+        // Clean up phi predecessors
         for (auto& instruction : block->instructions()) {
-            // Clean up phi predecessors
-            if (instruction->opcode() == Opcode::Phi) {
-                for (size_t i = instruction->phi_predecessors().size(); i > 0; --i) {
-                    auto* pred = instruction->phi_predecessors()[i - 1];
-                    if (!reachable.contains(pred))
-                        instruction->remove_phi_operand(i - 1);
-                }
+            if (instruction->opcode() != Opcode::Phi)
+                break;
+            for (size_t i = instruction->phi_predecessors().size(); i > 0; --i) {
+                auto* pred = instruction->phi_predecessors()[i - 1];
+                if (!reachable.contains(pred))
+                    instruction->remove_phi_operand(i - 1);
             }
+        }
 
-            // Clean up terminator targets (shouldn't happen for well-formed IR, but be safe)
-            if (instruction->true_target() && !reachable.contains(instruction->true_target()))
-                instruction->set_true_target(nullptr);
-            if (instruction->false_target() && !reachable.contains(instruction->false_target()))
-                instruction->set_false_target(nullptr);
+        // Clean up terminator targets (shouldn't happen for well-formed IR, but be safe)
+        if (auto* term = block->terminator()) {
+            if (term->true_target() && !reachable.contains(term->true_target()))
+                term->set_true_target(nullptr);
+            if (term->false_target() && !reachable.contains(term->false_target()))
+                term->set_false_target(nullptr);
         }
     }
 

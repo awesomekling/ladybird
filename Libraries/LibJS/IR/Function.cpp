@@ -1077,7 +1077,7 @@ Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
 // Control flow
 void Function::build_jump(BasicBlock& from, BasicBlock& to)
 {
-    auto instruction = Instruction::create(Opcode::Jump);
+    auto instruction = TerminatorInstruction::create(Opcode::Jump);
     instruction->set_true_target(&to);
     to.add_predecessor(&from);
     from.append(move(instruction));
@@ -1085,7 +1085,7 @@ void Function::build_jump(BasicBlock& from, BasicBlock& to)
 
 void Function::build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false)
 {
-    auto instruction = Instruction::create(Opcode::Branch);
+    auto instruction = TerminatorInstruction::create(Opcode::Branch);
     instruction->add_operand(&condition);
     instruction->set_true_target(&if_true);
     instruction->set_false_target(&if_false);
@@ -1118,7 +1118,7 @@ void Function::build_throw(BasicBlock& block, Value& value)
 // Generators/Async - terminators with result (the resume value)
 Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* continuation)
 {
-    auto instruction = Instruction::create(Opcode::Yield);
+    auto instruction = TerminatorInstruction::create(Opcode::Yield);
     instruction->add_operand(&value);
     if (continuation) {
         instruction->set_true_target(continuation);
@@ -1137,7 +1137,7 @@ Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* contin
 
 Value& Function::build_await(BasicBlock& block, Value& argument, BasicBlock& continuation)
 {
-    auto instruction = Instruction::create(Opcode::Await);
+    auto instruction = TerminatorInstruction::create(Opcode::Await);
     instruction->add_operand(&argument);
     instruction->set_true_target(&continuation);
     continuation.add_predecessor(&block);

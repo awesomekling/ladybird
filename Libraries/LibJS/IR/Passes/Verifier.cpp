@@ -117,26 +117,8 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                 }
             }
 
-            // Check: Only terminators may have CFG targets
-            // This invariant is relied upon by dominator computation which computes
-            // successors from the last instruction's targets and EH edges only.
-            if (!instr->is_terminator() && (instr->true_target() || instr->false_target())) {
-                report_error(ByteString::formatted(
-                    "Non-terminator instruction in block{} has CFG targets",
-                    block->index()));
-            }
-
-            // Check: All terminator targets exist in function
-            if (instr->true_target() && !all_blocks.contains(instr->true_target())) {
-                report_error(ByteString::formatted(
-                    "Instruction in block{} has true_target not in function",
-                    block->index()));
-            }
-            if (instr->false_target() && !all_blocks.contains(instr->false_target())) {
-                report_error(ByteString::formatted(
-                    "Instruction in block{} has false_target not in function",
-                    block->index()));
-            }
+            // NB: The invariant "only terminators may have CFG targets" is now enforced
+            // at compile time via TerminatorInstruction - only that class has target methods.
 
             // Check: All operands are non-null and reference defined values
             for (size_t i = 0; i < instr->operands().size(); ++i) {
@@ -176,8 +158,19 @@ bool Verifier::verify(Function& function, bool crash_on_error)
 
         // Check: Successor edges must be reflected in predecessor lists
         // (ensures CFG is consistent after transformations)
-        auto* term = block->last_instruction();
-        if (term) {
+        if (auto* term = block->terminator()) {
+            // Check: All terminator targets exist in function
+            if (term->true_target() && !all_blocks.contains(term->true_target())) {
+                report_error(ByteString::formatted(
+                    "Terminator in block{} has true_target not in function",
+                    block->index()));
+            }
+            if (term->false_target() && !all_blocks.contains(term->false_target())) {
+                report_error(ByteString::formatted(
+                    "Terminator in block{} has false_target not in function",
+                    block->index()));
+            }
+
             if (auto* true_target = term->true_target()) {
                 bool found = false;
                 for (auto* pred : true_target->predecessors()) {

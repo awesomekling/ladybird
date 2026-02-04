@@ -34,6 +34,10 @@ public:
     void prepend(NonnullOwnPtr<Instruction> instruction);
     Instruction* last_instruction() const;
 
+    // Returns the terminator instruction if this block is terminated, nullptr otherwise.
+    // Use this instead of last_instruction() when you need to access CFG targets.
+    TerminatorInstruction* terminator() const;
+
     Vector<BasicBlock*> const& predecessors() const { return m_predecessors; }
     void add_predecessor(BasicBlock* block);
     void remove_predecessor(BasicBlock* block);

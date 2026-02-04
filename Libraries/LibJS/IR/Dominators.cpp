@@ -52,13 +52,13 @@ void Dominators::compute_reverse_postorder()
         // Push successors (will be processed before we return to this block)
         // Include both control flow successors and exception edges
         bool has_unvisited_successor = false;
-        if (auto* last = block->last_instruction()) {
-            if (last->false_target() && !visited.contains(last->false_target())) {
-                stack.append(last->false_target());
+        if (auto* term = block->terminator()) {
+            if (term->false_target() && !visited.contains(term->false_target())) {
+                stack.append(term->false_target());
                 has_unvisited_successor = true;
             }
-            if (last->true_target() && !visited.contains(last->true_target())) {
-                stack.append(last->true_target());
+            if (term->true_target() && !visited.contains(term->true_target())) {
+                stack.append(term->true_target());
                 has_unvisited_successor = true;
             }
         }

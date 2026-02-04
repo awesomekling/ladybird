@@ -184,6 +184,9 @@ bool InstructionCombining::run(Function& function)
                 if (!not_input)
                     break;
 
+                // Branch is a terminator, so we can safely cast
+                auto* branch = static_cast<TerminatorInstruction*>(instruction.ptr());
+
                 // Check if the Not's input is a comparison we can safely invert
                 auto* cmp_instr = not_input->defining_instruction();
                 if (cmp_instr && not_input->uses().size() == 1) {
@@ -192,18 +195,18 @@ bool InstructionCombining::run(Function& function)
                         // This is safe because the comparison result is only used by the Not,
                         // which is only used by this Branch
                         cmp_instr->set_opcode(inverted.value());
-                        instruction->set_operand(0, not_input);
+                        branch->set_operand(0, not_input);
                         changed = true;
                         break;
                     }
                 }
 
                 // Fall back to swapping targets if we can't invert the comparison
-                auto* true_target = instruction->true_target();
-                auto* false_target = instruction->false_target();
-                instruction->set_operand(0, not_input);
-                instruction->set_true_target(false_target);
-                instruction->set_false_target(true_target);
+                auto* true_target = branch->true_target();
+                auto* false_target = branch->false_target();
+                branch->set_operand(0, not_input);
+                branch->set_true_target(false_target);
+                branch->set_false_target(true_target);
                 changed = true;
                 break;
             }

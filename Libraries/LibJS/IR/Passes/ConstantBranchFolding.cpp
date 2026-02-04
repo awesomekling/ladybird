@@ -17,22 +17,22 @@ bool ConstantBranchFolding::run(Function& function)
     bool changed = false;
 
     for (auto& block : function.basic_blocks()) {
-        auto* last = block->last_instruction();
-        if (!last || last->opcode() != Opcode::Branch)
+        auto* term = block->terminator();
+        if (!term || term->opcode() != Opcode::Branch)
             continue;
 
         // If both targets are the same, convert to unconditional jump
-        if (last->true_target() == last->false_target() && last->true_target() != nullptr) {
-            last->set_false_target(nullptr);
+        if (term->true_target() == term->false_target() && term->true_target() != nullptr) {
+            term->set_false_target(nullptr);
             changed = true;
             continue;
         }
 
         // Branch has condition as first operand
-        if (last->operands().is_empty())
+        if (term->operands().is_empty())
             continue;
 
-        auto* condition = last->operands()[0];
+        auto* condition = term->operands()[0];
         if (!condition->is_constant())
             continue;
 
@@ -52,14 +52,14 @@ bool ConstantBranchFolding::run(Function& function)
         }
 
         // Convert Branch to Jump
-        auto* target = take_true_branch ? last->true_target() : last->false_target();
-        auto* not_taken = take_true_branch ? last->false_target() : last->true_target();
+        auto* target = take_true_branch ? term->true_target() : term->false_target();
+        auto* not_taken = take_true_branch ? term->false_target() : term->true_target();
 
         // Update the instruction to be a Jump
         // NB: We can't easily change the opcode, so we update the targets instead
         // and let dead block elimination clean up the unreachable block
-        last->set_true_target(target);
-        last->set_false_target(nullptr);
+        term->set_true_target(target);
+        term->set_false_target(nullptr);
 
         // Remove phi operands and predecessor from the not-taken block
         if (not_taken) {

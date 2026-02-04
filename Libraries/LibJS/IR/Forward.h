@@ -13,6 +13,7 @@ namespace JS::IR {
 class BasicBlock;
 class Function;
 class Instruction;
+class TerminatorInstruction;
 class Value;
 
 enum class Opcode : u8;

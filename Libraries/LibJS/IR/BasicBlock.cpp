@@ -39,6 +39,14 @@ Instruction* BasicBlock::last_instruction() const
     return m_instructions.last().ptr();
 }
 
+TerminatorInstruction* BasicBlock::terminator() const
+{
+    auto* last = last_instruction();
+    if (!last || !last->is_terminator())
+        return nullptr;
+    return static_cast<TerminatorInstruction*>(last);
+}
+
 void BasicBlock::add_predecessor(BasicBlock* block)
 {
     if (!m_predecessors.contains_slow(block))

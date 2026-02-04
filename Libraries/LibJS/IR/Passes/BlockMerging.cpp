@@ -22,7 +22,7 @@ bool BlockMerging::run(Function& function)
         merged_any = false;
 
         for (auto& block_a : function.basic_blocks()) {
-            auto* terminator = block_a->last_instruction();
+            auto* terminator = block_a->terminator();
             if (!terminator)
                 continue;
 
@@ -62,7 +62,7 @@ bool BlockMerging::run(Function& function)
 
             // Merge B into A:
             // 1. Capture B's successors before modifying anything
-            auto* b_terminator = block_b->last_instruction();
+            auto* b_terminator = block_b->terminator();
             BasicBlock* b_true_target = b_terminator ? b_terminator->true_target() : nullptr;
             BasicBlock* b_false_target = b_terminator ? b_terminator->false_target() : nullptr;
 
@@ -78,11 +78,12 @@ bool BlockMerging::run(Function& function)
 
             // 4. Update all references to B to point to A
             for (auto& other_block : function.basic_blocks()) {
-                for (auto& instruction : other_block->instructions()) {
-                    if (instruction->true_target() == block_b)
-                        instruction->set_true_target(block_a.ptr());
-                    if (instruction->false_target() == block_b)
-                        instruction->set_false_target(block_a.ptr());
+                // Update terminator targets
+                if (auto* other_term = other_block->terminator()) {
+                    if (other_term->true_target() == block_b)
+                        other_term->set_true_target(block_a.ptr());
+                    if (other_term->false_target() == block_b)
+                        other_term->set_false_target(block_a.ptr());
                 }
 
                 // Update phi predecessor references and predecessor lists

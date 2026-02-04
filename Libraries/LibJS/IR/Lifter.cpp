@@ -1672,17 +1672,18 @@ void Lifter::connect_control_flow()
 
 void Lifter::compute_block_predecessors()
 {
-    // Build predecessor lists by examining each block's successors
+    // Build predecessor lists by examining each block's terminator
     for (auto& block : m_function->basic_blocks()) {
-        for (auto& instruction : block->instructions()) {
-            if (instruction->true_target()) {
-                m_predecessors.ensure(instruction->true_target()).append(block.ptr());
-                instruction->true_target()->add_predecessor(block.ptr());
-            }
-            if (instruction->false_target() && instruction->false_target() != instruction->true_target()) {
-                m_predecessors.ensure(instruction->false_target()).append(block.ptr());
-                instruction->false_target()->add_predecessor(block.ptr());
-            }
+        auto* term = block->terminator();
+        if (!term)
+            continue;
+        if (term->true_target()) {
+            m_predecessors.ensure(term->true_target()).append(block.ptr());
+            term->true_target()->add_predecessor(block.ptr());
+        }
+        if (term->false_target() && term->false_target() != term->true_target()) {
+            m_predecessors.ensure(term->false_target()).append(block.ptr());
+            term->false_target()->add_predecessor(block.ptr());
         }
     }
 
@@ -1932,10 +1933,10 @@ void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
     };
 
     // Fill phis for all CFG successors
-    if (auto* last = block.last_instruction()) {
-        fill_phi_for_successor(last->true_target());
-        if (last->false_target() && last->false_target() != last->true_target())
-            fill_phi_for_successor(last->false_target());
+    if (auto* term = block.terminator()) {
+        fill_phi_for_successor(term->true_target());
+        if (term->false_target() && term->false_target() != term->true_target())
+            fill_phi_for_successor(term->false_target());
     }
     // Also fill phis for exception edges
     fill_phi_for_successor(block.exception_handler());

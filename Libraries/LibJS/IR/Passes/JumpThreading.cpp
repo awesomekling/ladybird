@@ -19,7 +19,7 @@ bool JumpThreading::run(Function& function)
     // Look for blocks where a Branch condition is a Phi node
     // and some phi inputs are constants
     for (auto& block : function.basic_blocks()) {
-        auto* terminator = block->last_instruction();
+        auto* terminator = block->terminator();
         if (!terminator || terminator->opcode() != Opcode::Branch)
             continue;
 
@@ -127,7 +127,7 @@ bool JumpThreading::run(Function& function)
                 continue; // Can't thread - phi result is used elsewhere
 
             // Update the predecessor to jump directly to the target
-            auto* pred_terminator = pred_block->last_instruction();
+            auto* pred_terminator = pred_block->terminator();
             if (!pred_terminator)
                 continue;
 

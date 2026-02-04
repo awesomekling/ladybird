@@ -51,7 +51,7 @@ void redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlock& n
         return;
 
     // Update terminator in from_block
-    auto* terminator = from_block.last_instruction();
+    auto* terminator = from_block.terminator();
     if (terminator) {
         if (terminator->true_target() == &old_target)
             terminator->set_true_target(&new_target);
@@ -96,7 +96,7 @@ void remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_remove)
     remove_predecessor(live_block, block_to_remove);
 
     // Clear terminator targets
-    auto* terminator = live_block.last_instruction();
+    auto* terminator = live_block.terminator();
     if (terminator) {
         if (terminator->true_target() == &block_to_remove)
             terminator->set_true_target(nullptr);

@@ -17,7 +17,22 @@ Instruction::Instruction(Opcode opcode)
 
 NonnullOwnPtr<Instruction> Instruction::create(Opcode opcode)
 {
+    // Terminators get their own class with CFG target support
+    if (is_terminator_opcode(opcode))
+        return TerminatorInstruction::create(opcode);
     return adopt_own(*new Instruction(opcode));
+}
+
+TerminatorInstruction::TerminatorInstruction(Opcode opcode)
+    : Instruction(opcode)
+{
+    VERIFY(is_terminator_opcode(opcode));
+}
+
+NonnullOwnPtr<TerminatorInstruction> TerminatorInstruction::create(Opcode opcode)
+{
+    VERIFY(is_terminator_opcode(opcode));
+    return adopt_own(*new TerminatorInstruction(opcode));
 }
 
 void Instruction::add_operand(Value* value)

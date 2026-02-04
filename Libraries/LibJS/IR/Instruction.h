@@ -314,12 +314,16 @@ constexpr bool is_hoistable_opcode(Opcode opcode)
 
 JS_API char const* opcode_to_string(Opcode opcode);
 
+class TerminatorInstruction;
+
 class JS_API Instruction {
     AK_MAKE_NONCOPYABLE(Instruction);
     AK_MAKE_NONMOVABLE(Instruction);
 
 public:
     static NonnullOwnPtr<Instruction> create(Opcode opcode);
+
+    virtual ~Instruction() = default;
 
     Opcode opcode() const { return m_opcode; }
     void set_opcode(Opcode opcode) { m_opcode = opcode; }
@@ -334,12 +338,6 @@ public:
     void add_operand(Value* value);
     void set_operand(size_t index, Value* value);
     void clear_operand_uses();
-
-    // For Branch/Jump
-    BasicBlock* true_target() const { return m_true_target; }
-    BasicBlock* false_target() const { return m_false_target; }
-    void set_true_target(BasicBlock* block) { m_true_target = block; }
-    void set_false_target(BasicBlock* block) { m_false_target = block; }
 
     // For Phi nodes
     Vector<BasicBlock*> const& phi_predecessors() const { return m_phi_predecessors; }
@@ -438,17 +436,14 @@ public:
     bool is_pure() const;
     bool is_hoistable() const;
 
-private:
+protected:
     explicit Instruction(Opcode opcode);
 
+private:
     Opcode m_opcode;
     BasicBlock* m_parent_block { nullptr };
     Value* m_result { nullptr };
     Vector<Value*> m_operands;
-
-    // For Branch/Jump
-    BasicBlock* m_true_target { nullptr };
-    BasicBlock* m_false_target { nullptr };
 
     // For Phi
     Vector<BasicBlock*> m_phi_predecessors;
@@ -496,6 +491,25 @@ private:
 
     // For ArrayAppend
     bool m_is_spread { false };
+};
+
+// TerminatorInstruction is used for control flow instructions that end a basic block.
+// Only terminators have CFG targets (true_target/false_target).
+// This compile-time separation prevents accidentally setting targets on non-terminators.
+class JS_API TerminatorInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<TerminatorInstruction> create(Opcode opcode);
+
+    BasicBlock* true_target() const { return m_true_target; }
+    BasicBlock* false_target() const { return m_false_target; }
+    void set_true_target(BasicBlock* block) { m_true_target = block; }
+    void set_false_target(BasicBlock* block) { m_false_target = block; }
+
+private:
+    explicit TerminatorInstruction(Opcode opcode);
+
+    BasicBlock* m_true_target { nullptr };
+    BasicBlock* m_false_target { nullptr };
 };
 
 }
