@@ -110,9 +110,15 @@ enum class Opcode : u8 {
     PutGetterById,
     PutSetterById,
     PutPrototypeById,
+    PutGetterByIdWithThis,
+    PutSetterByIdWithThis,
+    PutPrototypeByIdWithThis,
     PutGetterByValue,
     PutSetterByValue,
     PutPrototypeByValue,
+    PutGetterByValueWithThis,
+    PutSetterByValueWithThis,
+    PutPrototypeByValueWithThis,
     PutBySpread,
 
     // Calls
@@ -145,6 +151,7 @@ enum class Opcode : u8 {
     // Object creation
     NewObject,
     NewArray,
+    NewArrayWithLength,
     ArrayAppend,
     NewClass,
     NewFunction,

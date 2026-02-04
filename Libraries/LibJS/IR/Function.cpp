@@ -411,6 +411,36 @@ void Function::build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecod
     block.append(move(instruction));
 }
 
+void Function::build_put_getter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& getter)
+{
+    auto instruction = Instruction::create(Opcode::PutGetterByIdWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&getter);
+    instruction->set_property_key_index(property);
+    block.append(move(instruction));
+}
+
+void Function::build_put_setter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& setter)
+{
+    auto instruction = Instruction::create(Opcode::PutSetterByIdWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&setter);
+    instruction->set_property_key_index(property);
+    block.append(move(instruction));
+}
+
+void Function::build_put_prototype_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& prototype)
+{
+    auto instruction = Instruction::create(Opcode::PutPrototypeByIdWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&prototype);
+    instruction->set_property_key_index(property);
+    block.append(move(instruction));
+}
+
 void Function::build_put_getter_by_value(BasicBlock& block, Value& base, Value& property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
     auto instruction = Instruction::create(Opcode::PutGetterByValue);
@@ -438,6 +468,36 @@ void Function::build_put_prototype_by_value(BasicBlock& block, Value& base, Valu
     instruction->add_operand(&property);
     instruction->add_operand(&prototype);
     instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_getter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& getter)
+{
+    auto instruction = Instruction::create(Opcode::PutGetterByValueWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&getter);
+    block.append(move(instruction));
+}
+
+void Function::build_put_setter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& setter)
+{
+    auto instruction = Instruction::create(Opcode::PutSetterByValueWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&setter);
+    block.append(move(instruction));
+}
+
+void Function::build_put_prototype_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& prototype)
+{
+    auto instruction = Instruction::create(Opcode::PutPrototypeByValueWithThis);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&prototype);
     block.append(move(instruction));
 }
 
@@ -753,6 +813,20 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
     auto instruction = Instruction::create(Opcode::NewArray);
     for (auto* element : elements)
         instruction->add_operand(element);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Array);
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_new_array_with_length(BasicBlock& block, Value& length)
+{
+    auto instruction = Instruction::create(Opcode::NewArrayWithLength);
+    instruction->add_operand(&length);
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Array);

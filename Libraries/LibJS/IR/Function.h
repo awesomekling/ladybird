@@ -122,9 +122,15 @@ public:
     void build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_getter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& getter);
+    void build_put_setter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& setter);
+    void build_put_prototype_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& prototype);
     void build_put_getter_by_value(BasicBlock& block, Value& base, Value& property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_setter_by_value(BasicBlock& block, Value& base, Value& property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_prototype_by_value(BasicBlock& block, Value& base, Value& property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_getter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& getter);
+    void build_put_setter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& setter);
+    void build_put_prototype_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& prototype);
     void build_put_by_spread(BasicBlock& block, Value& base, Value& source);
 
     // Calls
@@ -157,6 +163,7 @@ public:
     // Object creation
     Value& build_new_object(BasicBlock& block);
     Value& build_new_array(BasicBlock& block, Span<Value*> elements);
+    Value& build_new_array_with_length(BasicBlock& block, Value& length);
     void build_array_append(BasicBlock& block, Value& array, Value& value, bool is_spread);
     Value& build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys);
     Value& build_new_function(BasicBlock& block);

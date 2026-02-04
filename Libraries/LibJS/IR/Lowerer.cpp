@@ -553,6 +553,15 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::PutPrototypeById:
         emit<Bytecode::Op::PutPrototypeById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
         break;
+    case Opcode::PutGetterByIdWithThis:
+        emit<Bytecode::Op::PutGetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        break;
+    case Opcode::PutSetterByIdWithThis:
+        emit<Bytecode::Op::PutSetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        break;
+    case Opcode::PutPrototypeByIdWithThis:
+        emit<Bytecode::Op::PutPrototypeByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        break;
     case Opcode::PutGetterByValue:
         emit<Bytecode::Op::PutGetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
         break;
@@ -561,6 +570,15 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     case Opcode::PutPrototypeByValue:
         emit<Bytecode::Op::PutPrototypeByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+        break;
+    case Opcode::PutGetterByValueWithThis:
+        emit<Bytecode::Op::PutGetterByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
+        break;
+    case Opcode::PutSetterByValueWithThis:
+        emit<Bytecode::Op::PutSetterByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
+        break;
+    case Opcode::PutPrototypeByValueWithThis:
+        emit<Bytecode::Op::PutPrototypeByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
         break;
     case Opcode::PutBySpread:
         emit<Bytecode::Op::PutBySpread>(operand(0), operand(1));
@@ -746,6 +764,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         for (size_t i = 0; i < instruction.operands().size(); ++i)
             elements.append(operand(i));
         emit_with_extra_operand_slots<Bytecode::Op::NewArray>(elements.size(), dst(), ReadonlySpan<Bytecode::Operand> { elements });
+        break;
+    }
+
+    case Opcode::NewArrayWithLength: {
+        emit<Bytecode::Op::NewArrayWithLength>(dst(), operand(0));
         break;
     }
 

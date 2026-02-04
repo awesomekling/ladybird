@@ -184,12 +184,24 @@ char const* opcode_to_string(Opcode opcode)
         return "PutSetterById";
     case Opcode::PutPrototypeById:
         return "PutPrototypeById";
+    case Opcode::PutGetterByIdWithThis:
+        return "PutGetterByIdWithThis";
+    case Opcode::PutSetterByIdWithThis:
+        return "PutSetterByIdWithThis";
+    case Opcode::PutPrototypeByIdWithThis:
+        return "PutPrototypeByIdWithThis";
     case Opcode::PutGetterByValue:
         return "PutGetterByValue";
     case Opcode::PutSetterByValue:
         return "PutSetterByValue";
     case Opcode::PutPrototypeByValue:
         return "PutPrototypeByValue";
+    case Opcode::PutGetterByValueWithThis:
+        return "PutGetterByValueWithThis";
+    case Opcode::PutSetterByValueWithThis:
+        return "PutSetterByValueWithThis";
+    case Opcode::PutPrototypeByValueWithThis:
+        return "PutPrototypeByValueWithThis";
     case Opcode::PutBySpread:
         return "PutBySpread";
     case Opcode::Call:
@@ -242,6 +254,8 @@ char const* opcode_to_string(Opcode opcode)
         return "NewObject";
     case Opcode::NewArray:
         return "NewArray";
+    case Opcode::NewArrayWithLength:
+        return "NewArrayWithLength";
     case Opcode::ArrayAppend:
         return "ArrayAppend";
     case Opcode::NewClass:
