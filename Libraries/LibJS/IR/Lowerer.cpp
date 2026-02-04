@@ -92,9 +92,14 @@ u32 Lowerer::get_or_add_constant(JS::Value constant_value)
 Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 {
     // Check for coalescing: if this value coalesces with another, use the same operand
+    // Follow the chain to find the ultimate representative
     Value const* lookup_value = &value;
-    if (auto it = m_coalesce_representative.find(&value); it != m_coalesce_representative.end())
+    for (;;) {
+        auto it = m_coalesce_representative.find(lookup_value);
+        if (it == m_coalesce_representative.end())
+            break;
         lookup_value = it->value;
+    }
 
     // Check if we already have an operand for this value (or its coalescing representative)
     if (auto it = m_value_to_operand.find(lookup_value); it != m_value_to_operand.end())
@@ -129,14 +134,31 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 
 void Lowerer::compute_phi_coalescing()
 {
-    // Simple phi coalescing: for each phi, try to coalesce phi inputs with phi output
-    // This eliminates Mov instructions when lowering phi nodes
-    //
-    // We coalesce a phi input with the phi output if:
-    // 1. The input is not a constant/parameter/this (those can't be coalesced)
-    // 2. The input's only use is this phi (otherwise coalescing might conflict)
-    //
-    // For more aggressive coalescing, we'd need interference analysis.
+    // Phi coalescing: assign the same register to values that can share one.
+    // This eliminates Mov instructions when lowering phi nodes.
+
+    // Helper to find the representative of a coalescing class (with path compression)
+    auto find_representative = [&](Value const* v) -> Value const* {
+        Vector<Value const*> path;
+        for (;;) {
+            auto it = m_coalesce_representative.find(v);
+            if (it == m_coalesce_representative.end())
+                break;
+            path.append(v);
+            v = it->value;
+        }
+        // Path compression
+        for (auto* p : path)
+            m_coalesce_representative.set(p, v);
+        return v;
+    };
+
+    auto coalesce = [&](Value const* a, Value const* b) {
+        auto* rep_a = find_representative(a);
+        auto* rep_b = find_representative(b);
+        if (rep_a != rep_b)
+            m_coalesce_representative.set(rep_a, rep_b);
+    };
 
     for (auto const& block : m_function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
@@ -155,12 +177,17 @@ void Lowerer::compute_phi_coalescing()
                 if (operand->is_constant() || operand->is_parameter() || operand->is_this())
                     continue;
 
-                // Only coalesce if this is the operand's only use
-                if (operand->uses().size() != 1)
+                // Chain coalescing: if operand is a phi result, coalesce the two phis.
+                // This makes chains like: v14 = Phi[v0,v2], v15 = Phi[v14,v4], ...
+                // all share the same register.
+                if (auto* def = operand->defining_instruction(); def && def->opcode() == Opcode::Phi) {
+                    coalesce(operand, phi_result);
                     continue;
+                }
 
-                // Coalesce: make operand share phi_result's register
-                m_coalesce_representative.set(operand, phi_result);
+                // Standard coalescing: if operand's only use is this phi
+                if (operand->uses().size() == 1)
+                    coalesce(operand, phi_result);
             }
         }
     }
