@@ -147,14 +147,36 @@ bool ConstantFolding::run(Function& function)
                 break;
 
             case Opcode::StrictlyEquals:
+            case Opcode::StrictlyInequals:
                 if (operands.size() == 2) {
                     auto const& lhs = operands[0]->constant_value();
                     auto const& rhs = operands[1]->constant_value();
-                    if (lhs.is_int32() && rhs.is_int32()) {
-                        result_value = JS::Value(lhs.as_i32() == rhs.as_i32());
-                        can_fold = true;
+                    bool equals = false;
+                    bool can_determine = false;
+
+                    if (both_numeric()) {
+                        // Int32 and Double are both Number type — compare as doubles.
+                        double l = *numeric_to_double(lhs);
+                        double r = *numeric_to_double(rhs);
+                        // NaN !== NaN, and +0 === -0 are handled correctly by C++ ==.
+                        equals = l == r;
+                        can_determine = true;
                     } else if (lhs.is_boolean() && rhs.is_boolean()) {
-                        result_value = JS::Value(lhs.as_bool() == rhs.as_bool());
+                        equals = lhs.as_bool() == rhs.as_bool();
+                        can_determine = true;
+                    } else if ((lhs.is_null() && rhs.is_null()) || (lhs.is_undefined() && rhs.is_undefined())) {
+                        equals = true;
+                        can_determine = true;
+                    } else if ((lhs.is_null() || lhs.is_undefined() || lhs.is_boolean() || lhs.is_number())
+                        && (rhs.is_null() || rhs.is_undefined() || rhs.is_boolean() || rhs.is_number())) {
+                        // Different primitive types are never strictly equal.
+                        equals = false;
+                        can_determine = true;
+                    }
+
+                    if (can_determine) {
+                        bool result = (instruction->opcode() == Opcode::StrictlyEquals) ? equals : !equals;
+                        result_value = JS::Value(result);
                         can_fold = true;
                     }
                 }

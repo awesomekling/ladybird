@@ -76,7 +76,17 @@ block0:
     v13:boolean = StrictlyInequals true, false
     Return v13:boolean
 
+=== After ConstantFolding ===
 function():
 block0:
     v13:boolean = StrictlyInequals true, false
-    Return v13:boolean
+    Return true
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Return true
+
+function():
+block0:
+    Return true
