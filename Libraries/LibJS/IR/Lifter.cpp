@@ -90,8 +90,18 @@ void Lifter::lift_basic_blocks()
     }
 
     // Second pass: lift instructions from each basic block
-    // We split IR blocks at may-throw instructions to ensure exception edges
-    // have correct reaching definitions (the state at the throw point, not end of block).
+    //
+    // EH Splitting Invariant:
+    // We split IR blocks at may-throw instructions when there are more bytecode
+    // instructions to follow. This ensures that:
+    // 1. Each block with an exception handler has at most one may-throw instruction
+    //    (plus any non-throwing cleanup like ExtractValue) before the terminator.
+    // 2. The exception handler sees the correct reaching definitions at the throw
+    //    point, not values that would have been defined after the throw.
+    //
+    // The IR verifier's dominance checks implicitly verify this: if values defined
+    // after a throw point were incorrectly visible to the handler, they wouldn't
+    // dominate the handler's uses and the verifier would report an SSA violation.
     u32 split_counter = 0;
     for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
         auto* current_block = m_block_map.get(static_cast<u32>(block_index)).value();

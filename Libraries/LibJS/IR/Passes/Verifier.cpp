@@ -168,6 +168,10 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     }
 
     // SSA dominance verification
+    // This check implicitly verifies EH correctness: if exception handler blocks
+    // reference values that were defined after a throw point (due to incorrect EH
+    // splitting), those values won't dominate the handler and we'll report an error.
+    //
     // Build map from Value* to its defining block
     HashMap<Value const*, BasicBlock*> value_to_block;
     for (auto const& block : function.basic_blocks()) {
