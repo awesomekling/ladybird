@@ -57,4 +57,47 @@ constexpr char const* type_to_string(Type type)
     VERIFY_NOT_REACHED();
 }
 
+// Is this type a primitive that won't trigger ToPrimitive/valueOf calls?
+// Used to determine if arithmetic/comparison operations are safe from user code.
+constexpr bool is_safe_primitive_type(Type type)
+{
+    switch (type) {
+    case Type::Undefined:
+    case Type::Null:
+    case Type::Boolean:
+    case Type::Int32:
+    case Type::Number:
+    case Type::String:
+        return true;
+    // BigInt and Symbol don't call user code but can throw on coercion
+    case Type::BigInt:
+    case Type::Symbol:
+    // Object types can trigger ToPrimitive which calls valueOf/toString
+    case Type::Object:
+    case Type::Function:
+    case Type::Array:
+    // Unknown could be anything
+    case Type::Unknown:
+        return false;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+// Is this type safe for numeric operations (no throws, no user code)?
+// More restrictive than is_safe_primitive_type - excludes String (+ is concat)
+// and BigInt/Symbol (can throw on mixed operations).
+constexpr bool is_safe_numeric_type(Type type)
+{
+    switch (type) {
+    case Type::Undefined:
+    case Type::Null:
+    case Type::Boolean:
+    case Type::Int32:
+    case Type::Number:
+        return true;
+    default:
+        return false;
+    }
+}
+
 }

@@ -26,7 +26,7 @@ bool DeadCodeElimination::run(Function& function)
 
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
-            bool is_live_root = instruction->is_terminator() || has_side_effects_opcode(instruction->opcode());
+            bool is_live_root = instruction->is_terminator() || instruction->has_side_effects();
 
             if (is_live_root) {
                 // All operands of live instructions are live
@@ -68,7 +68,7 @@ bool DeadCodeElimination::run(Function& function)
                 continue;
 
             // Skip instructions with side effects
-            if (has_side_effects_opcode(instruction->opcode()))
+            if (instruction->has_side_effects())
                 continue;
 
             // If the result is not live, remove the instruction

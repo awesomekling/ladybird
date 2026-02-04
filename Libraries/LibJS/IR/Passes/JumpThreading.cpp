@@ -79,7 +79,7 @@ bool JumpThreading::run(Function& function)
                 if (instr->is_terminator())
                     continue;
 
-                if (has_side_effects_opcode(instr->opcode())) {
+                if (instr->has_side_effects()) {
                     bypassed_block_has_side_effects = true;
                     break;
                 }

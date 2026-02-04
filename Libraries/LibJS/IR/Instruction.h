@@ -230,108 +230,71 @@ constexpr bool may_throw_opcode(Opcode opcode)
     }
 }
 
-// Does this opcode have observable side effects?
-// Used by dead code elimination to determine which instructions can be removed.
+// Does this opcode have observable side effects at the opcode level?
+// NB: This is conservative - arithmetic/comparison ops CAN have side effects
+// when operands are objects (ToPrimitive calls valueOf/toString).
+// Use Instruction::has_side_effects() for type-aware analysis.
 constexpr bool has_side_effects_opcode(Opcode opcode)
 {
     switch (opcode) {
-    // Pure arithmetic/logic - no side effects
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals:
-    case Opcode::LooselyEquals:
-    case Opcode::StrictlyEquals:
-    case Opcode::LooselyInequals:
-    case Opcode::StrictlyInequals:
+    // These are always side-effect free regardless of operand types
     case Opcode::Not:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
     case Opcode::Move:
     case Opcode::Phi:
-    case Opcode::Increment:
-    case Opcode::Decrement:
-    case Opcode::PostfixIncrement:
-    case Opcode::PostfixDecrement:
+    case Opcode::LoadConstant:
+    case Opcode::LoadUndefined:
+    case Opcode::LoadNull:
+    case Opcode::ToBoolean:
+    case Opcode::Typeof:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
+    case Opcode::ExtractValue:
+    // Strict equality never calls user code
+    case Opcode::StrictlyEquals:
+    case Opcode::StrictlyInequals:
         return false;
-    // Everything else potentially has side effects
+    // Everything else potentially has side effects (including arithmetic
+    // which can call ToPrimitive on object operands)
     default:
         return true;
     }
 }
 
-// Is this opcode pure (no side effects, deterministic)?
-// Used by common subexpression elimination.
+// Is this opcode pure (no side effects, deterministic) at the opcode level?
+// NB: This is conservative - arithmetic/comparison ops are NOT pure when
+// operands could be objects. Use Instruction::is_pure() for type-aware analysis.
 constexpr bool is_pure_opcode(Opcode opcode)
 {
     switch (opcode) {
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals:
-    case Opcode::LooselyEquals:
-    case Opcode::StrictlyEquals:
-    case Opcode::LooselyInequals:
-    case Opcode::StrictlyInequals:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
+    // These are always pure regardless of operand types
     case Opcode::Not:
+    case Opcode::ToBoolean:
+    case Opcode::Typeof:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
+    // Strict equality is pure (no type coercion)
+    case Opcode::StrictlyEquals:
+    case Opcode::StrictlyInequals:
         return true;
     default:
         return false;
     }
 }
 
-// Can this instruction be safely hoisted out of a loop?
-// Must be pure AND not throw (hoisting a throwing instruction changes exception order).
+// Can this instruction be safely hoisted out of a loop at the opcode level?
+// Must be pure AND not throw. NB: This is conservative - arithmetic ops can
+// call ToPrimitive on objects. Use Instruction::is_hoistable() for type-aware analysis.
 constexpr bool is_hoistable_opcode(Opcode opcode)
 {
     switch (opcode) {
-    // Pure non-throwing arithmetic - safe to hoist
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
+    // These are always safe to hoist regardless of operand types
     case Opcode::Not:
+    case Opcode::ToBoolean:
+    case Opcode::Typeof:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
         return true;
-    // Comparisons are pure but may throw (ToPrimitive), so not hoistable
+    // Everything else needs type-aware analysis
     default:
         return false;
     }
@@ -457,6 +420,11 @@ public:
 
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
+
+    // Type-aware effect analysis (examines operand types for safe primitives)
+    bool has_side_effects() const;
+    bool is_pure() const;
+    bool is_hoistable() const;
 
 private:
     explicit Instruction(Opcode opcode);

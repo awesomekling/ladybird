@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Type.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -285,6 +286,133 @@ char const* opcode_to_string(Opcode opcode)
         return "GetNewTarget";
     }
     VERIFY_NOT_REACHED();
+}
+
+// Check if all operands are safe primitive types (no ToPrimitive calls possible)
+static bool all_operands_are_safe_primitives(Instruction const& instruction)
+{
+    for (auto* operand : instruction.operands()) {
+        if (!operand)
+            continue;
+        if (!is_safe_primitive_type(operand->type()))
+            return false;
+    }
+    return true;
+}
+
+// Check if all operands are safe numeric types (no throws, no user code)
+static bool all_operands_are_safe_numerics(Instruction const& instruction)
+{
+    for (auto* operand : instruction.operands()) {
+        if (!operand)
+            continue;
+        if (!is_safe_numeric_type(operand->type()))
+            return false;
+    }
+    return true;
+}
+
+// Opcodes that may call user code via ToPrimitive when operands are objects
+static bool opcode_may_call_user_code_on_objects(Opcode opcode)
+{
+    switch (opcode) {
+    // Arithmetic operations call ToNumber -> ToPrimitive on objects
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+    case Opcode::Negate:
+    case Opcode::UnaryPlus:
+    case Opcode::Increment:
+    case Opcode::Decrement:
+    case Opcode::PostfixIncrement:
+    case Opcode::PostfixDecrement:
+    // Bitwise operations call ToInt32 -> ToNumber -> ToPrimitive on objects
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::BitwiseNot:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+    // Relational comparisons call ToPrimitive on objects
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    // Loose equality can call ToPrimitive
+    case Opcode::LooselyEquals:
+    case Opcode::LooselyInequals:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool Instruction::has_side_effects() const
+{
+    // First check opcode-level side effects
+    if (!has_side_effects_opcode(m_opcode))
+        return false;
+
+    // For ops that may call user code on objects, check if operands are safe primitives
+    if (opcode_may_call_user_code_on_objects(m_opcode)) {
+        if (all_operands_are_safe_primitives(*this))
+            return false;
+    }
+
+    return true;
+}
+
+bool Instruction::is_pure() const
+{
+    // First check opcode-level purity
+    if (is_pure_opcode(m_opcode))
+        return true;
+
+    // For ops that may call user code on objects, check if operands are safe primitives
+    if (opcode_may_call_user_code_on_objects(m_opcode)) {
+        if (all_operands_are_safe_primitives(*this))
+            return true;
+    }
+
+    return false;
+}
+
+bool Instruction::is_hoistable() const
+{
+    // First check opcode-level hoistability
+    if (is_hoistable_opcode(m_opcode))
+        return true;
+
+    // For numeric ops, check if operands are safe numeric types (excludes String, BigInt, Symbol)
+    // These operations are safe to hoist when we know no user code or throws can occur.
+    switch (m_opcode) {
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+    case Opcode::Negate:
+    case Opcode::UnaryPlus:
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::BitwiseNot:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+        if (all_operands_are_safe_numerics(*this))
+            return true;
+        break;
+    default:
+        break;
+    }
+
+    return false;
 }
 
 }

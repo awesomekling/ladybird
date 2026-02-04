@@ -67,7 +67,7 @@ bool CommonSubexpressionElimination::run(Function& function)
             if (!instruction->result())
                 continue;
 
-            if (!is_pure_opcode(instruction->opcode()))
+            if (!instruction->is_pure())
                 continue;
 
             auto const& operands = instruction->operands();

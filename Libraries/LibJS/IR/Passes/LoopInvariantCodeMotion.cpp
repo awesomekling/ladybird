@@ -77,7 +77,7 @@ bool LoopInvariantCodeMotion::run(Function& function)
                 if (!instruction->result())
                     continue;
 
-                if (!is_hoistable_opcode(instruction->opcode()))
+                if (!instruction->is_hoistable())
                     continue;
 
                 // Check if all operands are defined outside the loop
