@@ -3,29 +3,29 @@ function():
 block0:
     Jump block1
 block1:
-    v1 = Move v0
-    v2 = Move v1
+    v1:unknown = Move v0:unknown
+    v2:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v0
+    End v0:unknown
 block3: [handler: block1]
-    v4 = Move 3
-    v5 = Move v4
-    End v5
+    v4:unknown = Move 3
+    v5:unknown = Move v4:unknown
+    End v5:unknown
 
 === After CopyPropagation ===
 function():
 block0:
     Jump block1
 block1:
-    v1 = Move v0
-    v2 = Move v0
+    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Jump block2
 block2:
-    End v0
+    End v0:unknown
 block3: [handler: block1]
-    v4 = Move 3
-    v5 = Move 3
+    v4:unknown = Move 3
+    v5:unknown = Move 3
     End 3
 
 === After ConstantFolding ===
@@ -33,14 +33,14 @@ function():
 block0:
     Jump block1
 block1:
-    v1 = Move v0
-    v2 = Move v0
+    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Jump block2
 block2:
-    End v0
+    End v0:unknown
 block3: [handler: block1]
-    v4 = Move 3
-    v5 = Move 3
+    v4:unknown = Move 3
+    v5:unknown = Move 3
     End 3
 
 === After DeadCodeElimination ===
@@ -50,7 +50,7 @@ block0:
 block1:
     Jump block2
 block2:
-    End v0
+    End v0:unknown
 block3: [handler: block1]
     End 3
 
@@ -61,13 +61,13 @@ block0:
 block1:
     Jump block2
 block2:
-    End v0
+    End v0:unknown
 
 === After EmptyBlockElimination ===
 function():
 block2:
-    End v0
+    End v0:unknown
 
 function():
 block2:
-    End v0
+    End v0:unknown

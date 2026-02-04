@@ -34,7 +34,7 @@ bool g_lower_ir = false;
 
 void dump(Value const& value, StringBuilder& builder)
 {
-    builder.appendff("v{}", value.index());
+    builder.appendff("v{}:{}", value.index(), type_to_string(value.type()));
 }
 
 static void dump_instruction(Instruction const& instruction, StringBuilder& builder, Bytecode::Executable const* executable)
