@@ -1,0 +1,132 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:number = Move 100000000000000000000
+    v5:int32 = ToInt32 v4:number
+    Jump block1
+block0_split0:
+    v6:int32 = Move v5:int32
+    Return v6:int32
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:number = Move 100000000000000000000
+    v5:int32 = ToInt32 100000000000000000000
+    Jump block1
+block0_split0:
+    v6:int32 = Move v5:int32
+    Return v5:int32
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:number = Move 100000000000000000000
+    v5:int32 = ToInt32 100000000000000000000
+    Jump block1
+block0_split0:
+    v6:int32 = Move 1661992960
+    Return 1661992960
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Jump block1
+block0_split0:
+    Return 1661992960
+
+=== After BlockMerging ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+=== After ConstantFolding ===
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960
+
+function():
+block0:
+    v5:int32 = ToInt32 100000000000000000000
+    Return 1661992960

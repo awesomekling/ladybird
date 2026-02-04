@@ -11,6 +11,7 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Value.h>
+#include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Value.h>
 #include <math.h>
 
@@ -253,10 +254,17 @@ bool ConstantFolding::run(Function& function)
                         can_fold = true;
                     } else if (v.is_double()) {
                         double d = v.as_double();
-                        if (isnan(d) || isinf(d) || d == 0.0)
+                        if (!isfinite(d) || d == 0.0) {
                             result_value = JS::Value(0);
-                        else
-                            result_value = JS::Value(static_cast<i32>(static_cast<i64>(d)));
+                        } else {
+                            auto int_val = floor(fabs(d));
+                            if (signbit(d))
+                                int_val = -int_val;
+                            auto int32bit = modulo(int_val, 4294967296.0);
+                            if (int32bit >= 2147483648.0)
+                                int32bit -= 4294967296.0;
+                            result_value = JS::Value(static_cast<i32>(int32bit));
+                        }
                         can_fold = true;
                     }
                 }
