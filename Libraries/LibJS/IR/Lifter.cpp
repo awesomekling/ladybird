@@ -1729,53 +1729,45 @@ void Lifter::fill_phi_operands()
     }
 }
 
-// Recursive SSA renaming using dominator tree walk
-void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
+// Iterative SSA renaming using dominator tree walk
+void Lifter::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Value*>>& stacks)
 {
-    // Record stack sizes at entry so we can restore them on exit
-    HashMap<u32, size_t> entry_sizes;
-    for (auto& [op_raw, stack] : stacks) {
-        entry_sizes.set(op_raw, stack.size());
-    }
+    struct WorkItem {
+        BasicBlock* block;
+        bool is_restore { false };
+        HashMap<u32, size_t> entry_sizes;
+    };
 
-    // Process phis first - they define values at block entry
-    for (auto& instruction : block.instructions()) {
-        if (instruction->opcode() != Opcode::Phi)
-            break;
+    Vector<WorkItem> work_stack;
+    work_stack.empend(&start_block, false, HashMap<u32, size_t> {});
 
-        auto raw_opt = m_value_to_operand_raw.get(instruction->result());
-        if (raw_opt.has_value()) {
-            stacks.ensure(*raw_opt).append(instruction->result());
-            if (!entry_sizes.contains(*raw_opt))
-                entry_sizes.set(*raw_opt, 0);
-        }
-    }
+    while (!work_stack.is_empty()) {
+        auto item = move(work_stack.last());
+        work_stack.take_last();
 
-    // Rewrite operand uses in non-phi instructions and push new definitions
-    for (auto& instruction : block.instructions()) {
-        if (instruction->opcode() == Opcode::Phi)
-            continue;
-
-        // Rewrite operand uses to current stack top
-        for (size_t i = 0; i < instruction->operands().size(); ++i) {
-            auto* operand_value = instruction->operands()[i];
-            if (!operand_value)
-                continue;
-
-            auto raw_opt = m_value_to_operand_raw.get(operand_value);
-            if (!raw_opt.has_value())
-                continue;
-
-            auto stack_opt = stacks.get(*raw_opt);
-            if (stack_opt.has_value() && !stack_opt->is_empty()) {
-                auto* current = stack_opt->last();
-                if (current != operand_value)
-                    instruction->set_operand(i, current);
+        if (item.is_restore) {
+            // Restore stack sizes (pop what we pushed in this block)
+            for (auto& [op_raw, target_size] : item.entry_sizes) {
+                auto& stack = stacks.ensure(op_raw);
+                while (stack.size() > target_size)
+                    stack.take_last();
             }
+            continue;
         }
 
-        // If instruction defines a value, push it onto the stack
-        if (instruction->result()) {
+        auto& block = *item.block;
+
+        // Record stack sizes at entry so we can restore them on exit
+        HashMap<u32, size_t> entry_sizes;
+        for (auto& [op_raw, stack] : stacks) {
+            entry_sizes.set(op_raw, stack.size());
+        }
+
+        // Process phis first - they define values at block entry
+        for (auto& instruction : block.instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                break;
+
             auto raw_opt = m_value_to_operand_raw.get(instruction->result());
             if (raw_opt.has_value()) {
                 stacks.ensure(*raw_opt).append(instruction->result());
@@ -1783,76 +1775,107 @@ void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
                     entry_sizes.set(*raw_opt, 0);
             }
         }
-    }
 
-    // Fill phi operands in CFG successors
-    auto fill_phi_for_successor = [&](BasicBlock* succ) {
-        if (!succ)
-            return;
-
-        // Find our index in the successor's predecessor list
-        size_t pred_index = SIZE_MAX;
-        auto const& phi_preds = succ->predecessors();
-        for (size_t i = 0; i < phi_preds.size(); ++i) {
-            if (phi_preds[i] == &block) {
-                pred_index = i;
-                break;
-            }
-        }
-        if (pred_index == SIZE_MAX)
-            return;
-
-        // Fill phi operands for this predecessor
-        for (auto& instruction : succ->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break;
-
-            auto& phi = static_cast<PhiInstruction&>(*instruction);
-            auto raw_opt = m_value_to_operand_raw.get(phi.result());
-            if (!raw_opt.has_value())
+        // Rewrite operand uses in non-phi instructions and push new definitions
+        for (auto& instruction : block.instructions()) {
+            if (instruction->opcode() == Opcode::Phi)
                 continue;
 
-            // Get current value from stack
-            auto stack_opt = stacks.get(*raw_opt);
-            Value* reaching = nullptr;
-            if (stack_opt.has_value() && !stack_opt->is_empty()) {
-                reaching = stack_opt->last();
-            } else {
-                // No definition reaches here - use undefined
-                reaching = &m_function->create_constant(JS::js_undefined());
+            // Rewrite operand uses to current stack top
+            for (size_t i = 0; i < instruction->operands().size(); ++i) {
+                auto* operand_value = instruction->operands()[i];
+                if (!operand_value)
+                    continue;
+
+                auto raw_opt = m_value_to_operand_raw.get(operand_value);
+                if (!raw_opt.has_value())
+                    continue;
+
+                auto stack_opt = stacks.get(*raw_opt);
+                if (stack_opt.has_value() && !stack_opt->is_empty()) {
+                    auto* current = stack_opt->last();
+                    if (current != operand_value)
+                        instruction->set_operand(i, current);
+                }
             }
 
-            // Find the correct phi operand index and set the value
-            for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                if (phi.incoming_block(i) == &block) {
-                    phi.set_incoming_value(i, reaching);
-                    break;
+            // If instruction defines a value, push it onto the stack
+            if (instruction->result()) {
+                auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+                if (raw_opt.has_value()) {
+                    stacks.ensure(*raw_opt).append(instruction->result());
+                    if (!entry_sizes.contains(*raw_opt))
+                        entry_sizes.set(*raw_opt, 0);
                 }
             }
         }
-    };
 
-    // Fill phis for all CFG successors
-    if (auto* term = block.terminator()) {
-        fill_phi_for_successor(term->true_target());
-        if (term->false_target() && term->false_target() != term->true_target())
-            fill_phi_for_successor(term->false_target());
-    }
-    // Also fill phis for exception edges
-    fill_phi_for_successor(block.exception_handler());
-    if (block.finalizer() != block.exception_handler())
-        fill_phi_for_successor(block.finalizer());
+        // Fill phi operands in CFG successors
+        auto fill_phi_for_successor = [&](BasicBlock* succ) {
+            if (!succ)
+                return;
 
-    // Recurse to dominated children in the dominator tree
-    for (auto* child : m_dominators->dominator_children(&block)) {
-        rename_ssa(*child, stacks);
-    }
+            // Find our index in the successor's predecessor list
+            size_t pred_index = SIZE_MAX;
+            auto const& phi_preds = succ->predecessors();
+            for (size_t i = 0; i < phi_preds.size(); ++i) {
+                if (phi_preds[i] == &block) {
+                    pred_index = i;
+                    break;
+                }
+            }
+            if (pred_index == SIZE_MAX)
+                return;
 
-    // Restore stack sizes (pop what we pushed in this block)
-    for (auto& [op_raw, target_size] : entry_sizes) {
-        auto& stack = stacks.ensure(op_raw);
-        while (stack.size() > target_size)
-            stack.take_last();
+            // Fill phi operands for this predecessor
+            for (auto& instruction : succ->instructions()) {
+                if (instruction->opcode() != Opcode::Phi)
+                    break;
+
+                auto& phi = static_cast<PhiInstruction&>(*instruction);
+                auto raw_opt = m_value_to_operand_raw.get(phi.result());
+                if (!raw_opt.has_value())
+                    continue;
+
+                // Get current value from stack
+                auto stack_opt = stacks.get(*raw_opt);
+                Value* reaching = nullptr;
+                if (stack_opt.has_value() && !stack_opt->is_empty()) {
+                    reaching = stack_opt->last();
+                } else {
+                    // No definition reaches here - use undefined
+                    reaching = &m_function->create_constant(JS::js_undefined());
+                }
+
+                // Find the correct phi operand index and set the value
+                for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                    if (phi.incoming_block(i) == &block) {
+                        phi.set_incoming_value(i, reaching);
+                        break;
+                    }
+                }
+            }
+        };
+
+        // Fill phis for all CFG successors
+        if (auto* term = block.terminator()) {
+            fill_phi_for_successor(term->true_target());
+            if (term->false_target() && term->false_target() != term->true_target())
+                fill_phi_for_successor(term->false_target());
+        }
+        // Also fill phis for exception edges
+        fill_phi_for_successor(block.exception_handler());
+        if (block.finalizer() != block.exception_handler())
+            fill_phi_for_successor(block.finalizer());
+
+        // Push restore item (will be processed after all children)
+        work_stack.empend(&block, true, move(entry_sizes));
+
+        // Push dominated children in reverse order so first child is processed first
+        auto const& children = m_dominators->dominator_children(&block);
+        for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i) {
+            work_stack.empend(children[i], false, HashMap<u32, size_t> {});
+        }
     }
 }
 
