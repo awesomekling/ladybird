@@ -24,11 +24,7 @@ bool CopyPropagation::run(Function& function)
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
             if (instruction->opcode() == Opcode::Move && instruction->result()) {
-                // v_result = Move v_src
                 auto* src = instruction->operands()[0];
-                // Don't propagate if the source is a phi result
-                if (src->defining_instruction() && src->defining_instruction()->opcode() == Opcode::Phi)
-                    continue;
                 copies.set(instruction->result(), src);
             }
         }
@@ -83,12 +79,8 @@ bool CopyPropagation::run(Function& function)
         return changed;
 
     // Replace uses of copied values with their sources
-    // NB: Skip phi nodes since their operands represent values from specific predecessors,
-    // and propagating through them would break SSA semantics
     for (auto& block : function.basic_blocks()) {
         for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() == Opcode::Phi)
-                continue;
             for (size_t i = 0; i < instruction->operands().size(); ++i) {
                 auto* operand = instruction->operands()[i];
 
