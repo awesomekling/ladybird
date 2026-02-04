@@ -183,6 +183,7 @@ public:
 
     // Iterators
     [[nodiscard]] Value& build_get_iterator(BasicBlock& block, Value& iterable);
+    [[nodiscard]] Value& build_get_object_property_iterator(BasicBlock& block, Value& object);
     [[nodiscard]] Value& build_iterator_next(BasicBlock& block, Value& iterator);
     [[nodiscard]] Value& build_iterator_next_unpack(BasicBlock& block, Value& iterator);
     void build_iterator_close(BasicBlock& block, Value& iterator);

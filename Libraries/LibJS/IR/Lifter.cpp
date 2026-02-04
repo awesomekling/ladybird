@@ -983,8 +983,13 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetObjectPropertyIterator: {
         auto const& op = static_cast<Bytecode::Op::GetObjectPropertyIterator const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);
-        auto& result = m_function->build_get_iterator(block, object);
-        define_operand(op.dst_iterator_object(), result, block);
+        auto& tuple = m_function->build_get_object_property_iterator(block, object);
+        auto& iterator_object = m_function->build_extract_value(block, tuple, 0);
+        auto& iterator_next = m_function->build_extract_value(block, tuple, 1);
+        auto& iterator_done = m_function->build_extract_value(block, tuple, 2);
+        define_operand(op.dst_iterator_object(), iterator_object, block);
+        define_operand(op.dst_iterator_next(), iterator_next, block);
+        define_operand(op.dst_iterator_done(), iterator_done, block);
         break;
     }
 

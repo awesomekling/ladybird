@@ -165,6 +165,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
 
     // Iterators
     GetIterator,
+    GetObjectPropertyIterator,
     IteratorNext,
     IteratorNextUnpack,
     IteratorClose,
@@ -348,6 +349,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
 
     // Iterators
     [to_underlying(Opcode::GetIterator)]                        = { "GetIterator",                        false, true,  true,  false, false, false, true  },
+    [to_underlying(Opcode::GetObjectPropertyIterator)]          = { "GetObjectPropertyIterator",          false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::IteratorNext)]                       = { "IteratorNext",                       false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::IteratorNextUnpack)]                 = { "IteratorNextUnpack",                 false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::IteratorClose)]                      = { "IteratorClose",                      false, true,  true,  false, false, false, false },

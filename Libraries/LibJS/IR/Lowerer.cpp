@@ -239,6 +239,10 @@ void Lowerer::compute_phi_coalescing()
 
 Bytecode::Operand Lowerer::allocate_tuple_registers(Value const& tuple, u32 count)
 {
+    // Check if already allocated (idempotent)
+    if (auto it = m_tuple_base_operand.find(&tuple); it != m_tuple_base_operand.end())
+        return it->value;
+
     // Allocate consecutive registers for tuple elements
     auto base = Bytecode::Operand(Bytecode::Register(m_next_register));
     m_next_register += count;
@@ -878,6 +882,18 @@ void Lowerer::lower_instruction(Instruction const& instruction)
             instruction.iterator_hint());
         break;
     }
+    case Opcode::GetObjectPropertyIterator: {
+        // GetObjectPropertyIterator produces a tuple of (iterator_object, iterator_next, iterator_done)
+        // Allocate 3 consecutive registers for the tuple result
+        auto tuple_base = allocate_tuple_registers(*instruction.result(), 3);
+        auto object = operand(0);
+        emit<Bytecode::Op::GetObjectPropertyIterator>(
+            Bytecode::Operand(Bytecode::Register(tuple_base.index())),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 1)),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 2)),
+            object);
+        break;
+    }
     case Opcode::IteratorNext: {
         // Operands: [iterator_object, iterator_next, iterator_done]
         emit<Bytecode::Op::IteratorNext>(dst(), operand(0), operand(1), operand(2));
@@ -954,7 +970,54 @@ void Lowerer::lower_blocks()
         m_bytecode_blocks.append(move(bc_block));
     }
 
-    // Second pass: lower each block
+    // Pre-pass: allocate tuple registers and map ExtractValue results
+    // This ensures that when we encounter uses of ExtractValue results in the lowering pass,
+    // the mappings are already in place (even if the ExtractValue is in a later block).
+    // We do this in two phases: first allocate all tuple registers, then map all ExtractValue results.
+
+    // Phase 1: Allocate tuple registers for all tuple-producing instructions
+    for (auto const& ir_block : m_function.basic_blocks()) {
+        for (auto const& instruction : ir_block->instructions()) {
+            switch (instruction->opcode()) {
+            case Opcode::GetIterator:
+            case Opcode::GetObjectPropertyIterator:
+                if (instruction->result())
+                    allocate_tuple_registers(*instruction->result(), 3);
+                break;
+            case Opcode::IteratorNextUnpack:
+            case Opcode::GetCalleeAndThisFromEnvironment:
+            case Opcode::GetCompletionFields:
+                if (instruction->result())
+                    allocate_tuple_registers(*instruction->result(), 2);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
+    // Phase 2: Map ExtractValue results to their tuple element registers
+    for (auto const& ir_block : m_function.basic_blocks()) {
+        for (auto const& instruction : ir_block->instructions()) {
+            if (instruction->opcode() == Opcode::ExtractValue) {
+                auto* tuple_value = instruction->operands()[0];
+                if (tuple_value && instruction->result()) {
+                    auto element_reg = operand_for_tuple_element(*tuple_value, instruction->extract_index());
+                    // Follow coalescing chain to find the representative
+                    Value const* rep = instruction->result();
+                    for (;;) {
+                        auto it = m_coalesce_representative.find(rep);
+                        if (it == m_coalesce_representative.end())
+                            break;
+                        rep = it->value;
+                    }
+                    m_value_to_operand.set(rep, element_reg);
+                }
+            }
+        }
+    }
+
+    // Main pass: lower each block
     for (size_t i = 0; i < m_function.basic_blocks().size(); ++i) {
         auto const& ir_block = m_function.basic_blocks()[i];
         m_current_block = m_bytecode_blocks[i].ptr();

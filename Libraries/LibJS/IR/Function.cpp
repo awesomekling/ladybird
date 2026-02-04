@@ -973,6 +973,11 @@ Value& Function::build_get_iterator(BasicBlock& block, Value& iterable)
     return build_unary_op(block, Opcode::GetIterator, iterable);
 }
 
+Value& Function::build_get_object_property_iterator(BasicBlock& block, Value& object)
+{
+    return build_unary_op(block, Opcode::GetObjectPropertyIterator, object);
+}
+
 Value& Function::build_iterator_next(BasicBlock& block, Value& iterator)
 {
     return build_unary_op(block, Opcode::IteratorNext, iterator);
