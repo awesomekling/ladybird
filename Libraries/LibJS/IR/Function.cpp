@@ -340,6 +340,29 @@ Value& Function::build_has_property(BasicBlock& block, Value& object, Value& pro
     return result;
 }
 
+Value& Function::build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property)
+{
+    auto instruction = Instruction::create(Opcode::GetPrivateById);
+    instruction->add_operand(&base);
+    instruction->set_identifier_index(property);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+void Function::build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::PutPrivateById);
+    instruction->add_operand(&base);
+    instruction->add_operand(&value);
+    instruction->set_identifier_index(property);
+    block.append(move(instruction));
+}
+
 // Calls
 Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments)
 {
@@ -531,6 +554,13 @@ void Function::build_create_immutable_binding(BasicBlock& block, Value& environm
 void Function::build_leave_lexical_environment(BasicBlock& block)
 {
     auto instruction = Instruction::create(Opcode::LeaveLexicalEnvironment);
+    block.append(move(instruction));
+}
+
+void Function::build_enter_object_environment(BasicBlock& block, Value& object)
+{
+    auto instruction = Instruction::create(Opcode::EnterObjectEnvironment);
+    instruction->add_operand(&object);
     block.append(move(instruction));
 }
 

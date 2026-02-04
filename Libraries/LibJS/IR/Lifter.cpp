@@ -1063,10 +1063,15 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case LeaveLexicalEnvironment:
         m_function->build_leave_lexical_environment(block);
         break;
+    case EnterObjectEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::EnterObjectEnvironment const&>(instruction);
+        auto& object = get_or_create_value_for_operand(op.object(), block);
+        m_function->build_enter_object_environment(block, object);
+        break;
+    }
     case CreateVariableEnvironment:
     case CreatePrivateEnvironment:
     case LeavePrivateEnvironment:
-    case EnterObjectEnvironment:
         // These affect the environment but don't produce IR values
         break;
 
@@ -1153,11 +1158,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetPrivateById: {
         auto const& op = static_cast<Bytecode::Op::GetPrivateById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_function->build_move(block, base);
+        auto& result = m_function->build_get_private_by_id(block, base, op.property());
         define_operand(op.dst(), result, block);
         break;
     }
-    case PutPrivateById:
+    case PutPrivateById: {
+        auto const& op = static_cast<Bytecode::Op::PutPrivateById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_private_by_id(block, base, op.property(), value);
+        break;
+    }
     case HasPrivateId:
     case AddPrivateName:
         // Private field operations - no result value for most
@@ -1414,12 +1425,12 @@ void Lifter::connect_control_flow()
         }
         case JumpNullish: {
             auto const& op = static_cast<Bytecode::Op::JumpNullish const&>(*last_instruction);
-            auto& condition = get_or_create_value_for_operand(op.condition(), ir_block);
+            auto& value = get_or_create_value_for_operand(op.condition(), ir_block);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            // NB: JumpNullish jumps if null or undefined - we'd need a proper IsNullish check
-            // For now, treat as a branch on the condition
-            m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            // JumpNullish jumps to true_target if value is null or undefined
+            auto& is_nullish = m_function->build_is_nullish(ir_block, value);
+            m_function->build_branch(ir_block, is_nullish, *true_target, *false_target);
             break;
         }
         case JumpUndefined: {

@@ -105,6 +105,8 @@ enum class Opcode : u8 {
     DeleteById,
     DeleteByValue,
     HasProperty,
+    GetPrivateById,
+    PutPrivateById,
 
     // Calls
     Call,
@@ -123,6 +125,7 @@ enum class Opcode : u8 {
     CreateMutableBinding,
     CreateImmutableBinding,
     LeaveLexicalEnvironment,
+    EnterObjectEnvironment,
     GetBinding,
     InitializeBinding,
     SetBinding,

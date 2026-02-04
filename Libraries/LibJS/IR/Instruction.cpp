@@ -173,6 +173,10 @@ char const* opcode_to_string(Opcode opcode)
         return "DeleteByValue";
     case Opcode::HasProperty:
         return "HasProperty";
+    case Opcode::GetPrivateById:
+        return "GetPrivateById";
+    case Opcode::PutPrivateById:
+        return "PutPrivateById";
     case Opcode::Call:
         return "Call";
     case Opcode::CallBuiltin:
@@ -211,6 +215,8 @@ char const* opcode_to_string(Opcode opcode)
         return "CreateImmutableBinding";
     case Opcode::LeaveLexicalEnvironment:
         return "LeaveLexicalEnvironment";
+    case Opcode::EnterObjectEnvironment:
+        return "EnterObjectEnvironment";
     case Opcode::DeleteVariable:
         return "DeleteVariable";
     case Opcode::ResolveThisBinding:

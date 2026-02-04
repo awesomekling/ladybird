@@ -117,6 +117,8 @@ public:
     Value& build_delete_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
     Value& build_delete_by_value(BasicBlock& block, Value& base, Value& property);
     Value& build_has_property(BasicBlock& block, Value& object, Value& property);
+    Value& build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
+    void build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value);
 
     // Calls
     Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
@@ -135,6 +137,7 @@ public:
     void build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
     void build_create_immutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
     void build_leave_lexical_environment(BasicBlock& block);
+    void build_enter_object_environment(BasicBlock& block, Value& object);
     Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
