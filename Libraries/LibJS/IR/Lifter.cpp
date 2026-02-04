@@ -583,7 +583,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_by_id(block, base, op.property(), op.base_identifier());
-        result.defining_instruction()->set_cache_index(op.cache_index());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
@@ -600,7 +600,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_put_by_id(block, base, op.property(), value);
-        block.instructions().last()->set_cache_index(op.cache_index());
+        block.instructions().last()->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutNormalByValue: {
@@ -712,7 +712,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::InitObjectLiteralProperty const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_init_object_literal_property(block, object, op.property(), value, op.shape_cache_index(), op.property_slot());
+        m_function->build_init_object_literal_property(block, object, op.property(), value, CacheIndex { op.shape_cache_index() }, PropertySlot { op.property_slot() });
         break;
     }
     case CreateDataPropertyOrThrow: {
@@ -893,7 +893,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetGlobal: {
         auto const& op = static_cast<Bytecode::Op::GetGlobal const&>(instruction);
         auto& result = m_function->build_get_global(block, op.identifier());
-        result.defining_instruction()->set_cache_index(op.cache_index());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
@@ -901,7 +901,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::SetGlobal const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_function->build_set_global(block, op.identifier(), value);
-        block.instructions().last()->set_cache_index(op.cache_index());
+        block.instructions().last()->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
 
@@ -909,7 +909,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case NewObject: {
         auto const& op = static_cast<Bytecode::Op::NewObject const&>(instruction);
         auto& result = m_function->build_new_object(block);
-        result.defining_instruction()->set_cache_index(op.cache_index());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1061,7 +1061,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetLength const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_function->build_get_length(block, base);
-        result.defining_instruction()->set_cache_index(op.cache_index());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1408,7 +1408,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case CacheObjectShape: {
         auto const& op = static_cast<Bytecode::Op::CacheObjectShape const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);
-        m_function->build_cache_object_shape(block, object, op.cache_index());
+        m_function->build_cache_object_shape(block, object, CacheIndex { op.cache_index() });
         break;
     }
     }

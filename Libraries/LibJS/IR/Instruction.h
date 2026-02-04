@@ -360,11 +360,11 @@ public:
     Bytecode::IdentifierTableIndex identifier_index() const { return m_identifier_index; }
     void set_identifier_index(Bytecode::IdentifierTableIndex index) { m_identifier_index = index; }
 
-    u32 cache_index() const { return m_cache_index; }
-    void set_cache_index(u32 index) { m_cache_index = index; }
+    CacheIndex cache_index() const { return m_cache_index; }
+    void set_cache_index(CacheIndex index) { m_cache_index = index; }
 
-    u32 property_slot() const { return m_property_slot; }
-    void set_property_slot(u32 slot) { m_property_slot = slot; }
+    PropertySlot property_slot() const { return m_property_slot; }
+    void set_property_slot(PropertySlot slot) { m_property_slot = slot; }
 
     // For NewFunction - reference to the AST node
     FunctionNode const* function_node() const { return m_function_node; }
@@ -455,8 +455,8 @@ private:
     // Instruction-specific indices
     Bytecode::PropertyKeyTableIndex m_property_key_index;
     Bytecode::IdentifierTableIndex m_identifier_index;
-    u32 m_cache_index { 0 };
-    u32 m_property_slot { 0 };
+    CacheIndex m_cache_index { 0 };
+    PropertySlot m_property_slot { 0 };
     u32 m_extract_index { 0 };
     IteratorHint m_iterator_hint { IteratorHint::Sync };
     FunctionNode const* m_function_node { nullptr };

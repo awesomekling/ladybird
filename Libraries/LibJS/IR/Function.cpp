@@ -902,7 +902,7 @@ Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex 
     return result;
 }
 
-void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot)
+void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, CacheIndex shape_cache_index, PropertySlot property_slot)
 {
     auto instruction = Instruction::create(Opcode::InitObjectLiteralProperty);
     instruction->add_operand(&object);
@@ -914,7 +914,7 @@ void Function::build_init_object_literal_property(BasicBlock& block, Value& obje
     block.append(move(instruction));
 }
 
-void Function::build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index)
+void Function::build_cache_object_shape(BasicBlock& block, Value& object, CacheIndex cache_index)
 {
     auto instruction = Instruction::create(Opcode::CacheObjectShape);
     instruction->add_operand(&object);

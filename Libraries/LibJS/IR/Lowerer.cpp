@@ -514,15 +514,15 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
     case Opcode::GetLength:
-        emit<Bytecode::Op::GetLength>(dst(), operand(0), OptionalNone {}, instruction.cache_index());
+        emit<Bytecode::Op::GetLength>(dst(), operand(0), OptionalNone {}, instruction.cache_index().value());
         break;
 
     // Property access
     case Opcode::GetById:
-        emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), instruction.base_identifier(), instruction.cache_index());
+        emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), instruction.base_identifier(), instruction.cache_index().value());
         break;
     case Opcode::GetByIdWithThis:
-        emit<Bytecode::Op::GetByIdWithThis>(dst(), operand(0), instruction.property_key_index(), operand(1), instruction.cache_index());
+        emit<Bytecode::Op::GetByIdWithThis>(dst(), operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value());
         break;
     case Opcode::GetByValue:
         emit<Bytecode::Op::GetByValue>(dst(), operand(0), operand(1), instruction.base_identifier());
@@ -533,7 +533,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::GetByValueWithThis>(dst(), operand(0), operand(2), operand(1));
         break;
     case Opcode::PutById:
-        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), OptionalNone {});
+        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), OptionalNone {});
         break;
     case Opcode::PutByValue:
         emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), OptionalNone {});
@@ -554,22 +554,22 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::PutPrivateById>(operand(0), instruction.identifier_index(), operand(1));
         break;
     case Opcode::PutGetterById:
-        emit<Bytecode::Op::PutGetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        emit<Bytecode::Op::PutGetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
         break;
     case Opcode::PutSetterById:
-        emit<Bytecode::Op::PutSetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        emit<Bytecode::Op::PutSetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
         break;
     case Opcode::PutPrototypeById:
-        emit<Bytecode::Op::PutPrototypeById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        emit<Bytecode::Op::PutPrototypeById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
         break;
     case Opcode::PutGetterByIdWithThis:
-        emit<Bytecode::Op::PutGetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        emit<Bytecode::Op::PutGetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
         break;
     case Opcode::PutSetterByIdWithThis:
-        emit<Bytecode::Op::PutSetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        emit<Bytecode::Op::PutSetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
         break;
     case Opcode::PutPrototypeByIdWithThis:
-        emit<Bytecode::Op::PutPrototypeByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index());
+        emit<Bytecode::Op::PutPrototypeByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
         break;
     case Opcode::PutGetterByValue:
         emit<Bytecode::Op::PutGetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
@@ -638,10 +638,10 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::SetLexicalBinding>(instruction.identifier_index(), operand(0));
         break;
     case Opcode::GetGlobal:
-        emit<Bytecode::Op::GetGlobal>(dst(), instruction.identifier_index(), instruction.cache_index());
+        emit<Bytecode::Op::GetGlobal>(dst(), instruction.identifier_index(), instruction.cache_index().value());
         break;
     case Opcode::SetGlobal:
-        emit<Bytecode::Op::SetGlobal>(instruction.identifier_index(), operand(0), instruction.cache_index());
+        emit<Bytecode::Op::SetGlobal>(instruction.identifier_index(), operand(0), instruction.cache_index().value());
         break;
     case Opcode::DeleteVariable:
         emit<Bytecode::Op::DeleteVariable>(dst(), instruction.identifier_index());
@@ -660,7 +660,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Object creation
     case Opcode::NewObject:
-        emit<Bytecode::Op::NewObject>(dst(), instruction.cache_index());
+        emit<Bytecode::Op::NewObject>(dst(), instruction.cache_index().value());
         break;
 
     // Postfix increment/decrement (dst gets old value, src gets mutated)
@@ -816,11 +816,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     case Opcode::InitObjectLiteralProperty:
-        emit<Bytecode::Op::InitObjectLiteralProperty>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.property_slot());
+        emit<Bytecode::Op::InitObjectLiteralProperty>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.property_slot().value());
         break;
 
     case Opcode::CacheObjectShape:
-        emit<Bytecode::Op::CacheObjectShape>(operand(0), instruction.cache_index());
+        emit<Bytecode::Op::CacheObjectShape>(operand(0), instruction.cache_index().value());
         break;
 
     // Construct (variable-length arguments)
