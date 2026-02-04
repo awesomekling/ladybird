@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/BinarySearch.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/Bytecode/Register.h>
@@ -1418,18 +1419,23 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
 
 u32 Lifter::address_to_block_index(size_t address) const
 {
-    // Find the basic block that contains this address
-    for (size_t i = 0; i < m_executable.basic_block_start_offsets.size(); ++i) {
-        if (m_executable.basic_block_start_offsets[i] == address)
-            return static_cast<u32>(i);
+    // Binary search for the block containing this address.
+    // basic_block_start_offsets is sorted, so we find the last offset <= address.
+    auto const& offsets = m_executable.basic_block_start_offsets;
+    VERIFY(!offsets.is_empty());
+
+    size_t nearby_index = 0;
+    if (binary_search(offsets, address, &nearby_index)) {
+        // Exact match
+        return static_cast<u32>(nearby_index);
     }
-    // If we didn't find an exact match, find the block that contains this address
-    for (size_t i = 0; i + 1 < m_executable.basic_block_start_offsets.size(); ++i) {
-        if (address >= m_executable.basic_block_start_offsets[i] && address < m_executable.basic_block_start_offsets[i + 1])
-            return static_cast<u32>(i);
-    }
-    // Default to the last block
-    return static_cast<u32>(m_executable.basic_block_start_offsets.size() - 1);
+
+    // No exact match - nearby_index points to the closest element.
+    // If the element at nearby_index is > address, step back to previous block.
+    if (nearby_index > 0 && offsets[nearby_index] > address)
+        --nearby_index;
+
+    return static_cast<u32>(nearby_index);
 }
 
 void Lifter::connect_control_flow()
