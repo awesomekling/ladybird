@@ -21,6 +21,7 @@
 #include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
+#include <LibJS/IR/Passes/Verifier.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
@@ -249,6 +250,10 @@ static void run_pass(Pass& pass, Function& function, bool& changed)
         if (g_dump_ir_between_passes)
             outln("=== After {} ===\n{}", pass.name(), dump(function));
     }
+
+#ifndef NDEBUG
+    Verifier::verify(function, true);
+#endif
 }
 
 void optimize(Function& function)
