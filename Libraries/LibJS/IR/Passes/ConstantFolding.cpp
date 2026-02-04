@@ -245,6 +245,51 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::ToInt32:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32()) {
+                        result_value = v;
+                        can_fold = true;
+                    } else if (v.is_double()) {
+                        double d = v.as_double();
+                        if (isnan(d) || isinf(d) || d == 0.0)
+                            result_value = JS::Value(0);
+                        else
+                            result_value = JS::Value(static_cast<i32>(static_cast<i64>(d)));
+                        can_fold = true;
+                    }
+                }
+                break;
+
+            case Opcode::ToNumber:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32() || v.is_double()) {
+                        result_value = v;
+                        can_fold = true;
+                    } else if (v.is_boolean()) {
+                        result_value = JS::Value(v.as_bool() ? 1 : 0);
+                        can_fold = true;
+                    } else if (v.is_undefined()) {
+                        result_value = JS::Value(js_nan());
+                        can_fold = true;
+                    } else if (v.is_null()) {
+                        result_value = JS::Value(0);
+                        can_fold = true;
+                    }
+                }
+                break;
+
+            case Opcode::ToBoolean:
+                if (operands.size() == 1) {
+                    if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
+                        result_value = JS::Value(*truthiness);
+                        can_fold = true;
+                    }
+                }
+                break;
+
             case Opcode::Not:
                 if (operands.size() == 1) {
                     if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
