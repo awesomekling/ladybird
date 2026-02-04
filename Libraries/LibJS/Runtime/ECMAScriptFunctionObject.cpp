@@ -276,11 +276,15 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
     if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up && executable->exception_handlers.is_empty()) {
         if (++data.m_call_count >= threshold) {
             data.m_tiered_up = true;
+            if (Bytecode::g_dump_bytecode)
+                executable->dump();
             auto ir_function = IR::Lifter::lift(*executable);
             IR::optimize(*ir_function);
             if (IR::g_dump_ir)
                 outln("{}", IR::dump(*ir_function));
             executable = IR::Lowerer::lower(vm(), *ir_function);
+            if (Bytecode::g_dump_bytecode)
+                executable->dump();
         }
     }
 
