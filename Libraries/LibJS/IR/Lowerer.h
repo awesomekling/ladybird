@@ -29,6 +29,7 @@ private:
     void emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to);
     bool target_has_phis(BasicBlock const& target) const;
     size_t get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to);
+    void compute_phi_coalescing();
 
     template<typename OpType, typename... Args>
     void emit(Args&&... args);
@@ -49,6 +50,8 @@ private:
     HashMap<Value const*, Bytecode::Operand> m_value_to_operand;
     HashMap<Value const*, Bytecode::Operand> m_tuple_base_operand;
     HashMap<BasicBlock const*, size_t> m_ir_block_to_bytecode_index;
+    // Phi coalescing: maps values to their coalescing representative
+    HashMap<Value const*, Value const*> m_coalesce_representative;
     // Maps (from_block, to_block) pairs to trampoline block indices for critical edge splitting
     HashMap<u64, size_t> m_edge_to_trampoline;
     Vector<JS::Value> m_constants;

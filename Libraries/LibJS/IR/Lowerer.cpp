@@ -25,6 +25,43 @@ Lowerer::Lowerer(VM& vm, Function const& function)
 {
 }
 
+// Check if a comparison instruction should be fused with a Branch
+// Returns true if the comparison has exactly one use and that use is a Branch terminator
+static bool should_fuse_comparison_with_branch(Instruction const& instruction)
+{
+    switch (instruction.opcode()) {
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    case Opcode::LooselyEquals:
+    case Opcode::StrictlyEquals:
+    case Opcode::LooselyInequals:
+    case Opcode::StrictlyInequals:
+        break;
+    default:
+        return false;
+    }
+
+    auto* result = instruction.result();
+    if (!result)
+        return false;
+
+    auto const& uses = result->uses();
+    if (uses.size() != 1)
+        return false;
+
+    auto* use = uses[0];
+    if (use->opcode() != Opcode::Branch)
+        return false;
+
+    // The Branch must use this comparison as its condition (operand 0)
+    if (use->operands().is_empty() || use->operands()[0] != result)
+        return false;
+
+    return true;
+}
+
 Bytecode::Operand Lowerer::allocate_register()
 {
     return Bytecode::Operand(Bytecode::Register(m_next_register++));
@@ -54,8 +91,13 @@ u32 Lowerer::get_or_add_constant(JS::Value constant_value)
 
 Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 {
-    // Check if we already have an operand for this value
-    if (auto it = m_value_to_operand.find(&value); it != m_value_to_operand.end())
+    // Check for coalescing: if this value coalesces with another, use the same operand
+    Value const* lookup_value = &value;
+    if (auto it = m_coalesce_representative.find(&value); it != m_coalesce_representative.end())
+        lookup_value = it->value;
+
+    // Check if we already have an operand for this value (or its coalescing representative)
+    if (auto it = m_value_to_operand.find(lookup_value); it != m_value_to_operand.end())
         return it->value;
 
     Bytecode::Operand operand = [&]() {
@@ -76,8 +118,47 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
         return allocate_register();
     }();
 
-    m_value_to_operand.set(&value, operand);
+    m_value_to_operand.set(lookup_value, operand);
     return operand;
+}
+
+void Lowerer::compute_phi_coalescing()
+{
+    // Simple phi coalescing: for each phi, try to coalesce phi inputs with phi output
+    // This eliminates Mov instructions when lowering phi nodes
+    //
+    // We coalesce a phi input with the phi output if:
+    // 1. The input is not a constant/parameter/this (those can't be coalesced)
+    // 2. The input's only use is this phi (otherwise coalescing might conflict)
+    //
+    // For more aggressive coalescing, we'd need interference analysis.
+
+    for (auto const& block : m_function.basic_blocks()) {
+        for (auto const& instruction : block->instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                break; // Phis are always at the start
+
+            auto* phi_result = instruction->result();
+            if (!phi_result)
+                continue;
+
+            for (auto* operand : instruction->operands()) {
+                if (!operand)
+                    continue;
+
+                // Can't coalesce constants, parameters, or this
+                if (operand->is_constant() || operand->is_parameter() || operand->is_this())
+                    continue;
+
+                // Only coalesce if this is the operand's only use
+                if (operand->uses().size() != 1)
+                    continue;
+
+                // Coalesce: make operand share phi_result's register
+                m_coalesce_representative.set(operand, phi_result);
+            }
+        }
+    }
 }
 
 Bytecode::Operand Lowerer::allocate_tuple_registers(Value const& tuple, u32 count)
@@ -249,29 +330,38 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     // Comparison
+    // NOTE: These may be skipped if they will be fused with a Branch instruction
     case Opcode::LessThan:
-        emit<Bytecode::Op::LessThan>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::LessThan>(dst(), operand(0), operand(1));
         break;
     case Opcode::LessThanEquals:
-        emit<Bytecode::Op::LessThanEquals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::LessThanEquals>(dst(), operand(0), operand(1));
         break;
     case Opcode::GreaterThan:
-        emit<Bytecode::Op::GreaterThan>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::GreaterThan>(dst(), operand(0), operand(1));
         break;
     case Opcode::GreaterThanEquals:
-        emit<Bytecode::Op::GreaterThanEquals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::GreaterThanEquals>(dst(), operand(0), operand(1));
         break;
     case Opcode::LooselyEquals:
-        emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), operand(1));
         break;
     case Opcode::StrictlyEquals:
-        emit<Bytecode::Op::StrictlyEquals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::StrictlyEquals>(dst(), operand(0), operand(1));
         break;
     case Opcode::LooselyInequals:
-        emit<Bytecode::Op::LooselyInequals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::LooselyInequals>(dst(), operand(0), operand(1));
         break;
     case Opcode::StrictlyInequals:
-        emit<Bytecode::Op::StrictlyInequals>(dst(), operand(0), operand(1));
+        if (!should_fuse_comparison_with_branch(instruction))
+            emit<Bytecode::Op::StrictlyInequals>(dst(), operand(0), operand(1));
         break;
 
     // Unary
@@ -628,12 +718,14 @@ void Lowerer::lower_blocks()
             if (target) {
                 emit_phi_moves_for_successor(*ir_block, *target);
                 auto target_index = m_ir_block_to_bytecode_index.get(target).value();
-                emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
+                // Skip jump if target is the immediately following block (fallthrough)
+                if (target_index != i + 1)
+                    emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
             break;
         }
         case Opcode::Branch: {
-            auto condition = operand_for_value(*terminator->operands()[0]);
+            auto* condition_value = terminator->operands()[0];
             auto* true_target = terminator->true_target();
             auto* false_target = terminator->false_target();
 
@@ -664,9 +756,46 @@ void Lowerer::lower_blocks()
                     false_index = m_ir_block_to_bytecode_index.get(false_target).value();
                 }
 
-                emit<Bytecode::Op::JumpIf>(condition,
-                    Bytecode::Label { static_cast<u32>(true_index) },
-                    Bytecode::Label { static_cast<u32>(false_index) });
+                auto true_label = Bytecode::Label { static_cast<u32>(true_index) };
+                auto false_label = Bytecode::Label { static_cast<u32>(false_index) };
+
+                // Check if condition comes from a fusible comparison
+                auto* cmp_instr = condition_value->defining_instruction();
+                if (cmp_instr && should_fuse_comparison_with_branch(*cmp_instr)) {
+                    auto lhs = operand_for_value(*cmp_instr->operands()[0]);
+                    auto rhs = operand_for_value(*cmp_instr->operands()[1]);
+                    switch (cmp_instr->opcode()) {
+                    case Opcode::LessThan:
+                        emit<Bytecode::Op::JumpLessThan>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::LessThanEquals:
+                        emit<Bytecode::Op::JumpLessThanEquals>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::GreaterThan:
+                        emit<Bytecode::Op::JumpGreaterThan>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::GreaterThanEquals:
+                        emit<Bytecode::Op::JumpGreaterThanEquals>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::LooselyEquals:
+                        emit<Bytecode::Op::JumpLooselyEquals>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::StrictlyEquals:
+                        emit<Bytecode::Op::JumpStrictlyEquals>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::LooselyInequals:
+                        emit<Bytecode::Op::JumpLooselyInequals>(lhs, rhs, true_label, false_label);
+                        break;
+                    case Opcode::StrictlyInequals:
+                        emit<Bytecode::Op::JumpStrictlyInequals>(lhs, rhs, true_label, false_label);
+                        break;
+                    default:
+                        VERIFY_NOT_REACHED();
+                    }
+                } else {
+                    auto condition = operand_for_value(*condition_value);
+                    emit<Bytecode::Op::JumpIf>(condition, true_label, false_label);
+                }
             } else if (true_target) {
                 // Only one target (unconditional after condition eval, or same target)
                 if (target_has_phis(*true_target))
@@ -695,6 +824,7 @@ void Lowerer::lower_blocks()
 GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 {
     Lowerer lowerer(vm, function);
+    lowerer.compute_phi_coalescing();
     lowerer.lower_blocks();
 
     auto source_executable = function.source_executable();
