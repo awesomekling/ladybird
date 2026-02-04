@@ -299,3 +299,35 @@ test("ToPrimitive side effects preserved in dead code elimination", () => {
     void (result + 0);
     expect(log).toEqual(["c"]);
 });
+
+test("entry block read-before-write preserves initial value", () => {
+    // Tests that when a register is read before being written in the entry block,
+    // the read sees the initial value, not the later definition.
+    // This exercises SSA stack initialization correctness.
+
+    // Test 1: Parameter read before reassignment
+    function readThenWrite(a) {
+        const original = a;
+        a = 999;
+        return original;
+    }
+    expect(readThenWrite(42)).toBe(42);
+    expect(readThenWrite("hello")).toBe("hello");
+
+    // Test 2: Multiple reads before write
+    function multipleReads(x) {
+        const first = x;
+        const second = x;
+        x = "overwritten";
+        return [first, second, x];
+    }
+    expect(multipleReads(123)).toEqual([123, 123, "overwritten"]);
+
+    // Test 3: Read in expression before later write
+    function readInExpression(n) {
+        const doubled = n + n;
+        n = 0;
+        return doubled;
+    }
+    expect(readInExpression(21)).toBe(42);
+});

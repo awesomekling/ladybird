@@ -1767,14 +1767,12 @@ void Lifter::place_phi_nodes()
 // This implements standard SSA renaming from Cytron et al.
 void Lifter::fill_phi_operands()
 {
-    // Initialize operand stacks with initial values from entry block
+    // NB: We intentionally start with empty stacks. The standard SSA renaming
+    // algorithm (Cytron et al.) builds up stacks during the dominator tree walk
+    // by pushing definitions as they are encountered. Seeding stacks with
+    // end-of-block definitions would cause early uses to be incorrectly rewritten
+    // to later definitions within the same block.
     HashMap<u32, Vector<Value*>> operand_stacks;
-    auto entry_defs = m_block_definitions.get(m_function->entry_block());
-    if (entry_defs.has_value()) {
-        for (auto& [op_raw, value] : *entry_defs) {
-            operand_stacks.ensure(op_raw).append(value);
-        }
-    }
 
     // Walk dominator tree starting from entry block
     if (m_function->entry_block())
