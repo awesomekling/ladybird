@@ -6,6 +6,7 @@
 
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/Verifier.h>
@@ -147,6 +148,99 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             report_error(ByteString::formatted(
                 "Block{} has finalizer not in function",
                 block->index()));
+        }
+    }
+
+    // SSA dominance verification
+    // Build map from Value* to its defining block
+    HashMap<Value const*, BasicBlock*> value_to_block;
+    for (auto const& block : function.basic_blocks()) {
+        for (auto const& instr : block->instructions()) {
+            if (instr->result())
+                value_to_block.set(instr->result(), block.ptr());
+        }
+    }
+
+    // Compute dominators for dominance checking
+    Dominators dominators(function);
+
+    for (auto const& block : function.basic_blocks()) {
+        for (auto const& instr : block->instructions()) {
+            if (instr->opcode() == Opcode::Phi) {
+                // For phi instructions, each operand must be reachable from its corresponding predecessor
+                // The defining block must dominate the predecessor (not the current block)
+                auto const& operands = instr->operands();
+                auto const& phi_preds = instr->phi_predecessors();
+                for (size_t i = 0; i < operands.size() && i < phi_preds.size(); ++i) {
+                    auto* operand = operands[i];
+                    auto* pred = phi_preds[i];
+                    if (!operand)
+                        continue;
+
+                    // Skip constants, parameters, and this values - they dominate everything
+                    if (operand->is_constant() || operand->is_parameter() || operand->is_this())
+                        continue;
+
+                    auto def_block = value_to_block.get(operand);
+                    if (!def_block.has_value()) {
+                        report_error(ByteString::formatted(
+                            "Phi operand v{} in block{} has no defining block",
+                            operand->index(), block->index()));
+                        continue;
+                    }
+
+                    // The definition must dominate the predecessor block
+                    // (the value flows from pred -> current block via the phi)
+                    if (!dominators.dominates(*def_block, pred)) {
+                        report_error(ByteString::formatted(
+                            "SSA violation: phi operand v{} (defined in block{}) does not dominate predecessor block{} for phi in block{}",
+                            operand->index(), (*def_block)->index(), pred->index(), block->index()));
+                    }
+                }
+            } else {
+                // For non-phi instructions, each operand's definition must dominate this block
+                for (size_t i = 0; i < instr->operands().size(); ++i) {
+                    auto* operand = instr->operands()[i];
+                    if (!operand)
+                        continue;
+
+                    // Skip constants, parameters, and this values - they dominate everything
+                    if (operand->is_constant() || operand->is_parameter() || operand->is_this())
+                        continue;
+
+                    auto def_block = value_to_block.get(operand);
+                    if (!def_block.has_value()) {
+                        report_error(ByteString::formatted(
+                            "Operand v{} in block{} has no defining block",
+                            operand->index(), block->index()));
+                        continue;
+                    }
+
+                    // Check dominance: def_block must dominate use_block
+                    // If in same block, check instruction order
+                    if (*def_block == block.ptr()) {
+                        // Same block: definition must come before use
+                        bool found_def = false;
+                        for (auto const& check_instr : block->instructions()) {
+                            if (check_instr->result() == operand) {
+                                found_def = true;
+                            }
+                            if (check_instr.ptr() == instr.ptr()) {
+                                if (!found_def) {
+                                    report_error(ByteString::formatted(
+                                        "SSA violation: operand v{} used before definition in block{}",
+                                        operand->index(), block->index()));
+                                }
+                                break;
+                            }
+                        }
+                    } else if (!dominators.dominates(*def_block, block.ptr())) {
+                        report_error(ByteString::formatted(
+                            "SSA violation: operand v{} (defined in block{}) does not dominate use in block{}",
+                            operand->index(), (*def_block)->index(), block->index()));
+                    }
+                }
+            }
         }
     }
 
