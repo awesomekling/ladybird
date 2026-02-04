@@ -53,6 +53,13 @@ bool BlockMerging::run(Function& function)
             if (!block_b->instructions().is_empty() && block_b->instructions().first()->opcode() == Opcode::Phi)
                 continue;
 
+            // Don't merge if exception handling context differs - this would change
+            // which handler catches exceptions from B's instructions
+            if (block_a->exception_handler() != block_b->exception_handler())
+                continue;
+            if (block_a->finalizer() != block_b->finalizer())
+                continue;
+
             // Merge B into A:
             // 1. Capture B's successors before modifying anything
             auto* b_terminator = block_b->last_instruction();
@@ -88,12 +95,6 @@ bool BlockMerging::run(Function& function)
                 b_true_target->add_predecessor(block_a.ptr());
             if (b_false_target && b_false_target != block_b && b_false_target != b_true_target)
                 b_false_target->add_predecessor(block_a.ptr());
-
-            // 6. Copy B's exception handler/finalizer to A if A doesn't have them
-            if (!block_a->exception_handler() && block_b->exception_handler())
-                block_a->set_exception_handler(block_b->exception_handler());
-            if (!block_a->finalizer() && block_b->finalizer())
-                block_a->set_finalizer(block_b->finalizer());
 
             merged_any = true;
             changed = true;
