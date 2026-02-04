@@ -27,7 +27,7 @@ bool ConstantFolding::run(Function& function)
             // Check if all operands are constants
             bool all_constants = true;
             for (auto* operand : instruction->operands()) {
-                if (!operand->is_constant()) {
+                if (!operand || !operand->is_constant()) {
                     all_constants = false;
                     break;
                 }
