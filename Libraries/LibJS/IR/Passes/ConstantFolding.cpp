@@ -119,6 +119,65 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::BitwiseAnd:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    result_value = JS::Value(operands[0]->constant_value().as_i32() & operands[1]->constant_value().as_i32());
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::BitwiseOr:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    result_value = JS::Value(operands[0]->constant_value().as_i32() | operands[1]->constant_value().as_i32());
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::BitwiseXor:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    result_value = JS::Value(operands[0]->constant_value().as_i32() ^ operands[1]->constant_value().as_i32());
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::BitwiseNot:
+                if (operands.size() == 1 && operands[0]->constant_value().is_int32()) {
+                    result_value = JS::Value(~operands[0]->constant_value().as_i32());
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::LeftShift:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    i32 lhs = operands[0]->constant_value().as_i32();
+                    u32 rhs = static_cast<u32>(operands[1]->constant_value().as_i32()) & 0x1f;
+                    result_value = JS::Value(lhs << rhs);
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::RightShift:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    i32 lhs = operands[0]->constant_value().as_i32();
+                    u32 rhs = static_cast<u32>(operands[1]->constant_value().as_i32()) & 0x1f;
+                    result_value = JS::Value(lhs >> rhs);
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::UnsignedRightShift:
+                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
+                    u32 lhs = static_cast<u32>(operands[0]->constant_value().as_i32());
+                    u32 rhs = static_cast<u32>(operands[1]->constant_value().as_i32()) & 0x1f;
+                    u32 result = lhs >> rhs;
+                    if (result <= static_cast<u32>(NumericLimits<i32>::max()))
+                        result_value = JS::Value(static_cast<i32>(result));
+                    else
+                        result_value = JS::Value(static_cast<double>(result));
+                    can_fold = true;
+                }
+                break;
+
             case Opcode::Not:
                 if (operands.size() == 1 && operands[0]->constant_value().is_boolean()) {
                     result_value = JS::Value(!operands[0]->constant_value().as_bool());
