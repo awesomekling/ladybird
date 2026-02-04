@@ -135,6 +135,13 @@ bool DeadBlockElimination::run(Function& function)
         }
     }
 
+    // Clear operand uses for instructions in dead blocks before removing them,
+    // so use lists don't contain stale references
+    for (auto* dead_block : dead_blocks) {
+        for (auto& instruction : dead_block->instructions())
+            instruction->clear_operand_uses();
+    }
+
     // Remove unreachable blocks
     function.basic_blocks().remove_all_matching([&](auto const& block) {
         return !reachable.contains(block.ptr());
