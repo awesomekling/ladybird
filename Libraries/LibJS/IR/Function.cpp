@@ -84,9 +84,7 @@ Value& Function::create_value_for_instruction()
 
 Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, Value& rhs)
 {
-    auto instruction = Instruction::create(opcode);
-    instruction->add_operand(&lhs);
-    instruction->add_operand(&rhs);
+    auto instruction = BinaryOpInstruction::create(opcode, &lhs, &rhs);
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
@@ -125,8 +123,7 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
 
 Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand)
 {
-    auto instruction = Instruction::create(opcode);
-    instruction->add_operand(&operand);
+    auto instruction = UnaryOpInstruction::create(opcode, &operand);
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
@@ -193,7 +190,7 @@ Value& Function::build_typeof(BasicBlock& block, Value& operand) { return build_
 
 Value& Function::build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
-    auto instruction = Instruction::create(Opcode::TypeofBinding);
+    auto instruction = Instruction::create<Opcode::TypeofBinding>();
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
@@ -226,7 +223,7 @@ Value& Function::build_concat_string(BasicBlock& block, Value& lhs, Value& rhs) 
 // Constants
 Value& Function::build_load_constant(BasicBlock& block, JS::Value constant)
 {
-    auto instruction = Instruction::create(Opcode::LoadConstant);
+    auto instruction = Instruction::create<Opcode::LoadConstant>();
 
     auto& constant_value = create_constant(constant);
     instruction->add_operand(&constant_value);
@@ -240,7 +237,7 @@ Value& Function::build_load_constant(BasicBlock& block, JS::Value constant)
 
 Value& Function::build_load_undefined(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::LoadUndefined);
+    auto instruction = Instruction::create<Opcode::LoadUndefined>();
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Undefined);
@@ -252,7 +249,7 @@ Value& Function::build_load_undefined(BasicBlock& block)
 
 Value& Function::build_load_null(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::LoadNull);
+    auto instruction = Instruction::create<Opcode::LoadNull>();
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Null);
@@ -277,7 +274,7 @@ Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::Prope
 
 Value& Function::build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property)
 {
-    auto instruction = Instruction::create(Opcode::GetByIdWithThis);
+    auto instruction = Instruction::create<Opcode::GetByIdWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->set_property_key_index(property);
@@ -291,7 +288,7 @@ Value& Function::build_get_by_id_with_this(BasicBlock& block, Value& base, Value
 
 Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::GetByValue);
+    auto instruction = Instruction::create<Opcode::GetByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->set_base_identifier(base_identifier);
@@ -305,7 +302,7 @@ Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& prope
 
 Value& Function::build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property)
 {
-    auto instruction = Instruction::create(Opcode::GetByValueWithThis);
+    auto instruction = Instruction::create<Opcode::GetByValueWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&property);
@@ -324,7 +321,7 @@ Value& Function::build_get_length(BasicBlock& block, Value& base)
 
 void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::PutById);
+    auto instruction = Instruction::create<Opcode::PutById>();
     instruction->add_operand(&base);
     instruction->add_operand(&value);
     instruction->set_property_key_index(property);
@@ -334,7 +331,7 @@ void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::Propert
 
 void Function::build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::PutByValue);
+    auto instruction = Instruction::create<Opcode::PutByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&value);
@@ -344,7 +341,7 @@ void Function::build_put_by_value(BasicBlock& block, Value& base, Value& propert
 
 Value& Function::build_delete_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property)
 {
-    auto instruction = Instruction::create(Opcode::DeleteById);
+    auto instruction = Instruction::create<Opcode::DeleteById>();
     instruction->add_operand(&base);
     instruction->set_property_key_index(property);
 
@@ -358,7 +355,7 @@ Value& Function::build_delete_by_id(BasicBlock& block, Value& base, Bytecode::Pr
 
 Value& Function::build_delete_by_value(BasicBlock& block, Value& base, Value& property)
 {
-    auto instruction = Instruction::create(Opcode::DeleteByValue);
+    auto instruction = Instruction::create<Opcode::DeleteByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
 
@@ -372,7 +369,7 @@ Value& Function::build_delete_by_value(BasicBlock& block, Value& base, Value& pr
 
 Value& Function::build_has_property(BasicBlock& block, Value& object, Value& property)
 {
-    auto instruction = Instruction::create(Opcode::HasProperty);
+    auto instruction = Instruction::create<Opcode::HasProperty>();
     instruction->add_operand(&object);
     instruction->add_operand(&property);
 
@@ -386,7 +383,7 @@ Value& Function::build_has_property(BasicBlock& block, Value& object, Value& pro
 
 Value& Function::build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property)
 {
-    auto instruction = Instruction::create(Opcode::GetPrivateById);
+    auto instruction = Instruction::create<Opcode::GetPrivateById>();
     instruction->add_operand(&base);
     instruction->set_identifier_index(property);
 
@@ -399,7 +396,7 @@ Value& Function::build_get_private_by_id(BasicBlock& block, Value& base, Bytecod
 
 void Function::build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::PutPrivateById);
+    auto instruction = Instruction::create<Opcode::PutPrivateById>();
     instruction->add_operand(&base);
     instruction->add_operand(&value);
     instruction->set_identifier_index(property);
@@ -408,7 +405,7 @@ void Function::build_put_private_by_id(BasicBlock& block, Value& base, Bytecode:
 
 void Function::build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutGetterById);
+    auto instruction = Instruction::create<Opcode::PutGetterById>();
     instruction->add_operand(&base);
     instruction->add_operand(&getter);
     instruction->set_property_key_index(property);
@@ -418,7 +415,7 @@ void Function::build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::
 
 void Function::build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutSetterById);
+    auto instruction = Instruction::create<Opcode::PutSetterById>();
     instruction->add_operand(&base);
     instruction->add_operand(&setter);
     instruction->set_property_key_index(property);
@@ -428,7 +425,7 @@ void Function::build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::
 
 void Function::build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutPrototypeById);
+    auto instruction = Instruction::create<Opcode::PutPrototypeById>();
     instruction->add_operand(&base);
     instruction->add_operand(&prototype);
     instruction->set_property_key_index(property);
@@ -438,7 +435,7 @@ void Function::build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecod
 
 void Function::build_put_getter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& getter)
 {
-    auto instruction = Instruction::create(Opcode::PutGetterByIdWithThis);
+    auto instruction = Instruction::create<Opcode::PutGetterByIdWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&getter);
@@ -448,7 +445,7 @@ void Function::build_put_getter_by_id_with_this(BasicBlock& block, Value& base, 
 
 void Function::build_put_setter_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& setter)
 {
-    auto instruction = Instruction::create(Opcode::PutSetterByIdWithThis);
+    auto instruction = Instruction::create<Opcode::PutSetterByIdWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&setter);
@@ -458,7 +455,7 @@ void Function::build_put_setter_by_id_with_this(BasicBlock& block, Value& base, 
 
 void Function::build_put_prototype_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& prototype)
 {
-    auto instruction = Instruction::create(Opcode::PutPrototypeByIdWithThis);
+    auto instruction = Instruction::create<Opcode::PutPrototypeByIdWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&prototype);
@@ -468,7 +465,7 @@ void Function::build_put_prototype_by_id_with_this(BasicBlock& block, Value& bas
 
 void Function::build_put_getter_by_value(BasicBlock& block, Value& base, Value& property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutGetterByValue);
+    auto instruction = Instruction::create<Opcode::PutGetterByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&getter);
@@ -478,7 +475,7 @@ void Function::build_put_getter_by_value(BasicBlock& block, Value& base, Value& 
 
 void Function::build_put_setter_by_value(BasicBlock& block, Value& base, Value& property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutSetterByValue);
+    auto instruction = Instruction::create<Opcode::PutSetterByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&setter);
@@ -488,7 +485,7 @@ void Function::build_put_setter_by_value(BasicBlock& block, Value& base, Value& 
 
 void Function::build_put_prototype_by_value(BasicBlock& block, Value& base, Value& property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    auto instruction = Instruction::create(Opcode::PutPrototypeByValue);
+    auto instruction = Instruction::create<Opcode::PutPrototypeByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&prototype);
@@ -498,7 +495,7 @@ void Function::build_put_prototype_by_value(BasicBlock& block, Value& base, Valu
 
 void Function::build_put_getter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& getter)
 {
-    auto instruction = Instruction::create(Opcode::PutGetterByValueWithThis);
+    auto instruction = Instruction::create<Opcode::PutGetterByValueWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&this_value);
@@ -508,7 +505,7 @@ void Function::build_put_getter_by_value_with_this(BasicBlock& block, Value& bas
 
 void Function::build_put_setter_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& setter)
 {
-    auto instruction = Instruction::create(Opcode::PutSetterByValueWithThis);
+    auto instruction = Instruction::create<Opcode::PutSetterByValueWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&this_value);
@@ -518,7 +515,7 @@ void Function::build_put_setter_by_value_with_this(BasicBlock& block, Value& bas
 
 void Function::build_put_prototype_by_value_with_this(BasicBlock& block, Value& base, Value& property, Value& this_value, Value& prototype)
 {
-    auto instruction = Instruction::create(Opcode::PutPrototypeByValueWithThis);
+    auto instruction = Instruction::create<Opcode::PutPrototypeByValueWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&this_value);
@@ -528,7 +525,7 @@ void Function::build_put_prototype_by_value_with_this(BasicBlock& block, Value& 
 
 void Function::build_put_by_spread(BasicBlock& block, Value& base, Value& source)
 {
-    auto instruction = Instruction::create(Opcode::PutBySpread);
+    auto instruction = Instruction::create<Opcode::PutBySpread>();
     instruction->add_operand(&base);
     instruction->add_operand(&source);
     block.append(move(instruction));
@@ -592,7 +589,7 @@ Value& Function::build_call_with_argument_array(BasicBlock& block, Value& callee
 
 Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
-    auto instruction = Instruction::create(Opcode::Construct);
+    auto instruction = Instruction::create<Opcode::Construct>();
     instruction->add_operand(&callee);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
@@ -608,7 +605,7 @@ Value& Function::build_construct(BasicBlock& block, Value& callee, Span<Value*> 
 
 Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
-    auto instruction = Instruction::create(Opcode::ConstructWithArgumentArray);
+    auto instruction = Instruction::create<Opcode::ConstructWithArgumentArray>();
     instruction->add_operand(&callee);
     instruction->add_operand(&this_value);
     instruction->add_operand(&arguments);
@@ -624,7 +621,7 @@ Value& Function::build_construct_with_argument_array(BasicBlock& block, Value& c
 
 Value& Function::build_super_call_with_argument_array(BasicBlock& block, Value& arguments, bool is_synthetic)
 {
-    auto instruction = Instruction::create(Opcode::SuperCallWithArgumentArray);
+    auto instruction = Instruction::create<Opcode::SuperCallWithArgumentArray>();
     instruction->add_operand(&arguments);
     instruction->set_is_synthetic(is_synthetic);
 
@@ -638,7 +635,7 @@ Value& Function::build_super_call_with_argument_array(BasicBlock& block, Value& 
 
 Value& Function::build_import_call(BasicBlock& block, Value& specifier, Value& options)
 {
-    auto instruction = Instruction::create(Opcode::ImportCall);
+    auto instruction = Instruction::create<Opcode::ImportCall>();
     instruction->add_operand(&specifier);
     instruction->add_operand(&options);
 
@@ -652,7 +649,7 @@ Value& Function::build_import_call(BasicBlock& block, Value& specifier, Value& o
 // Environment
 Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
-    auto instruction = Instruction::create(Opcode::GetCalleeAndThisFromEnvironment);
+    auto instruction = Instruction::create<Opcode::GetCalleeAndThisFromEnvironment>();
     instruction->set_identifier_index(identifier);
 
     // This produces a tuple of (callee, this_value)
@@ -665,7 +662,7 @@ Value& Function::build_get_callee_and_this_from_environment(BasicBlock& block, B
 
 void Function::build_create_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict)
 {
-    auto instruction = Instruction::create(Opcode::CreateVariable);
+    auto instruction = Instruction::create<Opcode::CreateVariable>();
     instruction->set_identifier_index(identifier);
     instruction->set_environment_mode(mode);
     instruction->set_is_immutable(is_immutable);
@@ -677,7 +674,7 @@ void Function::build_create_variable(BasicBlock& block, Bytecode::IdentifierTabl
 
 Value& Function::build_create_lexical_environment(BasicBlock& block, u32 capacity)
 {
-    auto instruction = Instruction::create(Opcode::CreateLexicalEnvironment);
+    auto instruction = Instruction::create<Opcode::CreateLexicalEnvironment>();
     instruction->set_capacity(capacity);
 
     auto& result = create_value_for_instruction();
@@ -689,7 +686,7 @@ Value& Function::build_create_lexical_environment(BasicBlock& block, u32 capacit
 
 void Function::build_create_mutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict)
 {
-    auto instruction = Instruction::create(Opcode::CreateMutableBinding);
+    auto instruction = Instruction::create<Opcode::CreateMutableBinding>();
     instruction->add_operand(&environment);
     instruction->set_identifier_index(identifier);
     instruction->set_is_strict(is_strict);
@@ -698,7 +695,7 @@ void Function::build_create_mutable_binding(BasicBlock& block, Value& environmen
 
 void Function::build_create_immutable_binding(BasicBlock& block, Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict)
 {
-    auto instruction = Instruction::create(Opcode::CreateImmutableBinding);
+    auto instruction = Instruction::create<Opcode::CreateImmutableBinding>();
     instruction->add_operand(&environment);
     instruction->set_identifier_index(identifier);
     instruction->set_is_strict(is_strict);
@@ -707,26 +704,26 @@ void Function::build_create_immutable_binding(BasicBlock& block, Value& environm
 
 void Function::build_leave_lexical_environment(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::LeaveLexicalEnvironment);
+    auto instruction = Instruction::create<Opcode::LeaveLexicalEnvironment>();
     block.append(move(instruction));
 }
 
 void Function::build_enter_object_environment(BasicBlock& block, Value& object)
 {
-    auto instruction = Instruction::create(Opcode::EnterObjectEnvironment);
+    auto instruction = Instruction::create<Opcode::EnterObjectEnvironment>();
     instruction->add_operand(&object);
     block.append(move(instruction));
 }
 
 void Function::build_resolve_this_binding(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::ResolveThisBinding);
+    auto instruction = Instruction::create<Opcode::ResolveThisBinding>();
     block.append(move(instruction));
 }
 
 Value& Function::build_resolve_super_base(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::ResolveSuperBase);
+    auto instruction = Instruction::create<Opcode::ResolveSuperBase>();
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
     block.append(move(instruction));
@@ -735,7 +732,7 @@ Value& Function::build_resolve_super_base(BasicBlock& block)
 
 Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
-    auto instruction = Instruction::create(Opcode::GetBinding);
+    auto instruction = Instruction::create<Opcode::GetBinding>();
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
@@ -747,7 +744,7 @@ Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableI
 
 void Function::build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::InitializeBinding);
+    auto instruction = Instruction::create<Opcode::InitializeBinding>();
     instruction->set_identifier_index(identifier);
     instruction->add_operand(&value);
 
@@ -756,7 +753,7 @@ void Function::build_initialize_binding(BasicBlock& block, Bytecode::IdentifierT
 
 void Function::build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::SetBinding);
+    auto instruction = Instruction::create<Opcode::SetBinding>();
     instruction->set_identifier_index(identifier);
     instruction->add_operand(&value);
 
@@ -765,7 +762,7 @@ void Function::build_set_binding(BasicBlock& block, Bytecode::IdentifierTableInd
 
 Value& Function::build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
-    auto instruction = Instruction::create(Opcode::GetGlobal);
+    auto instruction = Instruction::create<Opcode::GetGlobal>();
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
@@ -777,7 +774,7 @@ Value& Function::build_get_global(BasicBlock& block, Bytecode::IdentifierTableIn
 
 void Function::build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::SetGlobal);
+    auto instruction = Instruction::create<Opcode::SetGlobal>();
     instruction->set_identifier_index(identifier);
     instruction->add_operand(&value);
 
@@ -786,7 +783,7 @@ void Function::build_set_global(BasicBlock& block, Bytecode::IdentifierTableInde
 
 Value& Function::build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
-    auto instruction = Instruction::create(Opcode::DeleteVariable);
+    auto instruction = Instruction::create<Opcode::DeleteVariable>();
     instruction->set_identifier_index(identifier);
 
     auto& result = create_value_for_instruction();
@@ -800,7 +797,7 @@ Value& Function::build_delete_variable(BasicBlock& block, Bytecode::IdentifierTa
 // Object creation
 Value& Function::build_new_object(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::NewObject);
+    auto instruction = Instruction::create<Opcode::NewObject>();
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
@@ -812,7 +809,7 @@ Value& Function::build_new_object(BasicBlock& block)
 
 Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
 {
-    auto instruction = Instruction::create(Opcode::NewArray);
+    auto instruction = Instruction::create<Opcode::NewArray>();
     for (auto* element : elements)
         instruction->add_operand(element);
 
@@ -826,7 +823,7 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
 
 Value& Function::build_new_array_with_length(BasicBlock& block, Value& length)
 {
-    auto instruction = Instruction::create(Opcode::NewArrayWithLength);
+    auto instruction = Instruction::create<Opcode::NewArrayWithLength>();
     instruction->add_operand(&length);
 
     auto& result = create_value_for_instruction();
@@ -839,7 +836,7 @@ Value& Function::build_new_array_with_length(BasicBlock& block, Value& length)
 
 void Function::build_array_append(BasicBlock& block, Value& array, Value& value, bool is_spread)
 {
-    auto instruction = Instruction::create(Opcode::ArrayAppend);
+    auto instruction = Instruction::create<Opcode::ArrayAppend>();
     instruction->add_operand(&array);
     instruction->add_operand(&value);
     instruction->set_is_spread(is_spread);
@@ -848,7 +845,7 @@ void Function::build_array_append(BasicBlock& block, Value& array, Value& value,
 
 Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys)
 {
-    auto instruction = Instruction::create(Opcode::NewClass);
+    auto instruction = Instruction::create<Opcode::NewClass>();
 
     // super_class is the first operand (may be null)
     instruction->add_operand(super_class);
@@ -867,7 +864,7 @@ Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Val
 
 Value& Function::build_new_function(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::NewFunction);
+    auto instruction = Instruction::create<Opcode::NewFunction>();
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Function);
@@ -879,7 +876,7 @@ Value& Function::build_new_function(BasicBlock& block)
 
 Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex)
 {
-    auto instruction = Instruction::create(Opcode::NewRegExp);
+    auto instruction = Instruction::create<Opcode::NewRegExp>();
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Object);
@@ -894,7 +891,7 @@ Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex 
 
 void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, CacheIndex shape_cache_index, PropertySlot property_slot)
 {
-    auto instruction = Instruction::create(Opcode::InitObjectLiteralProperty);
+    auto instruction = Instruction::create<Opcode::InitObjectLiteralProperty>();
     instruction->add_operand(&object);
     instruction->add_operand(&value);
     instruction->set_property_key_index(property);
@@ -906,7 +903,7 @@ void Function::build_init_object_literal_property(BasicBlock& block, Value& obje
 
 void Function::build_cache_object_shape(BasicBlock& block, Value& object, CacheIndex cache_index)
 {
-    auto instruction = Instruction::create(Opcode::CacheObjectShape);
+    auto instruction = Instruction::create<Opcode::CacheObjectShape>();
     instruction->add_operand(&object);
     instruction->set_cache_index(cache_index);
 
@@ -920,7 +917,7 @@ Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { 
 // Arguments
 Value& Function::build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable)
 {
-    auto instruction = Instruction::create(Opcode::CreateArguments);
+    auto instruction = Instruction::create<Opcode::CreateArguments>();
     instruction->set_arguments_kind(kind);
     instruction->set_is_immutable(is_immutable);
     auto& result = create_value_for_instruction();
@@ -931,7 +928,7 @@ Value& Function::build_create_arguments(BasicBlock& block, Bytecode::Op::Argumen
 
 Value& Function::build_create_rest_params(BasicBlock& block, u32 rest_index)
 {
-    auto instruction = Instruction::create(Opcode::CreateRestParams);
+    auto instruction = Instruction::create<Opcode::CreateRestParams>();
     instruction->set_rest_index(rest_index);
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
@@ -941,7 +938,7 @@ Value& Function::build_create_rest_params(BasicBlock& block, u32 rest_index)
 
 Value& Function::build_get_new_target(BasicBlock& block)
 {
-    auto instruction = Instruction::create(Opcode::GetNewTarget);
+    auto instruction = Instruction::create<Opcode::GetNewTarget>();
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
     block.append(move(instruction));
@@ -951,21 +948,21 @@ Value& Function::build_get_new_target(BasicBlock& block)
 // Guard operations (may throw but produce no value)
 void Function::build_throw_if_not_object(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::ThrowIfNotObject);
+    auto instruction = Instruction::create<Opcode::ThrowIfNotObject>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
 
 void Function::build_throw_if_nullish(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::ThrowIfNullish);
+    auto instruction = Instruction::create<Opcode::ThrowIfNullish>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
 
 void Function::build_throw_if_tdz(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::ThrowIfTDZ);
+    auto instruction = Instruction::create<Opcode::ThrowIfTDZ>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
@@ -988,14 +985,14 @@ Value& Function::build_iterator_next_unpack(BasicBlock& block, Value& iterator)
 
 void Function::build_iterator_close(BasicBlock& block, Value& iterator)
 {
-    auto instruction = Instruction::create(Opcode::IteratorClose);
+    auto instruction = Instruction::create<Opcode::IteratorClose>();
     instruction->add_operand(&iterator);
     block.append(move(instruction));
 }
 
 Value& Function::build_iterator_to_array(BasicBlock& block, Value& iterator)
 {
-    auto instruction = Instruction::create(Opcode::IteratorToArray);
+    auto instruction = Instruction::create<Opcode::IteratorToArray>();
     instruction->add_operand(&iterator);
 
     auto& result = create_value_for_instruction();
@@ -1015,7 +1012,7 @@ Value& Function::build_move(BasicBlock& block, Value& source)
 // Tuple extraction
 Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
 {
-    auto instruction = Instruction::create(Opcode::ExtractValue);
+    auto instruction = Instruction::create<Opcode::ExtractValue>();
     instruction->add_operand(&tuple);
     instruction->set_extract_index(index);
 
@@ -1044,21 +1041,21 @@ void Function::build_branch(BasicBlock& from, Value& condition, BasicBlock& if_t
 
 void Function::build_return(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::Return);
+    auto instruction = TerminatorInstruction::create<Opcode::Return>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
 
 void Function::build_end(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::End);
+    auto instruction = TerminatorInstruction::create<Opcode::End>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
 
 void Function::build_throw(BasicBlock& block, Value& value)
 {
-    auto instruction = Instruction::create(Opcode::Throw);
+    auto instruction = TerminatorInstruction::create<Opcode::Throw>();
     instruction->add_operand(&value);
     block.append(move(instruction));
 }
@@ -1066,7 +1063,7 @@ void Function::build_throw(BasicBlock& block, Value& value)
 // Generators/Async - terminators with result (the resume value)
 Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* continuation)
 {
-    auto instruction = TerminatorInstruction::create(Opcode::Yield);
+    auto instruction = TerminatorInstruction::create<Opcode::Yield>();
     instruction->add_operand(&value);
     if (continuation) {
         instruction->set_true_target(continuation);
@@ -1084,7 +1081,7 @@ Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* contin
 
 Value& Function::build_await(BasicBlock& block, Value& argument, BasicBlock& continuation)
 {
-    auto instruction = TerminatorInstruction::create(Opcode::Await);
+    auto instruction = TerminatorInstruction::create<Opcode::Await>();
     instruction->add_operand(&argument);
     instruction->set_true_target(&continuation);
     CFG::add_predecessor(continuation, block);
@@ -1101,7 +1098,7 @@ Value& Function::build_get_completion_fields(BasicBlock& block, Value& completio
 {
     // GetCompletionFields produces a tuple of (type, value)
     // Use ExtractValue to get individual components
-    auto instruction = Instruction::create(Opcode::GetCompletionFields);
+    auto instruction = Instruction::create<Opcode::GetCompletionFields>();
     instruction->add_operand(&completion);
 
     auto& result = create_value_for_instruction();

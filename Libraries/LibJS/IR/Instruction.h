@@ -216,7 +216,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::Branch)]                             = { "Branch",                             true,  false, true,  false, false, false, false },
     [to_underlying(Opcode::Return)]                             = { "Return",                             true,  false, true,  false, false, false, false },
     [to_underlying(Opcode::End)]                                = { "End",                                true,  false, true,  false, false, false, false },
-    [to_underlying(Opcode::Throw)]                              = { "Throw",                              true,  false, true,  false, false, false, false },
+    [to_underlying(Opcode::Throw)]                              = { "Throw",                              true,  true,  true,  false, false, false, false },
 
     // SSA
     [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, false, false, false, false, false, true  },
@@ -433,6 +433,29 @@ constexpr bool opcode_has_result(Opcode opcode)
     return opcode_traits(opcode).has_result;
 }
 
+// Does this opcode require a specialized instruction class?
+// These opcodes must NOT use the generic Instruction::create<Op>().
+constexpr bool requires_specialized_instruction(Opcode opcode)
+{
+    switch (opcode) {
+    // Use JumpInstruction::create() or BranchInstruction::create()
+    case Opcode::Jump:
+    case Opcode::Branch:
+    // Use PhiInstruction::create()
+    case Opcode::Phi:
+    // Use GetByIdInstruction::create()
+    case Opcode::GetById:
+    // Use CallInstruction::create()
+    case Opcode::Call:
+    case Opcode::CallBuiltin:
+    case Opcode::CallDirectEval:
+    case Opcode::CallWithArgumentArray:
+        return true;
+    default:
+        return false;
+    }
+}
+
 class TerminatorInstruction;
 
 class JS_API Instruction {
@@ -440,7 +463,17 @@ class JS_API Instruction {
     AK_MAKE_NONMOVABLE(Instruction);
 
 public:
-    [[nodiscard]] static NonnullOwnPtr<Instruction> create(Opcode opcode);
+    template<Opcode Op>
+    [[nodiscard]] static NonnullOwnPtr<Instruction> create()
+    {
+        static_assert(!requires_specialized_instruction(Op),
+            "This opcode requires a specialized instruction class. "
+            "Use JumpInstruction, BranchInstruction, PhiInstruction, "
+            "GetByIdInstruction, or CallInstruction instead.");
+        static_assert(!is_terminator_opcode(Op),
+            "Terminator opcodes require TerminatorInstruction::create<Op>().");
+        return adopt_own(*new Instruction(Op));
+    }
 
     virtual ~Instruction() = default;
 
@@ -621,7 +654,16 @@ private:
 // This compile-time separation prevents accidentally setting targets on non-terminators.
 class JS_API TerminatorInstruction : public Instruction {
 public:
-    [[nodiscard]] static NonnullOwnPtr<TerminatorInstruction> create(Opcode opcode);
+    template<Opcode Op>
+    [[nodiscard]] static NonnullOwnPtr<TerminatorInstruction> create()
+    {
+        static_assert(is_terminator_opcode(Op),
+            "TerminatorInstruction::create<Op>() requires a terminator opcode.");
+        static_assert(!requires_specialized_instruction(Op),
+            "This opcode requires a specialized instruction class. "
+            "Use JumpInstruction or BranchInstruction instead.");
+        return adopt_own(*new TerminatorInstruction(Op));
+    }
 
     BasicBlock* true_target() const { return m_true_target; }
     BasicBlock* false_target() const { return m_false_target; }
