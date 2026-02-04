@@ -91,6 +91,22 @@ bool JumpThreading::run(Function& function)
             if (target_uses_bypassed_values)
                 continue; // Can't thread this case safely
 
+            // Check if the phi result is used outside the bypassed block.
+            // If the phi has uses beyond just the branch in this block, we can't safely
+            // remove the phi operand because other code depends on the merged value.
+            bool phi_used_outside_block = false;
+            if (auto* phi_result = phi->result()) {
+                for (auto* use : phi_result->uses()) {
+                    if (use != terminator) {
+                        phi_used_outside_block = true;
+                        break;
+                    }
+                }
+            }
+
+            if (phi_used_outside_block)
+                continue; // Can't thread - phi result is used elsewhere
+
             // Update the predecessor to jump directly to the target
             auto* pred_terminator = pred_block->last_instruction();
             if (!pred_terminator)
