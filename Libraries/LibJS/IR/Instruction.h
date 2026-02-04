@@ -123,6 +123,7 @@ enum class Opcode : u8 {
     GetGlobal,
     SetGlobal,
     DeleteVariable,
+    ResolveThisBinding,
 
     // Object creation
     NewObject,
@@ -154,6 +155,10 @@ enum class Opcode : u8 {
 
     // Tuple extraction (for multi-output instructions)
     ExtractValue,
+
+    // Arguments
+    CreateArguments,
+    CreateRestParams,
 };
 
 constexpr bool is_terminator_opcode(Opcode opcode)
@@ -194,6 +199,8 @@ constexpr bool may_throw_opcode(Opcode opcode)
     case Opcode::CreateMutableBinding:
     case Opcode::CreateImmutableBinding:
     case Opcode::LeaveLexicalEnvironment:
+    case Opcode::CreateArguments:
+    case Opcode::CreateRestParams:
         return false;
     default:
         return true;
@@ -300,6 +307,14 @@ public:
     Bytecode::Builtin builtin() const { return m_builtin; }
     void set_builtin(Bytecode::Builtin builtin) { m_builtin = builtin; }
 
+    // For CreateArguments
+    Bytecode::Op::ArgumentsKind arguments_kind() const { return m_arguments_kind; }
+    void set_arguments_kind(Bytecode::Op::ArgumentsKind kind) { m_arguments_kind = kind; }
+
+    // For CreateRestParams
+    u32 rest_index() const { return m_rest_index; }
+    void set_rest_index(u32 index) { m_rest_index = index; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -348,6 +363,12 @@ private:
 
     // For CallBuiltin
     Bytecode::Builtin m_builtin { Bytecode::Builtin::__Count };
+
+    // For CreateArguments
+    Bytecode::Op::ArgumentsKind m_arguments_kind { Bytecode::Op::ArgumentsKind::Mapped };
+
+    // For CreateRestParams
+    u32 m_rest_index { 0 };
 };
 
 }

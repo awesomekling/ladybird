@@ -471,6 +471,12 @@ void Function::build_leave_lexical_environment(BasicBlock& block)
     block.append(move(instruction));
 }
 
+void Function::build_resolve_this_binding(BasicBlock& block)
+{
+    auto instruction = Instruction::create(Opcode::ResolveThisBinding);
+    block.append(move(instruction));
+}
+
 Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier)
 {
     auto instruction = Instruction::create(Opcode::GetBinding);
@@ -640,6 +646,30 @@ void Function::build_cache_object_shape(BasicBlock& block, Value& object, u32 ca
 // Special
 Value& Function::build_in(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::In, lhs, rhs); }
 Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::InstanceOf, lhs, rhs); }
+
+// Arguments
+Value& Function::build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable)
+{
+    auto instruction = Instruction::create(Opcode::CreateArguments);
+    instruction->set_arguments_kind(kind);
+    instruction->set_is_immutable(is_immutable);
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+    result.set_defining_instruction(instruction.ptr());
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_create_rest_params(BasicBlock& block, u32 rest_index)
+{
+    auto instruction = Instruction::create(Opcode::CreateRestParams);
+    instruction->set_rest_index(rest_index);
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+    result.set_defining_instruction(instruction.ptr());
+    block.append(move(instruction));
+    return result;
+}
 
 // Iterators
 Value& Function::build_get_iterator(BasicBlock& block, Value& iterable)

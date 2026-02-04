@@ -28,6 +28,10 @@ public:
 
     GC::Ptr<Bytecode::Executable const> source_executable() const { return m_source_executable; }
 
+    // Mapping from source bytecode block index to IR block (set by lifter)
+    HashMap<u32, BasicBlock*> const& source_block_map() const { return m_source_block_map; }
+    void set_source_block_map(HashMap<u32, BasicBlock*> map) { m_source_block_map = move(map); }
+
     Vector<NonnullOwnPtr<BasicBlock>> const& basic_blocks() const { return m_basic_blocks; }
     Vector<NonnullOwnPtr<BasicBlock>>& basic_blocks() { return m_basic_blocks; }
     Vector<NonnullOwnPtr<Value>> const& values() const { return m_values; }
@@ -131,6 +135,7 @@ public:
     Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
+    void build_resolve_this_binding(BasicBlock& block);
 
     // Object creation
     Value& build_new_object(BasicBlock& block);
@@ -140,6 +145,10 @@ public:
     Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, u32 shape_cache_index, u32 property_slot);
     void build_cache_object_shape(BasicBlock& block, Value& object, u32 cache_index);
+
+    // Arguments
+    Value& build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable);
+    Value& build_create_rest_params(BasicBlock& block, u32 rest_index);
 
     // Iterators
     Value& build_get_iterator(BasicBlock& block, Value& iterable);
@@ -182,6 +191,7 @@ private:
     Value& build_unary_op(BasicBlock& block, Opcode opcode, Value& operand);
 
     GC::Ptr<Bytecode::Executable const> m_source_executable;
+    HashMap<u32, BasicBlock*> m_source_block_map;
     Vector<NonnullOwnPtr<BasicBlock>> m_basic_blocks;
     Vector<NonnullOwnPtr<Value>> m_values;
     Vector<Value*> m_parameters;

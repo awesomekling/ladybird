@@ -33,6 +33,10 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     // Phase 2: Fill in phi operands now that all phis exist
     lifter.place_phi_nodes();
     lifter.fill_phi_operands();
+
+    // Store the source block map for exception handler remapping in the lowerer
+    lifter.m_function->set_source_block_map(move(lifter.m_block_map));
+
     return move(lifter.m_function);
 }
 
@@ -953,7 +957,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
     case ResolveThisBinding: {
-        // ResolveThisBinding doesn't produce a value itself, it's a side-effect op
+        m_function->build_resolve_this_binding(block);
         break;
     }
     case GetObjectPropertyIterator: {
@@ -1111,15 +1115,14 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Arguments and rest params
     case CreateArguments: {
         auto const& op = static_cast<Bytecode::Op::CreateArguments const&>(instruction);
-        if (op.dst().has_value()) {
-            auto& result = m_function->create_register_value();
+        auto& result = m_function->build_create_arguments(block, op.kind(), op.is_immutable());
+        if (op.dst().has_value())
             define_operand(op.dst().value(), result, block);
-        }
         break;
     }
     case CreateRestParams: {
         auto const& op = static_cast<Bytecode::Op::CreateRestParams const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_create_rest_params(block, op.rest_index());
         define_operand(op.dst(), result, block);
         break;
     }

@@ -541,6 +541,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::LeaveLexicalEnvironment:
         emit<Bytecode::Op::LeaveLexicalEnvironment>();
         break;
+    case Opcode::ResolveThisBinding:
+        emit<Bytecode::Op::ResolveThisBinding>();
+        break;
     case Opcode::GetBinding:
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
         break;
@@ -611,6 +614,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::LoadUndefined:
     case Opcode::LoadNull:
         // Constants are handled by operand_for_value - no explicit lowering needed
+        break;
+
+    // Arguments
+    case Opcode::CreateArguments:
+        emit<Bytecode::Op::CreateArguments>(dst(), instruction.arguments_kind(), instruction.is_immutable());
+        break;
+    case Opcode::CreateRestParams:
+        emit<Bytecode::Op::CreateRestParams>(dst(), instruction.rest_index());
         break;
 
     // Call (variable-length arguments)
@@ -1075,6 +1086,56 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 
     // Copy length_identifier for GetLength instruction support
     executable->length_identifier = source_executable->length_identifier;
+
+    // Remap exception handlers from source executable
+    // Maps: source offset -> source block -> IR block -> target block -> target offset
+    auto const& source_block_map = function.source_block_map();
+
+    auto source_offset_to_target_offset = [&](size_t source_offset) -> Optional<size_t> {
+        // Find source block index for this offset
+        auto const& source_offsets = source_executable->basic_block_start_offsets;
+        u32 source_block_index = 0;
+        for (size_t i = 0; i < source_offsets.size(); ++i) {
+            if (source_offsets[i] <= source_offset) {
+                source_block_index = static_cast<u32>(i);
+            } else {
+                break;
+            }
+        }
+
+        // Find IR block for this source block
+        auto ir_block_it = source_block_map.find(source_block_index);
+        if (ir_block_it == source_block_map.end())
+            return {};
+        auto* ir_block = ir_block_it->value;
+
+        // Find target block index for this IR block
+        auto target_block_it = lowerer.m_ir_block_to_bytecode_index.find(ir_block);
+        if (target_block_it == lowerer.m_ir_block_to_bytecode_index.end())
+            return {};
+
+        return basic_block_start_offsets[target_block_it->value];
+    };
+
+    for (auto const& source_handler : source_executable->exception_handlers) {
+        auto start = source_offset_to_target_offset(source_handler.start_offset);
+        auto end = source_offset_to_target_offset(source_handler.end_offset);
+        if (!start.has_value() || !end.has_value())
+            continue;
+
+        Bytecode::Executable::ExceptionHandlers handler;
+        handler.start_offset = *start;
+        handler.end_offset = *end;
+
+        if (source_handler.handler_offset.has_value()) {
+            handler.handler_offset = source_offset_to_target_offset(*source_handler.handler_offset);
+        }
+        if (source_handler.finalizer_offset.has_value()) {
+            handler.finalizer_offset = source_offset_to_target_offset(*source_handler.finalizer_offset);
+        }
+
+        executable->exception_handlers.append(handler);
+    }
 
     return executable;
 }

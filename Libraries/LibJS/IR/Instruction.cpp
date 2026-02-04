@@ -201,6 +201,8 @@ char const* opcode_to_string(Opcode opcode)
         return "LeaveLexicalEnvironment";
     case Opcode::DeleteVariable:
         return "DeleteVariable";
+    case Opcode::ResolveThisBinding:
+        return "ResolveThisBinding";
     case Opcode::NewObject:
         return "NewObject";
     case Opcode::NewArray:
@@ -239,6 +241,10 @@ char const* opcode_to_string(Opcode opcode)
         return "Await";
     case Opcode::GetCompletionFields:
         return "GetCompletionFields";
+    case Opcode::CreateArguments:
+        return "CreateArguments";
+    case Opcode::CreateRestParams:
+        return "CreateRestParams";
     }
     VERIFY_NOT_REACHED();
 }

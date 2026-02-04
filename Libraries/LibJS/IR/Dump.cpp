@@ -143,6 +143,14 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
             builder.appendff(", continuation: block{}", instruction.true_target()->index());
         break;
 
+    case Opcode::CreateArguments:
+        builder.appendff(" kind:{}, immutable:{}", instruction.arguments_kind() == Bytecode::Op::ArgumentsKind::Mapped ? "mapped"sv : "unmapped"sv, instruction.is_immutable());
+        break;
+
+    case Opcode::CreateRestParams:
+        builder.appendff(" rest_index:{}", instruction.rest_index());
+        break;
+
     default:
         for (auto* operand : instruction.operands())
             append_operand(operand);
