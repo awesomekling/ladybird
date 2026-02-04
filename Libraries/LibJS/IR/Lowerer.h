@@ -28,6 +28,7 @@ private:
     void lower_instruction(Instruction const&);
     void emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to);
     bool target_has_phis(BasicBlock const& target) const;
+    bool needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const& to);
     size_t get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to);
     void compute_phi_coalescing();
 

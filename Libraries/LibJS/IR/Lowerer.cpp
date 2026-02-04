@@ -273,6 +273,31 @@ bool Lowerer::target_has_phis(BasicBlock const& target) const
     return target.instructions().first()->opcode() == Opcode::Phi;
 }
 
+bool Lowerer::needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const& to)
+{
+    // Check if any phi in the target block would need a move for this edge
+    for (auto const& instruction : to.instructions()) {
+        if (instruction->opcode() != Opcode::Phi)
+            break;
+
+        auto const& preds = instruction->phi_predecessors();
+        auto const& operands = instruction->operands();
+
+        for (size_t i = 0; i < preds.size(); ++i) {
+            if (preds[i] == &from) {
+                if (!operands[i] || !instruction->result())
+                    continue;
+                auto src = operand_for_value(*operands[i]);
+                auto dst = operand_for_value(*instruction->result());
+                if (src != dst)
+                    return true;
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 size_t Lowerer::get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to)
 {
     // Create a unique key for this edge
@@ -805,27 +830,27 @@ void Lowerer::lower_blocks()
 
             if (true_target && false_target && false_target != true_target) {
                 // Both targets exist and are different - check if we need critical edge splitting
-                bool true_has_phis = target_has_phis(*true_target);
-                bool false_has_phis = target_has_phis(*false_target);
+                bool true_needs_moves = needs_phi_moves_for_edge(*ir_block, *true_target);
+                bool false_needs_moves = needs_phi_moves_for_edge(*ir_block, *false_target);
 
                 size_t true_index = 0;
                 size_t false_index = 0;
 
-                if (true_has_phis && false_has_phis) {
-                    // Critical edges: both targets have phis, so we need trampolines
+                if (true_needs_moves && false_needs_moves) {
+                    // Critical edges: both targets need phi moves, so we need trampolines
                     // to avoid phi move conflicts
                     true_index = get_or_create_trampoline(*ir_block, *true_target);
                     false_index = get_or_create_trampoline(*ir_block, *false_target);
-                } else if (true_has_phis) {
-                    // Only true target has phis - emit moves before branch, use trampoline for true
+                } else if (true_needs_moves) {
+                    // Only true target needs phi moves - use trampoline for true
                     true_index = get_or_create_trampoline(*ir_block, *true_target);
                     false_index = m_ir_block_to_bytecode_index.get(false_target).value();
-                } else if (false_has_phis) {
-                    // Only false target has phis - emit moves before branch, use trampoline for false
+                } else if (false_needs_moves) {
+                    // Only false target needs phi moves - use trampoline for false
                     true_index = m_ir_block_to_bytecode_index.get(true_target).value();
                     false_index = get_or_create_trampoline(*ir_block, *false_target);
                 } else {
-                    // Neither target has phis - no phi moves needed
+                    // Neither target needs phi moves - jump directly
                     true_index = m_ir_block_to_bytecode_index.get(true_target).value();
                     false_index = m_ir_block_to_bytecode_index.get(false_target).value();
                 }
