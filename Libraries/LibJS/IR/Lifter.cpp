@@ -1303,9 +1303,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_put_private_by_id(block, base, op.property(), value);
         break;
     }
-    case HasPrivateId:
+    case HasPrivateId: {
+        auto const& op = static_cast<Bytecode::Op::HasPrivateId const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        // NB: HasPrivateId checks if an object has a private field. We use HasProperty
+        // as a placeholder since there's no dedicated IR opcode for private field checks.
+        auto& result = m_function->build_has_property(block, base, base);
+        define_operand(op.dst(), result, block);
+        break;
+    }
     case AddPrivateName:
-        // Private field operations - no result value for most
+        // Private field operations - adds name to private environment, no result value
         break;
 
     // Super
@@ -1329,10 +1337,24 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         // These are terminators that also define a result (the resume value)
         // They're handled in connect_control_flow() where we have block context
         break;
-    case PrepareYield:
-    case CreateAsyncFromSyncIterator:
+    case PrepareYield: {
+        auto const& op = static_cast<Bytecode::Op::PrepareYield const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.value(), block);
+        auto& result = m_function->build_move(block, value);
+        define_operand(op.dest(), result, block);
+        break;
+    }
+    case CreateAsyncFromSyncIterator: {
+        auto const& op = static_cast<Bytecode::Op::CreateAsyncFromSyncIterator const&>(instruction);
+        auto& iterator = get_or_create_value_for_operand(op.iterator(), block);
+        // NB: CreateAsyncFromSyncIterator wraps a sync iterator. We use a move as a placeholder
+        // since the actual transformation happens at runtime.
+        auto& result = m_function->build_move(block, iterator);
+        define_operand(op.dst(), result, block);
+        break;
+    }
     case AsyncIteratorClose:
-        // Async/generator helper ops - no result value
+        // Async iterator close - no result value, side effect only
         break;
 
     // Type checks
@@ -1371,13 +1393,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_function->build_cache_object_shape(block, object, op.cache_index());
         break;
     }
-
-    // TODO: Handle more opcodes as needed
-    default:
-        // For unhandled opcodes, we skip them for now
-        // In a complete implementation, we'd handle all opcodes
-        break;
     }
+    // NB: No default case - all bytecode opcodes must be explicitly handled above.
+    // This ensures new opcodes cause a compile error rather than being silently skipped.
 }
 
 u32 Lifter::address_to_block_index(size_t address) const
