@@ -1,0 +1,104 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:null = Move null
+    v8:undefined = Move undefined
+    v9:boolean = LooselyEquals v7:null, v8:undefined
+    Jump block1
+block0_split0:
+    v10:boolean = Move v9:boolean
+    v12:boolean = LooselyInequals v7:null, 5
+    Jump block2
+block0_split1:
+    v13:boolean = Move v12:boolean
+    v15:boolean = Move true
+    Return v10:boolean
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:null = Move null
+    v8:undefined = Move undefined
+    v9:boolean = LooselyEquals null, undefined
+    Jump block1
+block0_split0:
+    v10:boolean = Move v9:boolean
+    v12:boolean = LooselyInequals null, 5
+    Jump block2
+block0_split1:
+    v13:boolean = Move v12:boolean
+    v15:boolean = Move true
+    Return v9:boolean
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:null = Move null
+    v8:undefined = Move undefined
+    v9:boolean = LooselyEquals null, undefined
+    Jump block1
+block0_split0:
+    v10:boolean = Move true
+    v12:boolean = LooselyInequals null, 5
+    Jump block2
+block0_split1:
+    v13:boolean = Move true
+    v15:boolean = Move true
+    Return true
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
+    Return true
+
+=== After EmptyBlockElimination ===
+function():
+block0_split1:
+    Return true
+
+function():
+block0_split1:
+    Return true

@@ -189,6 +189,47 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::LooselyEquals:
+            case Opcode::LooselyInequals:
+                if (operands.size() == 2) {
+                    auto const& lhs = operands[0]->constant_value();
+                    auto const& rhs = operands[1]->constant_value();
+                    bool equals = false;
+                    bool can_determine = false;
+
+                    auto is_nullish = [](JS::Value v) { return v.is_null() || v.is_undefined(); };
+
+                    if (is_nullish(lhs) && is_nullish(rhs)) {
+                        // null == undefined (and vice versa) is true.
+                        equals = true;
+                        can_determine = true;
+                    } else if (is_nullish(lhs) || is_nullish(rhs)) {
+                        // null/undefined == non-nullish is always false.
+                        equals = false;
+                        can_determine = true;
+                    } else if (both_numeric()) {
+                        equals = *numeric_to_double(lhs) == *numeric_to_double(rhs);
+                        can_determine = true;
+                    } else if (lhs.is_boolean() && rhs.is_boolean()) {
+                        equals = lhs.as_bool() == rhs.as_bool();
+                        can_determine = true;
+                    } else if (lhs.is_boolean() && (rhs.is_int32() || rhs.is_double())) {
+                        // ToNumber(bool) == number
+                        equals = static_cast<double>(lhs.as_bool() ? 1 : 0) == *numeric_to_double(rhs);
+                        can_determine = true;
+                    } else if ((lhs.is_int32() || lhs.is_double()) && rhs.is_boolean()) {
+                        equals = *numeric_to_double(lhs) == static_cast<double>(rhs.as_bool() ? 1 : 0);
+                        can_determine = true;
+                    }
+
+                    if (can_determine) {
+                        bool result = (instruction->opcode() == Opcode::LooselyEquals) ? equals : !equals;
+                        result_value = JS::Value(result);
+                        can_fold = true;
+                    }
+                }
+                break;
+
             case Opcode::BitwiseAnd:
                 if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
                     result_value = JS::Value(operands[0]->constant_value().as_i32() & operands[1]->constant_value().as_i32());
