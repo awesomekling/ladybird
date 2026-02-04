@@ -37,6 +37,16 @@ private:
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);
     void define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block);
 
+    // Lifting helpers to reduce boilerplate for common instruction patterns
+    template<typename BytecodeOp>
+    void lift_binary_op(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&, Value&));
+
+    template<typename BytecodeOp>
+    void lift_unary_op_src(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&));
+
+    template<typename BytecodeOp>
+    void lift_unary_op_value(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&));
+
     Bytecode::Executable const& m_executable;
     NonnullOwnPtr<Function> m_function;
 

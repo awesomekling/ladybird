@@ -234,248 +234,138 @@ void Lifter::define_operand(Bytecode::Operand operand, Value& value, BasicBlock&
     m_value_to_operand_raw.set(&value, raw);
 }
 
+template<typename BytecodeOp>
+void Lifter::lift_binary_op(Bytecode::Instruction const& instruction, BasicBlock& block, Value& (Function::*build_fn)(BasicBlock&, Value&, Value&))
+{
+    auto const& op = static_cast<BytecodeOp const&>(instruction);
+    auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
+    auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
+    auto& result = (m_function.ptr()->*build_fn)(block, lhs, rhs);
+    define_operand(op.dst(), result, block);
+}
+
+template<typename BytecodeOp>
+void Lifter::lift_unary_op_src(Bytecode::Instruction const& instruction, BasicBlock& block, Value& (Function::*build_fn)(BasicBlock&, Value&))
+{
+    auto const& op = static_cast<BytecodeOp const&>(instruction);
+    auto& src = get_or_create_value_for_operand(op.src(), block);
+    auto& result = (m_function.ptr()->*build_fn)(block, src);
+    define_operand(op.dst(), result, block);
+}
+
+template<typename BytecodeOp>
+void Lifter::lift_unary_op_value(Bytecode::Instruction const& instruction, BasicBlock& block, Value& (Function::*build_fn)(BasicBlock&, Value&))
+{
+    auto const& op = static_cast<BytecodeOp const&>(instruction);
+    auto& src = get_or_create_value_for_operand(op.value(), block);
+    auto& result = (m_function.ptr()->*build_fn)(block, src);
+    define_operand(op.dst(), result, block);
+}
+
 void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlock& block)
 {
     using enum Bytecode::Instruction::Type;
 
     switch (instruction.type()) {
     // Arithmetic binary ops
-    case Add: {
-        auto const& op = static_cast<Bytecode::Op::Add const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_add(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Add:
+        lift_binary_op<Bytecode::Op::Add>(instruction, block, &Function::build_add);
         break;
-    }
-    case Sub: {
-        auto const& op = static_cast<Bytecode::Op::Sub const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_sub(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Sub:
+        lift_binary_op<Bytecode::Op::Sub>(instruction, block, &Function::build_sub);
         break;
-    }
-    case Mul: {
-        auto const& op = static_cast<Bytecode::Op::Mul const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_mul(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Mul:
+        lift_binary_op<Bytecode::Op::Mul>(instruction, block, &Function::build_mul);
         break;
-    }
-    case Div: {
-        auto const& op = static_cast<Bytecode::Op::Div const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_div(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Div:
+        lift_binary_op<Bytecode::Op::Div>(instruction, block, &Function::build_div);
         break;
-    }
-    case Mod: {
-        auto const& op = static_cast<Bytecode::Op::Mod const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_mod(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Mod:
+        lift_binary_op<Bytecode::Op::Mod>(instruction, block, &Function::build_mod);
         break;
-    }
-    case Exp: {
-        auto const& op = static_cast<Bytecode::Op::Exp const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_exp(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case Exp:
+        lift_binary_op<Bytecode::Op::Exp>(instruction, block, &Function::build_exp);
         break;
-    }
 
     // Bitwise binary ops
-    case BitwiseAnd: {
-        auto const& op = static_cast<Bytecode::Op::BitwiseAnd const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_bitwise_and(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case BitwiseAnd:
+        lift_binary_op<Bytecode::Op::BitwiseAnd>(instruction, block, &Function::build_bitwise_and);
         break;
-    }
-    case BitwiseOr: {
-        auto const& op = static_cast<Bytecode::Op::BitwiseOr const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_bitwise_or(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case BitwiseOr:
+        lift_binary_op<Bytecode::Op::BitwiseOr>(instruction, block, &Function::build_bitwise_or);
         break;
-    }
-    case BitwiseXor: {
-        auto const& op = static_cast<Bytecode::Op::BitwiseXor const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_bitwise_xor(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case BitwiseXor:
+        lift_binary_op<Bytecode::Op::BitwiseXor>(instruction, block, &Function::build_bitwise_xor);
         break;
-    }
-    case LeftShift: {
-        auto const& op = static_cast<Bytecode::Op::LeftShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_left_shift(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case LeftShift:
+        lift_binary_op<Bytecode::Op::LeftShift>(instruction, block, &Function::build_left_shift);
         break;
-    }
-    case RightShift: {
-        auto const& op = static_cast<Bytecode::Op::RightShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_right_shift(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case RightShift:
+        lift_binary_op<Bytecode::Op::RightShift>(instruction, block, &Function::build_right_shift);
         break;
-    }
-    case UnsignedRightShift: {
-        auto const& op = static_cast<Bytecode::Op::UnsignedRightShift const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_unsigned_right_shift(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case UnsignedRightShift:
+        lift_binary_op<Bytecode::Op::UnsignedRightShift>(instruction, block, &Function::build_unsigned_right_shift);
         break;
-    }
 
     // Comparison ops
-    case LessThan: {
-        auto const& op = static_cast<Bytecode::Op::LessThan const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_less_than(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case LessThan:
+        lift_binary_op<Bytecode::Op::LessThan>(instruction, block, &Function::build_less_than);
         break;
-    }
-    case LessThanEquals: {
-        auto const& op = static_cast<Bytecode::Op::LessThanEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_less_than_equals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case LessThanEquals:
+        lift_binary_op<Bytecode::Op::LessThanEquals>(instruction, block, &Function::build_less_than_equals);
         break;
-    }
-    case GreaterThan: {
-        auto const& op = static_cast<Bytecode::Op::GreaterThan const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_greater_than(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case GreaterThan:
+        lift_binary_op<Bytecode::Op::GreaterThan>(instruction, block, &Function::build_greater_than);
         break;
-    }
-    case GreaterThanEquals: {
-        auto const& op = static_cast<Bytecode::Op::GreaterThanEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_greater_than_equals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case GreaterThanEquals:
+        lift_binary_op<Bytecode::Op::GreaterThanEquals>(instruction, block, &Function::build_greater_than_equals);
         break;
-    }
-    case LooselyEquals: {
-        auto const& op = static_cast<Bytecode::Op::LooselyEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_loosely_equals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case LooselyEquals:
+        lift_binary_op<Bytecode::Op::LooselyEquals>(instruction, block, &Function::build_loosely_equals);
         break;
-    }
-    case StrictlyEquals: {
-        auto const& op = static_cast<Bytecode::Op::StrictlyEquals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_strictly_equals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case StrictlyEquals:
+        lift_binary_op<Bytecode::Op::StrictlyEquals>(instruction, block, &Function::build_strictly_equals);
         break;
-    }
-    case LooselyInequals: {
-        auto const& op = static_cast<Bytecode::Op::LooselyInequals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_loosely_inequals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case LooselyInequals:
+        lift_binary_op<Bytecode::Op::LooselyInequals>(instruction, block, &Function::build_loosely_inequals);
         break;
-    }
-    case StrictlyInequals: {
-        auto const& op = static_cast<Bytecode::Op::StrictlyInequals const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_strictly_inequals(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case StrictlyInequals:
+        lift_binary_op<Bytecode::Op::StrictlyInequals>(instruction, block, &Function::build_strictly_inequals);
         break;
-    }
 
-    // Unary ops
-    case BitwiseNot: {
-        auto const& op = static_cast<Bytecode::Op::BitwiseNot const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src(), block);
-        auto& result = m_function->build_bitwise_not(block, src);
-        define_operand(op.dst(), result, block);
+    // Unary ops with src()
+    case BitwiseNot:
+        lift_unary_op_src<Bytecode::Op::BitwiseNot>(instruction, block, &Function::build_bitwise_not);
         break;
-    }
-    case UnaryMinus: {
-        auto const& op = static_cast<Bytecode::Op::UnaryMinus const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src(), block);
-        auto& result = m_function->build_negate(block, src);
-        define_operand(op.dst(), result, block);
+    case UnaryMinus:
+        lift_unary_op_src<Bytecode::Op::UnaryMinus>(instruction, block, &Function::build_negate);
         break;
-    }
-    case UnaryPlus: {
-        auto const& op = static_cast<Bytecode::Op::UnaryPlus const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src(), block);
-        auto& result = m_function->build_unary_plus(block, src);
-        define_operand(op.dst(), result, block);
+    case UnaryPlus:
+        lift_unary_op_src<Bytecode::Op::UnaryPlus>(instruction, block, &Function::build_unary_plus);
         break;
-    }
-    case Not: {
-        auto const& op = static_cast<Bytecode::Op::Not const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src(), block);
-        auto& result = m_function->build_not(block, src);
-        define_operand(op.dst(), result, block);
+    case Not:
+        lift_unary_op_src<Bytecode::Op::Not>(instruction, block, &Function::build_not);
         break;
-    }
-    case Typeof: {
-        auto const& op = static_cast<Bytecode::Op::Typeof const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.src(), block);
-        auto& result = m_function->build_typeof(block, src);
-        define_operand(op.dst(), result, block);
+    case Typeof:
+        lift_unary_op_src<Bytecode::Op::Typeof>(instruction, block, &Function::build_typeof);
         break;
-    }
-    case ToBoolean: {
-        auto const& op = static_cast<Bytecode::Op::ToBoolean const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_function->build_to_boolean(block, src);
-        define_operand(op.dst(), result, block);
+
+    // Unary ops with value()
+    case ToBoolean:
+        lift_unary_op_value<Bytecode::Op::ToBoolean>(instruction, block, &Function::build_to_boolean);
         break;
-    }
-    case ToObject: {
-        auto const& op = static_cast<Bytecode::Op::ToObject const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_function->build_to_object(block, src);
-        define_operand(op.dst(), result, block);
+    case ToObject:
+        lift_unary_op_value<Bytecode::Op::ToObject>(instruction, block, &Function::build_to_object);
         break;
-    }
-    case ToString: {
-        auto const& op = static_cast<Bytecode::Op::ToString const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_function->build_to_string(block, src);
-        define_operand(op.dst(), result, block);
+    case ToString:
+        lift_unary_op_value<Bytecode::Op::ToString>(instruction, block, &Function::build_to_string);
         break;
-    }
-    case ToInt32: {
-        auto const& op = static_cast<Bytecode::Op::ToInt32 const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_function->build_to_int32(block, src);
-        define_operand(op.dst(), result, block);
+    case ToInt32:
+        lift_unary_op_value<Bytecode::Op::ToInt32>(instruction, block, &Function::build_to_int32);
         break;
-    }
-    case ToLength: {
-        auto const& op = static_cast<Bytecode::Op::ToLength const&>(instruction);
-        auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_function->build_to_length(block, src);
-        define_operand(op.dst(), result, block);
+    case ToLength:
+        lift_unary_op_value<Bytecode::Op::ToLength>(instruction, block, &Function::build_to_length);
         break;
-    }
     case TypeofBinding: {
         auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
         auto& result = m_function->build_typeof_binding(block, op.identifier());
@@ -831,22 +721,12 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
 
     // In/InstanceOf
-    case In: {
-        auto const& op = static_cast<Bytecode::Op::In const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_in(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case In:
+        lift_binary_op<Bytecode::Op::In>(instruction, block, &Function::build_in);
         break;
-    }
-    case InstanceOf: {
-        auto const& op = static_cast<Bytecode::Op::InstanceOf const&>(instruction);
-        auto& lhs = get_or_create_value_for_operand(op.lhs(), block);
-        auto& rhs = get_or_create_value_for_operand(op.rhs(), block);
-        auto& result = m_function->build_instance_of(block, lhs, rhs);
-        define_operand(op.dst(), result, block);
+    case InstanceOf:
+        lift_binary_op<Bytecode::Op::InstanceOf>(instruction, block, &Function::build_instance_of);
         break;
-    }
 
     // Environment
     case GetBinding: {
