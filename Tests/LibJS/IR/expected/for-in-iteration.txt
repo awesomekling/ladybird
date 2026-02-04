@@ -1,0 +1,540 @@
+=== Before optimization ===
+function():
+block0:
+    v0 = NewObject
+    Jump block6
+block1:
+    v45 = Phi [block3:v54, block16:v13]
+    v44 = Phi [block3:v55, block16:v16]
+    v43 = Phi [block3:v56, block16:v17]
+    v41 = Phi [block3:v57, block16:v42]
+    v39 = Phi [block3:v5, block16:v40]
+    v37 = Phi [block3:v58, block16:v38]
+    v35 = Phi [block3:v59, block16:v36]
+    v33 = Phi [block3:v60, block16:v34]
+    v31 = Phi [block3:v61, block16:v14]
+    v29 = Phi [block3:v62, block16:v30]
+    v28 = Phi [block3:v63, block16:v18]
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v46 = Phi [block17:v47, block21:v13]
+    v42 = Phi [block17:v48, block21:v24]
+    v40 = Phi [block17:v20, block21:v26]
+    v38 = Phi [block17:v49, block21:v23]
+    v36 = Phi [block17:v50, block21:v21]
+    v34 = Phi [block17:v51, block21:v25]
+    v32 = Phi [block17:v52, block21:v14]
+    v30 = Phi [block17:v53, block21:v22]
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block3:
+    Jump block1
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block17
+block5:
+    v21 = Move v13
+    v22 = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    Jump block7
+block0_split1:
+    v4 = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding v4
+    Jump block9
+block0_split3:
+    v5 = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27 = IsNullish v5
+    Branch v27, block3, block4
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block4_split11:
+    v20 = Move undefined
+    Jump block2
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v21
+    Jump block20
+block5_split14:
+    v24 = Move v21
+    v25 = Call v23, v22, v24
+    Jump block21
+block5_split15:
+    v26 = Move v25
+    Jump block2
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0 = NewObject
+    Jump block6
+block1:
+    v45 = Phi [block3:v54, block16:v13]
+    v44 = Phi [block3:v55, block16:v16]
+    v43 = Phi [block3:v56, block16:v17]
+    v41 = Phi [block3:v57, block16:v42]
+    v39 = Phi [block3:v5, block16:v40]
+    v37 = Phi [block3:v58, block16:v38]
+    v35 = Phi [block3:v59, block16:v36]
+    v33 = Phi [block3:v60, block16:v34]
+    v31 = Phi [block3:v61, block16:v14]
+    v29 = Phi [block3:v62, block16:v30]
+    v28 = Phi [block3:v63, block16:v18]
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v46 = Phi [block17:v47, block21:v13]
+    v42 = Phi [block17:v48, block21:v13]
+    v40 = Phi [block17:v19, block21:v25]
+    v38 = Phi [block17:v49, block21:v23]
+    v36 = Phi [block17:v50, block21:v13]
+    v34 = Phi [block17:v51, block21:v25]
+    v32 = Phi [block17:v52, block21:v14]
+    v30 = Phi [block17:v53, block21:v22]
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block3:
+    Jump block1
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block17
+block5:
+    v21 = Move v13
+    v22 = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    Jump block7
+block0_split1:
+    v4 = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding v4
+    Jump block9
+block0_split3:
+    v5 = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27 = IsNullish v5
+    Branch v27, block3, block4
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block4_split11:
+    v20 = Move undefined
+    Jump block2
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v24 = Move v13
+    v25 = Call v23, v22, v13
+    Jump block21
+block5_split15:
+    v26 = Move v25
+    Jump block2
+
+=== After ConstantFolding ===
+function():
+block0:
+    v0 = NewObject
+    Jump block6
+block1:
+    v45 = Phi [block3:v54, block16:v13]
+    v44 = Phi [block3:v55, block16:v16]
+    v43 = Phi [block3:v56, block16:v17]
+    v41 = Phi [block3:v57, block16:v42]
+    v39 = Phi [block3:v5, block16:v40]
+    v37 = Phi [block3:v58, block16:v38]
+    v35 = Phi [block3:v59, block16:v36]
+    v33 = Phi [block3:v60, block16:v34]
+    v31 = Phi [block3:v61, block16:v14]
+    v29 = Phi [block3:v62, block16:v30]
+    v28 = Phi [block3:v63, block16:v18]
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v46 = Phi [block17:v47, block21:v13]
+    v42 = Phi [block17:v48, block21:v13]
+    v40 = Phi [block17:v19, block21:v25]
+    v38 = Phi [block17:v49, block21:v23]
+    v36 = Phi [block17:v50, block21:v13]
+    v34 = Phi [block17:v51, block21:v25]
+    v32 = Phi [block17:v52, block21:v14]
+    v30 = Phi [block17:v53, block21:v22]
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block3:
+    Jump block1
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block17
+block5:
+    v21 = Move v13
+    v22 = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    Jump block7
+block0_split1:
+    v4 = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding v4
+    Jump block9
+block0_split3:
+    v5 = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27 = IsNullish v5
+    Branch v27, block3, block4
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block4_split11:
+    v20 = Move undefined
+    Jump block2
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v24 = Move v13
+    v25 = Call v23, v22, v13
+    Jump block21
+block5_split15:
+    v26 = Move v25
+    Jump block2
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0 = NewObject
+    Jump block6
+block1:
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block3:
+    Jump block1
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block17
+block5:
+    v22 = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    Jump block7
+block0_split1:
+    v4 = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding v4
+    Jump block9
+block0_split3:
+    v5 = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27 = IsNullish v5
+    Branch v27, block3, block4
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block4_split11:
+    Jump block2
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v25 = Call v23, v22, v13
+    Jump block21
+block5_split15:
+    Jump block2
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    v0 = NewObject
+    Jump block6
+block1:
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block2
+block5:
+    v22 = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    Jump block7
+block0_split1:
+    v4 = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding v4
+    Jump block9
+block0_split3:
+    v5 = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27 = IsNullish v5
+    Branch v27, block1, block4
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v25 = Call v23, v22, v13
+    Jump block2
+
+=== After BlockMerging ===
+function():
+block0:
+    v0 = NewObject
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    v4 = NewArray
+    InitializeBinding v4
+    v5 = GetGlobal obj
+    v27 = IsNullish v5
+    Branch v27, block1, block4
+block1:
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block2
+block5:
+    v22 = GetGlobal keys
+    Jump block18
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v25 = Call v23, v22, v13
+    Jump block2
+
+function():
+block0:
+    v0 = NewObject
+    InitObjectLiteralProperty v0, 1
+    InitObjectLiteralProperty v0, 2
+    InitObjectLiteralProperty v0, 3
+    CacheObjectShape v0
+    InitializeBinding v0
+    v4 = NewArray
+    InitializeBinding v4
+    v5 = GetGlobal obj
+    v27 = IsNullish v5
+    Branch v27, block1, block4
+block1:
+    v6 = GetGlobal keys
+    Jump block11
+block2:
+    v12 = IteratorNextUnpack v16, v17, v18
+    v13 = ExtractValue v12, 0
+    v14 = ExtractValue v12, 1
+    Jump block16
+block4:
+    v15 = GetObjectPropertyIterator v5
+    v16 = ExtractValue v15, 0
+    v17 = ExtractValue v15, 1
+    v18 = ExtractValue v15, 2
+    Jump block2
+block5:
+    v22 = GetGlobal keys
+    Jump block18
+block1_split5:
+    v7 = GetById v6.sort
+    Jump block12
+block1_split6:
+    v8 = Call v7, v6
+    Jump block13
+block1_split7:
+    v9 = GetById v8.join
+    Jump block14
+block1_split8:
+    v11 = Call v9, v8, v10
+    Jump block15
+block1_split9:
+    End v11
+block2_split10:
+    Branch v14, block1, block5
+block5_split12:
+    v23 = GetById v22.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v13
+    Jump block20
+block5_split14:
+    v25 = Call v23, v22, v13
+    Jump block2
