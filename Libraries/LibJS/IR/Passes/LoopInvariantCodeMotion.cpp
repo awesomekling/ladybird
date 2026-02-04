@@ -5,7 +5,9 @@
  */
 
 #include <AK/HashTable.h>
+#include <AK/Queue.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
@@ -13,58 +15,75 @@
 
 namespace JS::IR {
 
+// Collect all blocks in a natural loop given the header and back-edge source.
+// A natural loop consists of the header plus all blocks that can reach the
+// back-edge source without going through the header.
+static HashTable<BasicBlock*> collect_loop_blocks(BasicBlock* header, BasicBlock* back_edge_source)
+{
+    HashTable<BasicBlock*> loop_blocks;
+    loop_blocks.set(header);
+
+    if (back_edge_source == header)
+        return loop_blocks; // Single-block loop
+
+    // Work backwards from back_edge_source to find all blocks in the loop
+    Queue<BasicBlock*> worklist;
+    worklist.enqueue(back_edge_source);
+    loop_blocks.set(back_edge_source);
+
+    while (!worklist.is_empty()) {
+        auto* block = worklist.dequeue();
+        for (auto* pred : block->predecessors()) {
+            if (!loop_blocks.contains(pred)) {
+                loop_blocks.set(pred);
+                worklist.enqueue(pred);
+            }
+        }
+    }
+
+    return loop_blocks;
+}
+
 bool LoopInvariantCodeMotion::run(Function& function)
 {
     bool changed = false;
 
-    // Find loop headers and their preheaders
-    // A loop header is a block that has a back edge (a predecessor that comes after it)
-    for (size_t header_idx = 0; header_idx < function.basic_blocks().size(); ++header_idx) {
-        auto& header = function.basic_blocks()[header_idx];
+    // Compute dominators for proper back-edge detection
+    Dominators dominators(function);
 
-        // Check if this block has a back edge
+    // Find natural loops by looking for back-edges
+    // A back-edge is an edge B -> H where H dominates B
+    for (auto& header : function.basic_blocks()) {
         BasicBlock* back_edge_source = nullptr;
         BasicBlock* preheader = nullptr;
 
         for (auto* pred : header->predecessors()) {
-            // Find the predecessor's index
-            size_t pred_idx = SIZE_MAX;
-            for (size_t i = 0; i < function.basic_blocks().size(); ++i) {
-                if (function.basic_blocks()[i].ptr() == pred) {
-                    pred_idx = i;
-                    break;
-                }
-            }
-
-            if (pred_idx > header_idx) {
-                // This is a back edge
+            if (dominators.dominates(header.ptr(), pred)) {
+                // This is a back-edge: pred -> header where header dominates pred
                 back_edge_source = pred;
             } else {
-                // This could be the preheader
+                // This could be the preheader (entry edge into the loop)
                 preheader = pred;
             }
         }
 
-        // Not a loop header if no back edge
-        if (!back_edge_source || !preheader)
+        // Not a loop header if no back-edge found
+        if (!back_edge_source)
             continue;
 
-        // The preheader should only jump to the header (not a branch)
+        // Need exactly one non-back-edge predecessor as the preheader
+        // (multiple entry points make hoisting unsafe without more analysis)
+        if (!preheader)
+            continue;
+
+        // Verify the preheader has exactly one successor (the header)
+        // This ensures hoisted code will execute exactly when entering the loop
         auto* preheader_term = preheader->last_instruction();
         if (!preheader_term || preheader_term->opcode() != Opcode::Jump)
             continue;
 
-        // Collect all blocks in the loop (reachable from header via back edge path)
-        HashTable<BasicBlock*> loop_blocks;
-        loop_blocks.set(header.ptr());
-
-        // Simple heuristic: blocks between header and back edge source are in the loop
-        for (size_t i = header_idx; i < function.basic_blocks().size(); ++i) {
-            auto* block = function.basic_blocks()[i].ptr();
-            loop_blocks.set(block);
-            if (block == back_edge_source)
-                break;
-        }
+        // Collect all blocks in the natural loop
+        auto loop_blocks = collect_loop_blocks(header.ptr(), back_edge_source);
 
         // Find loop-invariant instructions in loop body blocks (not the header)
         for (auto* loop_block : loop_blocks) {
