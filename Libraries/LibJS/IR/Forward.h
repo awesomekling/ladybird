@@ -6,9 +6,14 @@
 
 #pragma once
 
+#include <AK/DistinctNumeric.h>
 #include <AK/Types.h>
 
 namespace JS::IR {
+
+// Strongly-typed indices to prevent accidental mixing of different index types.
+AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, BlockIndex, Comparison, CastToBool, Increment, CastToUnderlying);
+AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, ValueIndex, Comparison, CastToBool, Increment, CastToUnderlying);
 
 class BasicBlock;
 class Function;

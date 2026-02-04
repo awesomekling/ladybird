@@ -9,7 +9,7 @@
 
 namespace JS::IR {
 
-Value::Value(Kind kind, u32 index)
+Value::Value(Kind kind, ValueIndex index)
     : m_kind(kind)
     , m_index(index)
 {
@@ -37,19 +37,19 @@ void Value::replace_all_uses_with(Value* replacement)
     }
 }
 
-NonnullOwnPtr<Value> Value::create_for_instruction(u32 index)
+NonnullOwnPtr<Value> Value::create_for_instruction(ValueIndex index)
 {
     return adopt_own(*new Value(Kind::Instruction, index));
 }
 
-NonnullOwnPtr<Value> Value::create_for_parameter(u32 index, u32 parameter_index)
+NonnullOwnPtr<Value> Value::create_for_parameter(ValueIndex index, u32 parameter_index)
 {
     auto value = adopt_own(*new Value(Kind::Parameter, index));
     value->m_parameter_index = parameter_index;
     return value;
 }
 
-NonnullOwnPtr<Value> Value::create_for_constant(u32 index, JS::Value constant)
+NonnullOwnPtr<Value> Value::create_for_constant(ValueIndex index, JS::Value constant)
 {
     auto value = adopt_own(*new Value(Kind::Constant, index));
     value->m_constant_value = constant;
@@ -77,7 +77,7 @@ NonnullOwnPtr<Value> Value::create_for_constant(u32 index, JS::Value constant)
     return value;
 }
 
-NonnullOwnPtr<Value> Value::create_for_this(u32 index)
+NonnullOwnPtr<Value> Value::create_for_this(ValueIndex index)
 {
     return adopt_own(*new Value(Kind::This, index));
 }

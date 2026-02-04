@@ -228,8 +228,8 @@ private:
     Vector<Value*> m_parameters;
     Value* m_this_value { nullptr };
     BasicBlock* m_entry_block { nullptr };
-    u32 m_next_value_index { 0 };
-    u32 m_next_block_index { 0 };
+    ValueIndex m_next_value_index { 0 };
+    BlockIndex m_next_block_index { 0 };
 };
 
 }

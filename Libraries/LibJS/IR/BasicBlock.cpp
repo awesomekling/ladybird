@@ -9,13 +9,13 @@
 
 namespace JS::IR {
 
-BasicBlock::BasicBlock(u32 index, String name)
+BasicBlock::BasicBlock(BlockIndex index, String name)
     : m_index(index)
     , m_name(move(name))
 {
 }
 
-NonnullOwnPtr<BasicBlock> BasicBlock::create(u32 index, String name)
+NonnullOwnPtr<BasicBlock> BasicBlock::create(BlockIndex index, String name)
 {
     return adopt_own(*new BasicBlock(index, move(name)));
 }

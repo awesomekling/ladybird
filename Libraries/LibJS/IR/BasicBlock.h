@@ -19,9 +19,9 @@ class JS_API BasicBlock {
     AK_MAKE_NONMOVABLE(BasicBlock);
 
 public:
-    static NonnullOwnPtr<BasicBlock> create(u32 index, String name = {});
+    static NonnullOwnPtr<BasicBlock> create(BlockIndex index, String name = {});
 
-    u32 index() const { return m_index; }
+    BlockIndex index() const { return m_index; }
     String const& name() const { return m_name; }
 
     Function* parent_function() const { return m_parent_function; }
@@ -58,9 +58,9 @@ public:
     bool is_terminated() const;
 
 private:
-    BasicBlock(u32 index, String name);
+    BasicBlock(BlockIndex index, String name);
 
-    u32 m_index { 0 };
+    BlockIndex m_index;
     String m_name;
     Function* m_parent_function { nullptr };
     Vector<NonnullOwnPtr<Instruction>> m_instructions;

@@ -29,7 +29,7 @@ public:
 
     Kind kind() const { return m_kind; }
     Type type() const { return m_type; }
-    u32 index() const { return m_index; }
+    ValueIndex index() const { return m_index; }
 
     bool is_instruction() const { return m_kind == Kind::Instruction; }
     bool is_parameter() const { return m_kind == Kind::Parameter; }
@@ -58,17 +58,17 @@ public:
 
     void set_type(Type type) { m_type = type; }
 
-    static NonnullOwnPtr<Value> create_for_instruction(u32 index);
-    static NonnullOwnPtr<Value> create_for_parameter(u32 index, u32 parameter_index);
-    static NonnullOwnPtr<Value> create_for_constant(u32 index, JS::Value constant);
-    static NonnullOwnPtr<Value> create_for_this(u32 index);
+    static NonnullOwnPtr<Value> create_for_instruction(ValueIndex index);
+    static NonnullOwnPtr<Value> create_for_parameter(ValueIndex index, u32 parameter_index);
+    static NonnullOwnPtr<Value> create_for_constant(ValueIndex index, JS::Value constant);
+    static NonnullOwnPtr<Value> create_for_this(ValueIndex index);
 
 private:
-    Value(Kind kind, u32 index);
+    Value(Kind kind, ValueIndex index);
 
     Kind m_kind;
     Type m_type { Type::Unknown };
-    u32 m_index { 0 };
+    ValueIndex m_index;
     u32 m_parameter_index { 0 };
     Instruction* m_defining_instruction { nullptr };
     Vector<Instruction*> m_uses;
