@@ -13,26 +13,12 @@
 
 namespace JS::IR {
 
-// Check if a type is guaranteed to never be NaN
+// Check if a type is guaranteed to never be NaN when used in numeric comparisons.
+// Only types that are already numeric and cannot represent NaN qualify.
+// Other types (Number, String, Object, Undefined, etc.) could be or coerce to NaN.
 static bool type_cannot_be_nan(Type type)
 {
-    switch (type) {
-    case Type::Int32:
-    case Type::Boolean:
-    case Type::Undefined: // undefined -> NaN, but that's caught at runtime
-    case Type::Null:      // null -> 0
-    case Type::String:    // strings are compared lexicographically, not as numbers
-    case Type::Object:
-    case Type::Function:
-    case Type::Array:
-    case Type::Symbol:
-    case Type::BigInt:
-        return true;
-    case Type::Number:  // Could be NaN
-    case Type::Unknown: // Could be anything
-        return false;
-    }
-    VERIFY_NOT_REACHED();
+    return type == Type::Int32 || type == Type::Boolean;
 }
 
 // Returns the inverted comparison opcode if safe to invert.
