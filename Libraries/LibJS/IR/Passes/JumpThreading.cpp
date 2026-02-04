@@ -69,6 +69,60 @@ bool JumpThreading::run(Function& function)
 
             auto* thread_target = take_true ? true_target : false_target;
 
+            // Check if the bypassed block has side effects that must execute.
+            // We can't thread if the block creates environments, variables, etc.
+            bool bypassed_block_has_side_effects = false;
+            for (auto& instr : block->instructions()) {
+                // Skip phi nodes and terminators
+                if (instr->opcode() == Opcode::Phi)
+                    continue;
+                if (instr->is_terminator())
+                    continue;
+
+                // These opcodes have side effects that affect scope/bindings
+                // and must execute before any code that depends on them
+                switch (instr->opcode()) {
+                case Opcode::CreateLexicalEnvironment:
+                case Opcode::LeaveLexicalEnvironment:
+                case Opcode::EnterObjectEnvironment:
+                case Opcode::CreateVariable:
+                case Opcode::CreateMutableBinding:
+                case Opcode::CreateImmutableBinding:
+                case Opcode::InitializeBinding:
+                case Opcode::SetBinding:
+                case Opcode::SetGlobal:
+                case Opcode::PutById:
+                case Opcode::PutByValue:
+                case Opcode::PutPrivateById:
+                case Opcode::PutGetterById:
+                case Opcode::PutSetterById:
+                case Opcode::PutPrototypeById:
+                case Opcode::PutGetterByValue:
+                case Opcode::PutSetterByValue:
+                case Opcode::PutPrototypeByValue:
+                case Opcode::PutBySpread:
+                case Opcode::InitObjectLiteralProperty:
+                case Opcode::ArrayAppend:
+                case Opcode::Call:
+                case Opcode::CallBuiltin:
+                case Opcode::CallDirectEval:
+                case Opcode::CallWithArgumentArray:
+                case Opcode::Construct:
+                case Opcode::ConstructWithArgumentArray:
+                case Opcode::SuperCallWithArgumentArray:
+                case Opcode::IteratorClose:
+                    bypassed_block_has_side_effects = true;
+                    break;
+                default:
+                    break;
+                }
+                if (bypassed_block_has_side_effects)
+                    break;
+            }
+
+            if (bypassed_block_has_side_effects)
+                continue; // Can't thread - bypassed block has side effects
+
             // Check if thread_target uses any values defined in the bypassed block
             // (except through phi nodes in thread_target that we'll update)
             // If so, we can't safely thread because those values won't be available
