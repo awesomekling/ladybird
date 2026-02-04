@@ -91,8 +91,9 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
-    // Bitwise operations always produce Int32 (due to ToInt32 conversion in JS)
+    // Set known result types
     switch (opcode) {
+    // Bitwise operations always produce Int32 (due to ToInt32 conversion in JS)
     case Opcode::BitwiseAnd:
     case Opcode::BitwiseOr:
     case Opcode::BitwiseXor:
@@ -100,6 +101,19 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     case Opcode::RightShift:
     case Opcode::UnsignedRightShift:
         result.set_type(Type::Int32);
+        break;
+    // Comparison and membership operations always produce Boolean
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    case Opcode::LooselyEquals:
+    case Opcode::StrictlyEquals:
+    case Opcode::LooselyInequals:
+    case Opcode::StrictlyInequals:
+    case Opcode::In:
+    case Opcode::InstanceOf:
+        result.set_type(Type::Boolean);
         break;
     default:
         break;
@@ -118,9 +132,29 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
     result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
-    // BitwiseNot always produces Int32 (due to ToInt32 conversion in JS)
-    if (opcode == Opcode::BitwiseNot)
+    // Set known result types for type conversion and check operations
+    switch (opcode) {
+    case Opcode::BitwiseNot:
+    case Opcode::ToInt32:
         result.set_type(Type::Int32);
+        break;
+    case Opcode::ToNumber:
+    case Opcode::UnaryPlus:
+        result.set_type(Type::Number);
+        break;
+    case Opcode::ToBoolean:
+    case Opcode::Not:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
+        result.set_type(Type::Boolean);
+        break;
+    case Opcode::Typeof:
+    case Opcode::ToString:
+        result.set_type(Type::String);
+        break;
+    default:
+        break;
+    }
 
     block.append(move(instruction));
     return result;
