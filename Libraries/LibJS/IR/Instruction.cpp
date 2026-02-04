@@ -120,6 +120,10 @@ NonnullOwnPtr<UnaryOpInstruction> UnaryOpInstruction::create(Opcode opcode, Valu
 
 void Instruction::set_result(Value* value)
 {
+    // Only opcodes that produce results should have a result set.
+    // Setting nullptr is always allowed (to clear a result).
+    if (value)
+        VERIFY(opcode_has_result(m_opcode));
     m_result = value;
     if (value)
         value->set_defining_instruction(this);
