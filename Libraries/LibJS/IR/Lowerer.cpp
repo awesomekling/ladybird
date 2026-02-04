@@ -917,6 +917,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::ThrowIfTDZ:
         emit<Bytecode::Op::ThrowIfTDZ>(operand(0));
         break;
+
+    case Opcode::__Count:
+        VERIFY_NOT_REACHED();
     }
     // NB: No default case - all IR opcodes must be explicitly handled above.
     // This ensures new opcodes cause a compile error rather than being silently skipped.
