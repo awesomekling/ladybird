@@ -84,6 +84,7 @@ def test(file: Path, rebaseline: bool = False) -> bool:
         "--dump-ir",  # Dump the IR
         "--dump-ir-passes",  # Dump IR after each optimization pass
         "--optimize-ir",  # Run the optimizer
+        "--tier-up-threshold=1",  # Tier up functions on first call
     ]
     process = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
