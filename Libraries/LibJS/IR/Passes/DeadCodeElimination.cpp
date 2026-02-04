@@ -115,6 +115,8 @@ bool DeadCodeElimination::run(Function& function)
 
             // If the result is not live, remove the instruction
             if (!live_values.contains(instruction->result())) {
+                // Clear uses before removing so the use lists stay consistent
+                instruction->clear_operand_uses();
                 instructions.remove(i - 1);
                 changed = true;
             }

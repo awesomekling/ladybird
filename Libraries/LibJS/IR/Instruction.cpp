@@ -39,6 +39,14 @@ void Instruction::set_operand(size_t index, Value* value)
         value->add_use(this);
 }
 
+void Instruction::clear_operand_uses()
+{
+    for (auto* operand : m_operands) {
+        if (operand)
+            operand->remove_use(this);
+    }
+}
+
 void Instruction::add_phi_operand(BasicBlock* predecessor, Value* value)
 {
     VERIFY(m_opcode == Opcode::Phi);

@@ -211,6 +211,7 @@ public:
     Vector<Value*> const& operands() const { return m_operands; }
     void add_operand(Value* value);
     void set_operand(size_t index, Value* value);
+    void clear_operand_uses();
 
     // For Branch/Jump
     BasicBlock* true_target() const { return m_true_target; }
