@@ -105,14 +105,17 @@ bool InstructionCombining::run(Function& function)
                 break;
             }
 
-            // BitwiseNot (BitwiseNot x) → x
+            // BitwiseNot (BitwiseNot x) → x (only if x is already Int32)
+            // NB: ~~x is ToInt32(x) in general, so this is only valid when x
+            //     is already Int32. For example, ~~3.7 = 3, not 3.7.
             case Opcode::BitwiseNot: {
                 if (operands.is_empty() || !operands[0])
                     break;
 
                 auto* inner = operands[0]->defining_instruction();
                 if (inner && inner->opcode() == Opcode::BitwiseNot) {
-                    if (auto* inner_operand = inner->operands()[0]) {
+                    if (auto* inner_operand = inner->operands()[0];
+                        inner_operand && inner_operand->type() == Type::Int32) {
                         result->replace_all_uses_with(inner_operand);
                         changed = true;
                     }
