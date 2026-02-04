@@ -115,6 +115,11 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
             // For this, use the this register
             return Bytecode::Operand(Bytecode::Register::this_value());
         }
+        // Yield and Await results are resume values that appear in the accumulator (reg0)
+        if (auto* defining = value.defining_instruction()) {
+            if (defining->opcode() == Opcode::Yield || defining->opcode() == Opcode::Await)
+                return Bytecode::Operand(Bytecode::Register::accumulator());
+        }
         return allocate_register();
     }();
 
@@ -523,8 +528,21 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::Return:
     case Opcode::End:
     case Opcode::Throw:
+    case Opcode::Yield:
+    case Opcode::Await:
         // These are terminators, handled in lower_blocks
         break;
+
+    case Opcode::GetCompletionFields: {
+        // GetCompletionFields produces a tuple of (type, value)
+        // Allocate 2 consecutive registers for the result
+        auto tuple_base = allocate_tuple_registers(*instruction.result(), 2);
+        emit<Bytecode::Op::GetCompletionFields>(
+            Bytecode::Operand(Bytecode::Register(tuple_base.index())),
+            Bytecode::Operand(Bytecode::Register(tuple_base.index() + 1)),
+            operand(0));
+        break;
+    }
 
     // Opcodes that don't produce bytecode (side-effect only in IR)
     case Opcode::LoadConstant:
@@ -828,6 +846,38 @@ void Lowerer::lower_blocks()
         case Opcode::Throw: {
             auto value = operand_for_value(*terminator->operands()[0]);
             emit<Bytecode::Op::Throw>(value);
+            break;
+        }
+        case Opcode::Yield: {
+            // Yield: operand[0] is the value to yield, true_target is continuation (or null for final yield)
+            auto value = operand_for_value(*terminator->operands()[0]);
+            auto* continuation = terminator->true_target();
+            if (continuation) {
+                emit_phi_moves_for_successor(*ir_block, *continuation);
+                auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
+                emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
+                // The resume value appears in the accumulator (reg0) at runtime
+                // Map the Yield's result to reg0 so uses in the continuation block work
+                if (terminator->result())
+                    m_value_to_operand.set(terminator->result(), Bytecode::Operand(Bytecode::Register::accumulator()));
+            } else {
+                // Final yield (generator return) - Yield with no continuation label
+                emit<Bytecode::Op::Yield>(Optional<Bytecode::Label> {}, value);
+            }
+            break;
+        }
+        case Opcode::Await: {
+            // Await: operand[0] is the promise/value to await, true_target is continuation
+            auto argument = operand_for_value(*terminator->operands()[0]);
+            auto* continuation = terminator->true_target();
+            VERIFY(continuation);
+            emit_phi_moves_for_successor(*ir_block, *continuation);
+            auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
+            emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
+            // The resume value (resolved promise) appears in the accumulator (reg0) at runtime
+            // Map the Await's result to reg0 so uses in the continuation block work
+            if (terminator->result())
+                m_value_to_operand.set(terminator->result(), Bytecode::Operand(Bytecode::Register::accumulator()));
             break;
         }
         default:

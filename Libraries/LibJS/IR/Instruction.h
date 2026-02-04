@@ -142,6 +142,11 @@ enum class Opcode : u8 {
     IteratorClose,
     IteratorToArray,
 
+    // Generators/Async
+    Yield,
+    Await,
+    GetCompletionFields,
+
     // Copy
     Move,
 
@@ -157,6 +162,8 @@ constexpr bool is_terminator_opcode(Opcode opcode)
     case Opcode::Return:
     case Opcode::End:
     case Opcode::Throw:
+    case Opcode::Yield:
+    case Opcode::Await:
         return true;
     default:
         return false;

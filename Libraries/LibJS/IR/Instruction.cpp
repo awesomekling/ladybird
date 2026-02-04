@@ -231,6 +231,12 @@ char const* opcode_to_string(Opcode opcode)
         return "Move";
     case Opcode::ExtractValue:
         return "ExtractValue";
+    case Opcode::Yield:
+        return "Yield";
+    case Opcode::Await:
+        return "Await";
+    case Opcode::GetCompletionFields:
+        return "GetCompletionFields";
     }
     VERIFY_NOT_REACHED();
 }

@@ -46,6 +46,44 @@ void Lifter::lift_basic_blocks()
             m_function->set_entry_block(&block);
     }
 
+    // Pre-pass: identify Yield/Await continuation blocks and create resume values
+    // These blocks receive an implicit resume value in the accumulator (reg0)
+    for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
+        size_t start_offset = m_executable.basic_block_start_offsets[block_index];
+        size_t end_offset = (block_index + 1 < m_executable.basic_block_start_offsets.size())
+            ? m_executable.basic_block_start_offsets[block_index + 1]
+            : m_executable.bytecode.size();
+
+        auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
+        Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
+
+        // Find the last instruction (terminator)
+        Bytecode::Instruction const* last_instruction = nullptr;
+        while (!it.at_end()) {
+            last_instruction = &*it;
+            ++it;
+        }
+
+        if (!last_instruction)
+            continue;
+
+        using enum Bytecode::Instruction::Type;
+        if (last_instruction->type() == Yield) {
+            auto const& op = static_cast<Bytecode::Op::Yield const&>(*last_instruction);
+            if (op.continuation_label().has_value()) {
+                auto cont_block_index = address_to_block_index(op.continuation_label()->address());
+                // Create a placeholder value for the resume value
+                auto& resume_value = m_function->create_register_value();
+                m_continuation_resume_values.set(cont_block_index, &resume_value);
+            }
+        } else if (last_instruction->type() == Await) {
+            auto const& op = static_cast<Bytecode::Op::Await const&>(*last_instruction);
+            auto cont_block_index = address_to_block_index(op.continuation_label().address());
+            auto& resume_value = m_function->create_register_value();
+            m_continuation_resume_values.set(cont_block_index, &resume_value);
+        }
+    }
+
     // Second pass: lift instructions from each basic block
     // NB: We don't clear definitions between blocks - this is a simplification
     // that lets values flow through. Proper SSA would require phi node insertion
@@ -68,6 +106,14 @@ void Lifter::lift_basic_blocks()
                 auto finalizer_block_index = address_to_block_index(handlers->finalizer_offset.value());
                 ir_block.set_finalizer(m_block_map.get(finalizer_block_index).value());
             }
+        }
+
+        // If this block is a Yield/Await continuation, set up the resume value
+        // for the accumulator (reg0) so instructions in this block can use it
+        if (auto resume_value = m_continuation_resume_values.get(static_cast<u32>(block_index)); resume_value.has_value()) {
+            auto acc_raw = Bytecode::Operand(Bytecode::Register::accumulator()).raw();
+            m_current_definitions.set(acc_raw, *resume_value);
+            m_value_to_operand_raw.set(*resume_value, acc_raw);
         }
 
         auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
@@ -1114,13 +1160,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
 
-    // Async/Await/Yield (terminators, handled in control flow)
+    // Async/Await/Yield (terminators with results - handled in connect_control_flow)
     case Await:
     case Yield:
+        // These are terminators that also define a result (the resume value)
+        // They're handled in connect_control_flow() where we have block context
+        break;
     case PrepareYield:
     case CreateAsyncFromSyncIterator:
     case AsyncIteratorClose:
-        // Async/generator control flow - no result value
+        // Async/generator helper ops - no result value
         break;
 
     // Type checks
@@ -1139,8 +1188,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
 
-    // Completion tracking (for finally blocks)
-    case GetCompletionFields:
+    // Completion tracking (for generators and finally blocks)
+    case GetCompletionFields: {
+        auto const& op = static_cast<Bytecode::Op::GetCompletionFields const&>(instruction);
+        auto& completion = get_or_create_value_for_operand(op.completion(), block);
+        auto& tuple = m_function->build_get_completion_fields(block, completion);
+        auto& type_value = m_function->build_extract_value(block, tuple, 0);
+        auto& value_value = m_function->build_extract_value(block, tuple, 1);
+        define_operand(op.type_dst(), type_value, block);
+        define_operand(op.value_dst(), value_value, block);
+        break;
+    }
     case SetCompletionType:
         // Runtime bookkeeping - no IR values
         break;
@@ -1354,6 +1412,46 @@ void Lifter::connect_control_flow()
             // NB: JumpUndefined jumps if undefined - we'd need a proper IsUndefined check
             // For now, treat as a branch on the condition
             m_function->build_branch(ir_block, condition, *true_target, *false_target);
+            break;
+        }
+
+        // Generators/Async - terminators with result (the resume value)
+        case Yield: {
+            auto const& op = static_cast<Bytecode::Op::Yield const&>(*last_instruction);
+            auto& value = get_or_create_value_for_operand(op.value(), ir_block);
+            if (op.continuation_label().has_value()) {
+                auto cont_block_index = address_to_block_index(op.continuation_label()->address());
+                auto* continuation = m_block_map.get(cont_block_index).value();
+                // Build the Yield instruction (creates a new result value internally)
+                auto& auto_resume_value = m_function->build_yield(ir_block, value, continuation);
+
+                // Replace the auto-created result with our pre-created resume value
+                // The pre-created one is what the continuation block's instructions are using
+                if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
+                    auto* yield_instr = auto_resume_value.defining_instruction();
+                    (*pre_created)->set_defining_instruction(yield_instr);
+                    yield_instr->set_result(*pre_created);
+                }
+            } else {
+                // Final yield (return from generator) - emit Yield without continuation
+                m_function->build_yield(ir_block, value, nullptr);
+            }
+            break;
+        }
+        case Await: {
+            auto const& op = static_cast<Bytecode::Op::Await const&>(*last_instruction);
+            auto& argument = get_or_create_value_for_operand(op.argument(), ir_block);
+            auto cont_block_index = address_to_block_index(op.continuation_label().address());
+            auto* continuation = m_block_map.get(cont_block_index).value();
+            // Build the Await instruction (creates a new result value internally)
+            auto& auto_resume_value = m_function->build_await(ir_block, argument, *continuation);
+
+            // Replace the auto-created result with our pre-created resume value
+            if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
+                auto* await_instr = auto_resume_value.defining_instruction();
+                (*pre_created)->set_defining_instruction(await_instr);
+                await_instr->set_result(*pre_created);
+            }
             break;
         }
 

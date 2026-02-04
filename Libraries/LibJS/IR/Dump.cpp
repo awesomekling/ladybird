@@ -135,6 +135,14 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         builder.appendff(", {}", instruction.extract_index());
         break;
 
+    case Opcode::Yield:
+    case Opcode::Await:
+        for (auto* operand : instruction.operands())
+            append_operand(operand);
+        if (instruction.true_target())
+            builder.appendff(", continuation: block{}", instruction.true_target()->index());
+        break;
+
     default:
         for (auto* operand : instruction.operands())
             append_operand(operand);

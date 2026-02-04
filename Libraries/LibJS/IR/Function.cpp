@@ -720,6 +720,57 @@ void Function::build_throw(BasicBlock& block, Value& value)
     block.append(move(instruction));
 }
 
+// Generators/Async - terminators with result (the resume value)
+Value& Function::build_yield(BasicBlock& block, Value& value, BasicBlock* continuation)
+{
+    auto instruction = Instruction::create(Opcode::Yield);
+    instruction->add_operand(&value);
+    if (continuation) {
+        instruction->set_true_target(continuation);
+        continuation->add_predecessor(&block);
+    }
+
+    // The result is the value passed to .next() when the generator resumes
+    // For final yields (no continuation), the result is unused but we still create it
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_await(BasicBlock& block, Value& argument, BasicBlock& continuation)
+{
+    auto instruction = Instruction::create(Opcode::Await);
+    instruction->add_operand(&argument);
+    instruction->set_true_target(&continuation);
+    continuation.add_predecessor(&block);
+
+    // The result is the resolved value of the awaited promise
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_get_completion_fields(BasicBlock& block, Value& completion)
+{
+    // GetCompletionFields produces a tuple of (type, value)
+    // Use ExtractValue to get individual components
+    auto instruction = Instruction::create(Opcode::GetCompletionFields);
+    instruction->add_operand(&completion);
+
+    auto& result = create_value_for_instruction();
+    result.set_defining_instruction(instruction.ptr());
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // SSA
 Value& Function::build_phi(BasicBlock& block, Vector<Value*> values, Vector<BasicBlock*> predecessors)
 {

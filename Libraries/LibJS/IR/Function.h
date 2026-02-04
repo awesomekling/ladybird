@@ -164,6 +164,12 @@ public:
     void build_end(BasicBlock& block, Value& value);
     void build_throw(BasicBlock& block, Value& value);
 
+    // Generators/Async - terminators with result (the resume value)
+    // For Yield, continuation can be null for final yields (generator return)
+    Value& build_yield(BasicBlock& block, Value& value, BasicBlock* continuation);
+    Value& build_await(BasicBlock& block, Value& argument, BasicBlock& continuation);
+    Value& build_get_completion_fields(BasicBlock& block, Value& completion);
+
     // SSA
     Value& build_phi(BasicBlock& block, Vector<Value*> values, Vector<BasicBlock*> predecessors);
 
