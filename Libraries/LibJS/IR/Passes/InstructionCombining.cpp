@@ -10,8 +10,38 @@
 #include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Type.h>
 #include <LibJS/IR/Value.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/VM.h>
 
 namespace JS::IR {
+
+static GC::Ptr<PrimitiveString> typeof_result_for_type(Type type)
+{
+    auto& vm = VM::the();
+    switch (type) {
+    case Type::Int32:
+    case Type::Number:
+        return vm.cached_strings.number;
+    case Type::Boolean:
+        return vm.cached_strings.boolean;
+    case Type::Undefined:
+        return vm.cached_strings.undefined;
+    case Type::Null:
+        return vm.cached_strings.object;
+    case Type::String:
+        return vm.cached_strings.string;
+    case Type::Symbol:
+        return vm.cached_strings.symbol;
+    case Type::BigInt:
+        return vm.cached_strings.bigint;
+    case Type::Function:
+        return vm.cached_strings.function;
+    case Type::Array:
+        return vm.cached_strings.object;
+    default:
+        return nullptr;
+    }
+}
 
 // Check if a type is guaranteed to never be NaN when used in numeric comparisons.
 // Only types that are already numeric and cannot represent NaN qualify.
@@ -168,6 +198,21 @@ bool InstructionCombining::run(Function& function)
                     result->replace_all_uses_with(operands[0]);
                     changed = true;
                 }
+                break;
+            }
+
+            // Typeof x → constant string when x has a known type
+            case Opcode::Typeof: {
+                if (operands.is_empty() || !operands[0])
+                    break;
+
+                auto typeof_string = typeof_result_for_type(operands[0]->type());
+                if (!typeof_string)
+                    break;
+
+                auto& constant = function.create_constant(JS::Value(typeof_string));
+                result->replace_all_uses_with(&constant);
+                changed = true;
                 break;
             }
 

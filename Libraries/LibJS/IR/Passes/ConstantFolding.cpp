@@ -12,6 +12,7 @@
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/Value.h>
 #include <math.h>
 
@@ -197,6 +198,9 @@ bool ConstantFolding::run(Function& function)
                     } else if ((lhs.is_null() && rhs.is_null()) || (lhs.is_undefined() && rhs.is_undefined())) {
                         equals = true;
                         can_determine = true;
+                    } else if (lhs.is_string() && rhs.is_string()) {
+                        equals = lhs.as_string().utf8_string_view() == rhs.as_string().utf8_string_view();
+                        can_determine = true;
                     } else if ((lhs.is_null() || lhs.is_undefined() || lhs.is_boolean() || lhs.is_number())
                         && (rhs.is_null() || rhs.is_undefined() || rhs.is_boolean() || rhs.is_number())) {
                         // Different primitive types are never strictly equal.
@@ -235,6 +239,9 @@ bool ConstantFolding::run(Function& function)
                         can_determine = true;
                     } else if (lhs.is_boolean() && rhs.is_boolean()) {
                         equals = lhs.as_bool() == rhs.as_bool();
+                        can_determine = true;
+                    } else if (lhs.is_string() && rhs.is_string()) {
+                        equals = lhs.as_string().utf8_string_view() == rhs.as_string().utf8_string_view();
                         can_determine = true;
                     } else if (lhs.is_boolean() && (rhs.is_int32() || rhs.is_double())) {
                         // ToNumber(bool) == number
