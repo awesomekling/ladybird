@@ -1126,7 +1126,7 @@ Value& Function::build_phi(BasicBlock& block, Vector<Value*> values, Vector<Basi
 {
     VERIFY(values.size() == predecessors.size());
 
-    auto instruction = Instruction::create(Opcode::Phi);
+    auto instruction = PhiInstruction::create();
 
     for (size_t i = 0; i < values.size(); ++i)
         instruction->add_phi_operand(predecessors[i], values[i]);
