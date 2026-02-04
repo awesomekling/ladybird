@@ -434,7 +434,7 @@ class JS_API Instruction {
     AK_MAKE_NONMOVABLE(Instruction);
 
 public:
-    static NonnullOwnPtr<Instruction> create(Opcode opcode);
+    [[nodiscard]] static NonnullOwnPtr<Instruction> create(Opcode opcode);
 
     virtual ~Instruction() = default;
 
@@ -615,7 +615,7 @@ private:
 // This compile-time separation prevents accidentally setting targets on non-terminators.
 class JS_API TerminatorInstruction : public Instruction {
 public:
-    static NonnullOwnPtr<TerminatorInstruction> create(Opcode opcode);
+    [[nodiscard]] static NonnullOwnPtr<TerminatorInstruction> create(Opcode opcode);
 
     BasicBlock* true_target() const { return m_true_target; }
     BasicBlock* false_target() const { return m_false_target; }
@@ -636,7 +636,7 @@ private:
 class JS_API JumpInstruction final : public TerminatorInstruction {
 public:
     // Target is required at construction for compile-time safety.
-    static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
+    [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
 
     BasicBlock& target() const
     {
@@ -655,7 +655,7 @@ private:
 class JS_API BranchInstruction final : public TerminatorInstruction {
 public:
     // Both targets are required at construction for compile-time safety.
-    static NonnullOwnPtr<BranchInstruction> create(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
+    [[nodiscard]] static NonnullOwnPtr<BranchInstruction> create(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
 
     Value* condition() const
     {
@@ -687,7 +687,7 @@ private:
 // Result: the merged value
 class JS_API PhiInstruction final : public Instruction {
 public:
-    static NonnullOwnPtr<PhiInstruction> create();
+    [[nodiscard]] static NonnullOwnPtr<PhiInstruction> create();
 
     // Typed accessors for phi-specific functionality
     size_t incoming_count() const { return phi_predecessors().size(); }
@@ -709,7 +709,7 @@ constexpr bool is_call_opcode(Opcode opcode)
 // Result: the return value of the call
 class JS_API CallInstruction final : public Instruction {
 public:
-    static NonnullOwnPtr<CallInstruction> create(Opcode opcode, Value* callee, Value* this_value);
+    [[nodiscard]] static NonnullOwnPtr<CallInstruction> create(Opcode opcode, Value* callee, Value* this_value);
 
     Value* callee() const
     {
@@ -744,7 +744,7 @@ private:
 // Optional metadata: base_identifier
 class JS_API GetByIdInstruction final : public Instruction {
 public:
-    static NonnullOwnPtr<GetByIdInstruction> create(Value* base, Bytecode::PropertyKeyTableIndex property);
+    [[nodiscard]] static NonnullOwnPtr<GetByIdInstruction> create(Value* base, Bytecode::PropertyKeyTableIndex property);
 
     Value* base() const
     {
@@ -766,7 +766,7 @@ private:
 // Fixed arity: exactly 2 operands
 class JS_API BinaryOpInstruction final : public Instruction {
 public:
-    static NonnullOwnPtr<BinaryOpInstruction> create(Opcode opcode, Value* lhs, Value* rhs);
+    [[nodiscard]] static NonnullOwnPtr<BinaryOpInstruction> create(Opcode opcode, Value* lhs, Value* rhs);
 
     Value* lhs() const
     {
@@ -789,7 +789,7 @@ private:
 // Fixed arity: exactly 1 operand
 class JS_API UnaryOpInstruction final : public Instruction {
 public:
-    static NonnullOwnPtr<UnaryOpInstruction> create(Opcode opcode, Value* operand);
+    [[nodiscard]] static NonnullOwnPtr<UnaryOpInstruction> create(Opcode opcode, Value* operand);
 
     Value* operand() const
     {

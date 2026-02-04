@@ -19,7 +19,7 @@ class JS_API BasicBlock {
     AK_MAKE_NONMOVABLE(BasicBlock);
 
 public:
-    static NonnullOwnPtr<BasicBlock> create(BlockIndex index, String name = {});
+    [[nodiscard]] static NonnullOwnPtr<BasicBlock> create(BlockIndex index, String name = {});
 
     BlockIndex index() const { return m_index; }
     String const& name() const { return m_name; }

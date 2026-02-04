@@ -24,7 +24,7 @@ class JS_API Function {
     AK_MAKE_NONMOVABLE(Function);
 
 public:
-    static NonnullOwnPtr<Function> create(GC::Ptr<Bytecode::Executable const> source_executable = nullptr);
+    [[nodiscard]] static NonnullOwnPtr<Function> create(GC::Ptr<Bytecode::Executable const> source_executable = nullptr);
 
     GC::Ptr<Bytecode::Executable const> source_executable() const { return m_source_executable; }
 
@@ -41,7 +41,7 @@ public:
     void set_entry_block(BasicBlock* block) { m_entry_block = block; }
 
     // Factory methods for blocks
-    BasicBlock& create_block(String name = {});
+    [[nodiscard]] BasicBlock& create_block(String name = {});
 
     // Factory methods for values
     [[nodiscard]] Value& create_parameter(u32 parameter_index);
