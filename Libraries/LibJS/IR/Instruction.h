@@ -277,6 +277,8 @@ public:
     void set_function_node(FunctionNode const* node) { m_function_node = node; }
     Optional<Bytecode::IdentifierTableIndex> lhs_name() const { return m_lhs_name; }
     void set_lhs_name(Optional<Bytecode::IdentifierTableIndex> name) { m_lhs_name = name; }
+    Optional<Bytecode::IdentifierTableIndex> base_identifier() const { return m_base_identifier; }
+    void set_base_identifier(Optional<Bytecode::IdentifierTableIndex> id) { m_base_identifier = id; }
 
     // For NewClass - reference to the AST node
     ClassExpression const* class_expression() const { return m_class_expression; }
@@ -364,6 +366,7 @@ private:
     FunctionNode const* m_function_node { nullptr };
     ClassExpression const* m_class_expression { nullptr };
     Optional<Bytecode::IdentifierTableIndex> m_lhs_name;
+    Optional<Bytecode::IdentifierTableIndex> m_base_identifier;
 
     // For CreateVariable
     Bytecode::Op::EnvironmentMode m_environment_mode { Bytecode::Op::EnvironmentMode::Lexical };

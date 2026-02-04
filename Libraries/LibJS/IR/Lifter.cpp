@@ -527,7 +527,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetById: {
         auto const& op = static_cast<Bytecode::Op::GetById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_function->build_get_by_id(block, base, op.property());
+        auto& result = m_function->build_get_by_id(block, base, op.property(), op.base_identifier());
         result.defining_instruction()->set_cache_index(op.cache_index());
         define_operand(op.dst(), result, block);
         break;
@@ -536,7 +536,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetByValue const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
-        auto& result = m_function->build_get_by_value(block, base, property);
+        auto& result = m_function->build_get_by_value(block, base, property, op.base_identifier());
         define_operand(op.dst(), result, block);
         break;
     }

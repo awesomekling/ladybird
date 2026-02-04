@@ -210,11 +210,12 @@ Value& Function::build_load_null(BasicBlock& block)
 }
 
 // Property access
-Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property)
+Value& Function::build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
     auto instruction = Instruction::create(Opcode::GetById);
     instruction->add_operand(&base);
     instruction->set_property_key_index(property);
+    instruction->set_base_identifier(base_identifier);
 
     auto& result = create_value_for_instruction();
     result.set_defining_instruction(instruction.ptr());
@@ -239,11 +240,12 @@ Value& Function::build_get_by_id_with_this(BasicBlock& block, Value& base, Value
     return result;
 }
 
-Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& property)
+Value& Function::build_get_by_value(BasicBlock& block, Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
     auto instruction = Instruction::create(Opcode::GetByValue);
     instruction->add_operand(&base);
     instruction->add_operand(&property);
+    instruction->set_base_identifier(base_identifier);
 
     auto& result = create_value_for_instruction();
     result.set_defining_instruction(instruction.ptr());

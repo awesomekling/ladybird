@@ -510,13 +510,13 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Property access
     case Opcode::GetById:
-        emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), OptionalNone {}, instruction.cache_index());
+        emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), instruction.base_identifier(), instruction.cache_index());
         break;
     case Opcode::GetByIdWithThis:
         emit<Bytecode::Op::GetByIdWithThis>(dst(), operand(0), instruction.property_key_index(), operand(1), instruction.cache_index());
         break;
     case Opcode::GetByValue:
-        emit<Bytecode::Op::GetByValue>(dst(), operand(0), operand(1), OptionalNone {});
+        emit<Bytecode::Op::GetByValue>(dst(), operand(0), operand(1), instruction.base_identifier());
         break;
     case Opcode::GetByValueWithThis:
         // operands: base (0), this_value (1), property (2)

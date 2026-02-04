@@ -107,9 +107,9 @@ public:
     Value& build_load_null(BasicBlock& block);
 
     // Property access
-    Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property);
+    Value& build_get_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     Value& build_get_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property);
-    Value& build_get_by_value(BasicBlock& block, Value& base, Value& property);
+    Value& build_get_by_value(BasicBlock& block, Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     Value& build_get_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property);
     Value& build_get_length(BasicBlock& block, Value& base);
     void build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value);
