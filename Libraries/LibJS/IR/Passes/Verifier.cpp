@@ -50,9 +50,9 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         }
     }
 
-    // Add parameter values as defined
+    // Add parameter, constant, and this values as defined
     for (auto const& value : function.values()) {
-        if (value->is_parameter() || value->is_constant())
+        if (value->is_parameter() || value->is_constant() || value->is_this())
             defined_values.set(value.ptr());
     }
 
@@ -61,8 +61,36 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         for (auto* pred : block->predecessors())
             block_predecessor_set.set(pred);
 
+        // Check: Block structure invariants
+        if (!block->instructions().is_empty()) {
+            // Check: "Phis first" - all phi nodes must come before non-phi instructions
+            bool seen_non_phi = false;
+            for (auto const& instr : block->instructions()) {
+                if (instr->opcode() == Opcode::Phi) {
+                    if (seen_non_phi) {
+                        report_error(ByteString::formatted(
+                            "Block{} has Phi after non-Phi instruction",
+                            block->index()));
+                        break;
+                    }
+                } else {
+                    seen_non_phi = true;
+                }
+            }
+
+            // Check: "Terminator last" - terminator must be last instruction
+            for (size_t i = 0; i < block->instructions().size() - 1; ++i) {
+                if (block->instructions()[i]->is_terminator()) {
+                    report_error(ByteString::formatted(
+                        "Block{} has terminator before last instruction",
+                        block->index()));
+                    break;
+                }
+            }
+        }
+
         for (auto const& instr : block->instructions()) {
-            // Check 2: Phi operand count == phi predecessor count
+            // Check: Phi operand count == phi predecessor count
             if (instr->opcode() == Opcode::Phi) {
                 if (instr->operands().size() != instr->phi_predecessors().size()) {
                     report_error(ByteString::formatted(
@@ -92,8 +120,15 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                     block->index()));
             }
 
-            // Check 5: All operands reference defined values
-            for (auto* operand : instr->operands()) {
+            // Check: All operands are non-null and reference defined values
+            for (size_t i = 0; i < instr->operands().size(); ++i) {
+                auto* operand = instr->operands()[i];
+                if (!operand) {
+                    report_error(ByteString::formatted(
+                        "Instruction in block{} has null operand at index {}",
+                        block->index(), i));
+                    continue;
+                }
                 if (!defined_values.contains(operand)) {
                     report_error(ByteString::formatted(
                         "Instruction in block{} uses undefined value v{}",
