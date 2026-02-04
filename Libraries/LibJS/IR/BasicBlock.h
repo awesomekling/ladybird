@@ -42,21 +42,21 @@ public:
 
     // Exception handling (block-level)
     BasicBlock* exception_handler() const { return m_exception_handler; }
-    void set_exception_handler(BasicBlock* handler) { m_exception_handler = handler; }
-
     BasicBlock* finalizer() const { return m_finalizer; }
-    void set_finalizer(BasicBlock* finalizer) { m_finalizer = finalizer; }
 
     bool is_terminated() const;
 
 private:
     friend class CFG;
+    friend class Lifter;
 
-    // CFG mutation methods - only accessible through CFG:: helpers
+    // CFG/EH mutation methods - only accessible through CFG:: helpers or Lifter
     void add_predecessor(BasicBlock* block);
     void remove_predecessor(BasicBlock* block);
     void remove_phi_operands_for_predecessor(BasicBlock* predecessor);
     void replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred);
+    void set_exception_handler(BasicBlock* handler) { m_exception_handler = handler; }
+    void set_finalizer(BasicBlock* finalizer) { m_finalizer = finalizer; }
 
     BasicBlock(BlockIndex index, String name);
 

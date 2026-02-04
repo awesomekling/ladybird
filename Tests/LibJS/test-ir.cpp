@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -132,7 +133,7 @@ TEST_CASE(setup_exception_handler_edge)
     auto& catch_block = function->create_block("catch"_string);
     function->set_entry_block(&try_block);
 
-    try_block.set_exception_handler(&catch_block);
+    JS::IR::CFG::set_exception_handler(try_block, &catch_block);
 
     EXPECT_EQ(try_block.exception_handler(), &catch_block);
     EXPECT_EQ(try_block.finalizer(), nullptr);
@@ -146,7 +147,7 @@ TEST_CASE(setup_finalizer_edge)
     auto& finally_block = function->create_block("finally"_string);
     function->set_entry_block(&try_block);
 
-    try_block.set_finalizer(&finally_block);
+    JS::IR::CFG::set_finalizer(try_block, &finally_block);
 
     EXPECT_EQ(try_block.finalizer(), &finally_block);
     EXPECT_EQ(try_block.exception_handler(), nullptr);
@@ -247,7 +248,7 @@ TEST_CASE(def_use_chains)
     EXPECT_EQ(param.uses().size(), 1u);
 
     // Second use
-    function->build_add(entry, param, negated);
+    (void)function->build_add(entry, param, negated);
     EXPECT_EQ(param.uses().size(), 2u);
     EXPECT_EQ(negated.uses().size(), 1u);
 }
@@ -266,20 +267,19 @@ TEST_CASE(block_merging_respects_exception_handler_boundaries)
     function->set_entry_block(&entry);
 
     // entry -> try_block (with handler) -> after_try (no handler) -> exit
-    try_block.set_exception_handler(&handler);
+    JS::IR::CFG::set_exception_handler(try_block, &handler);
     // after_try has no handler (different EH context)
 
     function->build_jump(entry, try_block);
-    entry.add_predecessor(nullptr); // Entry has no real predecessor
+    JS::IR::CFG::add_predecessor(try_block, entry);
 
     // try_block jumps to after_try (single predecessor, candidate for merge)
     function->build_jump(try_block, after_try);
-    try_block.add_predecessor(&entry);
-    after_try.add_predecessor(&try_block);
+    JS::IR::CFG::add_predecessor(after_try, try_block);
 
     // after_try jumps to exit
     function->build_jump(after_try, exit_block);
-    exit_block.add_predecessor(&after_try);
+    JS::IR::CFG::add_predecessor(exit_block, after_try);
 
     // handler also jumps to exit
     function->build_jump(handler, exit_block);
@@ -316,10 +316,10 @@ TEST_CASE(dead_block_elimination_clears_use_lists)
 
     // entry -> exit (dead_block is unreachable)
     function->build_jump(entry, exit_block);
-    exit_block.add_predecessor(&entry);
+    JS::IR::CFG::add_predecessor(exit_block, entry);
 
     // dead_block uses param but is unreachable
-    function->build_negate(dead_block, param);
+    (void)function->build_negate(dead_block, param);
     function->build_jump(dead_block, exit_block);
 
     // Param should have 1 use (in dead_block)
@@ -354,7 +354,7 @@ TEST_CASE(verifier_catches_missing_terminator)
     function->set_entry_block(&entry);
 
     // Add a non-terminator instruction but no terminator
-    function->build_load_undefined(entry);
+    (void)function->build_load_undefined(entry);
 
     // Verifier should return false (invalid IR)
     bool valid = JS::IR::Verifier::verify(*function, false);
@@ -374,7 +374,7 @@ TEST_CASE(verifier_catches_predecessor_mismatch)
     function->build_jump(entry, target);
 
     // Manually remove the predecessor to simulate a bug in a pass
-    target.remove_predecessor(&entry);
+    JS::IR::CFG::remove_predecessor(target, entry);
 
     auto& undef = function->build_load_undefined(target);
     function->build_return(target, undef);

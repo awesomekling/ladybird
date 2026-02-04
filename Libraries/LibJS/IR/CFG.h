@@ -63,6 +63,12 @@ public:
     // - Removes block_to_remove from all phi predecessors
     // - Clears EH edges pointing to block_to_remove
     static void remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_remove);
+
+    // Set the exception handler for a block.
+    static void set_exception_handler(BasicBlock& block, BasicBlock* handler);
+
+    // Set the finalizer for a block.
+    static void set_finalizer(BasicBlock& block, BasicBlock* finalizer);
 };
 
 } // namespace JS::IR

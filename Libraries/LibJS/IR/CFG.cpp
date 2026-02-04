@@ -115,4 +115,14 @@ void CFG::remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_re
         live_block.set_finalizer(nullptr);
 }
 
+void CFG::set_exception_handler(BasicBlock& block, BasicBlock* handler)
+{
+    block.set_exception_handler(handler);
+}
+
+void CFG::set_finalizer(BasicBlock& block, BasicBlock* finalizer)
+{
+    block.set_finalizer(finalizer);
+}
+
 } // namespace JS::IR
