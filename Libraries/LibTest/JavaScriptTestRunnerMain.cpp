@@ -102,6 +102,7 @@ int main(int argc, char** argv)
     bool print_json = false;
     bool per_file = false;
     unsigned tier_up_threshold = 0;
+    unsigned max_failures = 0;
     StringView specified_test_root;
     ByteString common_path;
     Vector<ByteString> test_globs;
@@ -129,6 +130,7 @@ int main(int argc, char** argv)
     args_parser.add_option(g_collect_on_every_allocation, "Collect garbage after every allocation", "collect-often", 'g');
     args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
     args_parser.add_option(tier_up_threshold, "Tier up to IR after N calls (0 = disabled)", "tier-up-threshold", 0, "N");
+    args_parser.add_option(max_failures, "Stop after N test failures (0 = unlimited)", "max-failures", 0, "N");
     args_parser.add_option(test_globs, "Only run tests matching the given glob", "filter", 'f', "glob");
     for (auto& entry : g_extra_args)
         args_parser.add_option(*entry.key, entry.value.get<0>().characters(), entry.value.get<1>().characters(), entry.value.get<2>());
@@ -216,6 +218,7 @@ int main(int argc, char** argv)
     }
 
     Test::JS::TestRunner test_runner(test_root, common_path, print_times, print_progress, print_json, per_file);
+    test_runner.set_max_failures(max_failures);
     test_runner.run(test_globs);
 
     g_vm = nullptr;

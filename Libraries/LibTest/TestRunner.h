@@ -48,6 +48,8 @@ public:
 
     bool is_printing_progress() const { return m_print_progress; }
 
+    void set_max_failures(unsigned n) { m_max_failures = n; }
+
     bool needs_detailed_suites() const { return m_detailed_json; }
     Vector<Test::Suite> const& suites() const { return *m_suites; }
 
@@ -77,6 +79,7 @@ protected:
     double m_total_elapsed_time_in_ms { 0 };
     Test::Counts m_counts;
     Optional<Vector<Test::Suite>> m_suites;
+    unsigned m_max_failures { 0 };
 };
 
 inline void cleanup()
@@ -103,6 +106,8 @@ inline void TestRunner::run(ReadonlySpan<ByteString> test_globs)
         do_run_single_test(path, progress_counter, test_paths.size());
         if (m_print_progress)
             warn("\033]9;{};{};\033\\", progress_counter, test_paths.size());
+        if (m_max_failures > 0 && m_counts.tests_failed >= m_max_failures)
+            break;
     }
 
     if (m_print_progress)
