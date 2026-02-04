@@ -27,10 +27,11 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.lift_basic_blocks();
     lifter.connect_control_flow();
     lifter.compute_block_predecessors();
+    lifter.compute_dominators();
 
-    // SSA construction using a two-phase approach:
-    // Phase 1: Place placeholder phis at all join points for all written operands
-    // Phase 2: Fill in phi operands now that all phis exist
+    // SSA construction using dominance-based approach:
+    // Phase 1: Place phis at dominance frontiers of defining blocks
+    // Phase 2: Fill in phi operands by finding reaching definitions
     lifter.place_phi_nodes();
     lifter.fill_phi_operands();
 
@@ -1601,16 +1602,49 @@ void Lifter::compute_block_predecessors()
     }
 }
 
-// Phase 1: Place placeholder phis at all join points for all written operands
+void Lifter::compute_dominators()
+{
+    m_dominators = make<Dominators>(*m_function);
+}
+
+// Phase 1: Place phis at dominance frontiers of defining blocks
+// This implements the standard SSA phi placement algorithm from Cytron et al.
 void Lifter::place_phi_nodes()
 {
-    for (auto& block : m_function->basic_blocks()) {
-        auto preds = m_predecessors.get(block.ptr());
-        if (!preds.has_value() || preds->size() <= 1)
-            continue;
+    // For each written operand, compute where phis are needed
+    for (auto raw : m_written_operands) {
+        // Find all blocks that actually define this operand
+        HashTable<BasicBlock*> def_blocks;
+        for (auto& [block, defs] : m_block_actual_definitions) {
+            if (defs.contains(raw))
+                def_blocks.set(block);
+        }
 
-        // This is a join point - place a phi for each written operand
-        for (auto raw : m_written_operands) {
+        // Compute iterated dominance frontier (where phis are needed)
+        HashTable<BasicBlock*> phi_blocks;
+        Vector<BasicBlock*> worklist;
+        for (auto* block : def_blocks)
+            worklist.append(block);
+
+        while (!worklist.is_empty()) {
+            auto* block = worklist.take_last();
+            for (auto* frontier_block : m_dominators->dominance_frontier(block)) {
+                if (!phi_blocks.contains(frontier_block)) {
+                    phi_blocks.set(frontier_block);
+                    // If this block doesn't already define the variable, add to worklist
+                    // (the phi itself is a definition that extends the frontier)
+                    if (!def_blocks.contains(frontier_block))
+                        worklist.append(frontier_block);
+                }
+            }
+        }
+
+        // Place phis at the computed locations
+        for (auto* block : phi_blocks) {
+            auto preds = m_predecessors.get(block);
+            if (!preds.has_value() || preds->is_empty())
+                continue;
+
             // Create an empty phi (we'll fill operands in phase 2)
             Vector<Value*> empty_values;
             Vector<BasicBlock*> empty_blocks;
@@ -1620,15 +1654,15 @@ void Lifter::place_phi_nodes()
             }
 
             auto& phi = m_function->build_phi(*block, empty_values, empty_blocks);
-            m_phi_map.set(make_phi_key(block.ptr(), raw), &phi);
+            m_phi_map.set(make_phi_key(block, raw), &phi);
             m_value_to_operand_raw.set(&phi, raw);
 
             // Update m_block_definitions to include the phi value, UNLESS the block
             // has an actual definition that would override it. This ensures successors
             // inherit the correct value.
-            auto actual_defs = m_block_actual_definitions.get(block.ptr());
+            auto actual_defs = m_block_actual_definitions.get(block);
             if (!actual_defs.has_value() || !actual_defs->contains(raw)) {
-                m_block_definitions.ensure(block.ptr()).set(raw, &phi);
+                m_block_definitions.ensure(block).set(raw, &phi);
             }
         }
     }

@@ -9,8 +9,10 @@
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/OwnPtr.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Export.h>
+#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Forward.h>
 
 namespace JS::IR {
@@ -29,6 +31,7 @@ private:
     Value* find_reaching_def_for_phi(BasicBlock& from_block, u32 operand_raw, HashTable<BasicBlock*>& visited);
     void connect_control_flow();
     void compute_block_predecessors();
+    void compute_dominators();
     u32 address_to_block_index(size_t address) const;
 
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);
@@ -65,6 +68,9 @@ private:
 
     // Maps continuation block index -> resume value (for Yield/Await)
     HashMap<u32, Value*> m_continuation_resume_values;
+
+    // Dominator information for proper SSA construction
+    OwnPtr<Dominators> m_dominators;
 
     static u64 make_phi_key(BasicBlock* block, u32 operand_raw)
     {
