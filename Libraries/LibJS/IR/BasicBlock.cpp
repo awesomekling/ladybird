@@ -56,4 +56,32 @@ bool BasicBlock::is_terminated() const
     return last && last->is_terminator();
 }
 
+void BasicBlock::remove_phi_operands_for_predecessor(BasicBlock* predecessor)
+{
+    for (auto& instr : m_instructions) {
+        if (instr->opcode() != Opcode::Phi)
+            break;
+        for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
+            if (instr->phi_predecessors()[i - 1] == predecessor) {
+                instr->remove_phi_operand(i - 1);
+                break;
+            }
+        }
+    }
+}
+
+void BasicBlock::replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred)
+{
+    for (auto& instr : m_instructions) {
+        if (instr->opcode() != Opcode::Phi)
+            break;
+        for (size_t i = 0; i < instr->phi_predecessors().size(); ++i) {
+            if (instr->phi_predecessors()[i] == old_pred) {
+                instr->set_phi_predecessor(i, new_pred);
+                break;
+            }
+        }
+    }
+}
+
 }
