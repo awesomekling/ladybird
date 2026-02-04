@@ -69,6 +69,28 @@ bool JumpThreading::run(Function& function)
 
             auto* thread_target = take_true ? true_target : false_target;
 
+            // Check if thread_target uses any values defined in the bypassed block
+            // (except through phi nodes in thread_target that we'll update)
+            // If so, we can't safely thread because those values won't be available
+            // when coming directly from pred_block.
+            bool target_uses_bypassed_values = false;
+            for (auto& instr : thread_target->instructions()) {
+                // Skip phi nodes - we handle those separately
+                if (instr->opcode() == Opcode::Phi)
+                    continue;
+                for (auto* operand : instr->operands()) {
+                    if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr()) {
+                        target_uses_bypassed_values = true;
+                        break;
+                    }
+                }
+                if (target_uses_bypassed_values)
+                    break;
+            }
+
+            if (target_uses_bypassed_values)
+                continue; // Can't thread this case safely
+
             // Update the predecessor to jump directly to the target
             auto* pred_terminator = pred_block->last_instruction();
             if (!pred_terminator)
