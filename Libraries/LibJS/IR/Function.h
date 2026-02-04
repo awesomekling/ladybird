@@ -119,6 +119,13 @@ public:
     Value& build_has_property(BasicBlock& block, Value& object, Value& property);
     Value& build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
     void build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value);
+    void build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_getter_by_value(BasicBlock& block, Value& base, Value& property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_setter_by_value(BasicBlock& block, Value& base, Value& property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_prototype_by_value(BasicBlock& block, Value& base, Value& property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
+    void build_put_by_spread(BasicBlock& block, Value& base, Value& source);
 
     // Calls
     Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);

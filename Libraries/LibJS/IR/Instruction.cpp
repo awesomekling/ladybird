@@ -177,6 +177,20 @@ char const* opcode_to_string(Opcode opcode)
         return "GetPrivateById";
     case Opcode::PutPrivateById:
         return "PutPrivateById";
+    case Opcode::PutGetterById:
+        return "PutGetterById";
+    case Opcode::PutSetterById:
+        return "PutSetterById";
+    case Opcode::PutPrototypeById:
+        return "PutPrototypeById";
+    case Opcode::PutGetterByValue:
+        return "PutGetterByValue";
+    case Opcode::PutSetterByValue:
+        return "PutSetterByValue";
+    case Opcode::PutPrototypeByValue:
+        return "PutPrototypeByValue";
+    case Opcode::PutBySpread:
+        return "PutBySpread";
     case Opcode::Call:
         return "Call";
     case Opcode::CallBuiltin:

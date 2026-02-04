@@ -669,24 +669,69 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
     }
 
-    // Getters/setters/prototypes (just track as puts for now)
-    case PutGetterById:
+    // Getters/setters/prototypes
+    case PutGetterById: {
+        auto const& op = static_cast<Bytecode::Op::PutGetterById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& getter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_getter_by_id(block, base, op.property(), getter, op.base_identifier());
+        break;
+    }
+    case PutSetterById: {
+        auto const& op = static_cast<Bytecode::Op::PutSetterById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& setter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_setter_by_id(block, base, op.property(), setter, op.base_identifier());
+        break;
+    }
+    case PutPrototypeById: {
+        auto const& op = static_cast<Bytecode::Op::PutPrototypeById const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& prototype = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_prototype_by_id(block, base, op.property(), prototype, op.base_identifier());
+        break;
+    }
     case PutGetterByIdWithThis:
-    case PutSetterById:
     case PutSetterByIdWithThis:
-    case PutPrototypeById:
     case PutPrototypeByIdWithThis:
-        // These define getters/setters/prototype - no result, just side effect
+        // TODO: Handle WithThis variants when needed
         break;
-    case PutGetterByValue:
+    case PutGetterByValue: {
+        auto const& op = static_cast<Bytecode::Op::PutGetterByValue const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& getter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_getter_by_value(block, base, property, getter, op.base_identifier());
+        break;
+    }
+    case PutSetterByValue: {
+        auto const& op = static_cast<Bytecode::Op::PutSetterByValue const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& setter = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_setter_by_value(block, base, property, setter, op.base_identifier());
+        break;
+    }
+    case PutPrototypeByValue: {
+        auto const& op = static_cast<Bytecode::Op::PutPrototypeByValue const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& property = get_or_create_value_for_operand(op.property(), block);
+        auto& prototype = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_prototype_by_value(block, base, property, prototype, op.base_identifier());
+        break;
+    }
     case PutGetterByValueWithThis:
-    case PutSetterByValue:
     case PutSetterByValueWithThis:
-    case PutPrototypeByValue:
     case PutPrototypeByValueWithThis:
-    case PutBySpread:
-        // These define properties with spread - no result, just side effect
+        // TODO: Handle WithThis variants when needed
         break;
+    case PutBySpread: {
+        auto const& op = static_cast<Bytecode::Op::PutBySpread const&>(instruction);
+        auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& source = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_put_by_spread(block, base, source);
+        break;
+    }
 
     // In/InstanceOf
     case In: {

@@ -363,6 +363,74 @@ void Function::build_put_private_by_id(BasicBlock& block, Value& base, Bytecode:
     block.append(move(instruction));
 }
 
+void Function::build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutGetterById);
+    instruction->add_operand(&base);
+    instruction->add_operand(&getter);
+    instruction->set_property_key_index(property);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_setter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutSetterById);
+    instruction->add_operand(&base);
+    instruction->add_operand(&setter);
+    instruction->set_property_key_index(property);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_prototype_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutPrototypeById);
+    instruction->add_operand(&base);
+    instruction->add_operand(&prototype);
+    instruction->set_property_key_index(property);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_getter_by_value(BasicBlock& block, Value& base, Value& property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutGetterByValue);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&getter);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_setter_by_value(BasicBlock& block, Value& base, Value& property, Value& setter, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutSetterByValue);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&setter);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_prototype_by_value(BasicBlock& block, Value& base, Value& property, Value& prototype, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+{
+    auto instruction = Instruction::create(Opcode::PutPrototypeByValue);
+    instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&prototype);
+    instruction->set_base_identifier(base_identifier);
+    block.append(move(instruction));
+}
+
+void Function::build_put_by_spread(BasicBlock& block, Value& base, Value& source)
+{
+    auto instruction = Instruction::create(Opcode::PutBySpread);
+    instruction->add_operand(&base);
+    instruction->add_operand(&source);
+    block.append(move(instruction));
+}
+
 // Calls
 Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments)
 {

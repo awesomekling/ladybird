@@ -544,6 +544,27 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::PutPrivateById:
         emit<Bytecode::Op::PutPrivateById>(operand(0), instruction.identifier_index(), operand(1));
         break;
+    case Opcode::PutGetterById:
+        emit<Bytecode::Op::PutGetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        break;
+    case Opcode::PutSetterById:
+        emit<Bytecode::Op::PutSetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        break;
+    case Opcode::PutPrototypeById:
+        emit<Bytecode::Op::PutPrototypeById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index(), instruction.base_identifier());
+        break;
+    case Opcode::PutGetterByValue:
+        emit<Bytecode::Op::PutGetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+        break;
+    case Opcode::PutSetterByValue:
+        emit<Bytecode::Op::PutSetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+        break;
+    case Opcode::PutPrototypeByValue:
+        emit<Bytecode::Op::PutPrototypeByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+        break;
+    case Opcode::PutBySpread:
+        emit<Bytecode::Op::PutBySpread>(operand(0), operand(1));
+        break;
 
     // Environment
     case Opcode::GetCalleeAndThisFromEnvironment: {

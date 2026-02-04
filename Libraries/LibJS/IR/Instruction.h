@@ -107,6 +107,13 @@ enum class Opcode : u8 {
     HasProperty,
     GetPrivateById,
     PutPrivateById,
+    PutGetterById,
+    PutSetterById,
+    PutPrototypeById,
+    PutGetterByValue,
+    PutSetterByValue,
+    PutPrototypeByValue,
+    PutBySpread,
 
     // Calls
     Call,
