@@ -27,7 +27,7 @@ class FunctionNode;
 
 namespace JS::IR {
 
-enum class Opcode : u8 {
+enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     // Control flow
     Jump,
     Branch,
