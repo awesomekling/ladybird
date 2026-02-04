@@ -109,7 +109,16 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                 }
             }
 
-            // Check 4: All terminator targets exist in function
+            // Check: Only terminators may have CFG targets
+            // This invariant is relied upon by dominator computation which computes
+            // successors from the last instruction's targets and EH edges only.
+            if (!instr->is_terminator() && (instr->true_target() || instr->false_target())) {
+                report_error(ByteString::formatted(
+                    "Non-terminator instruction in block{} has CFG targets",
+                    block->index()));
+            }
+
+            // Check: All terminator targets exist in function
             if (instr->true_target() && !all_blocks.contains(instr->true_target())) {
                 report_error(ByteString::formatted(
                     "Instruction in block{} has true_target not in function",

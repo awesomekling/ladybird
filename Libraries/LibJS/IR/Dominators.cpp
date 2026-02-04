@@ -22,7 +22,11 @@ Dominators::Dominators(Function const& function)
 
 void Dominators::compute_reverse_postorder()
 {
-    // DFS to compute reverse postorder using explicit stack
+    // DFS to compute reverse postorder using explicit stack.
+    //
+    // NB: This assumes CFG edges only come from terminators (via true_target/false_target)
+    // and block-level exception edges (exception_handler/finalizer). Non-terminator
+    // instructions must not create CFG edges. This invariant is verified by the IR verifier.
     HashTable<BasicBlock*> visited;
     Vector<BasicBlock*> postorder;
     Vector<BasicBlock*> stack;
