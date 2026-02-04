@@ -5,10 +5,12 @@
  */
 
 #include <AK/HashMap.h>
+#include <AK/Vector.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
-#include <LibJS/IR/Passes/CommonSubexpressionElimination.h>
+#include <LibJS/IR/Passes/GlobalValueNumbering.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -54,14 +56,21 @@ static bool is_commutative(Opcode opcode)
     }
 }
 
-bool CommonSubexpressionElimination::run(Function& function)
+bool GlobalValueNumbering::run(Function& function)
 {
-    bool changed = false;
+    if (!function.entry_block())
+        return false;
 
-    // For now, do local CSE within each basic block
-    // Global CSE would require dominance analysis
-    for (auto& block : function.basic_blocks()) {
-        HashMap<ExpressionKey, Value*> expressions;
+    bool changed = false;
+    Dominators dominators(function);
+    HashMap<ExpressionKey, Value*> expressions;
+
+    // Walk the dominator tree in pre-order with a scoped expression table.
+    // When entering a block, expressions from all dominating blocks are
+    // already in the table. When returning, we remove entries added by
+    // that block to restore the table for sibling subtrees.
+    auto process_block = [&](auto& self, BasicBlock* block) -> void {
+        Vector<ExpressionKey> added_keys;
 
         for (auto& instruction : block->instructions()) {
             if (!instruction->result())
@@ -74,7 +83,6 @@ bool CommonSubexpressionElimination::run(Function& function)
             if (operands.is_empty())
                 continue;
 
-            // Build the expression key
             ExpressionKey key;
             key.opcode = instruction->opcode();
             key.operand1 = operands.size() > 0 ? operands[0] : nullptr;
@@ -86,18 +94,26 @@ bool CommonSubexpressionElimination::run(Function& function)
                     swap(key.operand1, key.operand2);
             }
 
-            // Check if we've seen this expression before
             auto existing = expressions.get(key);
             if (existing.has_value()) {
-                // Replace all uses of this result with the previous result
                 instruction->result()->replace_all_uses_with(*existing);
                 changed = true;
             } else {
-                // Record this expression
                 expressions.set(key, instruction->result());
+                added_keys.append(key);
             }
         }
-    }
+
+        // Recurse into dominator tree children
+        for (auto* child : dominators.dominator_children(block))
+            self(self, child);
+
+        // Remove expressions added by this block
+        for (auto const& key : added_keys)
+            expressions.remove(key);
+    };
+
+    process_block(process_block, function.entry_block());
 
     return changed;
 }

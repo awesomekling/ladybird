@@ -26,7 +26,7 @@ set(SOURCES
     IR/Lowerer.cpp
     IR/Passes/AlgebraicSimplification.cpp
     IR/Passes/BlockMerging.cpp
-    IR/Passes/CommonSubexpressionElimination.cpp
+    IR/Passes/GlobalValueNumbering.cpp
     IR/Passes/ConstantBranchFolding.cpp
     IR/Passes/ConstantFolding.cpp
     IR/Passes/CopyPropagation.cpp

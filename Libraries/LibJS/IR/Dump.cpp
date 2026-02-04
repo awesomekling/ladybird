@@ -11,13 +11,13 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/AlgebraicSimplification.h>
 #include <LibJS/IR/Passes/BlockMerging.h>
-#include <LibJS/IR/Passes/CommonSubexpressionElimination.h>
 #include <LibJS/IR/Passes/ConstantBranchFolding.h>
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadBlockElimination.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/EmptyBlockElimination.h>
+#include <LibJS/IR/Passes/GlobalValueNumbering.h>
 #include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
@@ -294,9 +294,9 @@ void optimize(Function& function)
         InstructionCombining inst_combine;
         run_pass(inst_combine, function, changed);
 
-        // Common subexpression elimination - reuse computed values
-        CommonSubexpressionElimination cse;
-        run_pass(cse, function, changed);
+        // Global value numbering - reuse computed values across blocks
+        GlobalValueNumbering gvn;
+        run_pass(gvn, function, changed);
 
         // Constant branch folding - simplify branches on constants
         ConstantBranchFolding branch_fold;
