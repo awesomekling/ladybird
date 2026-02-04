@@ -1559,6 +1559,33 @@ void Lifter::compute_block_predecessors()
             }
         }
     }
+
+    // Add exception edges: if a block has throwing instructions and an exception
+    // handler/finalizer, add edges so phi placement accounts for exception flow
+    for (auto& block : m_function->basic_blocks()) {
+        bool has_throwing_instr = false;
+        for (auto const& instr : block->instructions()) {
+            if (may_throw_opcode(instr->opcode())) {
+                has_throwing_instr = true;
+                break;
+            }
+        }
+
+        if (has_throwing_instr) {
+            if (auto* handler = block->exception_handler()) {
+                if (!m_predecessors.ensure(handler).contains_slow(block.ptr())) {
+                    m_predecessors.ensure(handler).append(block.ptr());
+                    handler->add_predecessor(block.ptr());
+                }
+            }
+            if (auto* finalizer = block->finalizer()) {
+                if (!m_predecessors.ensure(finalizer).contains_slow(block.ptr())) {
+                    m_predecessors.ensure(finalizer).append(block.ptr());
+                    finalizer->add_predecessor(block.ptr());
+                }
+            }
+        }
+    }
 }
 
 // Phase 1: Place placeholder phis at all join points for all written operands
