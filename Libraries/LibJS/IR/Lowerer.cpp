@@ -243,7 +243,16 @@ void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&..
 
 void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to)
 {
-    // For each phi in the successor block, emit a Mov to set up the phi value
+    // For each phi in the successor block, emit a Mov to set up the phi value.
+    //
+    // NB: Parallel move resolution (for handling phi cycles) is not needed here because:
+    // 1. Phi inputs come from predecessor blocks, while phi results are defined in the
+    //    current block. A phi result can't be an input to another phi in the same block.
+    // 2. When phis form chains (phi A's input is phi B's result from a PREVIOUS iteration),
+    //    the phi coalescing in compute_phi_coalescing() assigns them the same register,
+    //    eliminating the need for a move between them.
+    // 3. For "swap" patterns (a = old_b, b = old_a), the inputs come from different
+    //    variables, not from each other's phi results, so no cycle exists.
     for (auto const& instruction : to.instructions()) {
         if (instruction->opcode() != Opcode::Phi)
             break; // Phis are always at the start

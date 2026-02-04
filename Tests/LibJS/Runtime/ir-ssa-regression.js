@@ -300,6 +300,53 @@ test("ToPrimitive side effects preserved in dead code elimination", () => {
     expect(log).toEqual(["c"]);
 });
 
+test("phi chain move ordering handles swap patterns", () => {
+    // Tests that phi lowering correctly handles swap patterns where
+    // variables exchange values in a loop. This exercises phi move ordering.
+
+    // Basic swap in loop
+    function swapLoop() {
+        let a = 1;
+        let b = 2;
+        for (let i = 0; i < 3; i++) {
+            let tmp = a;
+            a = b;
+            b = tmp;
+        }
+        return [a, b];
+    }
+    expect(swapLoop()).toEqual([2, 1]); // 3 swaps: [2,1], [1,2], [2,1]
+
+    // Triple rotation
+    function rotate() {
+        let a = 1,
+            b = 2,
+            c = 3;
+        for (let i = 0; i < 2; i++) {
+            let t1 = a,
+                t2 = b;
+            a = c;
+            b = t1;
+            c = t2;
+        }
+        return [a, b, c];
+    }
+    expect(rotate()).toEqual([2, 3, 1]); // [3,1,2] then [2,3,1]
+
+    // Fibonacci-like loop with multiple loop-carried values
+    function fibLike() {
+        let prev = 0,
+            curr = 1;
+        for (let i = 0; i < 5; i++) {
+            let next = prev + curr;
+            prev = curr;
+            curr = next;
+        }
+        return [prev, curr];
+    }
+    expect(fibLike()).toEqual([5, 8]); // fib(5), fib(6)
+});
+
 test("entry block read-before-write preserves initial value", () => {
     // Tests that when a register is read before being written in the entry block,
     // the read sees the initial value, not the later definition.
