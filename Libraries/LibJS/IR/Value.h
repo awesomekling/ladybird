@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/NonnullOwnPtr.h>
+#include <AK/Optional.h>
 #include <AK/Vector.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
@@ -47,6 +48,25 @@ public:
     {
         VERIFY(is_constant());
         return m_constant_value;
+    }
+
+    // Returns the truthiness of a constant value, or empty if not determinable.
+    // Use this for constant folding of branch conditions.
+    Optional<bool> constant_truthiness() const
+    {
+        if (!is_constant())
+            return {};
+
+        auto const& cv = m_constant_value;
+        if (cv.is_boolean())
+            return cv.as_bool();
+        if (cv.is_int32())
+            return cv.as_i32() != 0;
+        if (cv.is_undefined() || cv.is_null())
+            return false;
+        // NB: We don't handle doubles or strings here since they require
+        // more complex truthiness checks (0.0/-0.0/NaN vs empty string).
+        return {};
     }
 
     u32 parameter_index() const

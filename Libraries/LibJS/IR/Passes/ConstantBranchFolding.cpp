@@ -34,23 +34,11 @@ bool ConstantBranchFolding::run(Function& function)
             continue;
 
         auto* condition = term->operands()[0];
-        if (!condition->is_constant())
+        auto truthiness = condition->constant_truthiness();
+        if (!truthiness.has_value())
             continue;
 
-        auto const& const_value = condition->constant_value();
-
-        // Determine which branch to take
-        bool take_true_branch = false;
-        if (const_value.is_boolean()) {
-            take_true_branch = const_value.as_bool();
-        } else if (const_value.is_int32()) {
-            take_true_branch = const_value.as_i32() != 0;
-        } else if (const_value.is_undefined() || const_value.is_null()) {
-            take_true_branch = false;
-        } else {
-            // Can't fold this branch
-            continue;
-        }
+        bool take_true_branch = *truthiness;
 
         // Convert Branch to Jump
         auto* target = take_true_branch ? term->true_target() : term->false_target();

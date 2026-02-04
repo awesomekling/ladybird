@@ -50,23 +50,14 @@ bool JumpThreading::run(Function& function)
             auto* pred_block = phi->phi_predecessors()[i];
             auto* pred_value = phi->operands()[i];
 
-            if (!pred_value || !pred_value->is_constant())
+            if (!pred_value)
                 continue;
 
-            auto const& const_value = pred_value->constant_value();
-
-            // Determine which branch to take
-            bool take_true = false;
-            if (const_value.is_boolean()) {
-                take_true = const_value.as_bool();
-            } else if (const_value.is_int32()) {
-                take_true = const_value.as_i32() != 0;
-            } else if (const_value.is_undefined() || const_value.is_null()) {
-                take_true = false;
-            } else {
-                // Can't determine truthiness
+            auto truthiness = pred_value->constant_truthiness();
+            if (!truthiness.has_value())
                 continue;
-            }
+
+            bool take_true = *truthiness;
 
             auto* thread_target = take_true ? true_target : false_target;
 
