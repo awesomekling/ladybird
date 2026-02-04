@@ -157,11 +157,35 @@ bool AlgebraicSimplification::run(Function& function)
                 //     (-1) >>> 0 = 4294967295, which doesn't fit in Int32.
                 break;
 
+            // +x → x when x is already numeric
+            case Opcode::UnaryPlus:
+                if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
+                    replacement = operands[0];
+                break;
+
+            // ToNumber(x) → x when x is already numeric
+            case Opcode::ToNumber:
+                if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
+                    replacement = operands[0];
+                break;
+
+            // ToInt32(x) → x when x is already Int32
+            case Opcode::ToInt32:
+                if (operands.size() == 1 && operands[0]->type() == Type::Int32)
+                    replacement = operands[0];
+                break;
+
+            // ToBoolean(x) → x when x is already Boolean
+            case Opcode::ToBoolean:
+                if (operands.size() == 1 && operands[0]->type() == Type::Boolean)
+                    replacement = operands[0];
+                break;
+
             default:
                 break;
             }
 
-            if (replacement) {
+            if (replacement && !instruction->result()->uses().is_empty()) {
                 // Replace all uses of the result with the simplified value
                 instruction->result()->replace_all_uses_with(replacement);
                 changed = true;
