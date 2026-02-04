@@ -1,0 +1,129 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:boolean = StrictlyEquals v5:undefined, undefined
+    v7:boolean = Move v6:boolean
+    v9:null = Move null
+    v10:null = Move v9:null
+    v14:boolean = IsNullish v9:null
+    Branch v14:boolean, block1, block2
+block1:
+    v12:int32 = Move 42
+    Jump block2
+block2:
+    v15:unknown = Phi [block0:v10:null, block1:v12:int32]
+    v13:int32 = Move v15:unknown
+    Return v7:boolean
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:boolean = StrictlyEquals undefined, undefined
+    v7:boolean = Move v6:boolean
+    v9:null = Move null
+    v10:null = Move null
+    v14:boolean = IsNullish null
+    Branch v14:boolean, block1, block2
+block1:
+    v12:int32 = Move 42
+    Jump block2
+block2:
+    v15:unknown = Phi [block0:v8:null, block1:v11:int32]
+    v13:int32 = Move v15:unknown
+    Return v6:boolean
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:boolean = StrictlyEquals undefined, undefined
+    v7:boolean = Move true
+    v9:null = Move null
+    v10:null = Move null
+    v14:boolean = IsNullish null
+    Branch true, block1, block2
+block1:
+    v12:int32 = Move 42
+    Jump block2
+block2:
+    v15:unknown = Phi [block0:v8:null, block1:v11:int32]
+    v13:int32 = Move v15:unknown
+    Return true
+
+=== After ConstantBranchFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:boolean = StrictlyEquals undefined, undefined
+    v7:boolean = Move true
+    v9:null = Move null
+    v10:null = Move null
+    v14:boolean = IsNullish null
+    Jump block1
+block1:
+    v12:int32 = Move 42
+    Jump block2
+block2:
+    v15:unknown = Phi [block1:v11:int32]
+    v13:int32 = Move v15:unknown
+    Return true
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block1:
+    Jump block2
+block2:
+    Return true
+
+=== After EmptyBlockElimination ===
+function():
+block2:
+    Return true
+
+function():
+block2:
+    Return true

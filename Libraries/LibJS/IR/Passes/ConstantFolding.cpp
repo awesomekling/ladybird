@@ -329,6 +329,21 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::IsUndefined:
+                if (operands.size() == 1) {
+                    result_value = JS::Value(operands[0]->constant_value().is_undefined());
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::IsNullish:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    result_value = JS::Value(v.is_null() || v.is_undefined());
+                    can_fold = true;
+                }
+                break;
+
             case Opcode::Move:
                 // Move of a constant is just the constant
                 if (operands.size() == 1) {
