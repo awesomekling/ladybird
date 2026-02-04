@@ -316,6 +316,32 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::Increment:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32()) {
+                        result_value = make_int_or_double(static_cast<i64>(v.as_i32()) + 1);
+                        can_fold = true;
+                    } else if (v.is_double()) {
+                        result_value = JS::Value(v.as_double() + 1);
+                        can_fold = true;
+                    }
+                }
+                break;
+
+            case Opcode::Decrement:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32()) {
+                        result_value = make_int_or_double(static_cast<i64>(v.as_i32()) - 1);
+                        can_fold = true;
+                    } else if (v.is_double()) {
+                        result_value = JS::Value(v.as_double() - 1);
+                        can_fold = true;
+                    }
+                }
+                break;
+
             case Opcode::ToInt32:
                 if (operands.size() == 1) {
                     auto const& v = operands[0]->constant_value();
