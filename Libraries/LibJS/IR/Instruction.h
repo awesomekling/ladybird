@@ -201,6 +201,7 @@ public:
     static NonnullOwnPtr<Instruction> create(Opcode opcode);
 
     Opcode opcode() const { return m_opcode; }
+    void set_opcode(Opcode opcode) { m_opcode = opcode; }
 
     BasicBlock* parent_block() const { return m_parent_block; }
     void set_parent_block(BasicBlock* block) { m_parent_block = block; }

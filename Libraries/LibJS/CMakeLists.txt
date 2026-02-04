@@ -31,6 +31,7 @@ set(SOURCES
     IR/Passes/DeadBlockElimination.cpp
     IR/Passes/DeadCodeElimination.cpp
     IR/Passes/EmptyBlockElimination.cpp
+    IR/Passes/InstructionCombining.cpp
     IR/Passes/JumpThreading.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Value.cpp

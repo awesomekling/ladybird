@@ -18,6 +18,7 @@
 #include <LibJS/IR/Passes/DeadBlockElimination.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/EmptyBlockElimination.h>
+#include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Value.h>
@@ -253,6 +254,10 @@ void optimize(Function& function)
         // Algebraic simplification - x + 0 → x, x * 1 → x, etc.
         AlgebraicSimplification alg_simp;
         run_pass(alg_simp, function, changed);
+
+        // Instruction combining - Not+Branch fusion, double negation, etc.
+        InstructionCombining inst_combine;
+        run_pass(inst_combine, function, changed);
 
         // Common subexpression elimination - reuse computed values
         CommonSubexpressionElimination cse;
