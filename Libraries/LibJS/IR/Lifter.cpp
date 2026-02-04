@@ -5,6 +5,7 @@
  */
 
 #include <AK/BinarySearch.h>
+#include <AK/QuickSort.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Op.h>
 #include <LibJS/Bytecode/Register.h>
@@ -1643,8 +1644,16 @@ void Lifter::place_phi_nodes()
             }
         }
 
-        // Place phis at the computed locations
-        for (auto* block : phi_blocks) {
+        // Place phis at the computed locations.
+        // NB: Sort by block index for deterministic phi ordering across runs,
+        //     since phi_blocks is a HashTable with pointer-based ordering.
+        Vector<BasicBlock*> sorted_phi_blocks;
+        sorted_phi_blocks.ensure_capacity(phi_blocks.size());
+        for (auto* block : phi_blocks)
+            sorted_phi_blocks.append(block);
+        quick_sort(sorted_phi_blocks, [](auto* a, auto* b) { return a->index() < b->index(); });
+
+        for (auto* block : sorted_phi_blocks) {
             auto preds = m_predecessors.get(block);
             if (!preds.has_value() || preds->is_empty())
                 continue;
