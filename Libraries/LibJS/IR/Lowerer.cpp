@@ -148,14 +148,14 @@ void Lowerer::compute_phi_coalescing()
             v = it->value;
         }
         // Path compression
-        for (auto* p : path)
+        for (auto const* p : path)
             m_coalesce_representative.set(p, v);
         return v;
     };
 
     auto coalesce = [&](Value const* a, Value const* b) {
-        auto* rep_a = find_representative(a);
-        auto* rep_b = find_representative(b);
+        auto const* rep_a = find_representative(a);
+        auto const* rep_b = find_representative(b);
         if (rep_a != rep_b)
             m_coalesce_representative.set(rep_a, rep_b);
     };
@@ -169,12 +169,46 @@ void Lowerer::compute_phi_coalescing()
             if (!phi_result)
                 continue;
 
+            // Helper to check if coalescing this operand with the phi result would
+            // create a conflict with another operand of the same phi.
+            // Two operands of the same phi represent different values from different
+            // control flow paths and must NOT share a register.
+            auto would_conflict_with_other_operand = [&](Value const* operand_to_check) -> bool {
+                auto const* rep_to_check = find_representative(operand_to_check);
+                auto const* phi_rep = find_representative(phi_result);
+
+                for (auto* other_operand : instruction->operands()) {
+                    if (!other_operand || other_operand == operand_to_check)
+                        continue;
+                    if (other_operand->is_constant() || other_operand->is_parameter() || other_operand->is_this())
+                        continue;
+
+                    auto const* other_rep = find_representative(other_operand);
+
+                    // If this operand is already in the same equivalence class as
+                    // another operand, coalescing would make phi_result share a
+                    // register with multiple different incoming values.
+                    if (rep_to_check == other_rep)
+                        return true;
+
+                    // If another operand is already coalesced with phi_result,
+                    // coalescing this one too would make both operands share a register.
+                    if (other_rep == phi_rep)
+                        return true;
+                }
+                return false;
+            };
+
             for (auto* operand : instruction->operands()) {
                 if (!operand)
                     continue;
 
                 // Can't coalesce constants, parameters, or this
                 if (operand->is_constant() || operand->is_parameter() || operand->is_this())
+                    continue;
+
+                // Check for conflicts before any coalescing
+                if (would_conflict_with_other_operand(operand))
                     continue;
 
                 // Chain coalescing: if operand is a phi result, coalesce the two phis.
@@ -234,7 +268,7 @@ template<typename OpType, typename... Args>
 void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&... args)
 {
     VERIFY(m_current_block);
-    size_t size_to_allocate = round_up_to_power_of_two(sizeof(OpType) + extra_operand_slots * sizeof(Bytecode::Operand), alignof(void*));
+    size_t size_to_allocate = round_up_to_power_of_two(sizeof(OpType) + (extra_operand_slots * sizeof(Bytecode::Operand)), alignof(void*));
     size_t slot_offset = m_current_block->size();
     m_current_block->grow(size_to_allocate);
     void* slot = m_current_block->data() + slot_offset;

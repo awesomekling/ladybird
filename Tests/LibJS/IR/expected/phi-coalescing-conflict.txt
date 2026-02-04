@@ -1,0 +1,334 @@
+=== Before optimization ===
+function():
+block0:
+    InitializeBinding true
+    Jump block4
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v19 = Phi [block11:v8, block14:v10]
+    v18 = Phi [block11:v9, block14:v13]
+    v17 = Phi [block11:v6, block14:v12]
+    v14 = GetGlobal x
+    Jump block15
+block0_split0:
+    InitializeBinding 10
+    Jump block5
+block0_split1:
+    InitializeBinding 20
+    Jump block6
+block0_split2:
+    InitializeBinding undefined
+    Jump block7
+block0_split3:
+    v4 = GetGlobal cond
+    Jump block8
+block0_split4:
+    v5 = Move undefined
+    Branch v4, block1, block2
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block11
+block1_split7:
+    v9 = Move v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block14
+block2_split10:
+    v13 = Move v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+=== After CopyPropagation ===
+function():
+block0:
+    InitializeBinding true
+    Jump block4
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v19 = Phi [block11:v8, block14:v10]
+    v18 = Phi [block11:v8, block14:v12]
+    v17 = Phi [block11:v6, block14:v12]
+    v14 = GetGlobal x
+    Jump block15
+block0_split0:
+    InitializeBinding 10
+    Jump block5
+block0_split1:
+    InitializeBinding 20
+    Jump block6
+block0_split2:
+    InitializeBinding undefined
+    Jump block7
+block0_split3:
+    v4 = GetGlobal cond
+    Jump block8
+block0_split4:
+    v5 = Move undefined
+    Branch v4, block1, block2
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block11
+block1_split7:
+    v9 = Move v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block14
+block2_split10:
+    v13 = Move v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+=== After ConstantFolding ===
+function():
+block0:
+    InitializeBinding true
+    Jump block4
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v19 = Phi [block11:v8, block14:v10]
+    v18 = Phi [block11:v8, block14:v12]
+    v17 = Phi [block11:v6, block14:v12]
+    v14 = GetGlobal x
+    Jump block15
+block0_split0:
+    InitializeBinding 10
+    Jump block5
+block0_split1:
+    InitializeBinding 20
+    Jump block6
+block0_split2:
+    InitializeBinding undefined
+    Jump block7
+block0_split3:
+    v4 = GetGlobal cond
+    Jump block8
+block0_split4:
+    v5 = Move undefined
+    Branch v4, block1, block2
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block11
+block1_split7:
+    v9 = Move v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block14
+block2_split10:
+    v13 = Move v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    InitializeBinding true
+    Jump block4
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v14 = GetGlobal x
+    Jump block15
+block0_split0:
+    InitializeBinding 10
+    Jump block5
+block0_split1:
+    InitializeBinding 20
+    Jump block6
+block0_split2:
+    InitializeBinding undefined
+    Jump block7
+block0_split3:
+    v4 = GetGlobal cond
+    Jump block8
+block0_split4:
+    Branch v4, block1, block2
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block11
+block1_split7:
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block14
+block2_split10:
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    InitializeBinding true
+    Jump block4
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v14 = GetGlobal x
+    Jump block15
+block0_split0:
+    InitializeBinding 10
+    Jump block5
+block0_split1:
+    InitializeBinding 20
+    Jump block6
+block0_split2:
+    InitializeBinding undefined
+    Jump block7
+block0_split3:
+    v4 = GetGlobal cond
+    Jump block8
+block0_split4:
+    Branch v4, block1, block2
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+=== After BlockMerging ===
+function():
+block0:
+    InitializeBinding true
+    InitializeBinding 10
+    InitializeBinding 20
+    InitializeBinding undefined
+    v4 = GetGlobal cond
+    Branch v4, block1, block2
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v14 = GetGlobal x
+    Jump block15
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
+
+function():
+block0:
+    InitializeBinding true
+    InitializeBinding 10
+    InitializeBinding 20
+    InitializeBinding undefined
+    v4 = GetGlobal cond
+    Branch v4, block1, block2
+block1:
+    v6 = GetGlobal a
+    Jump block9
+block2:
+    v10 = GetGlobal b
+    Jump block12
+block3:
+    v14 = GetGlobal x
+    Jump block15
+block1_split5:
+    v8 = Add v6, 1
+    Jump block10
+block1_split6:
+    SetGlobal x v8
+    Jump block3
+block2_split8:
+    v12 = Add v10, 2
+    Jump block13
+block2_split9:
+    SetGlobal x v12
+    Jump block3
+block3_split11:
+    v16 = Add v14, 100
+    Jump block16
+block3_split12:
+    End v16
