@@ -874,6 +874,17 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         }
         break;
     }
+
+    // Guard operations (may throw but produce no value)
+    case Opcode::ThrowIfNotObject:
+        emit<Bytecode::Op::ThrowIfNotObject>(operand(0));
+        break;
+    case Opcode::ThrowIfNullish:
+        emit<Bytecode::Op::ThrowIfNullish>(operand(0));
+        break;
+    case Opcode::ThrowIfTDZ:
+        emit<Bytecode::Op::ThrowIfTDZ>(operand(0));
+        break;
     }
 }
 

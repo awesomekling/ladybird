@@ -880,6 +880,28 @@ Value& Function::build_get_new_target(BasicBlock& block)
     return result;
 }
 
+// Guard operations (may throw but produce no value)
+void Function::build_throw_if_not_object(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::ThrowIfNotObject);
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
+void Function::build_throw_if_nullish(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::ThrowIfNullish);
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
+void Function::build_throw_if_tdz(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create(Opcode::ThrowIfTDZ);
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
 // Iterators
 Value& Function::build_get_iterator(BasicBlock& block, Value& iterable)
 {

@@ -180,6 +180,11 @@ enum class Opcode : u8 {
 
     // New target
     GetNewTarget,
+
+    // Guard operations (may throw but produce no value)
+    ThrowIfNotObject,
+    ThrowIfNullish,
+    ThrowIfTDZ,
 };
 
 constexpr bool is_terminator_opcode(Opcode opcode)

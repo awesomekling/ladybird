@@ -1139,11 +1139,24 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         break;
 
     // Throw guard ops
-    case ThrowIfNotObject:
-    case ThrowIfNullish:
-    case ThrowIfTDZ:
-        // These are guard instructions that may throw but produce no value
+    case ThrowIfNotObject: {
+        auto const& op = static_cast<Bytecode::Op::ThrowIfNotObject const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_throw_if_not_object(block, value);
         break;
+    }
+    case ThrowIfNullish: {
+        auto const& op = static_cast<Bytecode::Op::ThrowIfNullish const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_throw_if_nullish(block, value);
+        break;
+    }
+    case ThrowIfTDZ: {
+        auto const& op = static_cast<Bytecode::Op::ThrowIfTDZ const&>(instruction);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_throw_if_tdz(block, value);
+        break;
+    }
 
     // Array operations
     case ArrayAppend: {

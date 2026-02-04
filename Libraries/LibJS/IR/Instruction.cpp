@@ -284,6 +284,12 @@ char const* opcode_to_string(Opcode opcode)
         return "CreateRestParams";
     case Opcode::GetNewTarget:
         return "GetNewTarget";
+    case Opcode::ThrowIfNotObject:
+        return "ThrowIfNotObject";
+    case Opcode::ThrowIfNullish:
+        return "ThrowIfNullish";
+    case Opcode::ThrowIfTDZ:
+        return "ThrowIfTDZ";
     }
     VERIFY_NOT_REACHED();
 }

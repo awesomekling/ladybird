@@ -169,6 +169,11 @@ public:
     Value& build_create_rest_params(BasicBlock& block, u32 rest_index);
     Value& build_get_new_target(BasicBlock& block);
 
+    // Guard operations (may throw but produce no value)
+    void build_throw_if_not_object(BasicBlock& block, Value& value);
+    void build_throw_if_nullish(BasicBlock& block, Value& value);
+    void build_throw_if_tdz(BasicBlock& block, Value& value);
+
     // Iterators
     Value& build_get_iterator(BasicBlock& block, Value& iterable);
     Value& build_iterator_next(BasicBlock& block, Value& iterator);
