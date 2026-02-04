@@ -795,7 +795,16 @@ void Lowerer::lower_blocks()
                     }
                 } else {
                     auto condition = operand_for_value(*condition_value);
-                    emit<Bytecode::Op::JumpIf>(condition, true_label, false_label);
+                    // Use JumpTrue/JumpFalse when one target is fallthrough for smaller bytecode
+                    if (false_index == i + 1) {
+                        // False target is fallthrough - use JumpTrue (only jumps if true)
+                        emit<Bytecode::Op::JumpTrue>(condition, true_label);
+                    } else if (true_index == i + 1) {
+                        // True target is fallthrough - use JumpFalse (only jumps if false)
+                        emit<Bytecode::Op::JumpFalse>(condition, false_label);
+                    } else {
+                        emit<Bytecode::Op::JumpIf>(condition, true_label, false_label);
+                    }
                 }
             } else if (true_target) {
                 // Only one target (unconditional after condition eval, or same target)
