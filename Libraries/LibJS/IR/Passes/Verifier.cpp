@@ -101,14 +101,16 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         for (auto const& instr : block->instructions()) {
             // Check: Phi operand count == phi predecessor count
             if (instr->opcode() == Opcode::Phi) {
-                if (instr->operands().size() != instr->phi_predecessors().size()) {
+                auto& phi = static_cast<PhiInstruction const&>(*instr);
+                if (phi.operands().size() != phi.incoming_count()) {
                     report_error(ByteString::formatted(
                         "Phi in block{} has {} operands but {} predecessors",
-                        block->index(), instr->operands().size(), instr->phi_predecessors().size()));
+                        block->index(), phi.operands().size(), phi.incoming_count()));
                 }
 
                 // Check 3: Phi predecessors ⊆ block predecessors
-                for (auto* phi_pred : instr->phi_predecessors()) {
+                for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                    auto* phi_pred = phi.incoming_block(i);
                     if (!block_predecessor_set.contains(phi_pred)) {
                         report_error(ByteString::formatted(
                             "Phi in block{} has predecessor block{} not in block's predecessor list",
@@ -242,11 +244,10 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             if (instr->opcode() == Opcode::Phi) {
                 // For phi instructions, each operand must be reachable from its corresponding predecessor
                 // The defining block must dominate the predecessor (not the current block)
-                auto const& operands = instr->operands();
-                auto const& phi_preds = instr->phi_predecessors();
-                for (size_t i = 0; i < operands.size() && i < phi_preds.size(); ++i) {
-                    auto* operand = operands[i];
-                    auto* pred = phi_preds[i];
+                auto const& phi = static_cast<PhiInstruction const&>(*instr);
+                for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                    auto* operand = phi.incoming_value(i);
+                    auto* pred = phi.incoming_block(i);
                     if (!operand)
                         continue;
 

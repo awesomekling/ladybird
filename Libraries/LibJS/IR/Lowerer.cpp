@@ -257,16 +257,15 @@ void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock co
         if (instruction->opcode() != Opcode::Phi)
             break; // Phis are always at the start
 
-        auto const& preds = instruction->phi_predecessors();
-        auto const& operands = instruction->operands();
+        auto const& phi = static_cast<PhiInstruction const&>(*instruction);
 
-        for (size_t i = 0; i < preds.size(); ++i) {
-            if (preds[i] == &from) {
-                // This predecessor provides operands[i] for the phi
-                if (!operands[i] || !instruction->result())
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            if (phi.incoming_block(i) == &from) {
+                // This predecessor provides incoming_value(i) for the phi
+                if (!phi.incoming_value(i) || !phi.result())
                     continue;
-                auto src = operand_for_value(*operands[i]);
-                auto dst = operand_for_value(*instruction->result());
+                auto src = operand_for_value(*phi.incoming_value(i));
+                auto dst = operand_for_value(*phi.result());
                 if (src != dst)
                     emit<Bytecode::Op::Mov>(dst, src);
                 break;
@@ -289,15 +288,14 @@ bool Lowerer::needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const&
         if (instruction->opcode() != Opcode::Phi)
             break;
 
-        auto const& preds = instruction->phi_predecessors();
-        auto const& operands = instruction->operands();
+        auto const& phi = static_cast<PhiInstruction const&>(*instruction);
 
-        for (size_t i = 0; i < preds.size(); ++i) {
-            if (preds[i] == &from) {
-                if (!operands[i] || !instruction->result())
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            if (phi.incoming_block(i) == &from) {
+                if (!phi.incoming_value(i) || !phi.result())
                     continue;
-                auto src = operand_for_value(*operands[i]);
-                auto dst = operand_for_value(*instruction->result());
+                auto src = operand_for_value(*phi.incoming_value(i));
+                auto dst = operand_for_value(*phi.result());
                 if (src != dst)
                     return true;
                 break;

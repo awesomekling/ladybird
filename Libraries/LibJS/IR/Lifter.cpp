@@ -1793,7 +1793,8 @@ void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
             if (instruction->opcode() != Opcode::Phi)
                 break;
 
-            auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+            auto& phi = static_cast<PhiInstruction&>(*instruction);
+            auto raw_opt = m_value_to_operand_raw.get(phi.result());
             if (!raw_opt.has_value())
                 continue;
 
@@ -1807,11 +1808,10 @@ void Lifter::rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks)
                 reaching = &m_function->create_constant(JS::js_undefined());
             }
 
-            // Find the correct phi operand index (matches phi_predecessors order)
-            auto const& instr_phi_preds = instruction->phi_predecessors();
-            for (size_t i = 0; i < instr_phi_preds.size(); ++i) {
-                if (instr_phi_preds[i] == &block) {
-                    instruction->set_operand(i, reaching);
+            // Find the correct phi operand index and set the value
+            for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                if (phi.incoming_block(i) == &block) {
+                    phi.set_incoming_value(i, reaching);
                     break;
                 }
             }

@@ -97,19 +97,21 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
     }
 
-    case Opcode::Phi:
+    case Opcode::Phi: {
+        auto const& phi = static_cast<PhiInstruction const&>(instruction);
         builder.append(" ["sv);
-        for (size_t i = 0; i < instruction.operands().size(); ++i) {
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
             if (i > 0)
                 builder.append(", "sv);
-            builder.appendff("block{}:", instruction.phi_predecessors()[i]->index());
-            if (instruction.operands()[i])
-                dump(*instruction.operands()[i], builder);
+            builder.appendff("block{}:", phi.incoming_block(i)->index());
+            if (phi.incoming_value(i))
+                dump(*phi.incoming_value(i), builder);
             else
                 builder.append("null"sv);
         }
         builder.append(']');
         break;
+    }
 
     case Opcode::GetGlobal:
     case Opcode::SetGlobal:

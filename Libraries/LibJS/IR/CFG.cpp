@@ -34,8 +34,9 @@ void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Functi
         if (instruction->opcode() != Opcode::Phi)
             break; // Phis are always first
 
+        auto& phi = static_cast<PhiInstruction&>(*instruction);
         Value* value = value_for_phi ? value_for_phi(*instruction) : nullptr;
-        instruction->add_phi_operand(&predecessor, value);
+        phi.add_incoming(&predecessor, value);
     }
 }
 
@@ -70,9 +71,10 @@ void CFG::redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlo
         if (instruction->opcode() != Opcode::Phi)
             break;
 
-        for (size_t i = 0; i < instruction->phi_predecessors().size(); ++i) {
-            if (instruction->phi_predecessors()[i] == &from_block) {
-                old_phi_values.set(instruction.ptr(), instruction->operands()[i]);
+        auto& phi = static_cast<PhiInstruction&>(*instruction);
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            if (phi.incoming_block(i) == &from_block) {
+                old_phi_values.set(instruction.ptr(), phi.incoming_value(i));
                 break;
             }
         }

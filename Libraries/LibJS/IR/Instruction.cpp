@@ -69,6 +69,36 @@ NonnullOwnPtr<PhiInstruction> PhiInstruction::create()
     return adopt_own(*new PhiInstruction());
 }
 
+void PhiInstruction::add_incoming(BasicBlock* predecessor, Value* value)
+{
+    add_phi_operand(predecessor, value);
+}
+
+void PhiInstruction::remove_incoming(size_t index)
+{
+    remove_phi_operand(index);
+}
+
+void PhiInstruction::remove_incoming_from(BasicBlock* predecessor)
+{
+    for (size_t i = phi_predecessors().size(); i > 0; --i) {
+        if (phi_predecessors()[i - 1] == predecessor) {
+            remove_phi_operand(i - 1);
+            return;
+        }
+    }
+}
+
+void PhiInstruction::set_incoming_block(size_t index, BasicBlock* block)
+{
+    set_phi_predecessor(index, block);
+}
+
+void PhiInstruction::set_incoming_value(size_t index, Value* value)
+{
+    set_operand(index, value);
+}
+
 CallInstruction::CallInstruction(Opcode opcode, Value* callee, Value* this_value)
     : Instruction(opcode)
 {

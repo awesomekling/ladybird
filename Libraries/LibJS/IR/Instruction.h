@@ -700,19 +700,35 @@ private:
 };
 
 // PhiInstruction: SSA phi node for merging values from different predecessors.
-// Operands: one value per predecessor (in phi_predecessors order)
+// Stores (predecessor block, value) pairs that must always be kept in sync.
 // Result: the merged value
 class JS_API PhiInstruction final : public Instruction {
 public:
     [[nodiscard]] static NonnullOwnPtr<PhiInstruction> create();
 
-    // Typed accessors for phi-specific functionality
+    // Read-only accessors
     size_t incoming_count() const { return phi_predecessors().size(); }
     BasicBlock* incoming_block(size_t index) const { return phi_predecessors()[index]; }
     Value* incoming_value(size_t index) const { return operands()[index]; }
 
+    // Atomic modification methods - these keep predecessor/value pairs in sync
+    void add_incoming(BasicBlock* predecessor, Value* value);
+    void remove_incoming(size_t index);
+    void remove_incoming_from(BasicBlock* predecessor);
+    void set_incoming_block(size_t index, BasicBlock* block);
+    void set_incoming_value(size_t index, Value* value);
+
 private:
     PhiInstruction();
+
+    // Hide dangerous base class methods that could desync predecessor/value pairs
+    using Instruction::add_phi_operand;
+    using Instruction::remove_phi_operand;
+    using Instruction::set_phi_predecessor;
+
+    // Classes that need internal access to phi operations
+    friend class Lifter;
+    friend class Function;
 };
 
 // Check if an opcode is a call-like opcode (has callee and this_value operands)

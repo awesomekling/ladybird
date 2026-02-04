@@ -53,18 +53,19 @@ bool EmptyBlockElimination::run(Function& function)
                 if (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target)) {
                     // This predecessor can reach target both directly and via empty block
                     // Check if any phi in target would have different values for these paths
-                    for (auto& phi_instr : target->instructions()) {
-                        if (phi_instr->opcode() != Opcode::Phi)
+                    for (auto& instr : target->instructions()) {
+                        if (instr->opcode() != Opcode::Phi)
                             continue;
 
+                        auto& phi = static_cast<PhiInstruction&>(*instr);
                         Value* value_from_empty = nullptr;
                         Value* value_from_direct = nullptr;
 
-                        for (size_t i = 0; i < phi_instr->phi_predecessors().size(); ++i) {
-                            if (phi_instr->phi_predecessors()[i] == block.ptr())
-                                value_from_empty = phi_instr->operands()[i];
-                            if (phi_instr->phi_predecessors()[i] == pred)
-                                value_from_direct = phi_instr->operands()[i];
+                        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                            if (phi.incoming_block(i) == block.ptr())
+                                value_from_empty = phi.incoming_value(i);
+                            if (phi.incoming_block(i) == pred)
+                                value_from_direct = phi.incoming_value(i);
                         }
 
                         if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
@@ -112,12 +113,14 @@ bool EmptyBlockElimination::run(Function& function)
 
             // Add each predecessor of the empty block to target with traced phi values
             for (auto* pred : predecessors) {
-                CFG::add_predecessor(*target, *pred, [&](Instruction& phi_instr) -> Value* {
+                CFG::add_predecessor(*target, *pred, [&](Instruction& instr) -> Value* {
+                    auto& target_phi = static_cast<PhiInstruction&>(instr);
+
                     // Find the value this phi expects from the empty block
                     Value* value_from_empty = nullptr;
-                    for (size_t i = 0; i < phi_instr.phi_predecessors().size(); ++i) {
-                        if (phi_instr.phi_predecessors()[i] == block.ptr()) {
-                            value_from_empty = phi_instr.operands()[i];
+                    for (size_t i = 0; i < target_phi.incoming_count(); ++i) {
+                        if (target_phi.incoming_block(i) == block.ptr()) {
+                            value_from_empty = target_phi.incoming_value(i);
                             break;
                         }
                     }
@@ -128,9 +131,10 @@ bool EmptyBlockElimination::run(Function& function)
                     // If value_from_empty is a phi, trace to find what this pred would contribute
                     if (auto* def = value_from_empty->defining_instruction();
                         def && def->opcode() == Opcode::Phi) {
-                        for (size_t j = 0; j < def->phi_predecessors().size(); ++j) {
-                            if (def->phi_predecessors()[j] == pred)
-                                return def->operands()[j];
+                        auto& def_phi = static_cast<PhiInstruction&>(*def);
+                        for (size_t j = 0; j < def_phi.incoming_count(); ++j) {
+                            if (def_phi.incoming_block(j) == pred)
+                                return def_phi.incoming_value(j);
                         }
                     }
 

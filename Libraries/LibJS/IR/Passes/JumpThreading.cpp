@@ -31,12 +31,14 @@ bool JumpThreading::run(Function& function)
         if (!condition->defining_instruction())
             continue;
 
-        auto* phi = condition->defining_instruction();
-        if (phi->opcode() != Opcode::Phi)
+        auto* phi_instr = condition->defining_instruction();
+        if (phi_instr->opcode() != Opcode::Phi)
             continue;
 
+        auto& phi = static_cast<PhiInstruction&>(*phi_instr);
+
         // The phi must be in this same block
-        if (phi->parent_block() != block.ptr())
+        if (phi.parent_block() != block.ptr())
             continue;
 
         auto* true_target = terminator->true_target();
@@ -46,9 +48,9 @@ bool JumpThreading::run(Function& function)
             continue;
 
         // For each phi predecessor with a constant value, we can thread
-        for (size_t i = 0; i < phi->phi_predecessors().size(); ++i) {
-            auto* pred_block = phi->phi_predecessors()[i];
-            auto* pred_value = phi->operands()[i];
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            auto* pred_block = phi.incoming_block(i);
+            auto* pred_value = phi.incoming_value(i);
 
             if (!pred_value)
                 continue;
@@ -106,7 +108,7 @@ bool JumpThreading::run(Function& function)
             // If the phi has uses beyond just the branch in this block, we can't safely
             // remove the phi operand because other code depends on the merged value.
             bool phi_used_outside_block = false;
-            if (auto* phi_result = phi->result()) {
+            if (auto* phi_result = phi.result()) {
                 for (auto* use : phi_result->uses()) {
                     if (use != terminator) {
                         phi_used_outside_block = true;
@@ -136,12 +138,14 @@ bool JumpThreading::run(Function& function)
             if (updated) {
                 // Add pred_block to thread_target with traced phi values.
                 // Must be done before removing from block so we can trace through block's phis.
-                CFG::add_predecessor(*thread_target, *pred_block, [&](Instruction& phi_instr) -> Value* {
+                CFG::add_predecessor(*thread_target, *pred_block, [&](Instruction& instr) -> Value* {
+                    auto& target_phi = static_cast<PhiInstruction&>(instr);
+
                     // Find the value this phi expects from the bypassed block
                     Value* value_from_bypassed = nullptr;
-                    for (size_t j = 0; j < phi_instr.phi_predecessors().size(); ++j) {
-                        if (phi_instr.phi_predecessors()[j] == block.ptr()) {
-                            value_from_bypassed = phi_instr.operands()[j];
+                    for (size_t j = 0; j < target_phi.incoming_count(); ++j) {
+                        if (target_phi.incoming_block(j) == block.ptr()) {
+                            value_from_bypassed = target_phi.incoming_value(j);
                             break;
                         }
                     }
@@ -153,9 +157,10 @@ bool JumpThreading::run(Function& function)
                     // what value pred_block would contribute
                     if (auto* def = value_from_bypassed->defining_instruction();
                         def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
-                        for (size_t k = 0; k < def->phi_predecessors().size(); ++k) {
-                            if (def->phi_predecessors()[k] == pred_block)
-                                return def->operands()[k];
+                        auto& def_phi = static_cast<PhiInstruction&>(*def);
+                        for (size_t k = 0; k < def_phi.incoming_count(); ++k) {
+                            if (def_phi.incoming_block(k) == pred_block)
+                                return def_phi.incoming_value(k);
                         }
                     }
 

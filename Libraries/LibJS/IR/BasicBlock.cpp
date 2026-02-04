@@ -69,12 +69,8 @@ void BasicBlock::remove_phi_operands_for_predecessor(BasicBlock* predecessor)
     for (auto& instr : m_instructions) {
         if (instr->opcode() != Opcode::Phi)
             break;
-        for (size_t i = instr->phi_predecessors().size(); i > 0; --i) {
-            if (instr->phi_predecessors()[i - 1] == predecessor) {
-                instr->remove_phi_operand(i - 1);
-                break;
-            }
-        }
+        auto& phi = static_cast<PhiInstruction&>(*instr);
+        phi.remove_incoming_from(predecessor);
     }
 }
 
@@ -83,9 +79,10 @@ void BasicBlock::replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_p
     for (auto& instr : m_instructions) {
         if (instr->opcode() != Opcode::Phi)
             break;
-        for (size_t i = 0; i < instr->phi_predecessors().size(); ++i) {
-            if (instr->phi_predecessors()[i] == old_pred) {
-                instr->set_phi_predecessor(i, new_pred);
+        auto& phi = static_cast<PhiInstruction&>(*instr);
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            if (phi.incoming_block(i) == old_pred) {
+                phi.set_incoming_block(i, new_pred);
                 break;
             }
         }
