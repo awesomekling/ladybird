@@ -1,0 +1,73 @@
+=== Before optimization ===
+function():
+block0:
+    Jump block1
+block1:
+    v1 = Move v0
+    v2 = Move v1
+    Jump block2
+block2:
+    End v0
+block3: [handler: block1]
+    v4 = Move 3
+    v5 = Move v4
+    End v5
+
+=== After CopyPropagation ===
+function():
+block0:
+    Jump block1
+block1:
+    v1 = Move v0
+    v2 = Move v0
+    Jump block2
+block2:
+    End v0
+block3: [handler: block1]
+    v4 = Move 3
+    v5 = Move 3
+    End 3
+
+=== After ConstantFolding ===
+function():
+block0:
+    Jump block1
+block1:
+    v1 = Move v0
+    v2 = Move v0
+    Jump block2
+block2:
+    End v0
+block3: [handler: block1]
+    v4 = Move 3
+    v5 = Move 3
+    End 3
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block1:
+    Jump block2
+block2:
+    End v0
+block3: [handler: block1]
+    End 3
+
+=== After DeadBlockElimination ===
+function():
+block0:
+    Jump block1
+block1:
+    Jump block2
+block2:
+    End v0
+
+=== After EmptyBlockElimination ===
+function():
+block2:
+    End v0
+
+function():
+block2:
+    End v0

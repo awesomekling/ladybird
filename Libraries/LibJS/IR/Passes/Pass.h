@@ -6,12 +6,13 @@
 
 #pragma once
 
+#include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 
 namespace JS::IR {
 
 // Base class for optimization passes
-class Pass {
+class JS_API Pass {
 public:
     virtual ~Pass() = default;
     virtual bool run(Function&) = 0;

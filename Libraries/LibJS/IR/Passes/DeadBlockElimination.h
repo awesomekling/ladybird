@@ -6,12 +6,13 @@
 
 #pragma once
 
+#include <LibJS/Export.h>
 #include <LibJS/IR/Passes/Pass.h>
 
 namespace JS::IR {
 
 // Dead Block Elimination: Remove unreachable blocks
-class DeadBlockElimination final : public Pass {
+class JS_API DeadBlockElimination final : public Pass {
 public:
     virtual bool run(Function&) override;
     virtual char const* name() const override { return "DeadBlockElimination"; }

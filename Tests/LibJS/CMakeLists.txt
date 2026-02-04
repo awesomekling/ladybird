@@ -8,5 +8,14 @@ add_custom_target(test-js-bytecode ALL DEPENDS test-js "${CMAKE_BINARY_DIR}/bin/
 add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/bin/test-js-bytecode"
     COMMAND "${CMAKE_COMMAND}" -E copy "${ladybird_SOURCE_DIR}/Tests/LibJS/test-js-bytecode.py" "${CMAKE_BINARY_DIR}/bin/test-js-bytecode"
+    COMMAND chmod +x "${CMAKE_BINARY_DIR}/bin/test-js-bytecode"
     DEPENDS "${ladybird_SOURCE_DIR}/Tests/LibJS/test-js-bytecode.py"
+)
+
+add_custom_target(test-js-ir ALL DEPENDS test-js "${CMAKE_BINARY_DIR}/bin/test-js-ir")
+add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/bin/test-js-ir"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${ladybird_SOURCE_DIR}/Tests/LibJS/test-js-ir.py" "${CMAKE_BINARY_DIR}/bin/test-js-ir"
+    COMMAND chmod +x "${CMAKE_BINARY_DIR}/bin/test-js-ir"
+    DEPENDS "${ladybird_SOURCE_DIR}/Tests/LibJS/test-js-ir.py"
 )

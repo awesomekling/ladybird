@@ -6,12 +6,13 @@
 
 #pragma once
 
+#include <LibJS/Export.h>
 #include <LibJS/IR/Passes/Pass.h>
 
 namespace JS::IR {
 
 // Block Merging: Merge blocks where A jumps unconditionally to B and B has only A as predecessor
-class BlockMerging final : public Pass {
+class JS_API BlockMerging final : public Pass {
 public:
     virtual bool run(Function&) override;
     virtual char const* name() const override { return "BlockMerging"; }

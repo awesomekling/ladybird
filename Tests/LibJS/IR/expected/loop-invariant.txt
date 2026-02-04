@@ -1,0 +1,279 @@
+=== Before optimization ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4 = GetGlobal sum
+    Jump block8
+block2:
+    v9 = Move v17
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block2:v10, block7:v3]
+    v16 = Phi [block2:v9, block7:v18]
+    v15 = Phi [block2:v7, block7:v19]
+    v14 = Phi [block2:v8, block7:v20]
+    v11 = GetGlobal n
+    Jump block12
+block4:
+    v12 = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block7
+block0_split2:
+    v3 = Move 0
+    Jump block3
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
+    End v12
+
+=== After CopyPropagation ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4 = GetGlobal sum
+    Jump block8
+block2:
+    v9 = Move v17
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block2:v10, block7:v1]
+    v16 = Phi [block2:v17, block7:v18]
+    v15 = Phi [block2:v7, block7:v19]
+    v14 = Phi [block2:v8, block7:v20]
+    v11 = GetGlobal n
+    Jump block12
+block4:
+    v12 = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block7
+block0_split2:
+    v3 = Move 0
+    Jump block3
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
+    End v12
+
+=== After ConstantFolding ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4 = GetGlobal sum
+    Jump block8
+block2:
+    v9 = Move v17
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block2:v10, block7:v1]
+    v16 = Phi [block2:v17, block7:v18]
+    v15 = Phi [block2:v7, block7:v19]
+    v14 = Phi [block2:v8, block7:v20]
+    v11 = GetGlobal n
+    Jump block12
+block4:
+    v12 = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block7
+block0_split2:
+    v3 = Move 0
+    Jump block3
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
+    End v12
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4 = GetGlobal sum
+    Jump block8
+block2:
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block2:v10, block7:v1]
+    v11 = GetGlobal n
+    Jump block12
+block4:
+    v12 = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block7
+block0_split2:
+    Jump block3
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
+    End v12
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4 = GetGlobal sum
+    Jump block8
+block2:
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block2:v10, block6:v1]
+    v11 = GetGlobal n
+    Jump block12
+block4:
+    v12 = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block3
+block1_split3:
+    v5 = GetGlobal x
+    Jump block9
+block1_split4:
+    v7 = Mul v5, 2
+    Jump block10
+block1_split5:
+    v8 = Add v4, v7
+    Jump block11
+block1_split6:
+    SetGlobal sum v8
+    Jump block2
+block3_split7:
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4_split8:
+    End v12
+
+=== After BlockMerging ===
+function():
+block0:
+    InitializeBinding 10
+    InitializeBinding 0
+    InitializeBinding 5
+    Jump block3
+block1:
+    v4 = GetGlobal sum
+    v5 = GetGlobal x
+    v7 = Mul v5, 2
+    v8 = Add v4, v7
+    SetGlobal sum v8
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block1:v10, block0:v1]
+    v11 = GetGlobal n
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4:
+    v12 = GetGlobal sum
+    End v12
+
+function():
+block0:
+    InitializeBinding 10
+    InitializeBinding 0
+    InitializeBinding 5
+    Jump block3
+block1:
+    v4 = GetGlobal sum
+    v5 = GetGlobal x
+    v7 = Mul v5, 2
+    v8 = Add v4, v7
+    SetGlobal sum v8
+    v10 = Increment v17
+    Jump block3
+block3:
+    v17 = Phi [block1:v10, block0:v1]
+    v11 = GetGlobal n
+    v13 = LessThan v17, v11
+    Branch v13, block1, block4
+block4:
+    v12 = GetGlobal sum
+    End v12
