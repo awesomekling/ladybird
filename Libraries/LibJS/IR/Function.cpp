@@ -91,6 +91,16 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
 
     // Set known result types
     switch (opcode) {
+    // Arithmetic operations always produce Number
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+        if (is_safe_numeric_type(lhs.type()) && is_safe_numeric_type(rhs.type()))
+            result.set_type(Type::Number);
+        break;
     // Bitwise operations always produce Int32 (due to ToInt32 conversion in JS)
     case Opcode::BitwiseAnd:
     case Opcode::BitwiseOr:
@@ -113,6 +123,10 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     case Opcode::InstanceOf:
         result.set_type(Type::Boolean);
         break;
+    // String concatenation always produces String
+    case Opcode::ConcatString:
+        result.set_type(Type::String);
+        break;
     default:
         break;
     }
@@ -130,12 +144,20 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
 
     // Set known result types for type conversion and check operations
     switch (opcode) {
+    case Opcode::Move:
+        result.set_type(operand.type());
+        break;
     case Opcode::BitwiseNot:
     case Opcode::ToInt32:
         result.set_type(Type::Int32);
         break;
     case Opcode::ToNumber:
     case Opcode::UnaryPlus:
+    case Opcode::Negate:
+    case Opcode::Increment:
+    case Opcode::Decrement:
+    case Opcode::PostfixIncrement:
+    case Opcode::PostfixDecrement:
         result.set_type(Type::Number);
         break;
     case Opcode::ToBoolean:
@@ -229,6 +251,7 @@ Value& Function::build_load_constant(BasicBlock& block, JS::Value constant)
     instruction->add_operand(&constant_value);
 
     auto& result = create_value_for_instruction();
+    result.set_type(constant_value.type());
     instruction->set_result(&result);
 
     block.append(move(instruction));

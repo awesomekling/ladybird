@@ -20,7 +20,7 @@ block1:
 block2:
     v46:unknown = Phi [block17:v47:undefined, block21:v13:unknown]
     v42:unknown = Phi [block17:v48:undefined, block21:v24:unknown]
-    v40:unknown = Phi [block17:v20:unknown, block21:v26:unknown]
+    v40:unknown = Phi [block17:v20:undefined, block21:v26:unknown]
     v38:unknown = Phi [block17:v49:undefined, block21:v23:unknown]
     v36:unknown = Phi [block17:v50:undefined, block21:v21:unknown]
     v34:unknown = Phi [block17:v51:undefined, block21:v25:unknown]
@@ -78,7 +78,7 @@ block1_split9:
 block2_split10:
     Branch v14:unknown, block1, block5
 block4_split11:
-    v20:unknown = Move undefined
+    v20:undefined = Move undefined
     Jump block2
 block5_split12:
     v23:unknown = GetById v22:unknown.push
@@ -174,7 +174,7 @@ block1_split9:
 block2_split10:
     Branch v14:unknown, block1, block5
 block4_split11:
-    v20:unknown = Move undefined
+    v20:undefined = Move undefined
     Jump block2
 block5_split12:
     v23:unknown = GetById v22:unknown.push
@@ -270,7 +270,7 @@ block1_split9:
 block2_split10:
     Branch v14:unknown, block1, block5
 block4_split11:
-    v20:unknown = Move undefined
+    v20:undefined = Move undefined
     Jump block2
 block5_split12:
     v23:unknown = GetById v22:unknown.push

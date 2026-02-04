@@ -9,9 +9,9 @@ block1:
 block2:
     End v0:unknown
 block3: [handler: block1]
-    v4:unknown = Move 3
-    v5:unknown = Move v4:unknown
-    End v5:unknown
+    v4:int32 = Move 3
+    v5:int32 = Move v4:int32
+    End v5:int32
 
 === After CopyPropagation ===
 function():
@@ -24,8 +24,8 @@ block1:
 block2:
     End v0:unknown
 block3: [handler: block1]
-    v4:unknown = Move 3
-    v5:unknown = Move 3
+    v4:int32 = Move 3
+    v5:int32 = Move 3
     End 3
 
 === After ConstantFolding ===
@@ -39,8 +39,8 @@ block1:
 block2:
     End v0:unknown
 block3: [handler: block1]
-    v4:unknown = Move 3
-    v5:unknown = Move 3
+    v4:int32 = Move 3
+    v5:int32 = Move 3
     End 3
 
 === After DeadCodeElimination ===

@@ -28,7 +28,7 @@ block0_split3:
     v4:unknown = GetGlobal cond
     Jump block8
 block0_split4:
-    v5:unknown = Move undefined
+    v5:undefined = Move undefined
     Branch v4:unknown, block1, block2
 block1_split5:
     v8:unknown = Add v6:unknown, 1
@@ -84,7 +84,7 @@ block0_split3:
     v4:unknown = GetGlobal cond
     Jump block8
 block0_split4:
-    v5:unknown = Move undefined
+    v5:undefined = Move undefined
     Branch v4:unknown, block1, block2
 block1_split5:
     v8:unknown = Add v6:unknown, 1
@@ -140,7 +140,7 @@ block0_split3:
     v4:unknown = GetGlobal cond
     Jump block8
 block0_split4:
-    v5:unknown = Move undefined
+    v5:undefined = Move undefined
     Branch v4:unknown, block1, block2
 block1_split5:
     v8:unknown = Add v6:unknown, 1
