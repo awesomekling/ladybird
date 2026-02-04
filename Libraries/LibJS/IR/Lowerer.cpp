@@ -791,9 +791,18 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         // Get the tuple operand and extract the element at the given index
         auto* tuple_value = instruction.operands()[0];
         auto element_reg = operand_for_tuple_element(*tuple_value, instruction.extract_index());
-        // Map the result to this register
-        if (instruction.result())
-            m_value_to_operand.set(instruction.result(), element_reg);
+        // Map the result (and its coalescing representative) to this register
+        if (instruction.result()) {
+            // Follow coalescing chain to find the representative
+            Value const* rep = instruction.result();
+            for (;;) {
+                auto it = m_coalesce_representative.find(rep);
+                if (it == m_coalesce_representative.end())
+                    break;
+                rep = it->value;
+            }
+            m_value_to_operand.set(rep, element_reg);
+        }
         break;
     }
     }
