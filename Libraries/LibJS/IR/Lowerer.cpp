@@ -702,6 +702,12 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
+    case Opcode::ArrayAppend: {
+        // operand(0) = array, operand(1) = value
+        emit<Bytecode::Op::ArrayAppend>(operand(0), operand(1), instruction.is_spread());
+        break;
+    }
+
     // NewClass
     case Opcode::NewClass: {
         // Operands: [super_class (may be null), element_key0, element_key1, ...]

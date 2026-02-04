@@ -1096,10 +1096,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Array operations
     case ArrayAppend: {
         auto const& op = static_cast<Bytecode::Op::ArrayAppend const&>(instruction);
-        // ArrayAppend mutates dst array in place, adding src
-        // Track both operands for data flow
-        (void)get_or_create_value_for_operand(op.dst(), block);
-        (void)get_or_create_value_for_operand(op.src(), block);
+        auto& array = get_or_create_value_for_operand(op.dst(), block);
+        auto& value = get_or_create_value_for_operand(op.src(), block);
+        m_function->build_array_append(block, array, value, op.is_spread());
         break;
     }
 

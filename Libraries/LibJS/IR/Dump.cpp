@@ -151,6 +151,12 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         builder.appendff(" rest_index:{}", instruction.rest_index());
         break;
 
+    case Opcode::ArrayAppend:
+        for (auto* operand : instruction.operands())
+            append_operand(operand);
+        builder.appendff(", is_spread:{}", instruction.is_spread());
+        break;
+
     default:
         for (auto* operand : instruction.operands())
             append_operand(operand);

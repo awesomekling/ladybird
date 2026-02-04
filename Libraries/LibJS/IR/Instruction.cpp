@@ -213,6 +213,8 @@ char const* opcode_to_string(Opcode opcode)
         return "NewObject";
     case Opcode::NewArray:
         return "NewArray";
+    case Opcode::ArrayAppend:
+        return "ArrayAppend";
     case Opcode::NewClass:
         return "NewClass";
     case Opcode::NewFunction:

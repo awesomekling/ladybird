@@ -131,6 +131,7 @@ enum class Opcode : u8 {
     // Object creation
     NewObject,
     NewArray,
+    ArrayAppend,
     NewClass,
     NewFunction,
     NewRegExp,
@@ -324,6 +325,10 @@ public:
     bool is_synthetic() const { return m_is_synthetic; }
     void set_is_synthetic(bool value) { m_is_synthetic = value; }
 
+    // For ArrayAppend
+    bool is_spread() const { return m_is_spread; }
+    void set_is_spread(bool value) { m_is_spread = value; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -381,6 +386,9 @@ private:
 
     // For SuperCallWithArgumentArray
     bool m_is_synthetic { false };
+
+    // For ArrayAppend
+    bool m_is_spread { false };
 };
 
 }

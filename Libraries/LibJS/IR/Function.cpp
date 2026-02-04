@@ -590,6 +590,15 @@ Value& Function::build_new_array(BasicBlock& block, Span<Value*> elements)
     return result;
 }
 
+void Function::build_array_append(BasicBlock& block, Value& array, Value& value, bool is_spread)
+{
+    auto instruction = Instruction::create(Opcode::ArrayAppend);
+    instruction->add_operand(&array);
+    instruction->add_operand(&value);
+    instruction->set_is_spread(is_spread);
+    block.append(move(instruction));
+}
+
 Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys)
 {
     auto instruction = Instruction::create(Opcode::NewClass);
