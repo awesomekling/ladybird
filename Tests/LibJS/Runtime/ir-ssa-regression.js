@@ -133,3 +133,169 @@ test("side effect preservation in optimization", () => {
     void (obj < 10);
     expect(sideEffectCount).toBe(3);
 });
+
+test("private field in-check produces correct value", () => {
+    // Tests HasPrivateId opcode produces a proper boolean result.
+    class Foo {
+        #bar = 1;
+
+        static check(obj) {
+            return #bar in obj;
+        }
+    }
+
+    const instance = new Foo();
+    const nonInstance = {};
+
+    expect(Foo.check(instance)).toBe(true);
+    expect(Foo.check(nonInstance)).toBe(false);
+
+    // Test in conditional context
+    class Container {
+        #data;
+
+        constructor(value) {
+            this.#data = value;
+        }
+
+        static getDataOrDefault(obj, defaultValue) {
+            if (#data in obj) {
+                return obj.#data;
+            }
+            return defaultValue;
+        }
+    }
+
+    const c = new Container(42);
+    expect(Container.getDataOrDefault(c, 0)).toBe(42);
+    expect(Container.getDataOrDefault({}, 0)).toBe(0);
+});
+
+test("generator yield preserves values across suspension", () => {
+    // Tests PrepareYield correctly passes through values.
+    function* counter() {
+        let count = 0;
+        while (true) {
+            count = count + 1;
+            yield count;
+        }
+    }
+
+    const gen = counter();
+    expect(gen.next().value).toBe(1);
+    expect(gen.next().value).toBe(2);
+    expect(gen.next().value).toBe(3);
+
+    // Generator with multiple yields and state
+    function* fibonacci() {
+        let a = 0;
+        let b = 1;
+        while (true) {
+            yield a;
+            const next = a + b;
+            a = b;
+            b = next;
+        }
+    }
+
+    const fib = fibonacci();
+    expect(fib.next().value).toBe(0);
+    expect(fib.next().value).toBe(1);
+    expect(fib.next().value).toBe(1);
+    expect(fib.next().value).toBe(2);
+    expect(fib.next().value).toBe(3);
+    expect(fib.next().value).toBe(5);
+});
+
+test("EH edges with interleaved definitions", () => {
+    // Tests that values defined between multiple throw points are captured correctly.
+    let log = [];
+
+    function mayThrow(val, shouldThrow) {
+        if (shouldThrow) throw new Error(val);
+        return val;
+    }
+
+    // Test 1: Value modified between two potential throw points
+    // When mayThrow("second", true) throws, x is still "first" because
+    // the throw happens before the return/assignment.
+    let x = "initial";
+    try {
+        x = mayThrow("first", false);
+        x = mayThrow("second", true);
+        x = "unreachable";
+    } catch (e) {
+        log.push(`caught with x=${x}`);
+    }
+    expect(log).toEqual(["caught with x=first"]);
+
+    // Test 2: Multiple variables with interleaved modifications
+    // When mayThrow(20, true) throws, a=2 and b=10 (from previous assignment)
+    log = [];
+    let a = 0,
+        b = 0;
+    try {
+        a = 1;
+        b = mayThrow(10, false);
+        a = 2;
+        b = mayThrow(20, true);
+        a = 3;
+    } catch (e) {
+        log.push(`a=${a}, b=${b}`);
+    }
+    expect(log).toEqual(["a=2, b=10"]);
+
+    // Test 3: Assignment happens before throw
+    log = [];
+    let z = 0;
+    try {
+        z = 1;
+        throw new Error();
+    } catch (e) {
+        log.push(`z=${z}`);
+    }
+    expect(log).toEqual(["z=1"]);
+});
+
+test("ToPrimitive side effects preserved in dead code elimination", () => {
+    // ToPrimitive side effects must occur even if results are unused.
+    let log = [];
+    const makeObj = name => ({
+        valueOf() {
+            log.push(name);
+            return 1;
+        },
+    });
+
+    const a = makeObj("a");
+    const b = makeObj("b");
+    const c = makeObj("c");
+
+    // Short-circuit: false && ... doesn't evaluate the right side
+    if (false && a < 0) {
+        // Not reached
+    }
+    expect(log).toEqual([]);
+
+    // Short-circuit: true || ... doesn't evaluate the right side
+    if (true || a < 0) {
+        // Short-circuits
+    }
+    expect(log).toEqual([]);
+
+    // Actual comparison triggers valueOf on both operands
+    void (a < b);
+    expect(log).toEqual(["a", "b"]);
+
+    // Ternary only evaluates the taken branch for the result
+    // The condition `a < 0` calls valueOf on 'a' (returns 1)
+    // 1 < 0 is false, so we take the else branch which is just 'c' (no valueOf)
+    log = [];
+    const result = a < 0 ? b : c;
+    expect(log).toEqual(["a"]); // Only 'a' is converted, 'c' is just returned as-is
+
+    // Force valueOf on result
+    log = [];
+    void (result + 0);
+    expect(log).toEqual(["c"]);
+});
