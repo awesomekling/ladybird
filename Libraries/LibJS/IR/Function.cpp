@@ -1077,18 +1077,14 @@ Value& Function::build_extract_value(BasicBlock& block, Value& tuple, u32 index)
 // Control flow
 void Function::build_jump(BasicBlock& from, BasicBlock& to)
 {
-    auto instruction = TerminatorInstruction::create(Opcode::Jump);
-    instruction->set_true_target(&to);
+    auto instruction = JumpInstruction::create(to);
     to.add_predecessor(&from);
     from.append(move(instruction));
 }
 
 void Function::build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false)
 {
-    auto instruction = TerminatorInstruction::create(Opcode::Branch);
-    instruction->add_operand(&condition);
-    instruction->set_true_target(&if_true);
-    instruction->set_false_target(&if_false);
+    auto instruction = BranchInstruction::create(&condition, if_true, if_false);
     if_true.add_predecessor(&from);
     if_false.add_predecessor(&from);
     from.append(move(instruction));

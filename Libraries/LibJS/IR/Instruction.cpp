@@ -35,6 +35,89 @@ NonnullOwnPtr<TerminatorInstruction> TerminatorInstruction::create(Opcode opcode
     return adopt_own(*new TerminatorInstruction(opcode));
 }
 
+JumpInstruction::JumpInstruction(BasicBlock& target)
+    : TerminatorInstruction(Opcode::Jump)
+{
+    set_true_target(&target);
+}
+
+NonnullOwnPtr<JumpInstruction> JumpInstruction::create(BasicBlock& target)
+{
+    return adopt_own(*new JumpInstruction(target));
+}
+
+BranchInstruction::BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target)
+    : TerminatorInstruction(Opcode::Branch)
+{
+    add_operand(condition);
+    set_true_target(&true_target);
+    set_false_target(&false_target);
+}
+
+NonnullOwnPtr<BranchInstruction> BranchInstruction::create(Value* condition, BasicBlock& true_target, BasicBlock& false_target)
+{
+    return adopt_own(*new BranchInstruction(condition, true_target, false_target));
+}
+
+PhiInstruction::PhiInstruction()
+    : Instruction(Opcode::Phi)
+{
+}
+
+NonnullOwnPtr<PhiInstruction> PhiInstruction::create()
+{
+    return adopt_own(*new PhiInstruction());
+}
+
+CallInstruction::CallInstruction(Opcode opcode, Value* callee, Value* this_value)
+    : Instruction(opcode)
+{
+    VERIFY(is_call_opcode(opcode));
+    add_operand(callee);
+    add_operand(this_value);
+}
+
+NonnullOwnPtr<CallInstruction> CallInstruction::create(Opcode opcode, Value* callee, Value* this_value)
+{
+    VERIFY(is_call_opcode(opcode));
+    return adopt_own(*new CallInstruction(opcode, callee, this_value));
+}
+
+GetByIdInstruction::GetByIdInstruction(Value* base, Bytecode::PropertyKeyTableIndex property)
+    : Instruction(Opcode::GetById)
+{
+    add_operand(base);
+    set_property_key_index(property);
+}
+
+NonnullOwnPtr<GetByIdInstruction> GetByIdInstruction::create(Value* base, Bytecode::PropertyKeyTableIndex property)
+{
+    return adopt_own(*new GetByIdInstruction(base, property));
+}
+
+BinaryOpInstruction::BinaryOpInstruction(Opcode opcode, Value* lhs, Value* rhs)
+    : Instruction(opcode)
+{
+    add_operand(lhs);
+    add_operand(rhs);
+}
+
+NonnullOwnPtr<BinaryOpInstruction> BinaryOpInstruction::create(Opcode opcode, Value* lhs, Value* rhs)
+{
+    return adopt_own(*new BinaryOpInstruction(opcode, lhs, rhs));
+}
+
+UnaryOpInstruction::UnaryOpInstruction(Opcode opcode, Value* operand)
+    : Instruction(opcode)
+{
+    add_operand(operand);
+}
+
+NonnullOwnPtr<UnaryOpInstruction> UnaryOpInstruction::create(Opcode opcode, Value* operand)
+{
+    return adopt_own(*new UnaryOpInstruction(opcode, operand));
+}
+
 void Instruction::add_operand(Value* value)
 {
     m_operands.append(value);

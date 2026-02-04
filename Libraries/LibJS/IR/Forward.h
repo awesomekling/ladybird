@@ -16,9 +16,16 @@ AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, BlockIndex, Comparison, CastToBool, Inc
 AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, ValueIndex, Comparison, CastToBool, Increment, CastToUnderlying);
 
 class BasicBlock;
+class BinaryOpInstruction;
+class BranchInstruction;
+class CallInstruction;
 class Function;
+class GetByIdInstruction;
 class Instruction;
+class JumpInstruction;
+class PhiInstruction;
 class TerminatorInstruction;
+class UnaryOpInstruction;
 class Value;
 
 enum class Opcode : u8;

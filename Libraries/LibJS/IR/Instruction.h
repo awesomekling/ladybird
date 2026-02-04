@@ -496,7 +496,7 @@ private:
 // TerminatorInstruction is used for control flow instructions that end a basic block.
 // Only terminators have CFG targets (true_target/false_target).
 // This compile-time separation prevents accidentally setting targets on non-terminators.
-class JS_API TerminatorInstruction final : public Instruction {
+class JS_API TerminatorInstruction : public Instruction {
 public:
     static NonnullOwnPtr<TerminatorInstruction> create(Opcode opcode);
 
@@ -505,11 +505,191 @@ public:
     void set_true_target(BasicBlock* block) { m_true_target = block; }
     void set_false_target(BasicBlock* block) { m_false_target = block; }
 
-private:
+protected:
     explicit TerminatorInstruction(Opcode opcode);
 
+private:
     BasicBlock* m_true_target { nullptr };
     BasicBlock* m_false_target { nullptr };
+};
+
+// JumpInstruction: Unconditional jump to a single target.
+// Operands: none
+// Target: exactly one (true_target)
+class JS_API JumpInstruction final : public TerminatorInstruction {
+public:
+    // Target is required at construction for compile-time safety.
+    static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
+
+    BasicBlock& target() const
+    {
+        VERIFY(true_target());
+        return *true_target();
+    }
+    void set_target(BasicBlock& block) { set_true_target(&block); }
+
+private:
+    explicit JumpInstruction(BasicBlock& target);
+};
+
+// BranchInstruction: Conditional branch with true and false targets.
+// Operands: exactly one (the condition)
+// Targets: true_target and false_target
+class JS_API BranchInstruction final : public TerminatorInstruction {
+public:
+    // Both targets are required at construction for compile-time safety.
+    static NonnullOwnPtr<BranchInstruction> create(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
+
+    Value* condition() const
+    {
+        VERIFY(!operands().is_empty());
+        return operands()[0];
+    }
+
+    BasicBlock& true_branch() const
+    {
+        VERIFY(true_target());
+        return *true_target();
+    }
+
+    BasicBlock& false_branch() const
+    {
+        VERIFY(false_target());
+        return *false_target();
+    }
+
+    void set_true_branch(BasicBlock& block) { set_true_target(&block); }
+    void set_false_branch(BasicBlock& block) { set_false_target(&block); }
+
+private:
+    BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
+};
+
+// PhiInstruction: SSA phi node for merging values from different predecessors.
+// Operands: one value per predecessor (in phi_predecessors order)
+// Result: the merged value
+class JS_API PhiInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<PhiInstruction> create();
+
+    // Typed accessors for phi-specific functionality
+    size_t incoming_count() const { return phi_predecessors().size(); }
+    BasicBlock* incoming_block(size_t index) const { return phi_predecessors()[index]; }
+    Value* incoming_value(size_t index) const { return operands()[index]; }
+
+private:
+    PhiInstruction();
+};
+
+// Check if an opcode is a call-like opcode (has callee and this_value operands)
+constexpr bool is_call_opcode(Opcode opcode)
+{
+    switch (opcode) {
+    case Opcode::Call:
+    case Opcode::CallBuiltin:
+    case Opcode::CallDirectEval:
+    case Opcode::CallWithArgumentArray:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// CallInstruction: Function call with callee, this_value, and arguments.
+// Operands: [0] callee, [1] this_value, [2..] arguments
+// Result: the return value of the call
+class JS_API CallInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<CallInstruction> create(Opcode opcode, Value* callee, Value* this_value);
+
+    Value* callee() const
+    {
+        VERIFY(operands().size() >= 2);
+        return operands()[0];
+    }
+
+    Value* this_value() const
+    {
+        VERIFY(operands().size() >= 2);
+        return operands()[1];
+    }
+
+    size_t argument_count() const
+    {
+        return operands().size() > 2 ? operands().size() - 2 : 0;
+    }
+
+    Value* argument(size_t index) const
+    {
+        VERIFY(index + 2 < operands().size());
+        return operands()[index + 2];
+    }
+
+private:
+    CallInstruction(Opcode opcode, Value* callee, Value* this_value);
+};
+
+// GetByIdInstruction: Property access by identifier.
+// Operands: [0] base object
+// Required metadata: property_key_index
+// Optional metadata: base_identifier
+class JS_API GetByIdInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<GetByIdInstruction> create(Value* base, Bytecode::PropertyKeyTableIndex property);
+
+    Value* base() const
+    {
+        VERIFY(!operands().is_empty());
+        return operands()[0];
+    }
+
+    Bytecode::PropertyKeyTableIndex property() const
+    {
+        return property_key_index();
+    }
+
+private:
+    GetByIdInstruction(Value* base, Bytecode::PropertyKeyTableIndex property);
+};
+
+// BinaryOpInstruction: Binary arithmetic/comparison operations.
+// Operands: [0] lhs, [1] rhs
+// Fixed arity: exactly 2 operands
+class JS_API BinaryOpInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<BinaryOpInstruction> create(Opcode opcode, Value* lhs, Value* rhs);
+
+    Value* lhs() const
+    {
+        VERIFY(operands().size() == 2);
+        return operands()[0];
+    }
+
+    Value* rhs() const
+    {
+        VERIFY(operands().size() == 2);
+        return operands()[1];
+    }
+
+private:
+    BinaryOpInstruction(Opcode opcode, Value* lhs, Value* rhs);
+};
+
+// UnaryOpInstruction: Unary operations.
+// Operands: [0] operand
+// Fixed arity: exactly 1 operand
+class JS_API UnaryOpInstruction final : public Instruction {
+public:
+    static NonnullOwnPtr<UnaryOpInstruction> create(Opcode opcode, Value* operand);
+
+    Value* operand() const
+    {
+        VERIFY(operands().size() == 1);
+        return operands()[0];
+    }
+
+private:
+    UnaryOpInstruction(Opcode opcode, Value* operand);
 };
 
 }
