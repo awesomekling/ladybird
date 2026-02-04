@@ -1,0 +1,165 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:number = Move 1.5
+    v9:number = Move 2.5
+    v10:number = Add v7:number, v9:number
+    Jump block1
+block0_split0:
+    v11:number = Move v10:number
+    v12:number = Mul v7:number, v9:number
+    Jump block2
+block0_split1:
+    v13:number = Move v12:number
+    v14:number = Div v13:number, v11:number
+    Jump block3
+block0_split2:
+    v15:number = Move v14:number
+    v16:number = Add v11:number, v15:number
+    Jump block4
+block0_split3:
+    Return v16:number
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:number = Move 1.5
+    v9:number = Move 2.5
+    v10:number = Add 1.5, 2.5
+    Jump block1
+block0_split0:
+    v11:number = Move v10:number
+    v12:number = Mul 1.5, 2.5
+    Jump block2
+block0_split1:
+    v13:number = Move v12:number
+    v14:number = Div v12:number, v10:number
+    Jump block3
+block0_split2:
+    v15:number = Move v14:number
+    v16:number = Add v10:number, v14:number
+    Jump block4
+block0_split3:
+    Return v16:number
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:number = Move 1.5
+    v9:number = Move 2.5
+    v10:number = Add 1.5, 2.5
+    Jump block1
+block0_split0:
+    v11:number = Move 4
+    v12:number = Mul 1.5, 2.5
+    Jump block2
+block0_split1:
+    v13:number = Move 3.75
+    v14:number = Div 3.75, 4
+    Jump block3
+block0_split2:
+    v15:number = Move v14:number
+    v16:number = Add 4, v14:number
+    Jump block4
+block0_split3:
+    Return v16:number
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
+    v14:number = Div 3.75, 4
+    Jump block3
+block0_split2:
+    v16:number = Add 4, v14:number
+    Jump block4
+block0_split3:
+    Return v16:number
+
+=== After EmptyBlockElimination ===
+function():
+block0_split1:
+    v14:number = Div 3.75, 4
+    Jump block3
+block0_split2:
+    v16:number = Add 4, v14:number
+    Jump block4
+block0_split3:
+    Return v16:number
+
+=== After BlockMerging ===
+function():
+block0_split1:
+    v14:number = Div 3.75, 4
+    v16:number = Add 4, v14:number
+    Return v16:number
+
+=== After ConstantFolding ===
+function():
+block0_split1:
+    v14:number = Div 3.75, 4
+    v16:number = Add 4, 0.9375
+    Return v16:number
+
+=== After DeadCodeElimination ===
+function():
+block0_split1:
+    v16:number = Add 4, 0.9375
+    Return v16:number
+
+=== After ConstantFolding ===
+function():
+block0_split1:
+    v16:number = Add 4, 0.9375
+    Return 4.9375
+
+=== After DeadCodeElimination ===
+function():
+block0_split1:
+    Return 4.9375
+
+function():
+block0_split1:
+    Return 4.9375

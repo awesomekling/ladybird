@@ -12,6 +12,7 @@
 #include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
+#include <math.h>
 
 namespace JS::IR {
 
@@ -49,12 +50,31 @@ bool ConstantFolding::run(Function& function)
                 return JS::Value(static_cast<double>(result));
             };
 
+            // Helper to get a double from a numeric constant (Int32 or double)
+            auto numeric_to_double = [](JS::Value v) -> Optional<double> {
+                if (v.is_int32())
+                    return static_cast<double>(v.as_i32());
+                if (v.is_double())
+                    return v.as_double();
+                return {};
+            };
+
+            // Helper to check if two operands are both numeric constants
+            auto both_numeric = [&]() -> bool {
+                return operands.size() == 2
+                    && (operands[0]->constant_value().is_int32() || operands[0]->constant_value().is_double())
+                    && (operands[1]->constant_value().is_int32() || operands[1]->constant_value().is_double());
+            };
+
             switch (instruction->opcode()) {
             case Opcode::Add:
                 if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
                     i64 lhs = operands[0]->constant_value().as_i32();
                     i64 rhs = operands[1]->constant_value().as_i32();
                     result_value = make_int_or_double(lhs + rhs);
+                    can_fold = true;
+                } else if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) + *numeric_to_double(operands[1]->constant_value()));
                     can_fold = true;
                 }
                 break;
@@ -65,6 +85,9 @@ bool ConstantFolding::run(Function& function)
                     i64 rhs = operands[1]->constant_value().as_i32();
                     result_value = make_int_or_double(lhs - rhs);
                     can_fold = true;
+                } else if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) - *numeric_to_double(operands[1]->constant_value()));
+                    can_fold = true;
                 }
                 break;
 
@@ -74,33 +97,50 @@ bool ConstantFolding::run(Function& function)
                     i64 rhs = operands[1]->constant_value().as_i32();
                     result_value = make_int_or_double(lhs * rhs);
                     can_fold = true;
+                } else if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) * *numeric_to_double(operands[1]->constant_value()));
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::Div:
+                if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) / *numeric_to_double(operands[1]->constant_value()));
+                    can_fold = true;
+                }
+                break;
+
+            case Opcode::Mod:
+                if (both_numeric()) {
+                    result_value = JS::Value(fmod(*numeric_to_double(operands[0]->constant_value()), *numeric_to_double(operands[1]->constant_value())));
+                    can_fold = true;
                 }
                 break;
 
             case Opcode::LessThan:
-                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() < operands[1]->constant_value().as_i32());
+                if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) < *numeric_to_double(operands[1]->constant_value()));
                     can_fold = true;
                 }
                 break;
 
             case Opcode::LessThanEquals:
-                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() <= operands[1]->constant_value().as_i32());
+                if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) <= *numeric_to_double(operands[1]->constant_value()));
                     can_fold = true;
                 }
                 break;
 
             case Opcode::GreaterThan:
-                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() > operands[1]->constant_value().as_i32());
+                if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) > *numeric_to_double(operands[1]->constant_value()));
                     can_fold = true;
                 }
                 break;
 
             case Opcode::GreaterThanEquals:
-                if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-                    result_value = JS::Value(operands[0]->constant_value().as_i32() >= operands[1]->constant_value().as_i32());
+                if (both_numeric()) {
+                    result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) >= *numeric_to_double(operands[1]->constant_value()));
                     can_fold = true;
                 }
                 break;
