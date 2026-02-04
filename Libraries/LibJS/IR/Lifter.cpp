@@ -177,6 +177,10 @@ void Lifter::lift_basic_blocks()
 
         // Save final block's definitions (snapshot at end of block)
         m_block_definitions.set(current_block, m_current_definitions);
+
+        // Record the final IR block for this bytecode block (after any EH splits)
+        // This is the block that should receive the bytecode block's terminator
+        m_final_ir_block.set(static_cast<u32>(block_index), current_block);
     }
 }
 
@@ -1430,8 +1434,11 @@ u32 Lifter::address_to_block_index(size_t address) const
 void Lifter::connect_control_flow()
 {
     // Second pass through instructions to connect control flow edges
+    // NB: We use m_final_ir_block which points to the last IR block for each bytecode
+    // block (after any EH splits). This ensures terminators are added to the correct
+    // block even when the original block was split at may-throw instructions.
     for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
-        auto& ir_block = *m_block_map.get(static_cast<u32>(block_index)).value();
+        auto& ir_block = *m_final_ir_block.get(static_cast<u32>(block_index)).value();
 
         // If block is already terminated, skip
         if (ir_block.is_terminated())

@@ -40,8 +40,12 @@ private:
     Bytecode::Executable const& m_executable;
     NonnullOwnPtr<Function> m_function;
 
-    // Maps bytecode basic block index -> IR basic block
+    // Maps bytecode basic block index -> IR basic block (first block for each bytecode block)
     HashMap<u32, BasicBlock*> m_block_map;
+
+    // Maps bytecode basic block index -> final IR block (after EH splits)
+    // Used by connect_control_flow() to add terminators to the correct block
+    HashMap<u32, BasicBlock*> m_final_ir_block;
 
     // Per-block definitions: maps block -> (operand raw -> Value* at end of block)
     // NB: This is a cumulative snapshot, not just what's defined in the block
