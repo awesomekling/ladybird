@@ -1693,6 +1693,39 @@ void Lifter::fill_phi_operands()
             m_block_definitions.set(block.ptr(), current_defs);
         }
     }
+
+    // Compute phi types: if all incoming values have the same type, use that type
+    for (auto& block : m_function->basic_blocks()) {
+        for (auto& instruction : block->instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                break;
+
+            auto const& operands = instruction->operands();
+            if (operands.is_empty())
+                continue;
+
+            Type phi_type = Type::Unknown;
+            bool first = true;
+            bool all_same = true;
+
+            for (auto* operand : operands) {
+                if (!operand)
+                    continue;
+
+                Type op_type = operand->type();
+                if (first) {
+                    phi_type = op_type;
+                    first = false;
+                } else if (op_type != phi_type) {
+                    all_same = false;
+                    break;
+                }
+            }
+
+            if (all_same && phi_type != Type::Unknown)
+                instruction->result()->set_type(phi_type);
+        }
+    }
 }
 
 // Find reaching definition for filling phi operands

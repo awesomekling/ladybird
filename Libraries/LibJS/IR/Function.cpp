@@ -85,6 +85,20 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
     result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
 
+    // Bitwise operations always produce Int32 (due to ToInt32 conversion in JS)
+    switch (opcode) {
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+    case Opcode::UnsignedRightShift:
+        result.set_type(Type::Int32);
+        break;
+    default:
+        break;
+    }
+
     block.append(move(instruction));
     return result;
 }
@@ -97,6 +111,10 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
     auto& result = create_value_for_instruction();
     result.set_defining_instruction(instruction.ptr());
     instruction->set_result(&result);
+
+    // BitwiseNot always produces Int32 (due to ToInt32 conversion in JS)
+    if (opcode == Opcode::BitwiseNot)
+        result.set_type(Type::Int32);
 
     block.append(move(instruction));
     return result;
