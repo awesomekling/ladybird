@@ -1,7 +1,7 @@
 === Before optimization ===
 function():
 block0:
-    InitializeBinding 10
+    InitializeBinding x 10
     Jump block5
 block1:
     v4:unknown = GetGlobal sum
@@ -21,10 +21,10 @@ block4:
     v12:unknown = GetGlobal sum
     Jump block13
 block0_split0:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split1:
-    InitializeBinding 5
+    InitializeBinding n 5
     Jump block7
 block0_split2:
     v3:int32 = Move 0
@@ -50,7 +50,7 @@ block4_split8:
 === After DeadCodeElimination ===
 function():
 block0:
-    InitializeBinding 10
+    InitializeBinding x 10
     Jump block5
 block1:
     v4:unknown = GetGlobal sum
@@ -67,10 +67,10 @@ block4:
     v12:unknown = GetGlobal sum
     Jump block13
 block0_split0:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split1:
-    InitializeBinding 5
+    InitializeBinding n 5
     Jump block7
 block0_split2:
     v3:int32 = Move 0
@@ -96,7 +96,7 @@ block4_split8:
 === After CopyPropagation ===
 function():
 block0:
-    InitializeBinding 10
+    InitializeBinding x 10
     Jump block5
 block1:
     v4:unknown = GetGlobal sum
@@ -113,10 +113,10 @@ block4:
     v12:unknown = GetGlobal sum
     Jump block13
 block0_split0:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split1:
-    InitializeBinding 5
+    InitializeBinding n 5
     Jump block7
 block0_split2:
     v3:int32 = Move 0
@@ -142,7 +142,7 @@ block4_split8:
 === After AlgebraicSimplification ===
 function():
 block0:
-    InitializeBinding 10
+    InitializeBinding x 10
     Jump block5
 block1:
     v4:unknown = GetGlobal sum
@@ -158,10 +158,10 @@ block4:
     v12:unknown = GetGlobal sum
     Jump block13
 block0_split0:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split1:
-    InitializeBinding 5
+    InitializeBinding n 5
     Jump block7
 block0_split2:
     v3:int32 = Move 0
@@ -187,9 +187,9 @@ block4_split8:
 === After BlockMerging ===
 function():
 block0:
-    InitializeBinding 10
-    InitializeBinding 0
-    InitializeBinding 5
+    InitializeBinding x 10
+    InitializeBinding sum 0
+    InitializeBinding n 5
     v3:int32 = Move 0
     Jump block3
 block1:
@@ -212,9 +212,9 @@ block4:
 === After DeadCodeElimination ===
 function():
 block0:
-    InitializeBinding 10
-    InitializeBinding 0
-    InitializeBinding 5
+    InitializeBinding x 10
+    InitializeBinding sum 0
+    InitializeBinding n 5
     Jump block3
 block1:
     v4:unknown = GetGlobal sum
@@ -235,9 +235,9 @@ block4:
 
 function():
 block0:
-    InitializeBinding 10
-    InitializeBinding 0
-    InitializeBinding 5
+    InitializeBinding x 10
+    InitializeBinding sum 0
+    InitializeBinding n 5
     Jump block3
 block1:
     v4:unknown = GetGlobal sum

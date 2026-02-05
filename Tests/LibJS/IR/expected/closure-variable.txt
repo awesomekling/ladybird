@@ -34,7 +34,7 @@ block0:
     CreateVariable
     Jump block1
 block0_split0:
-    InitializeBinding 0
+    InitializeBinding count 0
     Jump block2
 block0_split1:
     v2:function = NewFunction
@@ -47,7 +47,7 @@ function():
 block0:
     v0:unknown = CreateLexicalEnvironment
     CreateVariable
-    InitializeBinding 0
+    InitializeBinding count 0
     v2:function = NewFunction
     Return v2:function
 
@@ -55,7 +55,7 @@ function():
 block0:
     v0:unknown = CreateLexicalEnvironment
     CreateVariable
-    InitializeBinding 0
+    InitializeBinding count 0
     v2:function = NewFunction
     Return v2:function
 

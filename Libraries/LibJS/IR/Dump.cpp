@@ -117,12 +117,17 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
     case Opcode::SetGlobal:
     case Opcode::GetBinding:
     case Opcode::SetBinding:
+    case Opcode::InitializeBinding:
         if (executable && instruction.identifier_index().is_valid()) {
             auto name = executable->identifier_table->get(instruction.identifier_index());
             builder.appendff(" {}", name);
         }
         for (auto* operand : instruction.operands())
             append_operand(operand);
+        if (instruction.opcode() == Opcode::InitializeBinding || instruction.opcode() == Opcode::SetBinding) {
+            if (instruction.environment_mode() == Bytecode::Op::EnvironmentMode::Var)
+                builder.append(" (var)"sv);
+        }
         break;
 
     case Opcode::GetById:

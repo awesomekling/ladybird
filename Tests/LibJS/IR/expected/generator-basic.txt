@@ -7,7 +7,7 @@ block0_split0:
     v2:unknown = Call v0:unknown, undefined
     Jump block2
 block0_split1:
-    InitializeBinding v2:unknown
+    InitializeBinding g v2:unknown
     Jump block3
 block0_split2:
     v3:unknown = GetGlobal g
@@ -44,7 +44,7 @@ function():
 block0:
     v0:unknown = GetGlobal count
     v2:unknown = Call v0:unknown, undefined
-    InitializeBinding v2:unknown
+    InitializeBinding g v2:unknown
     v3:unknown = GetGlobal g
     v4:unknown = GetById v3:unknown.next
     v5:unknown = Call v4:unknown, v3:unknown
@@ -60,7 +60,7 @@ function():
 block0:
     v0:unknown = GetGlobal count
     v2:unknown = Call v0:unknown, undefined
-    InitializeBinding v2:unknown
+    InitializeBinding g v2:unknown
     v3:unknown = GetGlobal g
     v4:unknown = GetById v3:unknown.next
     v5:unknown = Call v4:unknown, v3:unknown

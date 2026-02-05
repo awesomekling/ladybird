@@ -221,7 +221,7 @@ block0:
     Jump block1
 block0_split0:
     v0:unknown = CreateRestParams rest_index:0
-    InitializeBinding v0:unknown
+    InitializeBinding args v0:unknown
     Jump block2
 block0_split1:
     v1:unknown = GetBinding args
@@ -237,7 +237,7 @@ function():
 block0:
     CreateVariable
     v0:unknown = CreateRestParams rest_index:0
-    InitializeBinding v0:unknown
+    InitializeBinding args v0:unknown
     v1:unknown = GetBinding args
     v2:object = SuperCallWithArgumentArray v1:unknown
     Return v2:object
@@ -246,7 +246,7 @@ function():
 block0:
     CreateVariable
     v0:unknown = CreateRestParams rest_index:0
-    InitializeBinding v0:unknown
+    InitializeBinding args v0:unknown
     v1:unknown = GetBinding args
     v2:object = SuperCallWithArgumentArray v1:unknown
     Return v2:object

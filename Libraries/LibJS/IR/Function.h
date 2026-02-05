@@ -155,8 +155,8 @@ public:
     void build_leave_lexical_environment(BasicBlock& block);
     void build_enter_object_environment(BasicBlock& block, Value& object);
     [[nodiscard]] Value& build_get_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
-    void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
-    void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
+    void build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode);
+    void build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode);
     [[nodiscard]] Value& build_get_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     void build_set_global(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value);
     [[nodiscard]] Value& build_delete_variable(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);

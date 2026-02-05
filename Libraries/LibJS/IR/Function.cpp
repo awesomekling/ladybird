@@ -743,19 +743,21 @@ Value& Function::build_get_binding(BasicBlock& block, Bytecode::IdentifierTableI
     return result;
 }
 
-void Function::build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
+void Function::build_initialize_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode mode)
 {
     auto instruction = Instruction::create<Opcode::InitializeBinding>();
     instruction->set_identifier_index(identifier);
+    instruction->set_environment_mode(mode);
     instruction->add_operand(&value);
 
     block.append(move(instruction));
 }
 
-void Function::build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value)
+void Function::build_set_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode mode)
 {
     auto instruction = Instruction::create<Opcode::SetBinding>();
     instruction->set_identifier_index(identifier);
+    instruction->set_environment_mode(mode);
     instruction->add_operand(&value);
 
     block.append(move(instruction));

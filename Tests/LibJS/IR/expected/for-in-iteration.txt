@@ -47,13 +47,13 @@ block0_split0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     Jump block7
 block0_split1:
     v4:array = NewArray
     Jump block8
 block0_split2:
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     Jump block9
 block0_split3:
     v5:unknown = GetGlobal obj
@@ -124,13 +124,13 @@ block0_split0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     Jump block7
 block0_split1:
     v4:array = NewArray
     Jump block8
 block0_split2:
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     Jump block9
 block0_split3:
     v5:unknown = GetGlobal obj
@@ -199,13 +199,13 @@ block0_split0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     Jump block7
 block0_split1:
     v4:array = NewArray
     Jump block8
 block0_split2:
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     Jump block9
 block0_split3:
     v5:unknown = GetGlobal obj
@@ -272,13 +272,13 @@ block0_split0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     Jump block7
 block0_split1:
     v4:array = NewArray
     Jump block8
 block0_split2:
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     Jump block9
 block0_split3:
     v5:unknown = GetGlobal obj
@@ -321,9 +321,9 @@ block0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     v4:array = NewArray
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     v5:unknown = GetGlobal obj
     v27:boolean = IsNullish v5:unknown
     Branch v27:boolean, block1, block4
@@ -362,9 +362,9 @@ block0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     v4:array = NewArray
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     v5:unknown = GetGlobal obj
     v27:boolean = IsNullish v5:unknown
     Branch v27:boolean, block1, block4
@@ -400,9 +400,9 @@ block0:
     InitObjectLiteralProperty v0:object, 2
     InitObjectLiteralProperty v0:object, 3
     CacheObjectShape v0:object
-    InitializeBinding v0:object
+    InitializeBinding obj v0:object
     v4:array = NewArray
-    InitializeBinding v4:array
+    InitializeBinding keys v4:array
     v5:unknown = GetGlobal obj
     v27:boolean = IsNullish v5:unknown
     Branch v27:boolean, block1, block4

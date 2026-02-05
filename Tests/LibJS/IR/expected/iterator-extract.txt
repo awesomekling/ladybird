@@ -22,10 +22,10 @@ block3:
     v17:unknown = GetGlobal sum
     Jump block11
 block0_split0:
-    InitializeBinding v3:array
+    InitializeBinding arr v3:array
     Jump block5
 block0_split1:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split2:
     v5:unknown = GetGlobal arr
@@ -74,10 +74,10 @@ block3:
     v17:unknown = GetGlobal sum
     Jump block11
 block0_split0:
-    InitializeBinding v3:array
+    InitializeBinding arr v3:array
     Jump block5
 block0_split1:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split2:
     v5:unknown = GetGlobal arr
@@ -124,10 +124,10 @@ block3:
     v17:unknown = GetGlobal sum
     Jump block11
 block0_split0:
-    InitializeBinding v3:array
+    InitializeBinding arr v3:array
     Jump block5
 block0_split1:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split2:
     v5:unknown = GetGlobal arr
@@ -174,10 +174,10 @@ block3:
     v17:unknown = GetGlobal sum
     Jump block11
 block0_split0:
-    InitializeBinding v3:array
+    InitializeBinding arr v3:array
     Jump block5
 block0_split1:
-    InitializeBinding 0
+    InitializeBinding sum 0
     Jump block6
 block0_split2:
     v5:unknown = GetGlobal arr
@@ -206,8 +206,8 @@ block3_split9:
 function():
 block0:
     v3:array = NewArray 1, 2, 3
-    InitializeBinding v3:array
-    InitializeBinding 0
+    InitializeBinding arr v3:array
+    InitializeBinding sum 0
     v5:unknown = GetGlobal arr
     v6:unknown = GetIterator v5:unknown
     v7:unknown = ExtractValue v6:unknown, 0
@@ -234,8 +234,8 @@ block3:
 function():
 block0:
     v3:array = NewArray 1, 2, 3
-    InitializeBinding v3:array
-    InitializeBinding 0
+    InitializeBinding arr v3:array
+    InitializeBinding sum 0
     v5:unknown = GetGlobal arr
     v6:unknown = GetIterator v5:unknown
     v7:unknown = ExtractValue v6:unknown, 0
@@ -260,8 +260,8 @@ block3:
 function():
 block0:
     v3:array = NewArray 1, 2, 3
-    InitializeBinding v3:array
-    InitializeBinding 0
+    InitializeBinding arr v3:array
+    InitializeBinding sum 0
     v5:unknown = GetGlobal arr
     v6:unknown = GetIterator v5:unknown
     v7:unknown = ExtractValue v6:unknown, 0

@@ -1,7 +1,7 @@
 === Before optimization ===
 function():
 block0:
-    InitializeBinding true
+    InitializeBinding cond true
     Jump block4
 block1:
     v6:unknown = GetGlobal a
@@ -16,13 +16,13 @@ block3:
     v14:unknown = GetGlobal x
     Jump block15
 block0_split0:
-    InitializeBinding 10
+    InitializeBinding a 10
     Jump block5
 block0_split1:
-    InitializeBinding 20
+    InitializeBinding b 20
     Jump block6
 block0_split2:
-    InitializeBinding undefined
+    InitializeBinding x undefined
     Jump block7
 block0_split3:
     v4:unknown = GetGlobal cond
@@ -57,7 +57,7 @@ block3_split12:
 === After DeadCodeElimination ===
 function():
 block0:
-    InitializeBinding true
+    InitializeBinding cond true
     Jump block4
 block1:
     v6:unknown = GetGlobal a
@@ -69,13 +69,13 @@ block3:
     v14:unknown = GetGlobal x
     Jump block15
 block0_split0:
-    InitializeBinding 10
+    InitializeBinding a 10
     Jump block5
 block0_split1:
-    InitializeBinding 20
+    InitializeBinding b 20
     Jump block6
 block0_split2:
-    InitializeBinding undefined
+    InitializeBinding x undefined
     Jump block7
 block0_split3:
     v4:unknown = GetGlobal cond
@@ -107,7 +107,7 @@ block3_split12:
 === After EmptyBlockElimination ===
 function():
 block0:
-    InitializeBinding true
+    InitializeBinding cond true
     Jump block4
 block1:
     v6:unknown = GetGlobal a
@@ -119,13 +119,13 @@ block3:
     v14:unknown = GetGlobal x
     Jump block15
 block0_split0:
-    InitializeBinding 10
+    InitializeBinding a 10
     Jump block5
 block0_split1:
-    InitializeBinding 20
+    InitializeBinding b 20
     Jump block6
 block0_split2:
-    InitializeBinding undefined
+    InitializeBinding x undefined
     Jump block7
 block0_split3:
     v4:unknown = GetGlobal cond
@@ -153,10 +153,10 @@ block3_split12:
 === After BlockMerging ===
 function():
 block0:
-    InitializeBinding true
-    InitializeBinding 10
-    InitializeBinding 20
-    InitializeBinding undefined
+    InitializeBinding cond true
+    InitializeBinding a 10
+    InitializeBinding b 20
+    InitializeBinding x undefined
     v4:unknown = GetGlobal cond
     Branch v4:unknown, block1, block2
 block1:
@@ -176,10 +176,10 @@ block3:
 
 function():
 block0:
-    InitializeBinding true
-    InitializeBinding 10
-    InitializeBinding 20
-    InitializeBinding undefined
+    InitializeBinding cond true
+    InitializeBinding a 10
+    InitializeBinding b 20
+    InitializeBinding x undefined
     v4:unknown = GetGlobal cond
     Branch v4:unknown, block1, block2
 block1:

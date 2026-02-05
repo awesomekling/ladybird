@@ -754,10 +754,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::GetBinding>(dst(), instruction.identifier_index());
         break;
     case Opcode::InitializeBinding:
-        emit<Bytecode::Op::InitializeLexicalBinding>(instruction.identifier_index(), operand(0));
+        if (instruction.environment_mode() == Bytecode::Op::EnvironmentMode::Var)
+            emit<Bytecode::Op::InitializeVariableBinding>(instruction.identifier_index(), operand(0));
+        else
+            emit<Bytecode::Op::InitializeLexicalBinding>(instruction.identifier_index(), operand(0));
         break;
     case Opcode::SetBinding:
-        emit<Bytecode::Op::SetLexicalBinding>(instruction.identifier_index(), operand(0));
+        if (instruction.environment_mode() == Bytecode::Op::EnvironmentMode::Var)
+            emit<Bytecode::Op::SetVariableBinding>(instruction.identifier_index(), operand(0));
+        else
+            emit<Bytecode::Op::SetLexicalBinding>(instruction.identifier_index(), operand(0));
         break;
     case Opcode::GetGlobal:
         emit<Bytecode::Op::GetGlobal>(dst(), instruction.identifier_index(), instruction.cache_index().value());

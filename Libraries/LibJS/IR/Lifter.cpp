@@ -779,25 +779,25 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case SetLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::SetLexicalBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_set_binding(block, op.identifier(), value);
+        m_function->build_set_binding(block, op.identifier(), value, Bytecode::Op::EnvironmentMode::Lexical);
         break;
     }
     case SetVariableBinding: {
         auto const& op = static_cast<Bytecode::Op::SetVariableBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_set_binding(block, op.identifier(), value);
+        m_function->build_set_binding(block, op.identifier(), value, Bytecode::Op::EnvironmentMode::Var);
         break;
     }
     case InitializeLexicalBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeLexicalBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_initialize_binding(block, op.identifier(), value);
+        m_function->build_initialize_binding(block, op.identifier(), value, Bytecode::Op::EnvironmentMode::Lexical);
         break;
     }
     case InitializeVariableBinding: {
         auto const& op = static_cast<Bytecode::Op::InitializeVariableBinding const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_initialize_binding(block, op.identifier(), value);
+        m_function->build_initialize_binding(block, op.identifier(), value, Bytecode::Op::EnvironmentMode::Var);
         break;
     }
     case DeleteVariable: {
