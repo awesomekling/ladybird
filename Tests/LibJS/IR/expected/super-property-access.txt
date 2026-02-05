@@ -279,4 +279,3 @@ block0:
 function():
 block0:
     Return 10
-
