@@ -700,10 +700,6 @@ protected:
 private:
     friend class CFG;
     friend class Function;
-    friend class BlockMerging;
-    friend class EmptyBlockElimination;
-    friend class InstructionCombining;
-    friend class JumpThreading;
 
     BasicBlock* m_true_target { nullptr };
     BasicBlock* m_false_target { nullptr };
@@ -722,9 +718,12 @@ public:
         VERIFY(true_target());
         return *true_target();
     }
-    void set_target(BasicBlock& block) { set_true_target(&block); }
 
 private:
+    friend class CFG;
+
+    void set_target(BasicBlock& block) { set_true_target(&block); }
+
     explicit JumpInstruction(BasicBlock& target);
 };
 
@@ -754,10 +753,12 @@ public:
         return *false_target();
     }
 
+private:
+    friend class CFG;
+
     void set_true_branch(BasicBlock& block) { set_true_target(&block); }
     void set_false_branch(BasicBlock& block) { set_false_target(&block); }
 
-private:
     BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
 };
 

@@ -120,58 +120,58 @@ PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
             if (phi_used_outside_block)
                 continue; // Can't thread - phi result is used elsewhere
 
-            // Update the predecessor to jump directly to the target
-            auto* pred_terminator = pred_block->terminator();
-            if (!pred_terminator)
+            // Redirect edge from pred_block: bypass the current block, go to thread_target
+            if (!pred_block->terminator())
                 continue;
 
-            bool updated = false;
-            if (pred_terminator->true_target() == block.ptr()) {
-                pred_terminator->set_true_target(thread_target);
-                updated = true;
-            }
-            if (pred_terminator->false_target() == block.ptr()) {
-                pred_terminator->set_false_target(thread_target);
-                updated = true;
-            }
+            // Check if pred actually targets this block
+            auto* pred_terminator = pred_block->terminator();
+            if (pred_terminator->true_target() != block.ptr() && pred_terminator->false_target() != block.ptr())
+                continue;
 
-            if (updated) {
-                // Add pred_block to thread_target with traced phi values.
-                // Must be done before removing from block so we can trace through block's phis.
-                CFG::add_predecessor(*thread_target, *pred_block, [&](Instruction& instr) -> Value* {
-                    auto& target_phi = static_cast<PhiInstruction&>(instr);
+            // Precompute traced phi values before redirect_edge removes pred_block
+            // from the bypassed block's phis (which would break tracing).
+            HashMap<Instruction*, Value*> traced_values;
+            for (auto& instr : thread_target->instructions()) {
+                if (instr->opcode() != Opcode::Phi)
+                    break;
 
-                    // Find the value this phi expects from the bypassed block
-                    Value* value_from_bypassed = nullptr;
-                    for (size_t j = 0; j < target_phi.incoming_count(); ++j) {
-                        if (target_phi.incoming_block(j) == block.ptr()) {
-                            value_from_bypassed = target_phi.incoming_value(j);
+                auto& target_phi = static_cast<PhiInstruction&>(*instr);
+
+                Value* value_from_bypassed = nullptr;
+                for (size_t j = 0; j < target_phi.incoming_count(); ++j) {
+                    if (target_phi.incoming_block(j) == block.ptr()) {
+                        value_from_bypassed = target_phi.incoming_value(j);
+                        break;
+                    }
+                }
+
+                if (!value_from_bypassed)
+                    continue;
+
+                // If value_from_bypassed is a phi in the bypassed block, trace to find
+                // what value pred_block would contribute
+                if (auto* def = value_from_bypassed->defining_instruction();
+                    def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
+                    auto& def_phi = static_cast<PhiInstruction&>(*def);
+                    for (size_t k = 0; k < def_phi.incoming_count(); ++k) {
+                        if (def_phi.incoming_block(k) == pred_block) {
+                            traced_values.set(instr.ptr(), def_phi.incoming_value(k));
                             break;
                         }
                     }
-
-                    if (!value_from_bypassed)
-                        return nullptr;
-
-                    // If value_from_bypassed is a phi in the bypassed block, trace to find
-                    // what value pred_block would contribute
-                    if (auto* def = value_from_bypassed->defining_instruction();
-                        def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
-                        auto& def_phi = static_cast<PhiInstruction&>(*def);
-                        for (size_t k = 0; k < def_phi.incoming_count(); ++k) {
-                            if (def_phi.incoming_block(k) == pred_block)
-                                return def_phi.incoming_value(k);
-                        }
-                    }
-
-                    return value_from_bypassed;
-                });
-
-                // Remove pred_block from bypassed block (also removes phi operands)
-                CFG::remove_predecessor(*block, *pred_block);
-
-                changed = true;
+                } else {
+                    traced_values.set(instr.ptr(), value_from_bypassed);
+                }
             }
+
+            CFG::redirect_edge(*pred_block, *block, *thread_target, [&](Instruction& instr, Value*) -> Value* {
+                if (auto it = traced_values.find(&instr); it != traced_values.end())
+                    return it->value;
+                return nullptr;
+            });
+
+            changed = true;
         }
     }
 

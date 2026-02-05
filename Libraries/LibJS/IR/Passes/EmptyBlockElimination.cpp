@@ -106,23 +106,13 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
                 continue;
             }
 
-            // Update all predecessors to jump to target instead
-            for (auto* pred : predecessors) {
-                if (auto* pred_term = pred->terminator()) {
-                    if (pred_term->true_target() == block.ptr())
-                        pred_term->set_true_target(target);
-                    if (pred_term->false_target() == block.ptr())
-                        pred_term->set_false_target(target);
-                }
-            }
-
             // If eliminating the entry block, make target the new entry
             if (is_entry)
                 function.set_entry_block(target);
 
-            // Add each predecessor of the empty block to target with traced phi values
+            // Redirect each predecessor edge from the empty block to the target
             for (auto* pred : predecessors) {
-                CFG::add_predecessor(*target, *pred, [&](Instruction& instr) -> Value* {
+                CFG::redirect_edge(*pred, *block, *target, [&](Instruction& instr, Value*) -> Value* {
                     auto& target_phi = static_cast<PhiInstruction&>(instr);
 
                     // Find the value this phi expects from the empty block
@@ -150,9 +140,6 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
                     return value_from_empty;
                 });
             }
-
-            // Remove the empty block from target's predecessors (and phi operands)
-            CFG::remove_predecessor(*target, *block);
 
             // Clear the block's instructions (will be removed later)
             block->instructions().clear();

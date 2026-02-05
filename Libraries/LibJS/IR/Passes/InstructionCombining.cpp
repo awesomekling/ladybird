@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/InstructionCombining.h>
@@ -266,11 +267,8 @@ PreservedAnalyses InstructionCombining::run(Function& function, PassManager&)
                 }
 
                 // Fall back to swapping targets if we can't invert the comparison
-                auto* true_target = branch->true_target();
-                auto* false_target = branch->false_target();
                 branch->set_operand(0, not_input);
-                branch->set_true_target(false_target);
-                branch->set_false_target(true_target);
+                CFG::swap_branch_targets(*block);
                 changed = true;
                 break;
             }

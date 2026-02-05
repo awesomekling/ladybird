@@ -75,18 +75,7 @@ PreservedAnalyses BlockMerging::run(Function& function, PassManager&)
             block_b->instructions().clear();
 
             // 4. Update all references to B to point to A
-            for (auto& other_block : function.basic_blocks()) {
-                // Update terminator targets
-                if (auto* other_term = other_block->terminator()) {
-                    if (other_term->true_target() == block_b)
-                        other_term->set_true_target(block_a.ptr());
-                    if (other_term->false_target() == block_b)
-                        other_term->set_false_target(block_a.ptr());
-                }
-
-                // Update phi predecessor references and predecessor lists
-                CFG::replace_predecessor(*other_block, *block_b, *block_a);
-            }
+            CFG::retarget_all_edges(function, *block_b, *block_a);
 
             // 5. Add A to the predecessor lists of B's former successors
             if (b_true_target && b_true_target != block_b)

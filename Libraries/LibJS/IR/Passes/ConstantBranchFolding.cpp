@@ -13,23 +13,6 @@
 
 namespace JS::IR {
 
-// Helper to replace the terminator with an unconditional jump
-static void replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)
-{
-    // Clean up use lists and remove the old branch instruction
-    block.instructions().last()->clear_operand_uses();
-    block.instructions().remove(block.instructions().size() - 1);
-
-    // Add a new jump instruction
-    auto jump = JumpInstruction::create(target);
-    jump->set_parent_block(&block);
-    block.instructions().append(move(jump));
-
-    // Remove this block from the not-taken block's predecessors
-    if (not_taken)
-        CFG::remove_predecessor(*not_taken, block);
-}
-
 PreservedAnalyses ConstantBranchFolding::run(Function& function, PassManager&)
 {
     bool changed = false;
@@ -41,7 +24,7 @@ PreservedAnalyses ConstantBranchFolding::run(Function& function, PassManager&)
 
         // If both targets are the same, convert to unconditional jump
         if (term->true_target() == term->false_target() && term->true_target() != nullptr) {
-            replace_branch_with_jump(*block, *term->true_target(), nullptr);
+            CFG::replace_branch_with_jump(*block, *term->true_target(), nullptr);
             changed = true;
             continue;
         }
@@ -61,7 +44,7 @@ PreservedAnalyses ConstantBranchFolding::run(Function& function, PassManager&)
         auto* not_taken = take_true_branch ? term->false_target() : term->true_target();
 
         // Replace Branch with Jump
-        replace_branch_with_jump(*block, *target, not_taken);
+        CFG::replace_branch_with_jump(*block, *target, not_taken);
         changed = true;
     }
 
