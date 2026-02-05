@@ -25,6 +25,12 @@ void PassManager::run(Function& function)
     if (g_dump_ir_between_passes)
         dbgln("=== Before optimization ===\n{}", dump(function));
 
+    // Validate the IR from the builder before any optimization passes.
+    if (!Verifier::verify(function, VerifierMode::Full, false)) {
+        warnln("IR Verifier failed before optimization");
+        Verifier::verify(function, VerifierMode::Full, true);
+    }
+
     constexpr size_t max_iterations = 10;
     for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
         bool changed = false;
