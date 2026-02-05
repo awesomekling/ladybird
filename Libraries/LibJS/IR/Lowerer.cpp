@@ -844,7 +844,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::Call: {
         // IR operands: [callee, this_value, arg0, arg1, ...]
         auto args = collect_varargs(2);
-        emit_with_extra_operand_slots<Bytecode::Op::Call>(args.size(), dst(), operand(0), operand(1), Optional<Bytecode::StringTableIndex> {}, ReadonlySpan<Bytecode::Operand> { args });
+        emit_with_extra_operand_slots<Bytecode::Op::Call>(args.size(), dst(), operand(0), operand(1), instruction.expression_string(), ReadonlySpan<Bytecode::Operand> { args });
         break;
     }
 

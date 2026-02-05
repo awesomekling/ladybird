@@ -137,7 +137,7 @@ public:
     void build_put_by_spread(BasicBlock& block, Value& base, Value& source);
 
     // Calls
-    [[nodiscard]] Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments);
+    [[nodiscard]] Value& build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
     [[nodiscard]] Value& build_call_builtin(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
     [[nodiscard]] Value& build_call_direct_eval(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
     [[nodiscard]] Value& build_call_with_argument_array(BasicBlock& block, Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);

@@ -506,11 +506,12 @@ void Function::build_put_by_spread(BasicBlock& block, Value& base, Value& source
 }
 
 // Calls
-Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments)
+Value& Function::build_call(BasicBlock& block, Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
     auto instruction = CallInstruction::create(Opcode::Call, &callee, &this_value);
     for (auto* arg : arguments)
         instruction->add_operand(arg);
+    instruction->set_expression_string(expression_string);
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
