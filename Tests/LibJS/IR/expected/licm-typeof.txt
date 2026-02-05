@@ -34,14 +34,14 @@ block1:
     v7:string = Move v6:string
     Jump block2
 block2:
-    v8:int32 = Move v14:unknown
-    v9:number = Increment v14:unknown
+    v8:int32 = Move v14:number
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v4:int32, block2:v9:number]
+    v14:number = Phi [block0:v4:int32, block2:v9:number]
     v13:unknown = Phi [block0:v2:undefined, block2:v7:string]
     v12:unknown = Phi [block0:v15:undefined, block2:v8:int32]
-    v11:boolean = LessThan v14:unknown, 10
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
@@ -58,14 +58,14 @@ block1:
     v7:string = Move v6:string
     Jump block2
 block2:
-    v8:int32 = Move v14:unknown
-    v9:number = Increment v14:unknown
+    v8:int32 = Move v14:number
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
-    v11:boolean = LessThan v14:unknown, 10
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:number]
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
@@ -82,14 +82,14 @@ block1:
     v7:string = Move v6:string
     Jump block2
 block2:
-    v8:int32 = Move v14:unknown
-    v9:number = Increment v14:unknown
+    v8:int32 = Move v14:number
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
-    v11:boolean = LessThan v14:unknown, 10
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:number]
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
@@ -106,14 +106,14 @@ block1:
     v7:string = Move v6:string
     Jump block2
 block2:
-    v8:int32 = Move v14:unknown
-    v9:number = Increment v14:unknown
+    v8:int32 = Move v14:number
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v14:unknown]
-    v11:boolean = LessThan v14:unknown, 10
+    v12:unknown = Phi [block0:v15:undefined, block2:v14:number]
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
@@ -126,12 +126,12 @@ block0:
 block1:
     Jump block2
 block2:
-    v9:number = Increment v14:unknown
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v11:boolean = LessThan v14:unknown, 10
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
@@ -142,12 +142,12 @@ block0:
     v6:string = Typeof v5:unknown
     Jump block3
 block2:
-    v9:number = Increment v14:unknown
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v11:boolean = LessThan v14:unknown, 10
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block2, block4
 block4:
     Return v13:unknown
@@ -157,12 +157,12 @@ block0:
     v6:string = Typeof v5:unknown
     Jump block3
 block2:
-    v9:number = Increment v14:unknown
+    v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v3:int32, block2:v9:number]
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v11:boolean = LessThan v14:unknown, 10
+    v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block2, block4
 block4:
     Return v13:unknown

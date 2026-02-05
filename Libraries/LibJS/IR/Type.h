@@ -57,6 +57,20 @@ constexpr char const* type_to_string(Type type)
     VERIFY_NOT_REACHED();
 }
 
+// Join two types, producing the most specific type that contains both.
+constexpr Type join_types(Type a, Type b)
+{
+    if (a == b)
+        return a;
+    // int32 is a subtype of number.
+    if ((a == Type::Int32 && b == Type::Number) || (a == Type::Number && b == Type::Int32))
+        return Type::Number;
+    // array is a subtype of object.
+    if ((a == Type::Array && b == Type::Object) || (a == Type::Object && b == Type::Array))
+        return Type::Object;
+    return Type::Unknown;
+}
+
 // Is this type a primitive that won't trigger ToPrimitive/valueOf calls?
 // Used to determine if arithmetic/comparison operations are safe from user code.
 constexpr bool is_safe_primitive_type(Type type)
