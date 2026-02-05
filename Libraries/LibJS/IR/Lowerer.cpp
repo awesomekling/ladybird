@@ -643,7 +643,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
     case Opcode::GetLength:
-        emit<Bytecode::Op::GetLength>(dst(), operand(0), OptionalNone {}, instruction.cache_index().value());
+        emit<Bytecode::Op::GetLength>(dst(), operand(0), instruction.base_identifier(), instruction.cache_index().value());
         break;
 
     // Property access
@@ -662,14 +662,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::GetByValueWithThis>(dst(), operand(0), operand(2), operand(1));
         break;
     case Opcode::PutById:
-        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), OptionalNone {});
+        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
         break;
     case Opcode::PutByIdWithThis:
         // operands: base (0), this_value (1), value (2)
         emit<Bytecode::Op::PutNormalByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
         break;
     case Opcode::PutByValue:
-        emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), OptionalNone {});
+        emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
         break;
     case Opcode::PutByValueWithThis:
         // operands: base (0), this_value (1), property (2), value (3)

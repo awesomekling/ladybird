@@ -523,7 +523,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PutNormalById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_put_by_id(block, base, op.property(), value);
+        m_function->build_put_by_id(block, base, op.property(), value, op.base_identifier());
         block.instructions().last()->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
@@ -532,7 +532,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_put_by_value(block, base, property, value);
+        m_function->build_put_by_value(block, base, property, value, op.base_identifier());
         break;
     }
 
@@ -981,7 +981,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetLength: {
         auto const& op = static_cast<Bytecode::Op::GetLength const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_function->build_get_length(block, base);
+        auto& result = m_function->build_get_length(block, base, op.base_identifier());
         result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;

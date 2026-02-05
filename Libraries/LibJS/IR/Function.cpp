@@ -266,17 +266,20 @@ Value& Function::build_get_by_value_with_this(BasicBlock& block, Value& base, Va
     return result;
 }
 
-Value& Function::build_get_length(BasicBlock& block, Value& base)
+Value& Function::build_get_length(BasicBlock& block, Value& base, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
-    return build_unary_op(block, Opcode::GetLength, base);
+    auto& result = build_unary_op(block, Opcode::GetLength, base);
+    result.defining_instruction()->set_base_identifier(base_identifier);
+    return result;
 }
 
-void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value)
+void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
     auto instruction = Instruction::create<Opcode::PutById>();
     instruction->add_operand(&base);
     instruction->add_operand(&value);
     instruction->set_property_key_index(property);
+    instruction->set_base_identifier(base_identifier);
 
     block.append(move(instruction));
 }
@@ -292,12 +295,13 @@ void Function::build_put_by_id_with_this(BasicBlock& block, Value& base, Value& 
     block.append(move(instruction));
 }
 
-void Function::build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value)
+void Function::build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier)
 {
     auto instruction = Instruction::create<Opcode::PutByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&value);
+    instruction->set_base_identifier(base_identifier);
 
     block.append(move(instruction));
 }
