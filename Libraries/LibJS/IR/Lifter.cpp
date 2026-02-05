@@ -30,6 +30,17 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.lift_basic_blocks();
     lifter.connect_control_flow();
     lifter.compute_block_predecessors();
+
+    // If the entry block has predecessors (e.g., from labelled breaks that jump
+    // to the start of the function), insert a new empty entry block.
+    // SSA requires the entry block to have no predecessors.
+    if (auto* entry = lifter.m_function->entry_block(); entry && !entry->predecessors().is_empty()) {
+        auto& new_entry = lifter.m_function->create_block("entry"_string);
+        lifter.m_function->build_jump(new_entry, *entry);
+        lifter.m_function->set_entry_block(&new_entry);
+        lifter.compute_block_predecessors();
+    }
+
     lifter.compute_dominators();
 
     // SSA construction using dominance-based approach:
