@@ -1735,7 +1735,7 @@ void Lifter::fill_phi_operands()
     if (m_function->entry_block())
         rename_ssa(*m_function->entry_block(), operand_stacks);
 
-    // Compute phi types: if all incoming values have the same type, use that type
+    // Compute phi types by joining incoming value types.
     for (auto& block : m_function->basic_blocks()) {
         for (auto& instruction : block->instructions()) {
             if (instruction->opcode() != Opcode::Phi)
@@ -1747,23 +1747,20 @@ void Lifter::fill_phi_operands()
 
             Type phi_type = Type::Unknown;
             bool first = true;
-            bool all_same = true;
 
             for (auto* operand : operands) {
                 if (!operand)
                     continue;
 
-                Type op_type = operand->type();
                 if (first) {
-                    phi_type = op_type;
+                    phi_type = operand->type();
                     first = false;
-                } else if (op_type != phi_type) {
-                    all_same = false;
-                    break;
+                } else {
+                    phi_type = join_types(phi_type, operand->type());
                 }
             }
 
-            if (all_same && phi_type != Type::Unknown)
+            if (phi_type != Type::Unknown)
                 instruction->result()->set_type(phi_type);
         }
     }
