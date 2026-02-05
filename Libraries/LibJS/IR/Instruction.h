@@ -691,15 +691,15 @@ public:
 protected:
     explicit TerminatorInstruction(Opcode opcode);
 
-    // Protected so subclasses and friends can access, but not general code.
-    // Use subclass-specific APIs (set_target, set_true_branch, set_false_branch)
-    // for type-safe target mutation.
-    void set_true_target(BasicBlock* block) { m_true_target = block; }
-    void set_false_target(BasicBlock* block) { m_false_target = block; }
-
 private:
     friend class CFG;
     friend class Function;
+    friend class JumpInstruction;
+    friend class BranchInstruction;
+
+    // All target mutation goes through CFG helpers or subclass-specific APIs.
+    void set_true_target(BasicBlock* block) { m_true_target = block; }
+    void set_false_target(BasicBlock* block) { m_false_target = block; }
 
     BasicBlock* m_true_target { nullptr };
     BasicBlock* m_false_target { nullptr };
