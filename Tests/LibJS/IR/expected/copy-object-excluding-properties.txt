@@ -1,0 +1,353 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal test
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal test
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal test
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:object = NewObject
+    Jump block9
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v13:object
+    Jump block14
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v13:object
+    Jump block16
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v13:object
+    Jump block18
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+block0_split0:
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    v8:object = Move v4:object
+    ThrowIfNullish v8:object
+    Jump block10
+block0_split1:
+    v9:unknown = GetById v8:object.a
+    Jump block11
+block0_split2:
+    v10:unknown = Move v9:unknown
+    v12:object = CopyObjectExcludingProperties v8:object, v11:string
+    Jump block12
+block0_split3:
+    v13:object = Move v12:object
+    ThrowIfTDZ v10:unknown
+    Jump block13
+block0_split4:
+    v22:boolean = StrictlyInequals v10:unknown, 1
+    Branch v22:boolean, block1, block2
+block2_split5:
+    v15:unknown = GetById v13:object.b
+    Jump block15
+block2_split6:
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block4_split7:
+    v17:unknown = GetById v13:object.c
+    Jump block17
+block4_split8:
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block6_split9:
+    v19:unknown = GetById v13:object.a
+    Jump block19
+block6_split10:
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v4:object = NewObject
+    Jump block9
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v13:object
+    Jump block14
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v13:object
+    Jump block16
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v13:object
+    Jump block18
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+block0_split0:
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    v8:object = Move v4:object
+    ThrowIfNullish v8:object
+    Jump block10
+block0_split1:
+    v9:unknown = GetById v8:object.a
+    Jump block11
+block0_split2:
+    v10:unknown = Move v9:unknown
+    v12:object = CopyObjectExcludingProperties v8:object, v11:string
+    Jump block12
+block0_split3:
+    v13:object = Move v12:object
+    ThrowIfTDZ v10:unknown
+    Jump block13
+block0_split4:
+    v22:boolean = StrictlyInequals v10:unknown, 1
+    Branch v22:boolean, block1, block2
+block2_split5:
+    v15:unknown = GetById v13:object.b
+    Jump block15
+block2_split6:
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block4_split7:
+    v17:unknown = GetById v13:object.c
+    Jump block17
+block4_split8:
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block6_split9:
+    v19:unknown = GetById v13:object.a
+    Jump block19
+block6_split10:
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+
+=== After CopyPropagation ===
+function():
+block0:
+    v4:object = NewObject
+    Jump block9
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v12:object
+    Jump block14
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v12:object
+    Jump block16
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v12:object
+    Jump block18
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+block0_split0:
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    v8:object = Move v4:object
+    ThrowIfNullish v4:object
+    Jump block10
+block0_split1:
+    v9:unknown = GetById v4:object.a
+    Jump block11
+block0_split2:
+    v10:unknown = Move v9:unknown
+    v12:object = CopyObjectExcludingProperties v4:object, v11:string
+    Jump block12
+block0_split3:
+    v13:object = Move v12:object
+    ThrowIfTDZ v9:unknown
+    Jump block13
+block0_split4:
+    v22:boolean = StrictlyInequals v9:unknown, 1
+    Branch v22:boolean, block1, block2
+block2_split5:
+    v15:unknown = GetById v12:object.b
+    Jump block15
+block2_split6:
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block4_split7:
+    v17:unknown = GetById v12:object.c
+    Jump block17
+block4_split8:
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block6_split9:
+    v19:unknown = GetById v12:object.a
+    Jump block19
+block6_split10:
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+
+=== After BlockMerging ===
+function():
+block0:
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    v8:object = Move v4:object
+    ThrowIfNullish v4:object
+    v9:unknown = GetById v4:object.a
+    v10:unknown = Move v9:unknown
+    v12:object = CopyObjectExcludingProperties v4:object, v11:string
+    v13:object = Move v12:object
+    ThrowIfTDZ v9:unknown
+    v22:boolean = StrictlyInequals v9:unknown, 1
+    Branch v22:boolean, block1, block2
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v12:object
+    v15:unknown = GetById v12:object.b
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v12:object
+    v17:unknown = GetById v12:object.c
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v12:object
+    v19:unknown = GetById v12:object.a
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    ThrowIfNullish v4:object
+    v9:unknown = GetById v4:object.a
+    v12:object = CopyObjectExcludingProperties v4:object, v11:string
+    ThrowIfTDZ v9:unknown
+    v22:boolean = StrictlyInequals v9:unknown, 1
+    Branch v22:boolean, block1, block2
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v12:object
+    v15:unknown = GetById v12:object.b
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v12:object
+    v17:unknown = GetById v12:object.c
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v12:object
+    v19:unknown = GetById v12:object.a
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+
+function():
+block0:
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    ThrowIfNullish v4:object
+    v9:unknown = GetById v4:object.a
+    v12:object = CopyObjectExcludingProperties v4:object, v11:string
+    ThrowIfTDZ v9:unknown
+    v22:boolean = StrictlyInequals v9:unknown, 1
+    Branch v22:boolean, block1, block2
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v12:object
+    v15:unknown = GetById v12:object.b
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v12:object
+    v17:unknown = GetById v12:object.c
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v12:object
+    v19:unknown = GetById v12:object.a
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+block7:
+    Return v20:string
+block8:
+    Return v21:string

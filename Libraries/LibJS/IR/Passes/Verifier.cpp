@@ -393,6 +393,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::NewClass:
                     case Opcode::NewFunction:
                     case Opcode::GetTemplateObject:
+                    case Opcode::CopyObjectExcludingProperties:
                         return {};
                     case Opcode::__Count:
                         VERIFY_NOT_REACHED();

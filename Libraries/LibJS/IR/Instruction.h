@@ -169,6 +169,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     GetTemplateObject,
     InitObjectLiteralProperty,
     CacheObjectShape,
+    CopyObjectExcludingProperties,
 
     // Special
     In,
@@ -363,6 +364,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::GetTemplateObject)]                  = { "GetTemplateObject",                  false, false, true,  false, false, false, true  },
     [to_underlying(Opcode::InitObjectLiteralProperty)]          = { "InitObjectLiteralProperty",          false, false, true,  false, false, false, false },
     [to_underlying(Opcode::CacheObjectShape)]                   = { "CacheObjectShape",                   false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::CopyObjectExcludingProperties)]      = { "CopyObjectExcludingProperties",      false, true,  true,  false, false, false, true  },
 
     // Special
     [to_underlying(Opcode::In)]                                 = { "In",                                 false, true,  true,  false, false, false, true  },

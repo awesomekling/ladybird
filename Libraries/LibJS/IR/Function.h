@@ -180,6 +180,7 @@ public:
     [[nodiscard]] Value& build_get_template_object(BasicBlock& block, Span<Value*> strings, u32 cache_index);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, CacheIndex shape_cache_index, PropertySlot property_slot);
     void build_cache_object_shape(BasicBlock& block, Value& object, CacheIndex cache_index);
+    [[nodiscard]] Value& build_copy_object_excluding_properties(BasicBlock& block, Value& from_object, Span<Value*> excluded_names);
 
     // Arguments
     [[nodiscard]] Value& build_create_arguments(BasicBlock& block, Bytecode::Op::ArgumentsKind kind, bool is_immutable);

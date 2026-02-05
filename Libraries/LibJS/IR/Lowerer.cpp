@@ -979,6 +979,13 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::CacheObjectShape>(operand(0), instruction.cache_index().value());
         break;
 
+    case Opcode::CopyObjectExcludingProperties: {
+        // operand(0) = from_object, operand(1..) = excluded_names
+        auto excluded_names = collect_varargs(1);
+        emit_with_extra_operand_slots<Bytecode::Op::CopyObjectExcludingProperties>(excluded_names.size(), dst(), operand(0), ReadonlySpan<Bytecode::Operand> { excluded_names });
+        break;
+    }
+
     // Construct (variable-length arguments)
     case Opcode::Construct: {
         // IR operands: [callee, arg0, arg1, ...]

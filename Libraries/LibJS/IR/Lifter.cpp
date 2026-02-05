@@ -1196,7 +1196,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case CopyObjectExcludingProperties: {
         auto const& op = static_cast<Bytecode::Op::CopyObjectExcludingProperties const&>(instruction);
         auto& from = get_or_create_value_for_operand(op.from_object(), block);
-        auto& result = m_function->build_move(block, from);
+        Vector<IR::Value*> excluded_names;
+        for (auto const& excluded_name : op.excluded_names())
+            excluded_names.append(&get_or_create_value_for_operand(excluded_name, block));
+        auto& result = m_function->build_copy_object_excluding_properties(block, from, excluded_names.span());
         define_operand(op.dst(), result, block);
         break;
     }

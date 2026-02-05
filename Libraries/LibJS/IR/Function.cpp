@@ -965,6 +965,21 @@ void Function::build_cache_object_shape(BasicBlock& block, Value& object, CacheI
     block.append(move(instruction));
 }
 
+Value& Function::build_copy_object_excluding_properties(BasicBlock& block, Value& from_object, Span<Value*> excluded_names)
+{
+    auto instruction = Instruction::create<Opcode::CopyObjectExcludingProperties>();
+    instruction->add_operand(&from_object);
+    for (auto* name : excluded_names)
+        instruction->add_operand(name);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Object);
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 // Special
 Value& Function::build_in(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::In, lhs, rhs); }
 Value& Function::build_instance_of(BasicBlock& block, Value& lhs, Value& rhs) { return build_binary_op(block, Opcode::InstanceOf, lhs, rhs); }
