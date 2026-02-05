@@ -572,15 +572,50 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
                 break;
             case Opcode::Yield:
-            case Opcode::Await:
                 if (term->false_target()) {
                     report_error(ByteString::formatted(
-                        "{} in block{} has false_target (should be null)",
-                        opcode_to_string(term->opcode()), block->index()));
+                        "Yield in block{} has false_target (should be null)",
+                        block->index()));
+                }
+                break;
+            case Opcode::Await:
+                if (!term->true_target()) {
+                    report_error(ByteString::formatted(
+                        "Await in block{} has no continuation target",
+                        block->index()));
+                }
+                if (term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "Await in block{} has false_target (should be null)",
+                        block->index()));
                 }
                 break;
             default:
                 break;
+            }
+
+            // Check: Terminator operand arity
+            Optional<size_t> expected_operands;
+            switch (term->opcode()) {
+            case Opcode::Jump:
+                expected_operands = 0;
+                break;
+            case Opcode::Branch:
+            case Opcode::Return:
+            case Opcode::Throw:
+            case Opcode::End:
+            case Opcode::Yield:
+            case Opcode::Await:
+                expected_operands = 1;
+                break;
+            default:
+                break;
+            }
+            if (expected_operands.has_value() && term->operands().size() != *expected_operands) {
+                report_error(ByteString::formatted(
+                    "{} in block{} has {} operands, expected {}",
+                    opcode_to_string(term->opcode()), block->index(),
+                    term->operands().size(), *expected_operands));
             }
         }
 
@@ -727,11 +762,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         // Check: Value kind consistency
         // Constants, parameters, and this values must NOT have a defining instruction
         if (!value->is_instruction() && value->defining_instruction()) {
+            char const* kind_name = "this";
+            if (value->is_constant())
+                kind_name = "constant";
+            else if (value->is_parameter())
+                kind_name = "parameter";
             report_error(ByteString::formatted(
                 "Value v{} (kind={}) has a defining instruction but shouldn't",
-                value->index(),
-                value->is_constant() ? "constant" : value->is_parameter() ? "parameter"
-                                                                          : "this"));
+                value->index(), kind_name));
         }
 
         for (auto const* use : value->uses()) {
