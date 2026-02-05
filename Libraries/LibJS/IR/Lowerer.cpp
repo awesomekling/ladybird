@@ -948,7 +948,13 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Arguments
     case Opcode::CreateArguments:
-        emit<Bytecode::Op::CreateArguments>(dst(), instruction.arguments_kind(), instruction.is_immutable());
+        // CreateArguments without a dst register creates the 'arguments' binding
+        // in the environment. With a dst, it stores the object in the register
+        // and skips binding creation. Only emit dst when the result is used.
+        if (instruction.result() && !instruction.result()->uses().is_empty())
+            emit<Bytecode::Op::CreateArguments>(dst(), instruction.arguments_kind(), instruction.is_immutable());
+        else
+            emit<Bytecode::Op::CreateArguments>(Optional<Bytecode::Operand> {}, instruction.arguments_kind(), instruction.is_immutable());
         break;
     case Opcode::CreateRestParams:
         emit<Bytecode::Op::CreateRestParams>(dst(), instruction.rest_index());
