@@ -1262,6 +1262,14 @@ void Lowerer::lower_blocks()
         auto const& ir_block = *ordered_blocks[i];
         m_current_block = m_bytecode_blocks[i].ptr();
 
+        // Emit phi moves for exception handler edges.
+        // When any instruction in this block throws, the runtime jumps to the
+        // handler block. Phi nodes in that handler need their registers to
+        // already contain the correct values, so we emit the moves at the
+        // start of every block that can reach the handler via an exception.
+        if (auto* handler = ir_block.exception_handler())
+            emit_phi_moves_for_successor(ir_block, *handler);
+
         // Lower non-terminator instructions
         for (auto const& instruction : ir_block.instructions()) {
             if (instruction->is_terminator())

@@ -1,0 +1,268 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:int32 = Move 0
+    v2:int32 = Move 0
+    EnterUnwindContext block2
+block1:
+    v28:unknown = Phi [block2:v29:undefined, block5:v14:unknown, block6:v14:unknown, block7:v21:unknown]
+    v27:unknown = Phi [block2:v2:int32, block5:v2:int32, block6:v15:unknown, block7:v15:unknown]
+    v26:int32 = Phi [block2:v9:int32, block5:v9:int32, block6:v17:int32, block7:v17:int32]
+    v25:unknown = Phi [block2:v10:unknown, block5:v10:unknown, block6:v18:unknown, block7:v18:unknown]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v4:unknown = Move v3:unknown
+    v5:int32 = Move v26:int32
+    v6:unknown = Move v27:unknown
+    v7:array = NewArray v5:int32, v6:unknown
+    Jump block4
+block2: [handler: block1]
+    v9:int32 = Move 1
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block3:
+    End undefined
+block1_split0:
+    Return v7:array
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v15:unknown = Move v14:unknown
+    v17:int32 = Move 2
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    v22:unknown = Move v21:unknown
+    v24:int32 = Move 3
+    LeaveUnwindContext
+    Jump block3
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:int32 = Move 0
+    EnterUnwindContext block2
+block1:
+    v27:unknown = Phi [block2:v2:int32, block5:v2:int32, block6:v15:unknown, block7:v15:unknown]
+    v26:int32 = Phi [block2:v9:int32, block5:v9:int32, block6:v17:int32, block7:v17:int32]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v5:int32 = Move v26:int32
+    v6:unknown = Move v27:unknown
+    v7:array = NewArray v5:int32, v6:unknown
+    Jump block4
+block2: [handler: block1]
+    v9:int32 = Move 1
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block3:
+    End undefined
+block1_split0:
+    Return v7:array
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v15:unknown = Move v14:unknown
+    v17:int32 = Move 2
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    Jump block3
+
+=== After CopyPropagation ===
+function():
+block0:
+    v2:int32 = Move 0
+    EnterUnwindContext block2
+block1:
+    v27:unknown = Phi [block2:v0:int32, block5:v0:int32, block6:v14:unknown, block7:v14:unknown]
+    v26:int32 = Phi [block2:v8:int32, block5:v8:int32, block6:v16:int32, block7:v16:int32]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v5:int32 = Move v26:int32
+    v6:unknown = Move v27:unknown
+    v7:array = NewArray v26:int32, v27:unknown
+    Jump block4
+block2: [handler: block1]
+    v9:int32 = Move 1
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block3:
+    End undefined
+block1_split0:
+    Return v7:array
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v15:unknown = Move v14:unknown
+    v17:int32 = Move 2
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    Jump block3
+
+=== After BlockMerging ===
+function():
+block0:
+    v2:int32 = Move 0
+    EnterUnwindContext block2
+block1:
+    v27:unknown = Phi [block2:v0:int32, block5:v0:int32, block6:v14:unknown, block7:v14:unknown]
+    v26:int32 = Phi [block2:v8:int32, block5:v8:int32, block6:v16:int32, block7:v16:int32]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v5:int32 = Move v26:int32
+    v6:unknown = Move v27:unknown
+    v7:array = NewArray v26:int32, v27:unknown
+    Return v7:array
+block2: [handler: block1]
+    v9:int32 = Move 1
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v15:unknown = Move v14:unknown
+    v17:int32 = Move 2
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    End undefined
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    EnterUnwindContext block2
+block1:
+    v27:unknown = Phi [block2:v0:int32, block5:v0:int32, block6:v14:unknown, block7:v14:unknown]
+    v26:int32 = Phi [block2:v8:int32, block5:v8:int32, block6:v16:int32, block7:v16:int32]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v7:array = NewArray v26:int32, v27:unknown
+    Return v7:array
+block2: [handler: block1]
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    End undefined
+
+function():
+block0:
+    EnterUnwindContext block2
+block1:
+    v27:unknown = Phi [block2:v0:int32, block5:v0:int32, block6:v14:unknown, block7:v14:unknown]
+    v26:int32 = Phi [block2:v8:int32, block5:v8:int32, block6:v16:int32, block7:v16:int32]
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v7:array = NewArray v26:int32, v27:unknown
+    Return v7:array
+block2: [handler: block1]
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block2_split1: [handler: block1]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    End undefined
+
+=== Before optimization ===
+function(v1:unknown, v3:unknown):
+block0:
+    Branch v3:unknown, block1, block2
+block1:
+    v0:unknown = GetGlobal Error
+    Jump block3
+block2:
+    Return v1:unknown
+block1_split0:
+    v2:object = Construct v0:unknown, v1:unknown
+    Jump block4
+block1_split1:
+    Throw v2:object
+
+=== After BlockMerging ===
+function(v1:unknown, v3:unknown):
+block0:
+    Branch v3:unknown, block1, block2
+block1:
+    v0:unknown = GetGlobal Error
+    v2:object = Construct v0:unknown, v1:unknown
+    Throw v2:object
+block2:
+    Return v1:unknown
+
+function(v1:unknown, v3:unknown):
+block0:
+    Branch v3:unknown, block1, block2
+block1:
+    v0:unknown = GetGlobal Error
+    v2:object = Construct v0:unknown, v1:unknown
+    Throw v2:object
+block2:
+    Return v1:unknown
