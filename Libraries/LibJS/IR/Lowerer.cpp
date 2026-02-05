@@ -221,6 +221,33 @@ void Lowerer::compute_phi_coalescing()
                 if (would_conflict_with_other_operand(operand))
                     continue;
 
+                // Check if the phi result is still live in the incoming block after
+                // the point where the incoming value is defined. If so, they have
+                // overlapping lifetimes and cannot share a register.
+                auto* incoming_block = phi.incoming_block(i);
+                if (auto* defining = operand->defining_instruction()) {
+                    bool has_interference = false;
+                    bool past_definition = false;
+                    for (auto const& inst : incoming_block->instructions()) {
+                        if (inst.ptr() == defining) {
+                            past_definition = true;
+                            continue;
+                        }
+                        if (past_definition) {
+                            for (auto* use_operand : inst->operands()) {
+                                if (use_operand == phi_result) {
+                                    has_interference = true;
+                                    break;
+                                }
+                            }
+                            if (has_interference)
+                                break;
+                        }
+                    }
+                    if (has_interference)
+                        continue;
+                }
+
                 // Chain coalescing: if operand is a phi result, coalesce the two phis.
                 // This makes chains like: v14 = Phi[v0,v2], v15 = Phi[v14,v4], ...
                 // all share the same register.

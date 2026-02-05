@@ -1,0 +1,269 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v9:array = NewArray 1, 2, 3, 4, 5
+    Jump block4
+block1:
+    v30:unknown = Phi [block5:v31:undefined, block9:v16:array]
+    v29:unknown = Phi [block5:v32:undefined, block9:v21:unknown]
+    v28:unknown = Phi [block5:v33:undefined, block9:v15:unknown]
+    v27:unknown = Phi [block5:v34:undefined, block9:v20:unknown]
+    v26:unknown = Phi [block5:v35:undefined, block9:v19:int32]
+    v25:unknown = Phi [block5:v36:undefined, block9:v17:number]
+    v24:number = Phi [block5:v12:int32, block9:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v14:array.push
+    Jump block6
+block3:
+    Return v14:array
+block0_split0:
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    Jump block5
+block0_split1:
+    v14:array = Move v13:array
+    Jump block1
+block2_split2:
+    v16:array = Move v14:array
+    v17:number = ToNumeric v24:number
+    v18:number = Increment v17:number
+    Jump block7
+block2_split3:
+    v19:int32 = Move v17:number
+    v20:unknown = GetByValue v10:array, v17:number
+    Jump block8
+block2_split4:
+    v21:unknown = Call v15:unknown, v16:array, v20:unknown
+    Jump block9
+block2_split5:
+    Jump block1
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    Jump block4
+block1:
+    v24:number = Phi [block5:v12:int32, block9:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v14:array.push
+    Jump block6
+block3:
+    Return v14:array
+block0_split0:
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    Jump block5
+block0_split1:
+    v14:array = Move v13:array
+    Jump block1
+block2_split2:
+    v16:array = Move v14:array
+    v17:number = ToNumeric v24:number
+    v18:number = Increment v17:number
+    Jump block7
+block2_split3:
+    v20:unknown = GetByValue v10:array, v17:number
+    Jump block8
+block2_split4:
+    v21:unknown = Call v15:unknown, v16:array, v20:unknown
+    Jump block9
+block2_split5:
+    Jump block1
+
+=== After CopyPropagation ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    Jump block4
+block1:
+    v24:number = Phi [block5:v11:int32, block9:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    Jump block6
+block3:
+    Return v13:array
+block0_split0:
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    Jump block5
+block0_split1:
+    v14:array = Move v13:array
+    Jump block1
+block2_split2:
+    v16:array = Move v13:array
+    v17:number = ToNumeric v24:number
+    v18:number = Increment v17:number
+    Jump block7
+block2_split3:
+    v20:unknown = GetByValue v9:array, v17:number
+    Jump block8
+block2_split4:
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block9
+block2_split5:
+    Jump block1
+
+=== After AlgebraicSimplification ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    Jump block4
+block1:
+    v24:number = Phi [block5:v11:int32, block9:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    Jump block6
+block3:
+    Return v13:array
+block0_split0:
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    Jump block5
+block0_split1:
+    v14:array = Move v13:array
+    Jump block1
+block2_split2:
+    v16:array = Move v13:array
+    v18:number = Increment v24:number
+    Jump block7
+block2_split3:
+    v20:unknown = GetByValue v9:array, v24:number
+    Jump block8
+block2_split4:
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block9
+block2_split5:
+    Jump block1
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    Jump block4
+block1:
+    v24:number = Phi [block5:v11:int32, block8:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    Jump block6
+block3:
+    Return v13:array
+block0_split0:
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    Jump block5
+block0_split1:
+    v14:array = Move v13:array
+    Jump block1
+block2_split2:
+    v16:array = Move v13:array
+    v18:number = Increment v24:number
+    Jump block7
+block2_split3:
+    v20:unknown = GetByValue v9:array, v24:number
+    Jump block8
+block2_split4:
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block1
+
+=== After BlockMerging ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    v10:array = Move v9:array
+    v12:int32 = Move 0
+    v13:array = NewArray
+    v14:array = Move v13:array
+    Jump block1
+block1:
+    v24:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    v16:array = Move v13:array
+    v18:number = Increment v24:number
+    v20:unknown = GetByValue v9:array, v24:number
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block1
+block3:
+    Return v13:array
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    v13:array = NewArray
+    Jump block1
+block1:
+    v24:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    v18:number = Increment v24:number
+    v20:unknown = GetByValue v9:array, v24:number
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block1
+block3:
+    Return v13:array
+
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    v13:array = NewArray
+    Jump block1
+block1:
+    v24:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v24:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    v18:number = Increment v24:number
+    v20:unknown = GetByValue v9:array, v24:number
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    Jump block1
+block3:
+    Return v13:array
