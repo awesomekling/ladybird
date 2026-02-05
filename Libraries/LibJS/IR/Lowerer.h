@@ -8,6 +8,7 @@
 
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/Optional.h>
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/Label.h>
@@ -48,11 +49,11 @@ private:
     Function const& m_function;
     Vector<NonnullOwnPtr<Bytecode::BasicBlock>> m_bytecode_blocks;
     Bytecode::BasicBlock* m_current_block { nullptr };
-    HashMap<Value const*, Bytecode::Operand> m_value_to_operand;
-    HashMap<Value const*, Bytecode::Operand> m_tuple_base_operand;
+    Vector<Optional<Bytecode::Operand>> m_value_to_operand;
+    Vector<Optional<Bytecode::Operand>> m_tuple_base_operand;
     HashMap<BasicBlock const*, size_t> m_ir_block_to_bytecode_index;
-    // Phi coalescing: maps values to their coalescing representative
-    HashMap<Value const*, Value const*> m_coalesce_representative;
+    // Phi coalescing: maps values to their coalescing representative (nullptr = self)
+    Vector<Value const*> m_coalesce_representative;
     // Maps (from_block, to_block) pairs to trampoline block indices for critical edge splitting
     HashMap<u64, size_t> m_edge_to_trampoline;
     Vector<JS::Value> m_constants;

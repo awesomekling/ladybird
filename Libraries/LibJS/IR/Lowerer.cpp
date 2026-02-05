@@ -23,6 +23,10 @@ Lowerer::Lowerer(VM& vm, Function const& function)
     : m_vm(vm)
     , m_function(function)
 {
+    auto value_count = function.values().size();
+    m_value_to_operand.resize(value_count);
+    m_tuple_base_operand.resize(value_count);
+    m_coalesce_representative.resize(value_count);
 }
 
 // Check if a comparison instruction should be fused with a Branch
@@ -95,15 +99,16 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
     // Follow the chain to find the ultimate representative
     Value const* lookup_value = &value;
     for (;;) {
-        auto it = m_coalesce_representative.find(lookup_value);
-        if (it == m_coalesce_representative.end())
+        auto* rep = m_coalesce_representative[static_cast<u32>(lookup_value->index())];
+        if (!rep)
             break;
-        lookup_value = it->value;
+        lookup_value = rep;
     }
 
     // Check if we already have an operand for this value (or its coalescing representative)
-    if (auto it = m_value_to_operand.find(lookup_value); it != m_value_to_operand.end())
-        return it->value;
+    auto vi = static_cast<u32>(lookup_value->index());
+    if (m_value_to_operand[vi].has_value())
+        return m_value_to_operand[vi].value();
 
     Bytecode::Operand operand = [&]() {
         if (value.is_constant()) {
@@ -128,7 +133,7 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
         return allocate_register();
     }();
 
-    m_value_to_operand.set(lookup_value, operand);
+    m_value_to_operand[vi] = operand;
     return operand;
 }
 
@@ -141,15 +146,15 @@ void Lowerer::compute_phi_coalescing()
     auto find_representative = [&](Value const* v) -> Value const* {
         Vector<Value const*> path;
         for (;;) {
-            auto it = m_coalesce_representative.find(v);
-            if (it == m_coalesce_representative.end())
+            auto* rep = m_coalesce_representative[static_cast<u32>(v->index())];
+            if (!rep)
                 break;
             path.append(v);
-            v = it->value;
+            v = rep;
         }
         // Path compression
         for (auto const* p : path)
-            m_coalesce_representative.set(p, v);
+            m_coalesce_representative[static_cast<u32>(p->index())] = v;
         return v;
     };
 
@@ -157,7 +162,7 @@ void Lowerer::compute_phi_coalescing()
         auto const* rep_a = find_representative(a);
         auto const* rep_b = find_representative(b);
         if (rep_a != rep_b)
-            m_coalesce_representative.set(rep_a, rep_b);
+            m_coalesce_representative[static_cast<u32>(rep_a->index())] = rep_b;
     };
 
     for (auto const& block : m_function.basic_blocks()) {
@@ -346,22 +351,24 @@ void Lowerer::compute_phi_coalescing()
 
 Bytecode::Operand Lowerer::allocate_tuple_registers(Value const& tuple, u32 count)
 {
+    auto vi = static_cast<u32>(tuple.index());
+
     // Check if already allocated (idempotent)
-    if (auto it = m_tuple_base_operand.find(&tuple); it != m_tuple_base_operand.end())
-        return it->value;
+    if (m_tuple_base_operand[vi].has_value())
+        return m_tuple_base_operand[vi].value();
 
     // Allocate consecutive registers for tuple elements
     auto base = Bytecode::Operand(Bytecode::Register(m_next_register));
     m_next_register += count;
-    m_tuple_base_operand.set(&tuple, base);
+    m_tuple_base_operand[vi] = base;
     return base;
 }
 
 Bytecode::Operand Lowerer::operand_for_tuple_element(Value const& tuple, u32 index)
 {
-    auto it = m_tuple_base_operand.find(&tuple);
-    VERIFY(it != m_tuple_base_operand.end());
-    auto base_index = it->value.index();
+    auto vi = static_cast<u32>(tuple.index());
+    VERIFY(m_tuple_base_operand[vi].has_value());
+    auto base_index = m_tuple_base_operand[vi]->index();
     return Bytecode::Operand(Bytecode::Register(base_index + index));
 }
 
@@ -1165,12 +1172,12 @@ void Lowerer::lower_instruction(Instruction const& instruction)
             // Follow coalescing chain to find the representative
             Value const* rep = instruction.result();
             for (;;) {
-                auto it = m_coalesce_representative.find(rep);
-                if (it == m_coalesce_representative.end())
+                auto* next = m_coalesce_representative[static_cast<u32>(rep->index())];
+                if (!next)
                     break;
-                rep = it->value;
+                rep = next;
             }
-            m_value_to_operand.set(rep, element_reg);
+            m_value_to_operand[static_cast<u32>(rep->index())] = element_reg;
         }
         break;
     }
@@ -1250,12 +1257,12 @@ void Lowerer::lower_blocks()
                     // Follow coalescing chain to find the representative
                     Value const* rep = instruction->result();
                     for (;;) {
-                        auto it = m_coalesce_representative.find(rep);
-                        if (it == m_coalesce_representative.end())
+                        auto* next = m_coalesce_representative[static_cast<u32>(rep->index())];
+                        if (!next)
                             break;
-                        rep = it->value;
+                        rep = next;
                     }
-                    m_value_to_operand.set(rep, element_reg);
+                    m_value_to_operand[static_cast<u32>(rep->index())] = element_reg;
                 }
             }
         }
@@ -1443,7 +1450,7 @@ void Lowerer::lower_blocks()
                 // The resume value appears in the accumulator (reg0) at runtime
                 // Map the Yield's result to reg0 so uses in the continuation block work
                 if (terminator->result())
-                    m_value_to_operand.set(terminator->result(), Bytecode::Operand(Bytecode::Register::accumulator()));
+                    m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
             } else {
                 // Final yield (generator return) - Yield with no continuation label
                 emit<Bytecode::Op::Yield>(Optional<Bytecode::Label> {}, value);
@@ -1461,7 +1468,7 @@ void Lowerer::lower_blocks()
             // The resume value (resolved promise) appears in the accumulator (reg0) at runtime
             // Map the Await's result to reg0 so uses in the continuation block work
             if (terminator->result())
-                m_value_to_operand.set(terminator->result(), Bytecode::Operand(Bytecode::Register::accumulator()));
+                m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
             break;
         }
         default:
