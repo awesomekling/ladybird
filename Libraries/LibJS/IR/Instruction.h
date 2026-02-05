@@ -206,6 +206,9 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     // New target
     GetNewTarget,
 
+    // Exception handling
+    Catch,
+
     // Guard operations (may throw but produce no value)
     ThrowIfNotObject,
     ThrowIfNullish,
@@ -404,6 +407,9 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
 
     // New target
     [to_underlying(Opcode::GetNewTarget)]                       = { "GetNewTarget",                       false, true,  true,  false, false, false, true  },
+
+    // Exception handling
+    [to_underlying(Opcode::Catch)]                              = { "Catch",                              false, false, true,  false, false, false, true  },
 
     // Guard operations (may throw but produce no value)
     [to_underlying(Opcode::ThrowIfNotObject)]                   = { "ThrowIfNotObject",                   false, true,  true,  false, false, false, false },

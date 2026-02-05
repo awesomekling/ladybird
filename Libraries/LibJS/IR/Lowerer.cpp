@@ -932,6 +932,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::GetNewTarget>(dst());
         break;
 
+    // Exception handling
+    case Opcode::Catch:
+        emit<Bytecode::Op::Catch>(dst());
+        break;
+
     case Opcode::SuperCallWithArgumentArray:
         emit<Bytecode::Op::SuperCallWithArgumentArray>(dst(), operand(0), instruction.is_synthetic());
         break;

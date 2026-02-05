@@ -1149,8 +1149,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Exception handling
     case Catch: {
         auto const& op = static_cast<Bytecode::Op::Catch const&>(instruction);
-        // Catch puts the caught exception into the destination
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_catch(block);
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1612,6 +1611,19 @@ void Lifter::connect_control_flow()
             break;
         }
 
+        case EnterUnwindContext: {
+            auto const& op = static_cast<Bytecode::Op::EnterUnwindContext const&>(*last_instruction);
+            auto* target = m_block_map.get(address_to_block_index(op.entry_point().address())).value();
+            m_function->build_jump(ir_block, *target);
+            break;
+        }
+        case ContinuePendingUnwind: {
+            auto const& op = static_cast<Bytecode::Op::ContinuePendingUnwind const&>(*last_instruction);
+            auto* target = m_block_map.get(address_to_block_index(op.resume_target().address())).value();
+            m_function->build_jump(ir_block, *target);
+            break;
+        }
+
         default:
             // If not terminated by a known terminator, fall through to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
@@ -1687,7 +1699,6 @@ void Lifter::eliminate_unreachable_blocks()
     // Remove blocks that are not reachable from the entry block.
     // A block is reachable if it has an immediate dominator or is the entry.
     auto* entry = m_function->entry_block();
-    bool removed_any = false;
 
     // Clear operand use chains before removing blocks, so values defined
     // in reachable blocks don't retain stale use entries.
@@ -1700,17 +1711,34 @@ void Lifter::eliminate_unreachable_blocks()
             instruction->clear_operand_uses();
     }
 
-    m_function->basic_blocks().remove_all_matching([&](auto const& block) {
+    // Collect unreachable blocks so we can clear stale pointers.
+    HashTable<BasicBlock*> unreachable;
+    for (auto& block : m_function->basic_blocks()) {
         if (block.ptr() == entry)
-            return false;
+            continue;
         if (m_dominators->immediate_dominator(block.ptr()))
-            return false;
-        removed_any = true;
-        return true;
+            continue;
+        unreachable.set(block.ptr());
+    }
+
+    if (unreachable.is_empty())
+        return;
+
+    // Clear exception_handler/finalizer pointers that reference removed blocks.
+    for (auto& block : m_function->basic_blocks()) {
+        if (unreachable.contains(block.ptr()))
+            continue;
+        if (block->exception_handler() && unreachable.contains(block->exception_handler()))
+            block->set_exception_handler(nullptr);
+        if (block->finalizer() && unreachable.contains(block->finalizer()))
+            block->set_finalizer(nullptr);
+    }
+
+    m_function->basic_blocks().remove_all_matching([&](auto const& block) {
+        return unreachable.contains(block.ptr());
     });
 
-    if (removed_any)
-        compute_block_predecessors();
+    compute_block_predecessors();
 }
 
 // Phase 1: Place phis at dominance frontiers of defining blocks

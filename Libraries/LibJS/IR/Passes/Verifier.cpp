@@ -272,6 +272,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::CreateArguments:
                     case Opcode::CreateRestParams:
                     case Opcode::NewTypeError:
+                    case Opcode::Catch:
                         return 0;
                     // 1 operand
                     case Opcode::LoadConstant:

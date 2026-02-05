@@ -1,28 +1,33 @@
 === Before optimization ===
 function():
 block0:
-    Jump block1
-block1:
-    v1:unknown = Move undefined
-    v2:unknown = Move v1:unknown
-    Jump block2
-block2:
-    End undefined
+    Jump block3
+block3:
+    v4:int32 = Move 3
+    v5:int32 = Move v4:int32
+    End v5:int32
 
-=== After DeadCodeElimination ===
+=== After CopyPropagation ===
 function():
 block0:
-    Jump block1
-block1:
-    Jump block2
-block2:
-    End undefined
+    Jump block3
+block3:
+    v4:int32 = Move 3
+    v5:int32 = Move 3
+    End 3
 
 === After EmptyBlockElimination ===
 function():
-block2:
-    End undefined
+block3:
+    v4:int32 = Move 3
+    v5:int32 = Move 3
+    End 3
+
+=== After DeadCodeElimination ===
+function():
+block3:
+    End 3
 
 function():
-block2:
-    End undefined
+block3:
+    End 3

@@ -1029,6 +1029,16 @@ Value& Function::build_get_new_target(BasicBlock& block)
     return result;
 }
 
+// Exception handling
+Value& Function::build_catch(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::Catch>();
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+    block.append(move(instruction));
+    return result;
+}
+
 // Guard operations (may throw but produce no value)
 void Function::build_throw_if_not_object(BasicBlock& block, Value& value)
 {
