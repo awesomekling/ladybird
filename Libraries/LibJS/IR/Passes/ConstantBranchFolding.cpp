@@ -16,7 +16,8 @@ namespace JS::IR {
 // Helper to replace the terminator with an unconditional jump
 static void replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)
 {
-    // Remove the old branch instruction
+    // Clean up use lists and remove the old branch instruction
+    block.instructions().last()->clear_operand_uses();
     block.instructions().remove(block.instructions().size() - 1);
 
     // Add a new jump instruction
