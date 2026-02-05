@@ -7,6 +7,7 @@
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/Verifier.h>
@@ -27,6 +28,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     auto report_error = [&](StringView message) {
         if (crash_on_error) {
             warnln("IR Verifier: {}", message);
+            warnln("{}", dump(function));
             VERIFY_NOT_REACHED();
         }
         valid = false;
@@ -535,9 +537,13 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // or have stale references that DeadBlockElimination will clean up.
             if (block_is_reachable) {
                 // Check: All operands are non-null and reference defined values
+                // NB: NewClass allows null operands (no superclass, optional element keys).
+                bool allows_null_operands = instr->opcode() == Opcode::NewClass;
                 for (size_t i = 0; i < instr->operands().size(); ++i) {
                     auto* operand = instr->operands()[i];
                     if (!operand) {
+                        if (allows_null_operands)
+                            continue;
                         report_error(ByteString::formatted(
                             "Instruction in block{} has null operand at index {}",
                             block->index(), i));
@@ -721,8 +727,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             auto const& stored_preds = block->predecessors();
             auto& expected_preds = *computed_preds.get(block.ptr());
 
-            // Check: Every stored predecessor should be a computed predecessor
+            // Check: Every reachable stored predecessor should be a computed predecessor
             for (auto* pred : stored_preds) {
+                if (!reachable.contains(pred))
+                    continue;
                 if (!expected_preds.contains(pred)) {
                     report_error(ByteString::formatted(
                         "Block{} has predecessor block{} in stored list but no edge exists",
@@ -756,7 +764,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (value->is_constant()) {
             auto ir_type = value->type();
             auto const& cv = value->constant_value();
-            if (ir_type == Type::Unknown) {
+            if (ir_type == Type::Unknown && !cv.is_special_empty_value()) {
                 report_error(ByteString::formatted(
                     "Constant v{} has Type::Unknown",
                     value->index()));
