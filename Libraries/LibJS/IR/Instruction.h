@@ -782,6 +782,7 @@ protected:
     explicit TerminatorInstruction(Opcode opcode);
 
 private:
+    friend class Builder;
     friend class CFG;
     friend class Function;
     friend class JumpInstruction;
@@ -883,6 +884,7 @@ private:
     using Instruction::set_phi_predecessor;
 
     // Classes that need internal access to phi operations
+    friend class Builder;
     friend class Lifter;
     friend class Function;
 };

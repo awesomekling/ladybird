@@ -49,6 +49,7 @@ public:
     [[nodiscard]] Value& create_this();
     [[nodiscard]] Value& create_register_value();
     [[nodiscard]] Value& create_constant(JS::Value constant);
+    [[nodiscard]] Value& create_value_for_instruction();
 
     // Instruction builders that return result Value&
     // Arithmetic
@@ -246,7 +247,6 @@ public:
 private:
     explicit Function(GC::Ptr<Bytecode::Executable const> source_executable);
 
-    Value& create_value_for_instruction();
     Value& build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, Value& rhs);
     Value& build_unary_op(BasicBlock& block, Opcode opcode, Value& operand);
 

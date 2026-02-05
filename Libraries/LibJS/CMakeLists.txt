@@ -17,6 +17,7 @@ set(SOURCES
     Bytecode/ScopedOperand.cpp
     Bytecode/StringTable.cpp
     IR/BasicBlock.cpp
+    IR/Builder.cpp
     IR/CFG.cpp
     IR/Dominators.cpp
     IR/Dump.cpp

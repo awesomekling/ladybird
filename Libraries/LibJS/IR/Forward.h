@@ -19,6 +19,7 @@ AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u32, PropertySlot, Comparison, CastToBool, I
 
 class BasicBlock;
 class BinaryOpInstruction;
+class Builder;
 class BranchInstruction;
 class CallInstruction;
 class Function;
