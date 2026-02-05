@@ -16,6 +16,7 @@
 #include <LibCore/System.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
+#include <LibJS/IR/Dump.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/ValueInlines.h>
@@ -27,6 +28,7 @@
 
 static ByteString s_current_test = "";
 static bool s_parse_only = false;
+static bool s_enable_ir = false;
 static ByteString s_harness_file_directory;
 static bool s_automatic_harness_detection_mode = false;
 
@@ -205,6 +207,8 @@ static ErrorOr<void, TestError> run_test(StringView source, StringView filepath,
 
     auto vm = JS::VM::create();
     vm->set_dynamic_imports_allowed(true);
+    if (s_enable_ir)
+        vm->set_tier_up_threshold(1);
 
     GC::Ptr<JS::Realm> realm;
     GC::Ptr<JS::Test262::GlobalObject> global_object;
@@ -574,6 +578,7 @@ int main(int argc, char** argv)
     int timeout = 10;
     bool enable_debug_printing = false;
     bool disable_core_dumping = false;
+    bool enable_ir = false;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("LibJS test262 runner for streaming tests");
@@ -582,7 +587,17 @@ int main(int argc, char** argv)
     args_parser.add_option(timeout, "Seconds before test should timeout", "timeout", 't', "seconds");
     args_parser.add_option(enable_debug_printing, "Enable debug printing", "debug", 'd');
     args_parser.add_option(disable_core_dumping, "Disable core dumping", "disable-core-dump");
+    args_parser.add_option(enable_ir, "Enable IR compilation and optimization with tier-up threshold of 1", "ir");
+    args_parser.add_option(JS::Bytecode::g_dump_bytecode, "Dump the bytecode", "dump-bytecode");
+    args_parser.add_option(JS::IR::g_dump_ir, "Dump the IR", "dump-ir");
+    args_parser.add_option(JS::IR::g_dump_ir_between_passes, "Dump IR after each optimization pass", "dump-ir-passes");
     args_parser.parse(arguments);
+
+    if (enable_ir) {
+        s_enable_ir = true;
+        JS::IR::g_optimize_ir = true;
+        JS::IR::g_lower_ir = true;
+    }
 
 #ifdef AK_OS_GNU_HURD
     if (disable_core_dumping)
