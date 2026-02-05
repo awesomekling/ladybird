@@ -503,7 +503,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
             // Check: ExtractValue source must be a tuple-producing instruction
             // and the index must be within bounds
-            if (instr->opcode() == Opcode::ExtractValue) {
+            if (instr->opcode() == Opcode::ExtractValue && block_is_reachable) {
                 auto* source = instr->operands().is_empty() ? nullptr : instr->operands()[0];
                 if (source && source->is_instruction() && source->defining_instruction()) {
                     auto source_opcode = source->defining_instruction()->opcode();
@@ -529,6 +529,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             "ExtractValue in block{} index {} out of bounds (tuple size {})",
                             block->index(), instr->extract_index(), *tuple_size));
                     }
+                } else if (source && !source->is_instruction()) {
+                    report_error(ByteString::formatted(
+                        "ExtractValue in block{} source v{} is not an instruction result",
+                        block->index(), source->index()));
                 }
             }
 
