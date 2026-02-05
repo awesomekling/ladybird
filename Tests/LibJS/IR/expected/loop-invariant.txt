@@ -154,7 +154,6 @@ block1:
     v4:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumber v17:number
     v10:number = Increment v17:number
     Jump block3
 block3:
@@ -203,7 +202,6 @@ block1:
     v4:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumber v17:number
     v10:number = Increment v17:number
     Jump block3
 block3:
@@ -248,7 +246,6 @@ block1:
     v4:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumber v17:number
     v10:number = Increment v17:number
     Jump block3
 block3:
@@ -295,7 +292,6 @@ block1:
     v7:unknown = Mul v5:unknown, 2
     v8:unknown = Add v4:unknown, v7:unknown
     SetGlobal sum v8:unknown
-    v9:number = ToNumber v17:number
     v10:number = Increment v17:number
     Jump block3
 block3:
@@ -319,7 +315,6 @@ block1:
     v7:unknown = Mul v5:unknown, 2
     v8:unknown = Add v4:unknown, v7:unknown
     SetGlobal sum v8:unknown
-    v9:number = ToNumber v17:number
     v10:number = Increment v17:number
     Jump block3
 block3:

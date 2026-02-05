@@ -76,7 +76,6 @@ block0:
     Jump block1
 block0_split0:
     v5:int32 = Move v4:int32
-    v6:int32 = ToInt32 v4:int32
     Jump block2
 block0_split1:
     v7:int32 = Move v4:int32
@@ -88,7 +87,14 @@ block0:
     v4:int32 = ToInt32 v3:unknown
     Jump block1
 block0_split0:
-    v6:int32 = ToInt32 v4:int32
+    Jump block2
+block0_split1:
+    Return v4:int32
+
+=== After EmptyBlockElimination ===
+function(v3:unknown):
+block0:
+    v4:int32 = ToInt32 v3:unknown
     Jump block2
 block0_split1:
     Return v4:int32
@@ -97,11 +103,9 @@ block0_split1:
 function(v3:unknown):
 block0:
     v4:int32 = ToInt32 v3:unknown
-    v6:int32 = ToInt32 v4:int32
     Return v4:int32
 
 function(v3:unknown):
 block0:
     v4:int32 = ToInt32 v3:unknown
-    v6:int32 = ToInt32 v4:int32
     Return v4:int32

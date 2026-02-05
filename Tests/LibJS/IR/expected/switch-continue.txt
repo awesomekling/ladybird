@@ -118,7 +118,6 @@ block0:
 block1:
     Jump block5
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -145,7 +144,6 @@ block0:
 block1:
     Jump block5
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -169,7 +167,6 @@ function():
 block0:
     Jump block3
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -187,7 +184,6 @@ function():
 block0:
     Jump block3
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -205,7 +201,6 @@ function():
 block0:
     Jump block3
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -222,7 +217,6 @@ function():
 block0:
     Jump block3
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:
@@ -236,7 +230,6 @@ function():
 block0:
     Jump block3
 block2:
-    v4:number = ToNumber v10:number
     v5:number = Increment v10:number
     Jump block3
 block3:

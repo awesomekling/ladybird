@@ -233,7 +233,6 @@ block0_split8:
     v28:number = Add v27:number, 40
     Jump block10
 block0_split9:
-    v29:number = Add v28:number, 0
     Jump block11
 block0_split10:
     Return v28:number

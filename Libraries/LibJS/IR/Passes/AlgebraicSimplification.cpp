@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -53,6 +54,7 @@ static bool is_numeric_type(Type type)
 bool AlgebraicSimplification::run(Function& function)
 {
     bool changed = false;
+    HashTable<Instruction*> dead_instructions;
 
     for (auto& block : function.basic_blocks()) {
         for (auto& instruction : block->instructions()) {
@@ -188,8 +190,21 @@ bool AlgebraicSimplification::run(Function& function)
             if (replacement && !instruction->result()->uses().is_empty()) {
                 // Replace all uses of the result with the simplified value
                 instruction->result()->replace_all_uses_with(replacement);
+                instruction->clear_operand_uses();
+                dead_instructions.set(instruction.ptr());
                 changed = true;
             }
+        }
+    }
+
+    // Remove instructions that were simplified away.
+    // This is needed because some (e.g. ToNumber) have has_side_effects=true
+    // and would otherwise survive DCE even when they have no uses.
+    if (!dead_instructions.is_empty()) {
+        for (auto& block : function.basic_blocks()) {
+            block->instructions().remove_all_matching([&](auto const& instruction) {
+                return dead_instructions.contains(instruction.ptr());
+            });
         }
     }
 
