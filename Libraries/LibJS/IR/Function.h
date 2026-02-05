@@ -122,6 +122,7 @@ public:
     [[nodiscard]] Value& build_delete_by_value(BasicBlock& block, Value& base, Value& property);
     [[nodiscard]] Value& build_delete_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property);
     [[nodiscard]] Value& build_has_property(BasicBlock& block, Value& object, Value& property);
+    [[nodiscard]] Value& build_has_private_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
     [[nodiscard]] Value& build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property);
     void build_put_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property, Value& value);
     void build_put_getter_by_id(BasicBlock& block, Value& base, Bytecode::PropertyKeyTableIndex property, Value& getter, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});

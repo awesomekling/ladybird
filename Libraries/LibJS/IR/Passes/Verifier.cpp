@@ -299,6 +299,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::GetById:
                     case Opcode::GetLength:
                     case Opcode::GetPrivateById:
+                    case Opcode::HasPrivateId:
                     case Opcode::DeleteById:
                     case Opcode::GetIterator:
                     case Opcode::GetObjectPropertyIterator:
@@ -432,6 +433,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::In:
                     case Opcode::InstanceOf:
                     case Opcode::HasProperty:
+                    case Opcode::HasPrivateId:
                     case Opcode::DeleteById:
                     case Opcode::DeleteByIdWithThis:
                     case Opcode::DeleteByValue:

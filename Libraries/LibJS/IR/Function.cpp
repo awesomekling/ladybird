@@ -389,6 +389,20 @@ Value& Function::build_has_property(BasicBlock& block, Value& object, Value& pro
     return result;
 }
 
+Value& Function::build_has_private_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property)
+{
+    auto instruction = Instruction::create<Opcode::HasPrivateId>();
+    instruction->add_operand(&base);
+    instruction->set_identifier_index(property);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Boolean);
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_get_private_by_id(BasicBlock& block, Value& base, Bytecode::IdentifierTableIndex property)
 {
     auto instruction = Instruction::create<Opcode::GetPrivateById>();

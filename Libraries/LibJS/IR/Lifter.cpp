@@ -1262,9 +1262,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case HasPrivateId: {
         auto const& op = static_cast<Bytecode::Op::HasPrivateId const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        // NB: HasPrivateId checks if an object has a private field. We use HasProperty
-        // as a placeholder since there's no dedicated IR opcode for private field checks.
-        auto& result = m_function->build_has_property(block, base, base);
+        auto& result = m_function->build_has_private_id(block, base, op.property());
         define_operand(op.dst(), result, block);
         break;
     }

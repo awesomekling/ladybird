@@ -692,6 +692,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::HasProperty:
         emit<Bytecode::Op::In>(dst(), operand(1), operand(0));
         break;
+    case Opcode::HasPrivateId:
+        emit<Bytecode::Op::HasPrivateId>(dst(), operand(0), instruction.identifier_index());
+        break;
     case Opcode::GetPrivateById:
         emit<Bytecode::Op::GetPrivateById>(dst(), operand(0), instruction.identifier_index());
         break;
