@@ -58,6 +58,17 @@ PreservedAnalyses BlockMerging::run(Function& function, PassManager&)
             if (block_a->finalizer() != block_b->finalizer())
                 continue;
 
+            // Don't merge if the shared exception handler or finalizer has phi nodes.
+            // Both A and B are EH predecessors of the handler, so merging would create
+            // duplicate phi entries that can't be properly consolidated (A and B may
+            // contribute different values to the handler's phis).
+            auto handler_has_phis = [](BasicBlock* target) {
+                return target && !target->instructions().is_empty()
+                    && target->instructions().first()->opcode() == Opcode::Phi;
+            };
+            if (handler_has_phis(block_a->exception_handler()) || handler_has_phis(block_a->finalizer()))
+                continue;
+
             // Merge B into A:
             // 1. Capture B's successors before modifying anything
             auto* b_terminator = block_b->terminator();
