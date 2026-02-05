@@ -268,6 +268,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::DeleteVariable:
                     case Opcode::GetCalleeAndThisFromEnvironment:
                     case Opcode::AddPrivateName:
+                    case Opcode::CreateVariable:
                     case Opcode::CreateArguments:
                     case Opcode::CreateRestParams:
                         return 0;
@@ -386,7 +387,6 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::NewArray:
                     case Opcode::NewClass:
                     case Opcode::NewFunction:
-                    case Opcode::CreateVariable:
                         return {};
                     case Opcode::__Count:
                         VERIFY_NOT_REACHED();
