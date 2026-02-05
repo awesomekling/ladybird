@@ -1,0 +1,307 @@
+=== Before optimization ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block8
+block1:
+    v23:unknown = Phi [block4:v25:unknown, block13:v9:unknown, block14:v9:unknown, block15:v9:unknown]
+    v1:unknown = Catch
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    Jump block9
+block2:
+    v26:unknown = Phi [block5:v33:undefined, block11:v5:unknown]
+    v24:unknown = Phi [block5:v11:undefined, block11:v4:unknown]
+    v22:unknown = Phi [block5:v34:undefined, block11:v2:unknown]
+    v20:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
+    v6:unknown = GetGlobal result
+    Jump block12
+block3:
+    Jump block7
+block4: [handler: block1]
+    v27:unknown = Phi [block6:v13:unknown, block7:v28:undefined, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v25:unknown = Phi [block6:v12:unknown, block7:v29:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
+    v21:unknown = Phi [block6:v14:unknown, block7:v30:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]
+    v19:unknown = Phi [block6:v32:undefined, block7:v31:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
+    v7:unknown = GetGlobal result
+    Jump block13
+block5:
+    v11:undefined = Move undefined
+    Jump block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v13:unknown = Move v12:unknown
+    v14:unknown = GetGlobal result
+    Jump block16
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+block0_split0:
+    Jump block3
+block1_split1:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block10
+block1_split2:
+    SetGlobal result v4:unknown
+    Jump block11
+block1_split3:
+    v5:unknown = Move v4:unknown
+    Jump block2
+block2_split4:
+    End v6:unknown
+block4_split5: [handler: block1]
+    v9:unknown = Add v7:unknown, v8:string
+    Jump block14
+block4_split6: [handler: block1]
+    SetGlobal result v9:unknown
+    Jump block15
+block4_split7: [handler: block1]
+    ContinuePendingUnwind block5
+block6_split8: [finalizer: block4]
+    v16:unknown = Add v14:unknown, v15:string
+    Jump block17
+block6_split9: [finalizer: block4]
+    SetGlobal result v16:unknown
+    Jump block18
+block6_split10: [finalizer: block4]
+    Throw v17:string
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block8
+block1:
+    v1:unknown = Catch
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    Jump block9
+block2:
+    v6:unknown = GetGlobal result
+    Jump block12
+block3:
+    Jump block7
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    Jump block13
+block5:
+    Jump block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    Jump block16
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+block0_split0:
+    Jump block3
+block1_split1:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block10
+block1_split2:
+    SetGlobal result v4:unknown
+    Jump block11
+block1_split3:
+    Jump block2
+block2_split4:
+    End v6:unknown
+block4_split5: [handler: block1]
+    v9:unknown = Add v7:unknown, v8:string
+    Jump block14
+block4_split6: [handler: block1]
+    SetGlobal result v9:unknown
+    Jump block15
+block4_split7: [handler: block1]
+    ContinuePendingUnwind block5
+block6_split8: [finalizer: block4]
+    v16:unknown = Add v14:unknown, v15:string
+    Jump block17
+block6_split9: [finalizer: block4]
+    SetGlobal result v16:unknown
+    Jump block18
+block6_split10: [finalizer: block4]
+    Throw v17:string
+
+=== After CopyPropagation ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block8
+block1:
+    v1:unknown = Catch
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    Jump block9
+block2:
+    v6:unknown = GetGlobal result
+    Jump block12
+block3:
+    Jump block7
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    Jump block13
+block5:
+    Jump block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    Jump block16
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+block0_split0:
+    Jump block3
+block1_split1:
+    v4:unknown = Add v3:unknown, v1:unknown
+    Jump block10
+block1_split2:
+    SetGlobal result v4:unknown
+    Jump block11
+block1_split3:
+    Jump block2
+block2_split4:
+    End v6:unknown
+block4_split5: [handler: block1]
+    v9:unknown = Add v7:unknown, v8:string
+    Jump block14
+block4_split6: [handler: block1]
+    SetGlobal result v9:unknown
+    Jump block15
+block4_split7: [handler: block1]
+    ContinuePendingUnwind block5
+block6_split8: [finalizer: block4]
+    v16:unknown = Add v14:unknown, v15:string
+    Jump block17
+block6_split9: [finalizer: block4]
+    SetGlobal result v16:unknown
+    Jump block18
+block6_split10: [finalizer: block4]
+    Throw v17:string
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block7
+block1:
+    v1:unknown = Catch
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    Jump block9
+block2:
+    v6:unknown = GetGlobal result
+    Jump block12
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    Jump block13
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    Jump block16
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+block1_split1:
+    v4:unknown = Add v3:unknown, v1:unknown
+    Jump block10
+block1_split2:
+    SetGlobal result v4:unknown
+    Jump block2
+block2_split4:
+    End v6:unknown
+block4_split5: [handler: block1]
+    v9:unknown = Add v7:unknown, v8:string
+    Jump block14
+block4_split6: [handler: block1]
+    SetGlobal result v9:unknown
+    Jump block15
+block4_split7: [handler: block1]
+    ContinuePendingUnwind block2
+block6_split8: [finalizer: block4]
+    v16:unknown = Add v14:unknown, v15:string
+    Jump block17
+block6_split9: [finalizer: block4]
+    SetGlobal result v16:unknown
+    Jump block18
+block6_split10: [finalizer: block4]
+    Throw v17:string
+
+=== After BlockMerging ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block7
+block1:
+    v1:unknown = Catch
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    v4:unknown = Add v3:unknown, v1:unknown
+    SetGlobal result v4:unknown
+    Jump block2
+block2:
+    v6:unknown = GetGlobal result
+    End v6:unknown
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    v9:unknown = Add v7:unknown, v8:string
+    SetGlobal result v9:unknown
+    ContinuePendingUnwind block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    v16:unknown = Add v14:unknown, v15:string
+    SetGlobal result v16:unknown
+    Throw v17:string
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block7
+block1:
+    v1:unknown = Catch
+    v3:unknown = GetGlobal result
+    v4:unknown = Add v3:unknown, v1:unknown
+    SetGlobal result v4:unknown
+    Jump block2
+block2:
+    v6:unknown = GetGlobal result
+    End v6:unknown
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    v9:unknown = Add v7:unknown, v8:string
+    SetGlobal result v9:unknown
+    ContinuePendingUnwind block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    v16:unknown = Add v14:unknown, v15:string
+    SetGlobal result v16:unknown
+    Throw v17:string
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block7
+block1:
+    v1:unknown = Catch
+    v3:unknown = GetGlobal result
+    v4:unknown = Add v3:unknown, v1:unknown
+    SetGlobal result v4:unknown
+    Jump block2
+block2:
+    v6:unknown = GetGlobal result
+    End v6:unknown
+block4: [handler: block1]
+    v7:unknown = GetGlobal result
+    v9:unknown = Add v7:unknown, v8:string
+    SetGlobal result v9:unknown
+    ContinuePendingUnwind block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v14:unknown = GetGlobal result
+    v16:unknown = Add v14:unknown, v15:string
+    SetGlobal result v16:unknown
+    Throw v17:string
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string

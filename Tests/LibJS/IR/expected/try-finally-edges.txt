@@ -22,7 +22,7 @@ block1_split2:
     SetGlobal result v3:unknown
     Jump block7
 block1_split3:
-    Jump block2
+    ContinuePendingUnwind block2
 block2_split4:
     End v4:unknown
 block3_split5:
@@ -52,7 +52,7 @@ block1_split2:
     SetGlobal result v3:unknown
     Jump block7
 block1_split3:
-    Jump block2
+    ContinuePendingUnwind block2
 block2_split4:
     End v4:unknown
 block3_split5:
@@ -77,7 +77,9 @@ block1_split1:
     Jump block6
 block1_split2:
     SetGlobal result v3:unknown
-    Jump block2
+    Jump block7
+block1_split3:
+    ContinuePendingUnwind block2
 block2_split4:
     End v4:unknown
 
@@ -90,6 +92,8 @@ block1:
     v1:unknown = GetGlobal result
     v3:unknown = Add v1:unknown, 10
     SetGlobal result v3:unknown
+    ContinuePendingUnwind block2
+block2:
     v4:unknown = GetGlobal result
     End v4:unknown
 block3: [finalizer: block1]
@@ -104,6 +108,8 @@ block1:
     v1:unknown = GetGlobal result
     v3:unknown = Add v1:unknown, 10
     SetGlobal result v3:unknown
+    ContinuePendingUnwind block2
+block2:
     v4:unknown = GetGlobal result
     End v4:unknown
 block3: [finalizer: block1]
