@@ -28,8 +28,8 @@ public:
     Function* parent_function() const { return m_parent_function; }
     void set_parent_function(Function* function) { m_parent_function = function; }
 
-    Vector<NonnullOwnPtr<Instruction>> const& instructions() const { return m_instructions; }
-    Vector<NonnullOwnPtr<Instruction>>& instructions() { return m_instructions; }
+    ReadonlySpan<NonnullOwnPtr<Instruction>> instructions() const { return m_instructions.span(); }
+    Span<NonnullOwnPtr<Instruction>> instructions() { return m_instructions.span(); }
 
     void append(NonnullOwnPtr<Instruction> instruction);
     void prepend(NonnullOwnPtr<Instruction> instruction);

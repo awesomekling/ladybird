@@ -142,7 +142,7 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
             }
 
             // Clear the block's instructions (will be removed later)
-            block->instructions().clear();
+            block->clear_instructions();
 
             eliminated_any = true;
             changed = true;

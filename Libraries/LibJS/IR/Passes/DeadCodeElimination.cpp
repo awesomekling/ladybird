@@ -58,10 +58,8 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 
     // Step 3: Remove dead instructions (those whose results are not live)
     for (auto& block : function.basic_blocks()) {
-        auto& instructions = block->instructions();
-
-        for (size_t i = instructions.size(); i > 0; --i) {
-            auto& instruction = instructions[i - 1];
+        for (size_t i = block->instructions().size(); i > 0; --i) {
+            auto& instruction = block->instructions()[i - 1];
 
             // Skip instructions without results (terminators, etc.)
             if (!instruction->result())
@@ -73,9 +71,7 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 
             // If the result is not live, remove the instruction
             if (!live_values.contains(instruction->result())) {
-                // Clear uses before removing so the use lists stay consistent
-                instruction->clear_operand_uses();
-                instructions.remove(i - 1);
+                block->remove_instruction(i - 1);
                 changed = true;
             }
         }

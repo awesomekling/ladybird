@@ -127,16 +127,14 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
                 NonnullOwnPtr<Instruction> owned_instr = [&]() -> NonnullOwnPtr<Instruction> {
                     for (size_t i = 0; i < loop_block->instructions().size(); ++i) {
                         if (loop_block->instructions()[i].ptr() == instruction) {
-                            return loop_block->instructions().take(i);
+                            return loop_block->take_instruction(i);
                         }
                     }
                     VERIFY_NOT_REACHED();
                 }();
 
                 // Insert at end of preheader, before the terminator
-                size_t insert_pos = preheader->instructions().size() - 1;
-                owned_instr->set_parent_block(preheader);
-                preheader->instructions().insert(insert_pos, move(owned_instr));
+                preheader->insert_before_terminator(move(owned_instr));
 
                 changed = true;
             }

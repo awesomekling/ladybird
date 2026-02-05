@@ -147,14 +147,9 @@ void CFG::set_finalizer(BasicBlock& block, BasicBlock* finalizer)
 
 void CFG::replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)
 {
-    // Clean up use lists and remove the old branch instruction
-    block.instructions().last()->clear_operand_uses();
-    block.instructions().remove(block.instructions().size() - 1);
-
-    // Add a new jump instruction
-    auto jump = JumpInstruction::create(target);
-    jump->set_parent_block(&block);
-    block.instructions().append(move(jump));
+    // Remove the old branch and add a new jump instruction
+    block.remove_terminator();
+    block.append(JumpInstruction::create(target));
 
     // Remove this block from the not-taken block's predecessors
     if (not_taken)
@@ -200,10 +195,8 @@ void CFG::remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks
         return;
 
     // Clear operand uses in blocks being removed so use lists don't retain stale references.
-    for (auto* block : blocks_to_remove) {
-        for (auto& instruction : block->instructions())
-            instruction->clear_operand_uses();
-    }
+    for (auto* block : blocks_to_remove)
+        block->clear_instructions();
 
     // Remove all references to dead blocks from surviving blocks.
     for (auto& block : function.basic_blocks()) {

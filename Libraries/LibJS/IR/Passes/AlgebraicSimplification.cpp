@@ -196,7 +196,6 @@ PreservedAnalyses AlgebraicSimplification::run(Function& function, PassManager&)
             if (replacement && !instruction->result()->uses().is_empty()) {
                 // Replace all uses of the result with the simplified value
                 instruction->result()->replace_all_uses_with(replacement);
-                instruction->clear_operand_uses();
                 dead_instructions.set(instruction.ptr());
                 changed = true;
             }
@@ -208,8 +207,8 @@ PreservedAnalyses AlgebraicSimplification::run(Function& function, PassManager&)
     // and would otherwise survive DCE even when they have no uses.
     if (!dead_instructions.is_empty()) {
         for (auto& block : function.basic_blocks()) {
-            block->instructions().remove_all_matching([&](auto const& instruction) {
-                return dead_instructions.contains(instruction.ptr());
+            block->remove_instructions_if([&](Instruction const& instruction) {
+                return dead_instructions.contains(const_cast<Instruction*>(&instruction));
             });
         }
     }

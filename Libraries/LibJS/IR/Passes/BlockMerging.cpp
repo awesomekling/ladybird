@@ -76,14 +76,11 @@ PreservedAnalyses BlockMerging::run(Function& function, PassManager&)
             BasicBlock* b_false_target = b_terminator ? b_terminator->false_target() : nullptr;
 
             // 2. Remove the Jump from A
-            block_a->instructions().remove(block_a->instructions().size() - 1);
+            block_a->remove_terminator();
 
             // 3. Move all instructions from B to A
-            for (auto& instruction : block_b->instructions()) {
-                instruction->set_parent_block(block_a.ptr());
-                block_a->instructions().append(move(instruction));
-            }
-            block_b->instructions().clear();
+            for (auto& instruction : block_b->take_all_instructions())
+                block_a->append(move(instruction));
 
             // 4. Update all references to B to point to A
             CFG::retarget_all_edges(function, *block_b, *block_a);
