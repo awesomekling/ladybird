@@ -1,0 +1,275 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    SetGlobal g v2:unknown
+    Jump block3
+block0_split2:
+    v3:unknown = GetGlobal g
+    Jump block4
+block0_split3:
+    v4:unknown = GetById v3:unknown.next
+    Jump block5
+block0_split4:
+    v5:unknown = Call v4:unknown, v3:unknown
+    Jump block6
+block0_split5:
+    End v5:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    v2:unknown = Call v0:unknown, undefined
+    SetGlobal g v2:unknown
+    v3:unknown = GetGlobal g
+    v4:unknown = GetById v3:unknown.next
+    v5:unknown = Call v4:unknown, v3:unknown
+    End v5:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    v2:unknown = Call v0:unknown, undefined
+    SetGlobal g v2:unknown
+    v3:unknown = GetGlobal g
+    v4:unknown = GetById v3:unknown.next
+    v5:unknown = Call v4:unknown, v3:unknown
+    End v5:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    v21:unknown = Phi [block9:v22:undefined, block11:v9:object, block12:v9:object]
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v3:unknown = Move v1:unknown
+    v4:unknown = GetCompletionFields v3:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    Jump block10
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    Jump block11
+block3_split0:
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block9_split1: [finalizer: block2]
+    v9:object = Construct v7:unknown, v8:string
+    Jump block12
+block9_split2: [finalizer: block2]
+    Throw v9:object
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v3:unknown = Move v1:unknown
+    v4:unknown = GetCompletionFields v3:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    Jump block10
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    Jump block11
+block3_split0:
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block9_split1: [finalizer: block2]
+    v9:object = Construct v7:unknown, v8:string
+    Jump block12
+block9_split2: [finalizer: block2]
+    Throw v9:object
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v3:unknown = Move v1:unknown
+    v4:unknown = GetCompletionFields v1:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    Jump block10
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    Jump block11
+block3_split0:
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block9_split1: [finalizer: block2]
+    v9:object = Construct v7:unknown, v8:string
+    Jump block12
+block9_split2: [finalizer: block2]
+    Throw v9:object
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v3:unknown = Move v1:unknown
+    v4:unknown = GetCompletionFields v1:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    v9:object = Construct v7:unknown, v8:string
+    Throw v9:object
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v4:unknown = GetCompletionFields v1:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    v9:object = Construct v7:unknown, v8:string
+    Throw v9:object
+
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block9
+block2:
+    LeaveUnwindContext
+    v2:unknown = GetException
+    v1:unknown = Yield 42, continuation: block3
+block3:
+    SetException v2:unknown
+    v4:unknown = GetCompletionFields v1:unknown
+    v5:unknown = ExtractValue v4:unknown, 0
+    v6:unknown = ExtractValue v4:unknown, 1
+    v15:boolean = StrictlyEquals v5:unknown, 1
+    Branch v15:boolean, block4, block5
+block4:
+    ContinuePendingUnwind block8
+block5:
+    v17:boolean = StrictlyEquals v5:unknown, 5
+    Branch v17:boolean, block6, block7
+block6:
+    LeaveFinally
+    Throw v6:unknown
+block7:
+    LeaveFinally
+    v18:unknown = Yield v6:unknown
+block8:
+    v20:unknown = Yield undefined
+block9: [finalizer: block2]
+    v7:unknown = GetGlobal Error
+    v9:object = Construct v7:unknown, v8:string
+    Throw v9:object
