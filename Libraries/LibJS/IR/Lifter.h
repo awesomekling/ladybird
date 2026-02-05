@@ -32,6 +32,7 @@ private:
     void connect_control_flow();
     void compute_block_predecessors();
     void compute_dominators();
+    void eliminate_unreachable_blocks();
     u32 address_to_block_index(size_t address) const;
 
     Value& get_or_create_value_for_operand(Bytecode::Operand operand, BasicBlock& block);

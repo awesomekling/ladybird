@@ -42,6 +42,7 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     }
 
     lifter.compute_dominators();
+    lifter.eliminate_unreachable_blocks();
 
     // SSA construction using dominance-based approach:
     // Phase 1: Place phis at dominance frontiers of defining blocks
@@ -1655,6 +1656,37 @@ void Lifter::compute_block_predecessors()
 void Lifter::compute_dominators()
 {
     m_dominators = make<Dominators>(*m_function);
+}
+
+void Lifter::eliminate_unreachable_blocks()
+{
+    // Remove blocks that are not reachable from the entry block.
+    // A block is reachable if it has an immediate dominator or is the entry.
+    auto* entry = m_function->entry_block();
+    bool removed_any = false;
+
+    // Clear operand use chains before removing blocks, so values defined
+    // in reachable blocks don't retain stale use entries.
+    for (auto& block : m_function->basic_blocks()) {
+        if (block.ptr() == entry)
+            continue;
+        if (m_dominators->immediate_dominator(block.ptr()))
+            continue;
+        for (auto& instruction : block->instructions())
+            instruction->clear_operand_uses();
+    }
+
+    m_function->basic_blocks().remove_all_matching([&](auto const& block) {
+        if (block.ptr() == entry)
+            return false;
+        if (m_dominators->immediate_dominator(block.ptr()))
+            return false;
+        removed_any = true;
+        return true;
+    });
+
+    if (removed_any)
+        compute_block_predecessors();
 }
 
 // Phase 1: Place phis at dominance frontiers of defining blocks

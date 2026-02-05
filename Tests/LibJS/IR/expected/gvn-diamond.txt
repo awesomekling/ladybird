@@ -41,8 +41,6 @@ block2:
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v6:string, v11:string
     Return v12:boolean
-block3:
-    End undefined
 
 === After CopyPropagation ===
 function(v4:unknown, v13:unknown):
@@ -63,8 +61,6 @@ block2:
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v5:string, v10:string
     Return v12:boolean
-block3:
-    End undefined
 
 === After ConstantFolding ===
 function(v4:unknown, v13:unknown):
@@ -85,8 +81,6 @@ block2:
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v5:string, v10:string
     Return v12:boolean
-block3:
-    End undefined
 
 === After GlobalValueNumbering ===
 function(v4:unknown, v13:unknown):
@@ -107,24 +101,8 @@ block2:
     v11:string = Move v5:string
     v12:boolean = StrictlyEquals v5:string, v5:string
     Return v12:boolean
-block3:
-    End undefined
 
 === After DeadCodeElimination ===
-function(v4:unknown, v13:unknown):
-block0:
-    v5:string = Typeof v4:unknown
-    Branch v13:unknown, block1, block2
-block1:
-    v9:boolean = StrictlyEquals v5:string, v5:string
-    Return v9:boolean
-block2:
-    v12:boolean = StrictlyEquals v5:string, v5:string
-    Return v12:boolean
-block3:
-    End undefined
-
-=== After DeadBlockElimination ===
 function(v4:unknown, v13:unknown):
 block0:
     v5:string = Typeof v4:unknown

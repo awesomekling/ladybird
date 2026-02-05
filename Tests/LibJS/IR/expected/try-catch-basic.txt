@@ -8,10 +8,6 @@ block1:
     Jump block2
 block2:
     End undefined
-block3: [handler: block1]
-    v4:int32 = Move 3
-    v5:int32 = Move v4:int32
-    End v5:int32
 
 === After CopyPropagation ===
 function():
@@ -23,10 +19,6 @@ block1:
     Jump block2
 block2:
     End undefined
-block3: [handler: block1]
-    v4:int32 = Move 3
-    v5:int32 = Move 3
-    End 3
 
 === After ConstantFolding ===
 function():
@@ -38,23 +30,8 @@ block1:
     Jump block2
 block2:
     End undefined
-block3: [handler: block1]
-    v4:int32 = Move 3
-    v5:int32 = Move 3
-    End 3
 
 === After DeadCodeElimination ===
-function():
-block0:
-    Jump block1
-block1:
-    Jump block2
-block2:
-    End undefined
-block3: [handler: block1]
-    End 3
-
-=== After DeadBlockElimination ===
 function():
 block0:
     Jump block1
