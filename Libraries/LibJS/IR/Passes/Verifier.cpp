@@ -257,86 +257,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // expected output type. This catches type corruption from optimization passes.
             if (instr->result() && instr->result()->type() != Type::Unknown) {
                 auto actual_type = instr->result()->type();
-                auto expected_type = [](Opcode opcode) -> Optional<Type> {
-                    switch (opcode) {
-                    // Always Boolean
-                    case Opcode::ToBoolean:
-                    case Opcode::Not:
-                    case Opcode::IsUndefined:
-                    case Opcode::IsNullish:
-                    case Opcode::LessThan:
-                    case Opcode::LessThanEquals:
-                    case Opcode::GreaterThan:
-                    case Opcode::GreaterThanEquals:
-                    case Opcode::LooselyEquals:
-                    case Opcode::StrictlyEquals:
-                    case Opcode::LooselyInequals:
-                    case Opcode::StrictlyInequals:
-                    case Opcode::In:
-                    case Opcode::InstanceOf:
-                    case Opcode::HasProperty:
-                    case Opcode::HasPrivateId:
-                    case Opcode::DeleteById:
-                    case Opcode::DeleteByIdWithThis:
-                    case Opcode::DeleteByValue:
-                    case Opcode::DeleteByValueWithThis:
-                    case Opcode::DeleteVariable:
-                        return Type::Boolean;
-                    // Always Int32
-                    case Opcode::BitwiseAnd:
-                    case Opcode::BitwiseOr:
-                    case Opcode::BitwiseXor:
-                    case Opcode::LeftShift:
-                    case Opcode::RightShift:
-                    case Opcode::BitwiseNot:
-                    case Opcode::ToInt32:
-                        return Type::Int32;
-                    // Always String
-                    case Opcode::Typeof:
-                    case Opcode::TypeofBinding:
-                    case Opcode::ToString:
-                    case Opcode::ConcatString:
-                        return Type::String;
-                    // Always Number
-                    case Opcode::UnsignedRightShift:
-                    case Opcode::ToNumber:
-                    case Opcode::UnaryPlus:
-                    case Opcode::Negate:
-                    case Opcode::Increment:
-                    case Opcode::Decrement:
-                    case Opcode::PostfixIncrement:
-                    case Opcode::PostfixDecrement:
-                        return Type::Number;
-                    // Always Undefined
-                    case Opcode::LoadUndefined:
-                        return Type::Undefined;
-                    // Always Null
-                    case Opcode::LoadNull:
-                        return Type::Null;
-                    // Always Object
-                    case Opcode::NewObject:
-                    case Opcode::NewRegExp:
-                    case Opcode::ToObject:
-                        return Type::Object;
-                    // Always Array
-                    case Opcode::NewArray:
-                    case Opcode::NewArrayWithLength:
-                    case Opcode::GetTemplateObject:
-                    case Opcode::IteratorToArray:
-                        return Type::Array;
-                    // Always Function
-                    case Opcode::NewClass:
-                    case Opcode::NewFunction:
-                        return Type::Function;
-                    default:
-                        return {};
-                    }
-                }(instr->opcode());
-                if (expected_type.has_value() && actual_type != *expected_type) {
+                auto expected = opcode_guaranteed_result_type(instr->opcode());
+                if (expected != Type::Unknown && actual_type != expected) {
                     report_error(ByteString::formatted(
                         "{} in block{} has result type {} (expected {})",
                         opcode_to_string(instr->opcode()), block->index(),
-                        type_to_string(actual_type), type_to_string(*expected_type)));
+                        type_to_string(actual_type), type_to_string(expected)));
                 }
             }
 
