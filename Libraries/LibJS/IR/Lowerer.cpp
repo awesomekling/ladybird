@@ -276,6 +276,7 @@ void Lowerer::emit(Args&&... args)
     m_current_block->grow(sizeof(OpType));
     void* slot = m_current_block->data() + slot_offset;
     new (slot) OpType(forward<Args>(args)...);
+    static_cast<OpType*>(slot)->set_strict(m_strict);
     if (m_current_source_record.has_value())
         m_current_block->add_source_map_entry(static_cast<u32>(slot_offset), *m_current_source_record);
 }
@@ -289,6 +290,7 @@ void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&..
     m_current_block->grow(size_to_allocate);
     void* slot = m_current_block->data() + slot_offset;
     new (slot) OpType(forward<Args>(args)...);
+    static_cast<OpType*>(slot)->set_strict(m_strict);
     if (m_current_source_record.has_value())
         m_current_block->add_source_map_entry(static_cast<u32>(slot_offset), *m_current_source_record);
 }
@@ -1240,6 +1242,8 @@ void Lowerer::lower_blocks()
 GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 {
     Lowerer lowerer(vm, function);
+    if (function.source_executable())
+        lowerer.m_strict = function.source_executable()->is_strict_mode ? Strict::Yes : Strict::No;
     lowerer.compute_phi_coalescing();
     lowerer.lower_blocks();
 
