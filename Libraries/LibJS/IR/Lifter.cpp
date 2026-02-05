@@ -421,8 +421,8 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case PostfixIncrement: {
         auto const& op = static_cast<Bytecode::Op::PostfixIncrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
-        // dst gets the OLD value (that's what postfix returns)
-        auto& old_value = m_function->build_move(block, src);
+        // dst gets the OLD NUMERIC value (PostfixIncrement returns ToNumeric(src))
+        auto& old_value = m_function->build_to_number(block, src);
         define_operand(op.dst(), old_value, block);
         // src gets MUTATED to src + 1 - create a new SSA value for it
         auto& incremented = m_function->build_increment(block, src);
@@ -432,8 +432,8 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case PostfixDecrement: {
         auto const& op = static_cast<Bytecode::Op::PostfixDecrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
-        // dst gets the OLD value (that's what postfix returns)
-        auto& old_value = m_function->build_move(block, src);
+        // dst gets the OLD NUMERIC value (PostfixDecrement returns ToNumeric(src))
+        auto& old_value = m_function->build_to_number(block, src);
         define_operand(op.dst(), old_value, block);
         // src gets MUTATED to src - 1 - create a new SSA value for it
         auto& decremented = m_function->build_decrement(block, src);

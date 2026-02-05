@@ -1,0 +1,98 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:array = NewArray
+    Jump block1
+block0_split0:
+    v4:array = Move v3:array
+    v5:number = ToNumber v4:array
+    v6:number = Increment v4:array
+    Jump block2
+block0_split1:
+    v7:number = Move v5:number
+    Return v7:number
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:array = NewArray
+    Jump block1
+block0_split0:
+    v4:array = Move v3:array
+    v5:number = ToNumber v3:array
+    v6:number = Increment v3:array
+    Jump block2
+block0_split1:
+    v7:number = Move v5:number
+    Return v5:number
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:array = NewArray
+    Jump block1
+block0_split0:
+    v4:array = Move v3:array
+    v5:number = ToNumber v3:array
+    v6:number = Increment v3:array
+    Jump block2
+block0_split1:
+    v7:number = Move v5:number
+    Return v5:number
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v3:array = NewArray
+    Jump block1
+block0_split0:
+    v5:number = ToNumber v3:array
+    v6:number = Increment v3:array
+    Jump block2
+block0_split1:
+    Return v5:number
+
+=== After BlockMerging ===
+function():
+block0:
+    v3:array = NewArray
+    v5:number = ToNumber v3:array
+    v6:number = Increment v3:array
+    Return v5:number
+
+function():
+block0:
+    v3:array = NewArray
+    v5:number = ToNumber v3:array
+    v6:number = Increment v3:array
+    Return v5:number
