@@ -57,6 +57,7 @@ private:
     HashMap<u64, size_t> m_edge_to_trampoline;
     Vector<JS::Value> m_constants;
     u32 m_next_register { Bytecode::Register::reserved_register_count };
+    Optional<Bytecode::SourceRecord> m_current_source_record;
 };
 
 }

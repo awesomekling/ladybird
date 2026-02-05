@@ -276,6 +276,8 @@ void Lowerer::emit(Args&&... args)
     m_current_block->grow(sizeof(OpType));
     void* slot = m_current_block->data() + slot_offset;
     new (slot) OpType(forward<Args>(args)...);
+    if (m_current_source_record.has_value())
+        m_current_block->add_source_map_entry(static_cast<u32>(slot_offset), *m_current_source_record);
 }
 
 template<typename OpType, typename... Args>
@@ -287,6 +289,8 @@ void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&..
     m_current_block->grow(size_to_allocate);
     void* slot = m_current_block->data() + slot_offset;
     new (slot) OpType(forward<Args>(args)...);
+    if (m_current_source_record.has_value())
+        m_current_block->add_source_map_entry(static_cast<u32>(slot_offset), *m_current_source_record);
 }
 
 void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to)
@@ -1063,13 +1067,17 @@ void Lowerer::lower_blocks()
         for (auto const& instruction : ir_block.instructions()) {
             if (instruction->is_terminator())
                 continue;
+            m_current_source_record = instruction->source_record();
             lower_instruction(*instruction);
         }
+        m_current_source_record = {};
 
         // Handle terminator
         auto* terminator = ir_block.terminator();
         if (!terminator)
             continue;
+
+        m_current_source_record = terminator->source_record();
 
         switch (terminator->opcode()) {
         case Opcode::Jump: {
@@ -1240,11 +1248,16 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
     Vector<u8> bytecode;
     Vector<size_t> basic_block_start_offsets;
     Vector<size_t> label_offsets;
+    Vector<Bytecode::SourceMapEntry> source_map;
     HashMap<Bytecode::BasicBlock const*, size_t> block_offsets;
 
     for (auto const& block : lowerer.m_bytecode_blocks) {
         basic_block_start_offsets.append(bytecode.size());
         block_offsets.set(block.ptr(), bytecode.size());
+
+        // Merge per-block source map entries, adjusting offsets to flat buffer positions
+        for (auto const& entry : block->source_map())
+            source_map.append({ static_cast<u32>(bytecode.size()) + entry.bytecode_offset, entry.source_record });
 
         Bytecode::InstructionStreamIterator it(block->instruction_stream());
         while (!it.at_end()) {
@@ -1315,6 +1328,7 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
         source_executable->is_strict_mode ? Strict::Yes : Strict::No);
 
     executable->basic_block_start_offsets = move(basic_block_start_offsets);
+    executable->source_map = move(source_map);
     executable->name = source_executable->name;
 
     // Copy cache contents from source executable to preserve cached information

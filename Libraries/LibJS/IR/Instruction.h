@@ -9,6 +9,7 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Vector.h>
 #include <LibJS/Bytecode/Builtins.h>
+#include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
@@ -590,6 +591,10 @@ public:
     bool is_spread() const { return m_is_spread; }
     void set_is_spread(bool value) { m_is_spread = value; }
 
+    // Source location tracking
+    Optional<Bytecode::SourceRecord> const& source_record() const { return m_source_record; }
+    void set_source_record(Bytecode::SourceRecord record) { m_source_record = record; }
+
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
@@ -653,6 +658,9 @@ private:
 
     // For ArrayAppend
     bool m_is_spread { false };
+
+    // Source location
+    Optional<Bytecode::SourceRecord> m_source_record;
 };
 
 // TerminatorInstruction is used for control flow instructions that end a basic block.

@@ -143,8 +143,25 @@ void Lifter::lift_basic_blocks()
 
         while (!it.at_end()) {
             size_t instr_count_before = current_block->instructions().size();
+
+            // Look up source record for this bytecode instruction
+            auto absolute_offset = start_offset + it.offset();
+            auto* source_entry = binary_search(m_executable.source_map, absolute_offset, nullptr, [](size_t needle, Bytecode::SourceMapEntry const& entry) -> int {
+                if (needle < entry.bytecode_offset)
+                    return -1;
+                if (needle > entry.bytecode_offset)
+                    return 1;
+                return 0;
+            });
+
             lift_instruction(*it, *current_block);
             ++it;
+
+            // Attach source record to all IR instructions created from this bytecode instruction
+            if (source_entry) {
+                for (size_t i = instr_count_before; i < current_block->instructions().size(); ++i)
+                    current_block->instructions()[i]->set_source_record(source_entry->source_record);
+            }
 
             // Check if we added any may-throw instructions
             bool added_may_throw = false;
