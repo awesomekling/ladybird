@@ -905,6 +905,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
             operand(0));
         break;
     }
+    case Opcode::SetCompletionType: {
+        emit<Bytecode::Op::SetCompletionType>(operand(0), instruction.completion_type());
+        break;
+    }
+    case Opcode::NewTypeError: {
+        emit<Bytecode::Op::NewTypeError>(dst(), instruction.string_table_index());
+        break;
+    }
 
     // Opcodes that don't produce bytecode (side-effect only in IR)
     case Opcode::LoadConstant:
@@ -1100,6 +1108,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         // Operands: [iterator_object, iterator_next, iterator_done]
         // NB: Using Normal completion type since we don't track completion in IR
         emit<Bytecode::Op::IteratorClose>(operand(0), operand(1), operand(2), Completion::Type::Normal, OptionalNone {});
+        break;
+    }
+    case Opcode::AsyncIteratorClose: {
+        // Operands: [iterator_object, iterator_next, iterator_done]
+        emit<Bytecode::Op::AsyncIteratorClose>(operand(0), operand(1), operand(2), Completion::Type::Normal, OptionalNone {});
         break;
     }
     case Opcode::IteratorToArray: {

@@ -16,6 +16,7 @@
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/Runtime/Completion.h>
 
 namespace JS::IR {
 
@@ -199,6 +200,7 @@ public:
     [[nodiscard]] Value& build_iterator_next(BasicBlock& block, Value& iterator);
     [[nodiscard]] Value& build_iterator_next_unpack(BasicBlock& block, Value& iterator);
     void build_iterator_close(BasicBlock& block, Value& iterator);
+    void build_async_iterator_close(BasicBlock& block, Value& iterator);
     [[nodiscard]] Value& build_iterator_to_array(BasicBlock& block, Value& iterator);
 
     // Special
@@ -223,6 +225,8 @@ public:
     [[nodiscard]] Value& build_yield(BasicBlock& block, Value& value, BasicBlock* continuation);
     [[nodiscard]] Value& build_await(BasicBlock& block, Value& argument, BasicBlock& continuation);
     [[nodiscard]] Value& build_get_completion_fields(BasicBlock& block, Value& completion);
+    void build_set_completion_type(BasicBlock& block, Value& completion, Completion::Type type);
+    [[nodiscard]] Value& build_new_type_error(BasicBlock& block, Bytecode::StringTableIndex error_string);
 
     // SSA
     [[nodiscard]] Value& build_phi(BasicBlock& block, Vector<Value*> values, Vector<BasicBlock*> predecessors);

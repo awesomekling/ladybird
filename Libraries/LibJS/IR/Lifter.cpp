@@ -881,7 +881,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewTypeError: {
         auto const& op = static_cast<Bytecode::Op::NewTypeError const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& result = m_function->build_new_type_error(block, op.error_string());
         define_operand(op.dst(), result, block);
         break;
     }
@@ -1309,9 +1309,19 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.dst(), result, block);
         break;
     }
-    case AsyncIteratorClose:
-        // Async iterator close - no result value, side effect only
+    case AsyncIteratorClose: {
+        auto const& op = static_cast<Bytecode::Op::AsyncIteratorClose const&>(instruction);
+        auto& iterator_object = get_or_create_value_for_operand(op.iterator_object(), block);
+        auto& iterator_next = get_or_create_value_for_operand(op.iterator_next(), block);
+        auto& iterator_done = get_or_create_value_for_operand(op.iterator_done(), block);
+        m_function->build_async_iterator_close(block, iterator_object);
+        // NB: Add iterator_next and iterator_done as operands even though they're not used by IR.
+        // This preserves data flow for lowering back to bytecode.
+        auto* instr = block.instructions().last().ptr();
+        instr->add_operand(&iterator_next);
+        instr->add_operand(&iterator_done);
         break;
+    }
 
     // Type checks
     case IsCallable: {
@@ -1340,9 +1350,12 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.value_dst(), value_value, block);
         break;
     }
-    case SetCompletionType:
-        // Runtime bookkeeping - no IR values
+    case SetCompletionType: {
+        auto const& op = static_cast<Bytecode::Op::SetCompletionType const&>(instruction);
+        auto& completion = get_or_create_value_for_operand(op.completion(), block);
+        m_function->build_set_completion_type(block, completion, op.completion_type());
         break;
+    }
     case CacheObjectShape: {
         auto const& op = static_cast<Bytecode::Op::CacheObjectShape const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);

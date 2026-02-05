@@ -1079,6 +1079,13 @@ void Function::build_iterator_close(BasicBlock& block, Value& iterator)
     block.append(move(instruction));
 }
 
+void Function::build_async_iterator_close(BasicBlock& block, Value& iterator)
+{
+    auto instruction = Instruction::create<Opcode::AsyncIteratorClose>();
+    instruction->add_operand(&iterator);
+    block.append(move(instruction));
+}
+
 Value& Function::build_iterator_to_array(BasicBlock& block, Value& iterator)
 {
     auto instruction = Instruction::create<Opcode::IteratorToArray>();
@@ -1189,6 +1196,26 @@ Value& Function::build_get_completion_fields(BasicBlock& block, Value& completio
     // Use ExtractValue to get individual components
     auto instruction = Instruction::create<Opcode::GetCompletionFields>();
     instruction->add_operand(&completion);
+
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+void Function::build_set_completion_type(BasicBlock& block, Value& completion, Completion::Type type)
+{
+    auto instruction = Instruction::create<Opcode::SetCompletionType>();
+    instruction->add_operand(&completion);
+    instruction->set_completion_type(type);
+    block.append(move(instruction));
+}
+
+Value& Function::build_new_type_error(BasicBlock& block, Bytecode::StringTableIndex error_string)
+{
+    auto instruction = Instruction::create<Opcode::NewTypeError>();
+    instruction->set_string_table_index(error_string);
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);

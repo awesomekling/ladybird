@@ -17,6 +17,7 @@
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Iterator.h>
 
 namespace JS {
@@ -182,12 +183,15 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     IteratorNext,
     IteratorNextUnpack,
     IteratorClose,
+    AsyncIteratorClose,
     IteratorToArray,
 
     // Generators/Async
     Yield,
     Await,
     GetCompletionFields,
+    SetCompletionType,
+    NewTypeError,
 
     // Copy
     Move,
@@ -378,12 +382,15 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::IteratorNext)]                       = { "IteratorNext",                       false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::IteratorNextUnpack)]                 = { "IteratorNextUnpack",                 false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::IteratorClose)]                      = { "IteratorClose",                      false, true,  true,  false, false, false, false },
+    [to_underlying(Opcode::AsyncIteratorClose)]                 = { "AsyncIteratorClose",                 false, true,  true,  false, false, false, false },
     [to_underlying(Opcode::IteratorToArray)]                    = { "IteratorToArray",                    false, true,  true,  false, false, false, true  },
 
     // Generators/Async
     [to_underlying(Opcode::Yield)]                              = { "Yield",                              true,  true,  true,  false, false, false, true  },
     [to_underlying(Opcode::Await)]                              = { "Await",                              true,  true,  true,  false, false, false, true  },
     [to_underlying(Opcode::GetCompletionFields)]                = { "GetCompletionFields",                false, true,  true,  false, false, false, true  },
+    [to_underlying(Opcode::SetCompletionType)]                  = { "SetCompletionType",                  false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::NewTypeError)]                       = { "NewTypeError",                       false, false, true,  false, false, false, true  },
 
     // Copy
     [to_underlying(Opcode::Move)]                               = { "Move",                               false, false, false, false, false, false, true  },
@@ -607,6 +614,14 @@ public:
     bool is_spread() const { return m_is_spread; }
     void set_is_spread(bool value) { m_is_spread = value; }
 
+    // For SetCompletionType / AsyncIteratorClose
+    Completion::Type completion_type() const { return m_completion_type; }
+    void set_completion_type(Completion::Type type) { m_completion_type = type; }
+
+    // For NewTypeError
+    Bytecode::StringTableIndex string_table_index() const { return m_string_table_index; }
+    void set_string_table_index(Bytecode::StringTableIndex index) { m_string_table_index = index; }
+
     // Source location tracking
     Optional<Bytecode::SourceRecord> const& source_record() const { return m_source_record; }
     void set_source_record(Bytecode::SourceRecord record) { m_source_record = record; }
@@ -678,6 +693,12 @@ private:
 
     // For ArrayAppend
     bool m_is_spread { false };
+
+    // For SetCompletionType / AsyncIteratorClose
+    Completion::Type m_completion_type { Completion::Type::Normal };
+
+    // For NewTypeError
+    Bytecode::StringTableIndex m_string_table_index;
 
     // Source location
     Optional<Bytecode::SourceRecord> m_source_record;

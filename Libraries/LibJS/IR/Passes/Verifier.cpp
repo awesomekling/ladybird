@@ -271,6 +271,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::CreateVariable:
                     case Opcode::CreateArguments:
                     case Opcode::CreateRestParams:
+                    case Opcode::NewTypeError:
                         return 0;
                     // 1 operand
                     case Opcode::LoadConstant:
@@ -317,6 +318,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::SetBinding:
                     case Opcode::InitializeBinding:
                     case Opcode::GetCompletionFields:
+                    case Opcode::SetCompletionType:
                     case Opcode::CreateMutableBinding:
                     case Opcode::CreateImmutableBinding:
                         return 1;
@@ -363,6 +365,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::IteratorNext:
                     case Opcode::IteratorNextUnpack:
                     case Opcode::IteratorClose:
+                    case Opcode::AsyncIteratorClose:
                     case Opcode::IteratorToArray:
                     case Opcode::PutByIdWithThis:
                     case Opcode::PutByValue:
