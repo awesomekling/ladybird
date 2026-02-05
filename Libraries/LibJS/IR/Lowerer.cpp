@@ -228,6 +228,12 @@ void Lowerer::compute_phi_coalescing()
                 if (auto* defining = operand->defining_instruction()) {
                     bool has_interference = false;
                     bool past_definition = false;
+                    // We must check not only for direct uses of phi_result,
+                    // but also for uses of any value already coalesced with
+                    // phi_result. If a coalesced value is still live after
+                    // the operand's definition, sharing a register would
+                    // clobber that value.
+                    auto const* phi_rep = find_representative(phi_result);
                     for (auto const& inst : incoming_block->instructions()) {
                         if (inst.ptr() == defining) {
                             past_definition = true;
@@ -235,7 +241,7 @@ void Lowerer::compute_phi_coalescing()
                         }
                         if (past_definition) {
                             for (auto* use_operand : inst->operands()) {
-                                if (use_operand == phi_result) {
+                                if (use_operand && find_representative(use_operand) == phi_rep) {
                                     has_interference = true;
                                     break;
                                 }
