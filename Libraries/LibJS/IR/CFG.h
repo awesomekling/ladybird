@@ -72,6 +72,20 @@ public:
 
     // Set the finalizer for a block.
     static void set_finalizer(BasicBlock& block, BasicBlock* finalizer);
+
+    // Replace a Branch terminator with an unconditional Jump to `target`.
+    // Removes the branch's operand uses, replaces the instruction, and removes
+    // `block` from the not-taken target's predecessor list.
+    static void replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken);
+
+    // Swap the true and false targets of a Branch terminator.
+    // No predecessor changes needed (both targets remain connected).
+    static void swap_branch_targets(BasicBlock& block);
+
+    // Retarget all edges in `function` that point to `old_target` to instead
+    // point to `new_target`. Updates terminator targets and predecessor lists
+    // in all blocks.
+    static void retarget_all_edges(Function& function, BasicBlock& old_target, BasicBlock& new_target);
 };
 
 } // namespace JS::IR

@@ -6,6 +6,7 @@
 
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
+#include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Value.h>
 
@@ -132,6 +133,55 @@ void CFG::set_exception_handler(BasicBlock& block, BasicBlock* handler)
 void CFG::set_finalizer(BasicBlock& block, BasicBlock* finalizer)
 {
     block.set_finalizer(finalizer);
+}
+
+void CFG::replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)
+{
+    // Clean up use lists and remove the old branch instruction
+    block.instructions().last()->clear_operand_uses();
+    block.instructions().remove(block.instructions().size() - 1);
+
+    // Add a new jump instruction
+    auto jump = JumpInstruction::create(target);
+    jump->set_parent_block(&block);
+    block.instructions().append(move(jump));
+
+    // Remove this block from the not-taken block's predecessors
+    if (not_taken)
+        CFG::remove_predecessor(*not_taken, block);
+}
+
+void CFG::swap_branch_targets(BasicBlock& block)
+{
+    auto* terminator = block.terminator();
+    VERIFY(terminator);
+    VERIFY(terminator->opcode() == Opcode::Branch);
+
+    auto* true_target = terminator->true_target();
+    auto* false_target = terminator->false_target();
+    terminator->set_true_target(false_target);
+    terminator->set_false_target(true_target);
+}
+
+void CFG::retarget_all_edges(Function& function, BasicBlock& old_target, BasicBlock& new_target)
+{
+    if (&old_target == &new_target)
+        return;
+
+    for (auto& block : function.basic_blocks()) {
+        auto* terminator = block->terminator();
+        if (!terminator)
+            continue;
+
+        if (terminator->true_target() == &old_target)
+            terminator->set_true_target(&new_target);
+        if (terminator->false_target() == &old_target)
+            terminator->set_false_target(&new_target);
+    }
+
+    // Update predecessor lists and phi references
+    for (auto& block : function.basic_blocks())
+        CFG::replace_predecessor(*block, old_target, new_target);
 }
 
 } // namespace JS::IR
