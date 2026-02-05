@@ -79,9 +79,6 @@ private:
     // Block predecessors (computed after control flow is connected)
     HashMap<BasicBlock*, Vector<BasicBlock*>> m_predecessors;
 
-    // Maps continuation block index -> resume value (for Yield/Await)
-    HashMap<u32, Value*> m_continuation_resume_values;
-
     // Dominator information for proper SSA construction
     OwnPtr<Dominators> m_dominators;
 };

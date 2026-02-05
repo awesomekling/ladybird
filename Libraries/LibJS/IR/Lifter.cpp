@@ -68,44 +68,6 @@ void Lifter::lift_basic_blocks()
             m_function->set_entry_block(&block);
     }
 
-    // Pre-pass: identify Yield/Await continuation blocks and create resume values
-    // These blocks receive an implicit resume value in the accumulator (reg0)
-    for (size_t block_index = 0; block_index < m_executable.basic_block_start_offsets.size(); ++block_index) {
-        size_t start_offset = m_executable.basic_block_start_offsets[block_index];
-        size_t end_offset = (block_index + 1 < m_executable.basic_block_start_offsets.size())
-            ? m_executable.basic_block_start_offsets[block_index + 1]
-            : m_executable.bytecode.size();
-
-        auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
-        Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
-
-        // Find the last instruction (terminator)
-        Bytecode::Instruction const* last_instruction = nullptr;
-        while (!it.at_end()) {
-            last_instruction = &*it;
-            ++it;
-        }
-
-        if (!last_instruction)
-            continue;
-
-        using enum Bytecode::Instruction::Type;
-        if (last_instruction->type() == Yield) {
-            auto const& op = static_cast<Bytecode::Op::Yield const&>(*last_instruction);
-            if (op.continuation_label().has_value()) {
-                auto cont_block_index = address_to_block_index(op.continuation_label()->address());
-                // Create a placeholder value for the resume value
-                auto& resume_value = m_function->create_register_value();
-                m_continuation_resume_values.set(cont_block_index, &resume_value);
-            }
-        } else if (last_instruction->type() == Await) {
-            auto const& op = static_cast<Bytecode::Op::Await const&>(*last_instruction);
-            auto cont_block_index = address_to_block_index(op.continuation_label().address());
-            auto& resume_value = m_function->create_register_value();
-            m_continuation_resume_values.set(cont_block_index, &resume_value);
-        }
-    }
-
     // Second pass: lift instructions from each basic block
     //
     // EH Splitting Invariant:
@@ -143,14 +105,6 @@ void Lifter::lift_basic_blocks()
         }
         current_block->set_exception_handler(exception_handler);
         current_block->set_finalizer(finalizer);
-
-        // If this block is a Yield/Await continuation, set up the resume value
-        // for the accumulator (reg0) so instructions in this block can use it
-        if (auto resume_value = m_continuation_resume_values.get(static_cast<u32>(block_index)); resume_value.has_value()) {
-            auto acc_raw = Bytecode::Operand(Bytecode::Register::accumulator()).raw();
-            m_current_definitions.set(acc_raw, *resume_value);
-            m_value_to_operand_raw.set(*resume_value, acc_raw);
-        }
 
         auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
         Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
@@ -1613,18 +1567,12 @@ void Lifter::connect_control_flow()
             if (op.continuation_label().has_value()) {
                 auto cont_block_index = address_to_block_index(op.continuation_label()->address());
                 auto* continuation = m_block_map.get(cont_block_index).value();
-                // Build the Yield instruction (creates a new result value internally)
-                auto& auto_resume_value = m_builder.build_yield(value, continuation);
-
-                // Replace the auto-created result with our pre-created resume value
-                // The pre-created one is what the continuation block's instructions are using
-                if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
-                    auto* yield_instr = auto_resume_value.defining_instruction();
-                    yield_instr->set_result(*pre_created);
-                }
+                auto& resume_value = m_builder.build_yield(value, continuation);
+                // The resume value (passed via .next()/.throw()/.return()) arrives in the
+                // accumulator (reg0). Register it so SSA construction places Phi nodes
+                // when multiple Yields share a continuation block.
+                define_operand(Bytecode::Operand(Bytecode::Register::accumulator()), resume_value, ir_block);
             } else {
-                // Final yield (return from generator) - emit Yield without continuation
-                // Result is intentionally unused since there's no continuation
                 (void)m_builder.build_yield(value, nullptr);
             }
             break;
@@ -1634,14 +1582,8 @@ void Lifter::connect_control_flow()
             auto& argument = get_or_create_value_for_operand(op.argument(), ir_block);
             auto cont_block_index = address_to_block_index(op.continuation_label().address());
             auto* continuation = m_block_map.get(cont_block_index).value();
-            // Build the Await instruction (creates a new result value internally)
-            auto& auto_resume_value = m_builder.build_await(argument, *continuation);
-
-            // Replace the auto-created result with our pre-created resume value
-            if (auto pre_created = m_continuation_resume_values.get(cont_block_index); pre_created.has_value()) {
-                auto* await_instr = auto_resume_value.defining_instruction();
-                await_instr->set_result(*pre_created);
-            }
+            auto& resume_value = m_builder.build_await(argument, *continuation);
+            define_operand(Bytecode::Operand(Bytecode::Register::accumulator()), resume_value, ir_block);
             break;
         }
 
