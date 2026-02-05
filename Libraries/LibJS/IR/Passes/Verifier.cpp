@@ -635,6 +635,45 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     }
 
     for (auto const& value : function.values()) {
+        // Check: Constant type sanity
+        // Constants must not have Type::Unknown, and their IR::Type must match the JS::Value.
+        if (value->is_constant()) {
+            auto ir_type = value->type();
+            auto const& cv = value->constant_value();
+            if (ir_type == Type::Unknown) {
+                report_error(ByteString::formatted(
+                    "Constant v{} has Type::Unknown",
+                    value->index()));
+            } else {
+                auto expected_type = [&]() -> Optional<Type> {
+                    if (cv.is_undefined())
+                        return Type::Undefined;
+                    if (cv.is_null())
+                        return Type::Null;
+                    if (cv.is_boolean())
+                        return Type::Boolean;
+                    if (cv.is_int32())
+                        return Type::Int32;
+                    if (cv.is_number())
+                        return Type::Number;
+                    if (cv.is_string())
+                        return Type::String;
+                    if (cv.is_symbol())
+                        return Type::Symbol;
+                    if (cv.is_bigint())
+                        return Type::BigInt;
+                    if (cv.is_object())
+                        return Type::Object;
+                    return {};
+                }();
+                if (expected_type.has_value() && ir_type != *expected_type) {
+                    report_error(ByteString::formatted(
+                        "Constant v{} has type {} but JS::Value implies {}",
+                        value->index(), type_to_string(ir_type), type_to_string(*expected_type)));
+                }
+            }
+        }
+
         // Check: Value kind consistency
         // Constants, parameters, and this values must NOT have a defining instruction
         if (!value->is_instruction() && value->defining_instruction()) {
