@@ -1,0 +1,111 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal putById
+    Jump block1
+block0_split0:
+    v1:object = NewObject
+    Jump block2
+block0_split1:
+    v3:unknown = Call v0:unknown, undefined, v1:object
+    Jump block3
+block0_split2:
+    v4:unknown = GetGlobal putById
+    Jump block4
+block0_split3:
+    v5:object = NewObject
+    Jump block5
+block0_split4:
+    v6:unknown = Call v4:unknown, undefined, v5:object
+    Jump block6
+block0_split5:
+    v7:unknown = GetGlobal putByValue
+    Jump block7
+block0_split6:
+    v8:object = NewObject
+    Jump block8
+block0_split7:
+    v10:unknown = Call v7:unknown, undefined, v8:object, v9:string
+    Jump block9
+block0_split8:
+    v11:unknown = GetGlobal putByValue
+    Jump block10
+block0_split9:
+    v12:object = NewObject
+    Jump block11
+block0_split10:
+    v13:unknown = Call v11:unknown, undefined, v12:object, v9:string
+    Jump block12
+block0_split11:
+    End v13:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal putById
+    v1:object = NewObject
+    v3:unknown = Call v0:unknown, undefined, v1:object
+    v4:unknown = GetGlobal putById
+    v5:object = NewObject
+    v6:unknown = Call v4:unknown, undefined, v5:object
+    v7:unknown = GetGlobal putByValue
+    v8:object = NewObject
+    v10:unknown = Call v7:unknown, undefined, v8:object, v9:string
+    v11:unknown = GetGlobal putByValue
+    v12:object = NewObject
+    v13:unknown = Call v11:unknown, undefined, v12:object, v9:string
+    End v13:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal putById
+    v1:object = NewObject
+    v3:unknown = Call v0:unknown, undefined, v1:object
+    v4:unknown = GetGlobal putById
+    v5:object = NewObject
+    v6:unknown = Call v4:unknown, undefined, v5:object
+    v7:unknown = GetGlobal putByValue
+    v8:object = NewObject
+    v10:unknown = Call v7:unknown, undefined, v8:object, v9:string
+    v11:unknown = GetGlobal putByValue
+    v12:object = NewObject
+    v13:unknown = Call v11:unknown, undefined, v12:object, v9:string
+    End v13:unknown
+
+=== Before optimization ===
+function(v0:unknown):
+block0:
+    PutById v0:unknown, 1.foo
+    Jump block1
+block0_split0:
+    End undefined
+
+=== After BlockMerging ===
+function(v0:unknown):
+block0:
+    PutById v0:unknown, 1.foo
+    End undefined
+
+function(v0:unknown):
+block0:
+    PutById v0:unknown, 1.foo
+    End undefined
+
+=== Before optimization ===
+function(v0:unknown, v1:unknown):
+block0:
+    PutByValue v0:unknown, v1:unknown, 1
+    Jump block1
+block0_split0:
+    End undefined
+
+=== After BlockMerging ===
+function(v0:unknown, v1:unknown):
+block0:
+    PutByValue v0:unknown, v1:unknown, 1
+    End undefined
+
+function(v0:unknown, v1:unknown):
+block0:
+    PutByValue v0:unknown, v1:unknown, 1
+    End undefined
