@@ -32,6 +32,10 @@ BasicBlock& Function::create_block(String name)
 
 Value& Function::create_parameter(u32 parameter_index)
 {
+    for (auto* param : m_parameters) {
+        if (param->parameter_index() == parameter_index)
+            return *param;
+    }
     auto value = Value::create_for_parameter(m_next_value_index++, parameter_index);
     auto& ref = *value;
     m_values.append(move(value));

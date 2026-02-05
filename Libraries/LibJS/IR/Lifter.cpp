@@ -193,8 +193,11 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
         auto constant = m_executable.constants[decoded_operand.index()];
         value = &m_function->create_constant(constant);
     } else if (decoded_operand.type() == Bytecode::Operand::Type::Argument) {
-        // For arguments, create a parameter value to preserve the argument index
+        // For arguments, create a parameter value to preserve the argument index.
+        // NB: Also register in m_value_to_operand_raw so that SSA renaming can
+        // replace uses with the reaching definition when the argument is reassigned.
         value = &m_function->create_parameter(decoded_operand.index());
+        m_value_to_operand_raw.set(value, raw);
     } else if (decoded_operand.is_register() && decoded_operand.index() == Bytecode::Register::this_value().index()) {
         // For the this register, create a special this value
         value = &m_function->create_this();
@@ -1827,16 +1830,14 @@ void Lifter::fill_phi_operands()
     // to later definitions within the same block.
     HashMap<u32, Vector<Value*>> operand_stacks;
 
-    // Seed stacks with parameter values for arguments that may be reassigned.
+    // Seed stacks with parameter values for all arguments.
     // Function parameters are implicit definitions at the entry block, but since
     // they aren't instruction results, the SSA renaming won't encounter them as
-    // definitions. We must seed them so that reaching definitions through paths
-    // that don't reassign the argument see the original parameter value instead
-    // of undefined.
+    // definitions. We must seed them so that the rename walk always has the
+    // original parameter as the base reaching definition.
     for (auto* param : m_function->parameters()) {
         u32 raw = m_executable.argument_index_base + param->parameter_index();
-        if (m_written_operands.contains(raw))
-            operand_stacks.ensure(raw).append(param);
+        operand_stacks.ensure(raw).append(param);
     }
 
     // Walk dominator tree starting from entry block
