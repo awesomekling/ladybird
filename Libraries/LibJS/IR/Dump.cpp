@@ -259,9 +259,7 @@ static void run_pass(Pass& pass, Function& function, bool& changed)
             outln("=== After {} ===\n{}", pass.name(), dump(function));
     }
 
-#ifndef NDEBUG
     Verifier::verify(function, true);
-#endif
 }
 
 void optimize(Function& function)

@@ -42,6 +42,10 @@ void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Functi
 
 void CFG::replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred)
 {
+    // Only replace if old_pred is actually a predecessor of this block
+    if (!block.predecessors().contains_slow(&old_pred))
+        return;
+
     // Use existing helper which updates both predecessor list and phi predecessors
     block.replace_phi_predecessor(&old_pred, &new_pred);
 
