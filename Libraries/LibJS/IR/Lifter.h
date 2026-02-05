@@ -76,9 +76,6 @@ private:
     // Reverse mapping: Value -> bytecode operand raw (for fixing references)
     HashMap<Value*, u32> m_value_to_operand_raw;
 
-    // Block predecessors (computed after control flow is connected)
-    HashMap<BasicBlock*, Vector<BasicBlock*>> m_predecessors;
-
     // Dominator information for proper SSA construction
     OwnPtr<Dominators> m_dominators;
 };

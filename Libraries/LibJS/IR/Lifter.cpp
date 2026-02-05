@@ -1630,7 +1630,6 @@ void Lifter::compute_block_predecessors()
 {
     // Clear existing predecessor data (this may be called more than once,
     // e.g. after inserting a new entry block).
-    m_predecessors.clear();
     for (auto& block : m_function->basic_blocks())
         block->clear_predecessors();
 
@@ -1639,14 +1638,10 @@ void Lifter::compute_block_predecessors()
         auto* term = block->terminator();
         if (!term)
             continue;
-        if (term->true_target()) {
-            m_predecessors.ensure(term->true_target()).append(block.ptr());
+        if (term->true_target())
             CFG::add_predecessor(*term->true_target(), *block);
-        }
-        if (term->false_target() && term->false_target() != term->true_target()) {
-            m_predecessors.ensure(term->false_target()).append(block.ptr());
+        if (term->false_target() && term->false_target() != term->true_target())
             CFG::add_predecessor(*term->false_target(), *block);
-        }
     }
 
     // Add exception edges: if a block has throwing instructions and an exception
@@ -1669,18 +1664,10 @@ void Lifter::compute_block_predecessors()
             needs_eh_annotations = true;
 
         if (needs_eh_annotations) {
-            if (auto* handler = block->exception_handler()) {
-                if (!m_predecessors.ensure(handler).contains_slow(block.ptr())) {
-                    m_predecessors.ensure(handler).append(block.ptr());
-                    CFG::add_predecessor(*handler, *block);
-                }
-            }
-            if (auto* finalizer = block->finalizer()) {
-                if (!m_predecessors.ensure(finalizer).contains_slow(block.ptr())) {
-                    m_predecessors.ensure(finalizer).append(block.ptr());
-                    CFG::add_predecessor(*finalizer, *block);
-                }
-            }
+            if (auto* handler = block->exception_handler())
+                CFG::add_predecessor(*handler, *block);
+            if (auto* finalizer = block->finalizer())
+                CFG::add_predecessor(*finalizer, *block);
         } else {
             block->set_exception_handler(nullptr);
             block->set_finalizer(nullptr);
@@ -1792,16 +1779,16 @@ void Lifter::place_phi_nodes()
         quick_sort(sorted_phi_blocks, [](auto* a, auto* b) { return a->index() < b->index(); });
 
         for (auto* block : sorted_phi_blocks) {
-            auto preds = m_predecessors.get(block);
-            if (!preds.has_value() || preds->is_empty())
+            auto const& preds = block->predecessors();
+            if (preds.is_empty())
                 continue;
 
             // Create an empty phi (we'll fill operands in phase 2)
             Vector<Value*> empty_values;
             Vector<BasicBlock*> empty_blocks;
-            for (size_t i = 0; i < preds->size(); ++i) {
+            for (size_t i = 0; i < preds.size(); ++i) {
                 empty_values.append(nullptr);
-                empty_blocks.append((*preds)[i]);
+                empty_blocks.append(preds[i]);
             }
 
             m_builder.set_insertion_block(block);
