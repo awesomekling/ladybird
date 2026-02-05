@@ -94,6 +94,11 @@ public:
     // and removing the blocks from function.basic_blocks().
     // Precondition: the caller has already redirected edges as needed.
     static void remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks_to_remove);
+
+    // Visit each successor of a block (terminator targets + exception handler + finalizer).
+    // The callback is called once per non-null edge. A block may be visited
+    // multiple times if multiple edges point to it.
+    static void for_each_successor(BasicBlock const& block, AK::Function<void(BasicBlock&)> callback);
 };
 
 } // namespace JS::IR

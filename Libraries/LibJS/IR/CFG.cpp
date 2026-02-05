@@ -219,4 +219,18 @@ void CFG::remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks
     });
 }
 
+void CFG::for_each_successor(BasicBlock const& block, AK::Function<void(BasicBlock&)> callback)
+{
+    if (auto* term = block.terminator()) {
+        if (auto* target = term->true_target())
+            callback(*target);
+        if (auto* target = term->false_target())
+            callback(*target);
+    }
+    if (auto* handler = block.exception_handler())
+        callback(*handler);
+    if (auto* finalizer = block.finalizer())
+        callback(*finalizer);
+}
+
 } // namespace JS::IR
