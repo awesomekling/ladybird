@@ -727,9 +727,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             auto const& stored_preds = block->predecessors();
             auto& expected_preds = *computed_preds.get(block.ptr());
 
-            // Check: Every reachable stored predecessor should be a computed predecessor
+            // Check: Every stored predecessor should be a computed predecessor.
+            // In InterPass mode, skip unreachable predecessors since they may
+            // have stale edges that DeadBlockElimination will clean up.
             for (auto* pred : stored_preds) {
-                if (!reachable.contains(pred))
+                if (!full_mode && !reachable.contains(pred))
                     continue;
                 if (!expected_preds.contains(pred)) {
                     report_error(ByteString::formatted(
@@ -877,6 +879,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     auto* operand = phi.incoming_value(i);
                     auto* pred = phi.incoming_block(i);
                     if (!operand)
+                        continue;
+
+                    // In InterPass mode, skip unreachable predecessors — they may have
+                    // stale phi entries that DeadBlockElimination will clean up.
+                    if (!full_mode && !reachable.contains(pred))
                         continue;
 
                     // Skip constants, parameters, and this values - they dominate everything
