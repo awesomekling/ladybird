@@ -23,7 +23,7 @@ void PassManager::add_pass(NonnullOwnPtr<Pass> pass)
 void PassManager::run(Function& function)
 {
     if (g_dump_ir_between_passes)
-        outln("=== Before optimization ===\n{}", dump(function));
+        dbgln("=== Before optimization ===\n{}", dump(function));
 
     constexpr size_t max_iterations = 10;
     for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
@@ -35,7 +35,7 @@ void PassManager::run(Function& function)
             if (!preserved.is_all()) {
                 changed = true;
                 if (g_dump_ir_between_passes)
-                    outln("=== After {} ===\n{}", pass->name(), dump(function));
+                    dbgln("=== After {} ===\n{}", pass->name(), dump(function));
             }
 
             invalidate(preserved);

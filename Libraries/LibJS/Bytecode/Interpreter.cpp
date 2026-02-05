@@ -155,11 +155,11 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
                 if (IR::g_optimize_ir)
                     IR::optimize(*ir_function);
                 if (IR::g_dump_ir)
-                    outln("{}", IR::dump(*ir_function));
+                    dbgln("{}", IR::dump(*ir_function));
                 if (IR::g_lower_ir) {
                     executable = IR::Lowerer::lower(vm, *ir_function);
                     if (g_dump_bytecode) {
-                        outln("=== Lowered bytecode ===");
+                        dbgln("=== Lowered bytecode ===");
                         executable->dump();
                     }
                 }
