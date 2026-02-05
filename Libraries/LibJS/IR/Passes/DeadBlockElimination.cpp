@@ -15,7 +15,7 @@
 
 namespace JS::IR {
 
-bool DeadBlockElimination::run(Function& function)
+PreservedAnalyses DeadBlockElimination::run(Function& function, PassManager&)
 {
     // Find all reachable blocks using BFS from entry
     HashTable<BasicBlock*> reachable;
@@ -68,7 +68,7 @@ bool DeadBlockElimination::run(Function& function)
     }
 
     if (dead_blocks.is_empty())
-        return false;
+        return PreservedAnalyses::all();
 
     // Build a map of phi results from dead blocks to their replacement values
     // If a phi in a dead block has all identical operands, we can replace uses of
@@ -139,7 +139,7 @@ bool DeadBlockElimination::run(Function& function)
         return !reachable.contains(block.ptr());
     });
 
-    return true;
+    return PreservedAnalyses::none();
 }
 
 }

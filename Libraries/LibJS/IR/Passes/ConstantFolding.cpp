@@ -18,7 +18,7 @@
 
 namespace JS::IR {
 
-bool ConstantFolding::run(Function& function)
+PreservedAnalyses ConstantFolding::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -537,7 +537,7 @@ bool ConstantFolding::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

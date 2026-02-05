@@ -14,7 +14,7 @@ namespace JS::IR {
 // Block Merging: Merge blocks where A jumps unconditionally to B and B has only A as predecessor
 class JS_API BlockMerging final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "BlockMerging"; }
 };
 

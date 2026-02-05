@@ -7,10 +7,10 @@
 #include <AK/HashMap.h>
 #include <AK/Vector.h>
 #include <LibJS/IR/BasicBlock.h>
-#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/GlobalValueNumbering.h>
+#include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -56,13 +56,13 @@ static bool is_commutative(Opcode opcode)
     }
 }
 
-bool GlobalValueNumbering::run(Function& function)
+PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pass_manager)
 {
     if (!function.entry_block())
-        return false;
+        return PreservedAnalyses::all();
 
     bool changed = false;
-    Dominators dominators(function);
+    auto const& dominators = pass_manager.dominators(function);
     HashMap<ExpressionKey, Value*> expressions;
 
     // Walk the dominator tree in pre-order with a scoped expression table.
@@ -115,7 +115,7 @@ bool GlobalValueNumbering::run(Function& function)
 
     process_block(process_block, function.entry_block());
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

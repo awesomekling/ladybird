@@ -7,10 +7,10 @@
 #include <AK/HashTable.h>
 #include <AK/Queue.h>
 #include <LibJS/IR/BasicBlock.h>
-#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
+#include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -44,12 +44,12 @@ static HashTable<BasicBlock*> collect_loop_blocks(BasicBlock* header, BasicBlock
     return loop_blocks;
 }
 
-bool LoopInvariantCodeMotion::run(Function& function)
+PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& pass_manager)
 {
     bool changed = false;
 
     // Compute dominators for proper back-edge detection
-    Dominators dominators(function);
+    auto const& dominators = pass_manager.dominators(function);
 
     // Find natural loops by looking for back-edges
     // A back-edge is an edge B -> H where H dominates B
@@ -143,7 +143,7 @@ bool LoopInvariantCodeMotion::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 }

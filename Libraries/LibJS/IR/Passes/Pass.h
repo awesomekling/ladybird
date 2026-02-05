@@ -8,6 +8,7 @@
 
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/Passes/PassManager.h>
 
 namespace JS::IR {
 
@@ -15,7 +16,7 @@ namespace JS::IR {
 class JS_API Pass {
 public:
     virtual ~Pass() = default;
-    virtual bool run(Function&) = 0;
+    virtual PreservedAnalyses run(Function&, PassManager&) = 0;
     virtual char const* name() const = 0;
 };
 

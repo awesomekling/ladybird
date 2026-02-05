@@ -13,7 +13,7 @@
 
 namespace JS::IR {
 
-bool JumpThreading::run(Function& function)
+PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -175,7 +175,7 @@ bool JumpThreading::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 }

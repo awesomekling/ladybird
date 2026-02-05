@@ -14,7 +14,7 @@ namespace JS::IR {
 // Examples: x + 0 → x, x * 1 → x, x * 0 → 0, x - x → 0
 class AlgebraicSimplification final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "AlgebraicSimplification"; }
 };
 

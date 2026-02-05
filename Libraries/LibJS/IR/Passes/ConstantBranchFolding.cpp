@@ -30,7 +30,7 @@ static void replace_branch_with_jump(BasicBlock& block, BasicBlock& target, Basi
         CFG::remove_predecessor(*not_taken, block);
 }
 
-bool ConstantBranchFolding::run(Function& function)
+PreservedAnalyses ConstantBranchFolding::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -65,7 +65,7 @@ bool ConstantBranchFolding::run(Function& function)
         changed = true;
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 }

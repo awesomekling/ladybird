@@ -105,7 +105,7 @@ static Optional<Opcode> inverted_comparison_if_safe(Instruction const& cmp_instr
     }
 }
 
-bool InstructionCombining::run(Function& function)
+PreservedAnalyses InstructionCombining::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -281,7 +281,7 @@ bool InstructionCombining::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

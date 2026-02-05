@@ -14,7 +14,7 @@
 
 namespace JS::IR {
 
-bool EmptyBlockElimination::run(Function& function)
+PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
 {
     bool changed = false;
     bool eliminated_any;
@@ -184,7 +184,7 @@ bool EmptyBlockElimination::run(Function& function)
         return block->instructions().is_empty();
     });
 
-    return changed;
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 }

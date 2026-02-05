@@ -51,7 +51,7 @@ static bool is_numeric_type(Type type)
     }
 }
 
-bool AlgebraicSimplification::run(Function& function)
+PreservedAnalyses AlgebraicSimplification::run(Function& function, PassManager&)
 {
     bool changed = false;
     HashTable<Instruction*> dead_instructions;
@@ -214,7 +214,7 @@ bool AlgebraicSimplification::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

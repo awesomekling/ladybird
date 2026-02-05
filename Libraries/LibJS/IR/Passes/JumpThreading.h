@@ -15,7 +15,7 @@ namespace JS::IR {
 // the appropriate target
 class JumpThreading final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "JumpThreading"; }
 };
 

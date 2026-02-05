@@ -13,7 +13,7 @@
 
 namespace JS::IR {
 
-bool CopyPropagation::run(Function& function)
+PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -76,7 +76,7 @@ bool CopyPropagation::run(Function& function)
     }
 
     if (copies.is_empty())
-        return changed;
+        return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 
     // Replace uses of copied values with their sources
     for (auto& block : function.basic_blocks()) {
@@ -101,7 +101,7 @@ bool CopyPropagation::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

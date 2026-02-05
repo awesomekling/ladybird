@@ -13,7 +13,7 @@ namespace JS::IR {
 // Dead Code Elimination: Remove instructions with unused results that have no side effects
 class DeadCodeElimination final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "DeadCodeElimination"; }
 };
 

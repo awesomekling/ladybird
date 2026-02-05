@@ -21,7 +21,7 @@
 #include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
-#include <LibJS/IR/Passes/Verifier.h>
+#include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
@@ -250,90 +250,22 @@ String dump(Function const& function)
     return MUST(builder.to_string());
 }
 
-static void run_pass(Pass& pass, Function& function, bool& changed)
-{
-    bool pass_changed = pass.run(function);
-    if (pass_changed) {
-        changed = true;
-        if (g_dump_ir_between_passes)
-            outln("=== After {} ===\n{}", pass.name(), dump(function));
-    }
-
-    if (!Verifier::verify(function, VerifierMode::InterPass, false)) {
-        warnln("IR Verifier failed after pass: {}", pass.name());
-        Verifier::verify(function, VerifierMode::InterPass, true);
-    }
-}
-
 void optimize(Function& function)
 {
-    if (g_dump_ir_between_passes)
-        outln("=== Before optimization ===\n{}", dump(function));
-
-    // Run optimization passes until no more changes (with safety limit)
-    constexpr size_t max_iterations = 10;
-    for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
-        bool changed = false;
-
-        // Copy propagation first - enables other optimizations
-        CopyPropagation copy_prop;
-        run_pass(copy_prop, function, changed);
-
-        // Loop invariant code motion - hoist invariant computations out of loops
-        LoopInvariantCodeMotion licm;
-        run_pass(licm, function, changed);
-
-        // Constant folding - evaluate constant expressions
-        ConstantFolding const_fold;
-        run_pass(const_fold, function, changed);
-
-        // Algebraic simplification - x + 0 → x, x * 1 → x, etc.
-        AlgebraicSimplification alg_simp;
-        run_pass(alg_simp, function, changed);
-
-        // Instruction combining - Not+Branch fusion, double negation, etc.
-        InstructionCombining inst_combine;
-        run_pass(inst_combine, function, changed);
-
-        // Global value numbering - reuse computed values across blocks
-        GlobalValueNumbering gvn;
-        run_pass(gvn, function, changed);
-
-        // Constant branch folding - simplify branches on constants
-        ConstantBranchFolding branch_fold;
-        run_pass(branch_fold, function, changed);
-
-        // Jump threading - thread jumps through blocks with constant phi inputs
-        JumpThreading jump_thread;
-        run_pass(jump_thread, function, changed);
-
-        // Dead code elimination - remove unused instructions
-        DeadCodeElimination dce;
-        run_pass(dce, function, changed);
-
-        // Dead block elimination - remove unreachable blocks
-        DeadBlockElimination dbe;
-        run_pass(dbe, function, changed);
-
-        // Empty block elimination - remove blocks that only jump
-        EmptyBlockElimination ebe;
-        run_pass(ebe, function, changed);
-
-        // Block merging - merge linear chains of blocks
-        BlockMerging block_merge;
-        run_pass(block_merge, function, changed);
-
-        if (!changed)
-            break;
-    }
-
-    // Run full verification after all passes are complete.
-    // This catches cleanliness issues (unreachable blocks, empty blocks)
-    // that are normal intermediate states but should be resolved by the end.
-    if (!Verifier::verify(function, VerifierMode::Full, false)) {
-        warnln("IR Verifier (full) failed after optimization");
-        Verifier::verify(function, VerifierMode::Full, true);
-    }
+    PassManager pass_manager;
+    pass_manager.add_pass(make<CopyPropagation>());
+    pass_manager.add_pass(make<LoopInvariantCodeMotion>());
+    pass_manager.add_pass(make<ConstantFolding>());
+    pass_manager.add_pass(make<AlgebraicSimplification>());
+    pass_manager.add_pass(make<InstructionCombining>());
+    pass_manager.add_pass(make<GlobalValueNumbering>());
+    pass_manager.add_pass(make<ConstantBranchFolding>());
+    pass_manager.add_pass(make<JumpThreading>());
+    pass_manager.add_pass(make<DeadCodeElimination>());
+    pass_manager.add_pass(make<DeadBlockElimination>());
+    pass_manager.add_pass(make<EmptyBlockElimination>());
+    pass_manager.add_pass(make<BlockMerging>());
+    pass_manager.run(function);
 }
 
 }

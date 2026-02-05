@@ -13,7 +13,7 @@ namespace JS::IR {
 // Constant Folding: Evaluate constant expressions at compile time
 class ConstantFolding final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "ConstantFolding"; }
 };
 

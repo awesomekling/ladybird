@@ -27,7 +27,7 @@ enum class VerifierMode {
 // Returns true if the IR is valid, crashes or returns false on errors.
 class JS_API Verifier final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "Verifier"; }
 
     // Run verification and return true if valid, false otherwise

@@ -13,7 +13,7 @@
 
 namespace JS::IR {
 
-bool DeadCodeElimination::run(Function& function)
+PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -81,7 +81,7 @@ bool DeadCodeElimination::run(Function& function)
         }
     }
 
-    return changed;
+    return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 }
 
 }

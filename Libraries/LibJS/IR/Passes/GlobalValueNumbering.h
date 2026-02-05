@@ -14,7 +14,7 @@ namespace JS::IR {
 // by walking the dominator tree with a scoped expression table.
 class GlobalValueNumbering final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "GlobalValueNumbering"; }
 };
 

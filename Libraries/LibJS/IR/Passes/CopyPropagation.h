@@ -13,7 +13,7 @@ namespace JS::IR {
 // Copy Propagation: Replace uses of `v1 = Move v0` with direct uses of `v0`
 class CopyPropagation final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "CopyPropagation"; }
 };
 

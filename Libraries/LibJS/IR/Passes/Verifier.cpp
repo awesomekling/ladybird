@@ -15,10 +15,10 @@
 
 namespace JS::IR {
 
-bool Verifier::run(Function& function)
+PreservedAnalyses Verifier::run(Function& function, PassManager&)
 {
     verify(function, VerifierMode::InterPass, true);
-    return false; // Verifier never modifies the IR
+    return PreservedAnalyses::all(); // Verifier never modifies the IR
 }
 
 bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error)

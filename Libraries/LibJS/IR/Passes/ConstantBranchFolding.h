@@ -13,7 +13,7 @@ namespace JS::IR {
 // Constant Branch Folding: Convert `Branch const` to unconditional `Jump`
 class ConstantBranchFolding final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "ConstantBranchFolding"; }
 };
 

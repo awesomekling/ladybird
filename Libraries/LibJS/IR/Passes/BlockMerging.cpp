@@ -13,7 +13,7 @@
 
 namespace JS::IR {
 
-bool BlockMerging::run(Function& function)
+PreservedAnalyses BlockMerging::run(Function& function, PassManager&)
 {
     bool changed = false;
 
@@ -105,7 +105,7 @@ bool BlockMerging::run(Function& function)
         return block->instructions().is_empty();
     });
 
-    return changed;
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 }

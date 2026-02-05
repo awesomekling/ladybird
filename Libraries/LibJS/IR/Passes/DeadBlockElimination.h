@@ -14,7 +14,7 @@ namespace JS::IR {
 // Dead Block Elimination: Remove unreachable blocks
 class JS_API DeadBlockElimination final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "DeadBlockElimination"; }
 };
 

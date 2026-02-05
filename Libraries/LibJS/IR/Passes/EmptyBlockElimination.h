@@ -14,7 +14,7 @@ namespace JS::IR {
 // by redirecting predecessors to jump directly to the target
 class EmptyBlockElimination final : public Pass {
 public:
-    virtual bool run(Function&) override;
+    virtual PreservedAnalyses run(Function&, PassManager&) override;
     virtual char const* name() const override { return "EmptyBlockElimination"; }
 };
 
