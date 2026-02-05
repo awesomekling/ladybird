@@ -96,54 +96,6 @@ block0:
     v6:int32 = ToInt32 3
     Return false
 
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Return false
-
 function():
 block0:
     v6:int32 = ToInt32 3

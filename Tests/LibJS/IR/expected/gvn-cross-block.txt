@@ -52,21 +52,6 @@ block1:
 block2:
     Return v4:string
 
-=== After ConstantFolding ===
-function(v3:unknown, v8:unknown):
-block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
-block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v6:string
-block2:
-    Return v4:string
-
 === After GlobalValueNumbering ===
 function(v3:unknown, v8:unknown):
 block0:

@@ -110,62 +110,6 @@ block3_split11:
 block3_split12:
     End v16:unknown
 
-=== After ConstantFolding ===
-function():
-block0:
-    InitializeBinding true
-    Jump block4
-block1:
-    v6:unknown = GetGlobal a
-    Jump block9
-block2:
-    v10:unknown = GetGlobal b
-    Jump block12
-block3:
-    v19:unknown = Phi [block11:v8:unknown, block14:v10:unknown]
-    v18:unknown = Phi [block11:v8:unknown, block14:v12:unknown]
-    v17:unknown = Phi [block11:v6:unknown, block14:v12:unknown]
-    v14:unknown = GetGlobal x
-    Jump block15
-block0_split0:
-    InitializeBinding 10
-    Jump block5
-block0_split1:
-    InitializeBinding 20
-    Jump block6
-block0_split2:
-    InitializeBinding undefined
-    Jump block7
-block0_split3:
-    v4:unknown = GetGlobal cond
-    Jump block8
-block0_split4:
-    v5:undefined = Move undefined
-    Branch v4:unknown, block1, block2
-block1_split5:
-    v8:unknown = Add v6:unknown, 1
-    Jump block10
-block1_split6:
-    SetGlobal x v8:unknown
-    Jump block11
-block1_split7:
-    v9:unknown = Move v8:unknown
-    Jump block3
-block2_split8:
-    v12:unknown = Add v10:unknown, 2
-    Jump block13
-block2_split9:
-    SetGlobal x v12:unknown
-    Jump block14
-block2_split10:
-    v13:unknown = Move v12:unknown
-    Jump block3
-block3_split11:
-    v16:unknown = Add v14:unknown, 100
-    Jump block16
-block3_split12:
-    End v16:unknown
-
 === After DeadCodeElimination ===
 function():
 block0:

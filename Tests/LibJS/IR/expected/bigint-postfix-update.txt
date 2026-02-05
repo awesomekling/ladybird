@@ -77,69 +77,6 @@ block0:
     v6:number = Increment v8:bigint
     Return v8:bigint
 
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:bigint = ToNumeric v3:bigint
-    v6:number = Increment v8:bigint
-    Return v8:bigint
-
 function():
 block0:
     v5:bigint = ToNumeric v3:bigint

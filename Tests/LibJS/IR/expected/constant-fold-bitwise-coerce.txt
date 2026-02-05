@@ -132,54 +132,6 @@ block0:
     v7:int32 = ToInt32 1.7
     Return -1
 
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
-=== After ConstantFolding ===
-function():
-block0:
-    v7:int32 = ToInt32 1.7
-    Return -1
-
 function():
 block0:
     v7:int32 = ToInt32 1.7

@@ -72,60 +72,6 @@ block0:
     v5:int32 = ToInt32 100000000000000000000
     Return 1661992960
 
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
-=== After ConstantFolding ===
-function():
-block0:
-    v5:int32 = ToInt32 100000000000000000000
-    Return 1661992960
-
 function():
 block0:
     v5:int32 = ToInt32 100000000000000000000

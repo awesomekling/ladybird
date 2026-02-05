@@ -20,17 +20,6 @@ block1:
 block2:
     End undefined
 
-=== After ConstantFolding ===
-function():
-block0:
-    Jump block1
-block1:
-    v1:unknown = Move undefined
-    v2:unknown = Move undefined
-    Jump block2
-block2:
-    End undefined
-
 === After DeadCodeElimination ===
 function():
 block0:

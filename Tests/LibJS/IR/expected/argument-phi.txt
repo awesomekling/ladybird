@@ -56,18 +56,6 @@ block2:
     v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
     Return v5:unknown
 
-=== After ConstantFolding ===
-function(v2:unknown):
-block0:
-    v4:boolean = StrictlyEquals v2:unknown, undefined
-    Branch v4:boolean, block1, block2
-block1:
-    v1:int32 = Move 42
-    Jump block2
-block2:
-    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
-    Return v5:unknown
-
 === After DeadCodeElimination ===
 function(v2:unknown):
 block0:

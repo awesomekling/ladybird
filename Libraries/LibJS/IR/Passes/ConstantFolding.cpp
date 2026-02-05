@@ -39,6 +39,12 @@ bool ConstantFolding::run(Function& function)
             if (!all_constants || !instruction->result())
                 continue;
 
+            // Skip if the result has no uses — folding would create a new
+            // constant but replace nothing, causing the pass to report
+            // a change without making progress.
+            if (instruction->result()->uses().is_empty())
+                continue;
+
             // Try to fold the instruction
             JS::Value result_value;
             bool can_fold = false;

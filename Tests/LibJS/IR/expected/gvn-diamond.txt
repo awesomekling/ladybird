@@ -62,26 +62,6 @@ block2:
     v12:boolean = StrictlyEquals v5:string, v10:string
     Return v12:boolean
 
-=== After ConstantFolding ===
-function(v4:unknown, v13:unknown):
-block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
-block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v5:string, v7:string
-    Return v9:boolean
-block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v5:string, v10:string
-    Return v12:boolean
-
 === After GlobalValueNumbering ===
 function(v4:unknown, v13:unknown):
 block0:
