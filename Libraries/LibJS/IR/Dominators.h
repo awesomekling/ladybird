@@ -40,15 +40,16 @@ public:
 private:
     void compute_reverse_postorder();
     void compute_dominators();
-    void compute_dominance_frontiers();
-
-    void compute_dominator_children();
+    void ensure_dominance_frontiers() const;
+    void ensure_dominator_children() const;
 
     Function const& m_function;
     HashMap<BasicBlock const*, BasicBlock*> m_immediate_dominator;
-    HashMap<BasicBlock const*, HashTable<BasicBlock*>> m_dominance_frontier;
-    HashMap<BasicBlock const*, Vector<BasicBlock*>> m_dominator_children;
+    mutable HashMap<BasicBlock const*, HashTable<BasicBlock*>> m_dominance_frontier;
+    mutable HashMap<BasicBlock const*, Vector<BasicBlock*>> m_dominator_children;
     Vector<BasicBlock*> m_reverse_postorder;
+    mutable bool m_dominance_frontiers_computed { false };
+    mutable bool m_dominator_children_computed { false };
 };
 
 }

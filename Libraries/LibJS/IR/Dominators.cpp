@@ -16,66 +16,61 @@ Dominators::Dominators(Function const& function)
 {
     compute_reverse_postorder();
     compute_dominators();
-    compute_dominance_frontiers();
-    compute_dominator_children();
 }
 
 void Dominators::compute_reverse_postorder()
 {
-    // DFS to compute reverse postorder using explicit stack.
+    // DFS to compute reverse postorder using explicit stack with frames.
     //
     // NB: This assumes CFG edges only come from terminators (via true_target/false_target)
     // and block-level exception edges (exception_handler/finalizer). Non-terminator
     // instructions must not create CFG edges. This invariant is verified by the IR verifier.
-    HashTable<BasicBlock*> visited;
-    Vector<BasicBlock*> postorder;
-    Vector<BasicBlock*> stack;
 
     if (!m_function.entry_block())
         return;
 
-    stack.append(m_function.entry_block());
+    struct Frame {
+        BasicBlock* block;
+        bool children_pushed { false };
+    };
+
+    HashTable<BasicBlock*> visited;
+    Vector<BasicBlock*> postorder;
+    Vector<Frame> stack;
+
+    visited.set(m_function.entry_block());
+    stack.append({ m_function.entry_block() });
 
     while (!stack.is_empty()) {
-        auto* block = stack.last();
+        auto& frame = stack.last();
 
-        if (visited.contains(block)) {
+        if (frame.children_pushed) {
+            postorder.append(frame.block);
             stack.take_last();
-            // Only add to postorder on second visit (all children processed)
-            if (!postorder.contains_slow(block))
-                postorder.append(block);
             continue;
         }
 
-        visited.set(block);
+        frame.children_pushed = true;
+
+        // NB: Save the block pointer before pushing children, since appending
+        // to the stack may reallocate and invalidate the frame reference.
+        auto* block = frame.block;
 
         // Push successors (will be processed before we return to this block)
         // Include both control flow successors and exception edges
-        bool has_unvisited_successor = false;
-        if (auto* term = block->terminator()) {
-            if (term->false_target() && !visited.contains(term->false_target())) {
-                stack.append(term->false_target());
-                has_unvisited_successor = true;
+        auto push_if_new = [&](BasicBlock* target) {
+            if (target && !visited.contains(target)) {
+                visited.set(target);
+                stack.append({ target });
             }
-            if (term->true_target() && !visited.contains(term->true_target())) {
-                stack.append(term->true_target());
-                has_unvisited_successor = true;
-            }
-        }
-        // Exception handlers and finalizers are also successors for dominance computation
-        if (block->exception_handler() && !visited.contains(block->exception_handler())) {
-            stack.append(block->exception_handler());
-            has_unvisited_successor = true;
-        }
-        if (block->finalizer() && !visited.contains(block->finalizer())) {
-            stack.append(block->finalizer());
-            has_unvisited_successor = true;
-        }
+        };
 
-        if (!has_unvisited_successor) {
-            stack.take_last();
-            postorder.append(block);
+        if (auto* term = block->terminator()) {
+            push_if_new(term->false_target());
+            push_if_new(term->true_target());
         }
+        push_if_new(block->exception_handler());
+        push_if_new(block->finalizer());
     }
 
     // Reverse to get reverse postorder
@@ -159,8 +154,12 @@ void Dominators::compute_dominators()
     }
 }
 
-void Dominators::compute_dominance_frontiers()
+void Dominators::ensure_dominance_frontiers() const
 {
+    if (m_dominance_frontiers_computed)
+        return;
+    m_dominance_frontiers_computed = true;
+
     // Dominance frontier algorithm from Cytron et al.
     // DF(n) = { y | exists pred p of y such that n dominates p but n does not strictly dominate y }
 
@@ -225,6 +224,7 @@ bool Dominators::dominates(BasicBlock const* a, BasicBlock const* b) const
 
 HashTable<BasicBlock*> const& Dominators::dominance_frontier(BasicBlock const* block) const
 {
+    ensure_dominance_frontiers();
     static HashTable<BasicBlock*> empty;
     auto it = m_dominance_frontier.find(block);
     if (it == m_dominance_frontier.end())
@@ -232,8 +232,12 @@ HashTable<BasicBlock*> const& Dominators::dominance_frontier(BasicBlock const* b
     return it->value;
 }
 
-void Dominators::compute_dominator_children()
+void Dominators::ensure_dominator_children() const
 {
+    if (m_dominator_children_computed)
+        return;
+    m_dominator_children_computed = true;
+
     // Build the dominator tree children by grouping blocks by their immediate dominator
     for (auto* block : m_reverse_postorder) {
         m_dominator_children.set(block, {});
@@ -248,6 +252,7 @@ void Dominators::compute_dominator_children()
 
 Vector<BasicBlock*> const& Dominators::dominator_children(BasicBlock const* block) const
 {
+    ensure_dominator_children();
     static Vector<BasicBlock*> empty;
     auto it = m_dominator_children.find(block);
     if (it == m_dominator_children.end())
