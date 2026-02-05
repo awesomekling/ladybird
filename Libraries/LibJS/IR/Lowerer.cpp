@@ -199,12 +199,22 @@ void Lowerer::compute_phi_coalescing()
                 return false;
             };
 
-            for (auto* operand : instruction->operands()) {
+            auto const& phi = static_cast<PhiInstruction const&>(*instruction);
+
+            for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                auto* operand = phi.incoming_value(i);
                 if (!operand)
                     continue;
 
                 // Can't coalesce constants, parameters, or this
                 if (operand->is_constant() || operand->is_parameter() || operand->is_this())
+                    continue;
+
+                // Back-edge operands (from the same block as the phi) cannot be
+                // coalesced with the phi result. The operand is defined later in
+                // the block while the phi result is still live, so they have
+                // overlapping lifetimes.
+                if (phi.incoming_block(i) == block.ptr())
                     continue;
 
                 // Check for conflicts before any coalescing
@@ -974,11 +984,22 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
 void Lowerer::lower_blocks()
 {
+    // Build ordered block list with entry block first.
+    // After optimization passes, the entry block may not be first in the vector,
+    // but bytecode execution always starts at block index 0.
+    Vector<BasicBlock const*> ordered_blocks;
+    auto* entry = m_function.entry_block();
+    if (entry)
+        ordered_blocks.append(entry);
+    for (auto const& block : m_function.basic_blocks()) {
+        if (block.ptr() != entry)
+            ordered_blocks.append(block.ptr());
+    }
+
     // First pass: create bytecode blocks and map IR blocks to indices
-    for (size_t i = 0; i < m_function.basic_blocks().size(); ++i) {
-        auto const& ir_block = m_function.basic_blocks()[i];
-        m_ir_block_to_bytecode_index.set(ir_block.ptr(), i);
-        auto bc_block = Bytecode::BasicBlock::create(static_cast<u32>(i), ir_block->name());
+    for (size_t i = 0; i < ordered_blocks.size(); ++i) {
+        m_ir_block_to_bytecode_index.set(ordered_blocks[i], i);
+        auto bc_block = Bytecode::BasicBlock::create(static_cast<u32>(i), ordered_blocks[i]->name());
         m_bytecode_blocks.append(move(bc_block));
     }
 
@@ -1030,19 +1051,19 @@ void Lowerer::lower_blocks()
     }
 
     // Main pass: lower each block
-    for (size_t i = 0; i < m_function.basic_blocks().size(); ++i) {
-        auto const& ir_block = m_function.basic_blocks()[i];
+    for (size_t i = 0; i < ordered_blocks.size(); ++i) {
+        auto const& ir_block = *ordered_blocks[i];
         m_current_block = m_bytecode_blocks[i].ptr();
 
         // Lower non-terminator instructions
-        for (auto const& instruction : ir_block->instructions()) {
+        for (auto const& instruction : ir_block.instructions()) {
             if (instruction->is_terminator())
                 continue;
             lower_instruction(*instruction);
         }
 
         // Handle terminator
-        auto* terminator = ir_block->terminator();
+        auto* terminator = ir_block.terminator();
         if (!terminator)
             continue;
 
@@ -1050,7 +1071,7 @@ void Lowerer::lower_blocks()
         case Opcode::Jump: {
             auto* target = terminator->true_target();
             if (target) {
-                emit_phi_moves_for_successor(*ir_block, *target);
+                emit_phi_moves_for_successor(ir_block, *target);
                 auto target_index = m_ir_block_to_bytecode_index.get(target).value();
                 // Skip jump if target is the immediately following block (fallthrough)
                 if (target_index != i + 1)
@@ -1065,8 +1086,8 @@ void Lowerer::lower_blocks()
 
             if (true_target && false_target && false_target != true_target) {
                 // Both targets exist and are different - check if we need critical edge splitting
-                bool true_needs_moves = needs_phi_moves_for_edge(*ir_block, *true_target);
-                bool false_needs_moves = needs_phi_moves_for_edge(*ir_block, *false_target);
+                bool true_needs_moves = needs_phi_moves_for_edge(ir_block, *true_target);
+                bool false_needs_moves = needs_phi_moves_for_edge(ir_block, *false_target);
 
                 size_t true_index = 0;
                 size_t false_index = 0;
@@ -1074,16 +1095,16 @@ void Lowerer::lower_blocks()
                 if (true_needs_moves && false_needs_moves) {
                     // Critical edges: both targets need phi moves, so we need trampolines
                     // to avoid phi move conflicts
-                    true_index = get_or_create_trampoline(*ir_block, *true_target);
-                    false_index = get_or_create_trampoline(*ir_block, *false_target);
+                    true_index = get_or_create_trampoline(ir_block, *true_target);
+                    false_index = get_or_create_trampoline(ir_block, *false_target);
                 } else if (true_needs_moves) {
                     // Only true target needs phi moves - use trampoline for true
-                    true_index = get_or_create_trampoline(*ir_block, *true_target);
+                    true_index = get_or_create_trampoline(ir_block, *true_target);
                     false_index = m_ir_block_to_bytecode_index.get(false_target).value();
                 } else if (false_needs_moves) {
                     // Only false target needs phi moves - use trampoline for false
                     true_index = m_ir_block_to_bytecode_index.get(true_target).value();
-                    false_index = get_or_create_trampoline(*ir_block, *false_target);
+                    false_index = get_or_create_trampoline(ir_block, *false_target);
                 } else {
                     // Neither target needs phi moves - jump directly
                     true_index = m_ir_block_to_bytecode_index.get(true_target).value();
@@ -1142,7 +1163,7 @@ void Lowerer::lower_blocks()
             } else if (true_target) {
                 // Only one target (unconditional after condition eval, or same target)
                 if (target_has_phis(*true_target))
-                    emit_phi_moves_for_successor(*ir_block, *true_target);
+                    emit_phi_moves_for_successor(ir_block, *true_target);
                 auto target_index = m_ir_block_to_bytecode_index.get(true_target).value();
                 emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
@@ -1168,7 +1189,7 @@ void Lowerer::lower_blocks()
             auto value = operand_for_value(*terminator->operands()[0]);
             auto* continuation = terminator->true_target();
             if (continuation) {
-                emit_phi_moves_for_successor(*ir_block, *continuation);
+                emit_phi_moves_for_successor(ir_block, *continuation);
                 auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
                 emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
                 // The resume value appears in the accumulator (reg0) at runtime
@@ -1186,7 +1207,7 @@ void Lowerer::lower_blocks()
             auto argument = operand_for_value(*terminator->operands()[0]);
             auto* continuation = terminator->true_target();
             VERIFY(continuation);
-            emit_phi_moves_for_successor(*ir_block, *continuation);
+            emit_phi_moves_for_successor(ir_block, *continuation);
             auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
             emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
             // The resume value (resolved promise) appears in the accumulator (reg0) at runtime
