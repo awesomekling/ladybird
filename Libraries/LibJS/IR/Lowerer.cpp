@@ -535,6 +535,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::ToNumber:
         emit<Bytecode::Op::UnaryPlus>(dst(), operand(0)); // ToNumber is essentially unary plus
         break;
+    case Opcode::ToNumeric:
+        emit<Bytecode::Op::ToNumeric>(dst(), operand(0));
+        break;
     case Opcode::ToString:
         emit<Bytecode::Op::ToString>(dst(), operand(0));
         break;

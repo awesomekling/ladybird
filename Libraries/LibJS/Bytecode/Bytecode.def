@@ -1010,6 +1010,11 @@ op ToLength < Instruction
     m_value: Operand
 endop
 
+op ToNumeric < Instruction
+    m_dst: Operand
+    m_value: Operand
+endop
+
 op ToObject < Instruction
     m_dst: Operand
     m_value: Operand

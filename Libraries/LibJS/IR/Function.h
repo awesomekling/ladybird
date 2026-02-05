@@ -84,6 +84,7 @@ public:
     [[nodiscard]] Value& build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTableIndex identifier);
     [[nodiscard]] Value& build_to_boolean(BasicBlock& block, Value& operand);
     [[nodiscard]] Value& build_to_number(BasicBlock& block, Value& operand);
+    [[nodiscard]] Value& build_to_numeric(BasicBlock& block, Value& operand);
     [[nodiscard]] Value& build_to_string(BasicBlock& block, Value& operand);
     [[nodiscard]] Value& build_to_object(BasicBlock& block, Value& operand);
     [[nodiscard]] Value& build_to_int32(BasicBlock& block, Value& operand);

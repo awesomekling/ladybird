@@ -257,6 +257,7 @@ static bool opcode_may_call_user_code_on_objects(Opcode opcode)
     case Opcode::Exp:
     case Opcode::Negate:
     case Opcode::UnaryPlus:
+    case Opcode::ToNumeric:
     case Opcode::Increment:
     case Opcode::Decrement:
     case Opcode::PostfixIncrement:

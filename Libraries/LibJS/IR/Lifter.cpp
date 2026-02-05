@@ -396,6 +396,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case ToLength:
         lift_unary_op_value<Bytecode::Op::ToLength>(instruction, block, &Function::build_to_length);
         break;
+    case ToNumeric:
+        lift_unary_op_value<Bytecode::Op::ToNumeric>(instruction, block, &Function::build_to_numeric);
+        break;
     case TypeofBinding: {
         auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
         auto& result = m_function->build_typeof_binding(block, op.identifier());
@@ -422,10 +425,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PostfixIncrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
         // dst gets the OLD NUMERIC value (PostfixIncrement returns ToNumeric(src))
-        auto& old_value = m_function->build_to_number(block, src);
+        auto& old_value = m_function->build_to_numeric(block, src);
         define_operand(op.dst(), old_value, block);
         // src gets MUTATED to src + 1 - create a new SSA value for it
-        auto& incremented = m_function->build_increment(block, src);
+        auto& incremented = m_function->build_increment(block, old_value);
         define_operand(op.src(), incremented, block);
         break;
     }
@@ -433,10 +436,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PostfixDecrement const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.src(), block);
         // dst gets the OLD NUMERIC value (PostfixDecrement returns ToNumeric(src))
-        auto& old_value = m_function->build_to_number(block, src);
+        auto& old_value = m_function->build_to_numeric(block, src);
         define_operand(op.dst(), old_value, block);
         // src gets MUTATED to src - 1 - create a new SSA value for it
-        auto& decremented = m_function->build_decrement(block, src);
+        auto& decremented = m_function->build_decrement(block, old_value);
         define_operand(op.src(), decremented, block);
         break;
     }

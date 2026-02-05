@@ -284,6 +284,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::Typeof:
                     case Opcode::ToBoolean:
                     case Opcode::ToNumber:
+                    case Opcode::ToNumeric:
                     case Opcode::ToString:
                     case Opcode::ToObject:
                     case Opcode::ToInt32:

@@ -171,6 +171,12 @@ bool AlgebraicSimplification::run(Function& function)
                     replacement = operands[0];
                 break;
 
+            // ToNumeric(x) → x when x is already numeric
+            case Opcode::ToNumeric:
+                if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
+                    replacement = operands[0];
+                break;
+
             // ToInt32(x) → x when x is already Int32
             case Opcode::ToInt32:
                 if (operands.size() == 1 && operands[0]->type() == Type::Int32)

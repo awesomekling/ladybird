@@ -65,28 +65,28 @@ block0:
     v0:unknown = GetBinding count
     Jump block1
 block0_split0:
-    v1:number = ToNumber v0:unknown
-    v2:number = Increment v0:unknown
+    v1:unknown = ToNumeric v0:unknown
+    v2:number = Increment v1:unknown
     Jump block2
 block0_split1:
     SetBinding count v2:number
     Jump block3
 block0_split2:
-    Return v1:number
+    Return v1:unknown
 
 === After BlockMerging ===
 function():
 block0:
     v0:unknown = GetBinding count
-    v1:number = ToNumber v0:unknown
-    v2:number = Increment v0:unknown
+    v1:unknown = ToNumeric v0:unknown
+    v2:number = Increment v1:unknown
     SetBinding count v2:number
-    Return v1:number
+    Return v1:unknown
 
 function():
 block0:
     v0:unknown = GetBinding count
-    v1:number = ToNumber v0:unknown
-    v2:number = Increment v0:unknown
+    v1:unknown = ToNumeric v0:unknown
+    v2:number = Increment v1:unknown
     SetBinding count v2:number
-    Return v1:number
+    Return v1:unknown

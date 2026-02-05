@@ -547,6 +547,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(ThrowIfTDZ);
             HANDLE_INSTRUCTION(ThrowConstAssignment);
             HANDLE_INSTRUCTION(ToLength);
+            HANDLE_INSTRUCTION(ToNumeric);
             HANDLE_INSTRUCTION(ToObject);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(ToBoolean);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(Typeof);
@@ -3188,6 +3189,12 @@ void ToBoolean::execute_impl(Bytecode::Interpreter& interpreter) const
 ThrowCompletionOr<void> ToLength::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.set(m_dst, Value { TRY(interpreter.get(m_value).to_length(interpreter.vm())) });
+    return {};
+}
+
+ThrowCompletionOr<void> ToNumeric::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    interpreter.set(m_dst, TRY(interpreter.get(m_value).to_numeric(interpreter.vm())));
     return {};
 }
 

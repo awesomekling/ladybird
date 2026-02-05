@@ -31,12 +31,12 @@ block0:
     Jump block1
 block0_split0:
     v4:array = Move v3:array
-    v5:number = ToNumber v4:array
-    v6:number = Increment v4:array
+    v5:unknown = ToNumeric v4:array
+    v6:number = Increment v5:unknown
     Jump block2
 block0_split1:
-    v7:number = Move v5:number
-    Return v7:number
+    v7:unknown = Move v5:unknown
+    Return v7:unknown
 
 === After CopyPropagation ===
 function():
@@ -47,12 +47,12 @@ block0:
     Jump block1
 block0_split0:
     v4:array = Move v3:array
-    v5:number = ToNumber v3:array
-    v6:number = Increment v3:array
+    v5:unknown = ToNumeric v3:array
+    v6:number = Increment v5:unknown
     Jump block2
 block0_split1:
-    v7:number = Move v5:number
-    Return v5:number
+    v7:unknown = Move v5:unknown
+    Return v5:unknown
 
 === After ConstantFolding ===
 function():
@@ -63,12 +63,12 @@ block0:
     Jump block1
 block0_split0:
     v4:array = Move v3:array
-    v5:number = ToNumber v3:array
-    v6:number = Increment v3:array
+    v5:unknown = ToNumeric v3:array
+    v6:number = Increment v5:unknown
     Jump block2
 block0_split1:
-    v7:number = Move v5:number
-    Return v5:number
+    v7:unknown = Move v5:unknown
+    Return v5:unknown
 
 === After DeadCodeElimination ===
 function():
@@ -76,23 +76,23 @@ block0:
     v3:array = NewArray
     Jump block1
 block0_split0:
-    v5:number = ToNumber v3:array
-    v6:number = Increment v3:array
+    v5:unknown = ToNumeric v3:array
+    v6:number = Increment v5:unknown
     Jump block2
 block0_split1:
-    Return v5:number
+    Return v5:unknown
 
 === After BlockMerging ===
 function():
 block0:
     v3:array = NewArray
-    v5:number = ToNumber v3:array
-    v6:number = Increment v3:array
-    Return v5:number
+    v5:unknown = ToNumeric v3:array
+    v6:number = Increment v5:unknown
+    Return v5:unknown
 
 function():
 block0:
     v3:array = NewArray
-    v5:number = ToNumber v3:array
-    v6:number = Increment v3:array
-    Return v5:number
+    v5:unknown = ToNumeric v3:array
+    v6:number = Increment v5:unknown
+    Return v5:unknown

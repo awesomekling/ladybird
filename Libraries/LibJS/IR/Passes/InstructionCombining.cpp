@@ -201,6 +201,19 @@ bool InstructionCombining::run(Function& function)
                 break;
             }
 
+            // ToNumeric (ToNumeric x) → ToNumeric x
+            case Opcode::ToNumeric: {
+                if (operands.is_empty() || !operands[0])
+                    break;
+
+                auto* inner = operands[0]->defining_instruction();
+                if (inner && inner->opcode() == Opcode::ToNumeric) {
+                    result->replace_all_uses_with(operands[0]);
+                    changed = true;
+                }
+                break;
+            }
+
             // Typeof x → constant string when x has a known type
             case Opcode::Typeof: {
                 if (operands.is_empty() || !operands[0])

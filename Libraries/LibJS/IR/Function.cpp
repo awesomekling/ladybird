@@ -163,6 +163,14 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
     case Opcode::PostfixDecrement:
         result.set_type(Type::Number);
         break;
+    case Opcode::ToNumeric:
+        if (operand.type() == Type::Int32)
+            result.set_type(Type::Int32);
+        else if (operand.type() == Type::Number)
+            result.set_type(Type::Number);
+        else if (operand.type() == Type::BigInt)
+            result.set_type(Type::BigInt);
+        break;
     case Opcode::ToBoolean:
     case Opcode::Not:
     case Opcode::IsUndefined:
@@ -228,6 +236,7 @@ Value& Function::build_typeof_binding(BasicBlock& block, Bytecode::IdentifierTab
 
 Value& Function::build_to_boolean(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToBoolean, operand); }
 Value& Function::build_to_number(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToNumber, operand); }
+Value& Function::build_to_numeric(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToNumeric, operand); }
 Value& Function::build_to_string(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToString, operand); }
 Value& Function::build_to_object(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToObject, operand); }
 Value& Function::build_to_int32(BasicBlock& block, Value& operand) { return build_unary_op(block, Opcode::ToInt32, operand); }

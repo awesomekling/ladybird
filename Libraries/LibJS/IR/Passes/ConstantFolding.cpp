@@ -444,6 +444,25 @@ bool ConstantFolding::run(Function& function)
                 }
                 break;
 
+            case Opcode::ToNumeric:
+                if (operands.size() == 1) {
+                    auto const& v = operands[0]->constant_value();
+                    if (v.is_int32() || v.is_double() || v.is_bigint()) {
+                        result_value = v;
+                        can_fold = true;
+                    } else if (v.is_boolean()) {
+                        result_value = JS::Value(v.as_bool() ? 1 : 0);
+                        can_fold = true;
+                    } else if (v.is_undefined()) {
+                        result_value = JS::Value(js_nan());
+                        can_fold = true;
+                    } else if (v.is_null()) {
+                        result_value = JS::Value(0);
+                        can_fold = true;
+                    }
+                }
+                break;
+
             case Opcode::ToBoolean:
                 if (operands.size() == 1) {
                     if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
