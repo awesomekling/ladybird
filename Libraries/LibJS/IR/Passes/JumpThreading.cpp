@@ -165,7 +165,7 @@ PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
                 }
             }
 
-            CFG::redirect_edge(*pred_block, *block, *thread_target, [&](Instruction& instr, Value*) -> Value* {
+            CFG::redirect_edge(*pred_block, *block, *thread_target, [&](Instruction& instr) -> Value* {
                 if (auto it = traced_values.find(&instr); it != traced_values.end())
                     return it->value;
                 return nullptr;

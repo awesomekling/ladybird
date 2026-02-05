@@ -112,7 +112,7 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
 
             // Redirect each predecessor edge from the empty block to the target
             for (auto* pred : predecessors) {
-                CFG::redirect_edge(*pred, *block, *target, [&](Instruction& instr, Value*) -> Value* {
+                CFG::redirect_edge(*pred, *block, *target, [&](Instruction& instr) -> Value* {
                     auto& target_phi = static_cast<PhiInstruction&>(instr);
 
                     // Find the value this phi expects from the empty block
