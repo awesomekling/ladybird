@@ -259,9 +259,9 @@ static void run_pass(Pass& pass, Function& function, bool& changed)
             outln("=== After {} ===\n{}", pass.name(), dump(function));
     }
 
-    if (!Verifier::verify(function, false)) {
+    if (!Verifier::verify(function, VerifierMode::InterPass, false)) {
         warnln("IR Verifier failed after pass: {}", pass.name());
-        Verifier::verify(function, true);
+        Verifier::verify(function, VerifierMode::InterPass, true);
     }
 }
 
@@ -325,6 +325,14 @@ void optimize(Function& function)
 
         if (!changed)
             break;
+    }
+
+    // Run full verification after all passes are complete.
+    // This catches cleanliness issues (unreachable blocks, empty blocks)
+    // that are normal intermediate states but should be resolved by the end.
+    if (!Verifier::verify(function, VerifierMode::Full, false)) {
+        warnln("IR Verifier (full) failed after optimization");
+        Verifier::verify(function, VerifierMode::Full, true);
     }
 }
 

@@ -11,6 +11,17 @@
 
 namespace JS::IR {
 
+enum class VerifierMode {
+    // Structural checks only. Tolerates unreachable blocks and dead code
+    // (normal intermediate states during optimization). Only verifies
+    // reachable code for SSA dominance and operand validity.
+    InterPass,
+
+    // All structural checks plus cleanliness checks: no unreachable blocks,
+    // no empty blocks, block index uniqueness. Use after optimization is complete.
+    Full,
+};
+
 // IR Verifier: Validate CFG invariants and SSA properties
 // This is a debugging/validation pass that does not modify the IR.
 // Returns true if the IR is valid, crashes or returns false on errors.
@@ -21,7 +32,7 @@ public:
 
     // Run verification and return true if valid, false otherwise
     // When crash_on_error is true (default), crashes immediately on first error
-    static bool verify(Function&, bool crash_on_error = true);
+    static bool verify(Function&, VerifierMode = VerifierMode::InterPass, bool crash_on_error = true);
 };
 
 }

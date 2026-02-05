@@ -442,12 +442,16 @@ block0:
     Branch v27:boolean, block1, block4
 block1:
     v6:unknown = GetGlobal keys
-    Jump block11
+    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = GetById v8:unknown.join
+    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    End v11:unknown
 block2:
     v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
     v13:unknown = ExtractValue v12:unknown, 0
     v14:unknown = ExtractValue v12:unknown, 1
-    Jump block16
+    Branch v14:unknown, block1, block5
 block4:
     v15:unknown = GetObjectPropertyIterator v5:unknown
     v16:unknown = ExtractValue v15:unknown, 0
@@ -456,30 +460,8 @@ block4:
     Jump block2
 block5:
     v22:unknown = GetGlobal keys
-    Jump block18
-block1_split5:
-    v7:unknown = GetById v6:unknown.sort
-    Jump block12
-block1_split6:
-    v8:unknown = Call v7:unknown, v6:unknown
-    Jump block13
-block1_split7:
-    v9:unknown = GetById v8:unknown.join
-    Jump block14
-block1_split8:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    Jump block15
-block1_split9:
-    End v11:unknown
-block2_split10:
-    Branch v14:unknown, block1, block5
-block5_split12:
     v23:unknown = GetById v22:unknown.push
-    Jump block19
-block5_split13:
     ThrowIfTDZ v13:unknown
-    Jump block20
-block5_split14:
     v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
     Jump block2
 
@@ -498,12 +480,16 @@ block0:
     Branch v27:boolean, block1, block4
 block1:
     v6:unknown = GetGlobal keys
-    Jump block11
+    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = GetById v8:unknown.join
+    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    End v11:unknown
 block2:
     v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
     v13:unknown = ExtractValue v12:unknown, 0
     v14:unknown = ExtractValue v12:unknown, 1
-    Jump block16
+    Branch v14:unknown, block1, block5
 block4:
     v15:unknown = GetObjectPropertyIterator v5:unknown
     v16:unknown = ExtractValue v15:unknown, 0
@@ -512,29 +498,7 @@ block4:
     Jump block2
 block5:
     v22:unknown = GetGlobal keys
-    Jump block18
-block1_split5:
-    v7:unknown = GetById v6:unknown.sort
-    Jump block12
-block1_split6:
-    v8:unknown = Call v7:unknown, v6:unknown
-    Jump block13
-block1_split7:
-    v9:unknown = GetById v8:unknown.join
-    Jump block14
-block1_split8:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    Jump block15
-block1_split9:
-    End v11:unknown
-block2_split10:
-    Branch v14:unknown, block1, block5
-block5_split12:
     v23:unknown = GetById v22:unknown.push
-    Jump block19
-block5_split13:
     ThrowIfTDZ v13:unknown
-    Jump block20
-block5_split14:
     v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
     Jump block2

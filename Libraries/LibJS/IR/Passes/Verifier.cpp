@@ -16,11 +16,11 @@ namespace JS::IR {
 
 bool Verifier::run(Function& function)
 {
-    verify(function, true);
+    verify(function, VerifierMode::InterPass, true);
     return false; // Verifier never modifies the IR
 }
 
-bool Verifier::verify(Function& function, bool crash_on_error)
+bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error)
 {
     bool valid = true;
 
@@ -32,17 +32,18 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         valid = false;
     };
 
+    bool const full_mode = mode == VerifierMode::Full;
+
     // Build set of all blocks for quick lookup
     HashTable<BasicBlock*> all_blocks;
     for (auto const& block : function.basic_blocks())
         all_blocks.set(block.ptr());
 
-    // Check 1: Entry block has no predecessors
+    // Check: Entry block has no predecessors
     if (function.entry_block() && !function.entry_block()->predecessors().is_empty()) {
         report_error("Entry block has predecessors"sv);
     }
 
-    // Check: Reachability from entry block
     // Compute reachable blocks via BFS (including EH/finalizer edges)
     HashTable<BasicBlock*> reachable;
     if (auto* entry = function.entry_block()) {
@@ -65,11 +66,28 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             enqueue(current->finalizer());
         }
     }
-    for (auto const& block : function.basic_blocks()) {
-        if (!reachable.contains(block.ptr())) {
-            report_error(ByteString::formatted(
-                "Block{} is unreachable from entry block",
-                block->index()));
+
+    // Full mode: no unreachable blocks allowed
+    if (full_mode) {
+        for (auto const& block : function.basic_blocks()) {
+            if (!reachable.contains(block.ptr())) {
+                report_error(ByteString::formatted(
+                    "Block{} is unreachable from entry block",
+                    block->index()));
+            }
+        }
+    }
+
+    // Full mode: block index uniqueness
+    if (full_mode) {
+        HashTable<BlockIndex> seen_indices;
+        for (auto const& block : function.basic_blocks()) {
+            if (seen_indices.contains(block->index())) {
+                report_error(ByteString::formatted(
+                    "Duplicate block index {}",
+                    block->index()));
+            }
+            seen_indices.set(block->index());
         }
     }
 
@@ -96,6 +114,8 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     }
 
     for (auto const& block : function.basic_blocks()) {
+        bool block_is_reachable = reachable.contains(block.ptr());
+
         // Check: Block parent pointer
         if (block->parent_function() != &function) {
             report_error(ByteString::formatted(
@@ -154,6 +174,11 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                     "Block{} does not end with a terminator",
                     block->index()));
             }
+        } else if (full_mode) {
+            // Full mode: no empty blocks
+            report_error(ByteString::formatted(
+                "Block{} has no instructions",
+                block->index()));
         }
 
         for (auto const& instr : block->instructions()) {
@@ -166,7 +191,7 @@ bool Verifier::verify(Function& function, bool crash_on_error)
 
             // Check: Phi operand count == phi predecessor count
             if (instr->opcode() == Opcode::Phi) {
-                auto& phi = static_cast<PhiInstruction const&>(*instr);
+                auto const& phi = static_cast<PhiInstruction const&>(*instr);
                 if (phi.operands().size() != phi.incoming_count()) {
                     report_error(ByteString::formatted(
                         "Phi in block{} has {} operands but {} predecessors",
@@ -459,31 +484,51 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                 }
             }
 
-            // Check: All operands are non-null and reference defined values
-            for (size_t i = 0; i < instr->operands().size(); ++i) {
-                auto* operand = instr->operands()[i];
-                if (!operand) {
+            // Check: Result presence vs. opcode traits
+            {
+                bool trait_has_result = opcode_has_result(instr->opcode());
+                if (trait_has_result && !instr->result()) {
                     report_error(ByteString::formatted(
-                        "Instruction in block{} has null operand at index {}",
-                        block->index(), i));
-                    continue;
+                        "{} in block{} should have a result but doesn't",
+                        opcode_to_string(instr->opcode()), block->index()));
                 }
-                if (!defined_values.contains(operand)) {
+                if (!trait_has_result && instr->result()) {
                     report_error(ByteString::formatted(
-                        "Instruction in block{} uses undefined value v{}",
-                        block->index(), operand->index()));
+                        "{} in block{} should not have a result but does",
+                        opcode_to_string(instr->opcode()), block->index()));
                 }
-                // Check: Instruction-kind values must have a defining instruction
-                // This catches placeholder register values that weren't properly renamed
-                if (operand->is_instruction() && !operand->defining_instruction()) {
-                    report_error(ByteString::formatted(
-                        "Instruction in block{} uses v{} which has no defining instruction (likely SSA renaming failure)",
-                        block->index(), operand->index()));
+            }
+
+            // Operand validity and dominance checks only for reachable blocks.
+            // Unreachable blocks may reference values from other unreachable code
+            // or have stale references that DeadBlockElimination will clean up.
+            if (block_is_reachable) {
+                // Check: All operands are non-null and reference defined values
+                for (size_t i = 0; i < instr->operands().size(); ++i) {
+                    auto* operand = instr->operands()[i];
+                    if (!operand) {
+                        report_error(ByteString::formatted(
+                            "Instruction in block{} has null operand at index {}",
+                            block->index(), i));
+                        continue;
+                    }
+                    if (!defined_values.contains(operand)) {
+                        report_error(ByteString::formatted(
+                            "Instruction in block{} uses undefined value v{}",
+                            block->index(), operand->index()));
+                    }
+                    // Check: Instruction-kind values must have a defining instruction
+                    // This catches placeholder register values that weren't properly renamed
+                    if (operand->is_instruction() && !operand->defining_instruction()) {
+                        report_error(ByteString::formatted(
+                            "Instruction in block{} uses v{} which has no defining instruction (likely SSA renaming failure)",
+                            block->index(), operand->index()));
+                    }
                 }
             }
         }
 
-        // Check 6: Exception handler/finalizer targets exist
+        // Check: Exception handler/finalizer targets exist
         if (block->exception_handler() && !all_blocks.contains(block->exception_handler())) {
             report_error(ByteString::formatted(
                 "Block{} has exception_handler not in function",
@@ -539,53 +584,54 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             }
         }
 
-        // Check: Successor edges must be reflected in predecessor lists
-        // (ensures CFG is consistent after transformations)
-        if (auto* term = block->terminator()) {
-            // Check: All terminator targets exist in function
-            if (term->true_target() && !all_blocks.contains(term->true_target())) {
-                report_error(ByteString::formatted(
-                    "Terminator in block{} has true_target not in function",
-                    block->index()));
-            }
-            if (term->false_target() && !all_blocks.contains(term->false_target())) {
-                report_error(ByteString::formatted(
-                    "Terminator in block{} has false_target not in function",
-                    block->index()));
-            }
+        // Successor/predecessor edge checks only for reachable blocks.
+        if (block_is_reachable) {
+            if (auto* term = block->terminator()) {
+                // Check: All terminator targets exist in function
+                if (term->true_target() && !all_blocks.contains(term->true_target())) {
+                    report_error(ByteString::formatted(
+                        "Terminator in block{} has true_target not in function",
+                        block->index()));
+                }
+                if (term->false_target() && !all_blocks.contains(term->false_target())) {
+                    report_error(ByteString::formatted(
+                        "Terminator in block{} has false_target not in function",
+                        block->index()));
+                }
 
-            if (auto* true_target = term->true_target()) {
-                bool found = false;
-                for (auto* pred : true_target->predecessors()) {
-                    if (pred == block.ptr()) {
-                        found = true;
-                        break;
+                if (auto* true_target = term->true_target()) {
+                    bool found = false;
+                    for (auto* pred : true_target->predecessors()) {
+                        if (pred == block.ptr()) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        report_error(ByteString::formatted(
+                            "Block{} has successor block{} but is not in its predecessor list",
+                            block->index(), true_target->index()));
                     }
                 }
-                if (!found) {
-                    report_error(ByteString::formatted(
-                        "Block{} has successor block{} but is not in its predecessor list",
-                        block->index(), true_target->index()));
-                }
-            }
-            if (auto* false_target = term->false_target()) {
-                bool found = false;
-                for (auto* pred : false_target->predecessors()) {
-                    if (pred == block.ptr()) {
-                        found = true;
-                        break;
+                if (auto* false_target = term->false_target()) {
+                    bool found = false;
+                    for (auto* pred : false_target->predecessors()) {
+                        if (pred == block.ptr()) {
+                            found = true;
+                            break;
+                        }
                     }
-                }
-                if (!found) {
-                    report_error(ByteString::formatted(
-                        "Block{} has successor block{} but is not in its predecessor list",
-                        block->index(), false_target->index()));
+                    if (!found) {
+                        report_error(ByteString::formatted(
+                            "Block{} has successor block{} but is not in its predecessor list",
+                            block->index(), false_target->index()));
+                    }
                 }
             }
         }
     }
 
-    // Check: Recompute CFG predecessors from successor edges and compare
+    // Check: Recompute CFG predecessors from successor edges of reachable blocks
     // This catches desync between terminator targets and predecessor lists
     {
         HashMap<BasicBlock*, HashTable<BasicBlock*>> computed_preds;
@@ -593,6 +639,8 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             computed_preds.set(block.ptr(), {});
 
         for (auto const& block : function.basic_blocks()) {
+            if (!reachable.contains(block.ptr()))
+                continue;
             if (auto* term = block->terminator()) {
                 if (auto* target = term->true_target())
                     computed_preds.get(target)->set(block.ptr());
@@ -602,6 +650,8 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         }
 
         for (auto const& block : function.basic_blocks()) {
+            if (!reachable.contains(block.ptr()))
+                continue;
             auto const& stored_preds = block->predecessors();
             auto& expected_preds = *computed_preds.get(block.ptr());
 
@@ -706,9 +756,13 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                     value->index()));
             }
         }
+
+        // NB: Use-list entries are NOT unique per instruction. An instruction that
+        // uses the same value in multiple operand positions (e.g., Add v0, v0) will
+        // appear multiple times in the use list — once per operand reference.
     }
 
-    // SSA dominance verification
+    // SSA dominance verification (only for reachable blocks)
     // This check implicitly verifies EH correctness: if exception handler blocks
     // reference values that were defined after a throw point (due to incorrect EH
     // splitting), those values won't dominate the handler and we'll report an error.
@@ -726,6 +780,9 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     Dominators dominators(function);
 
     for (auto const& block : function.basic_blocks()) {
+        if (!reachable.contains(block.ptr()))
+            continue;
+
         for (auto const& instr : block->instructions()) {
             if (instr->opcode() == Opcode::Phi) {
                 // For phi instructions, each operand must be reachable from its corresponding predecessor

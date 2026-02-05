@@ -273,29 +273,17 @@ block0:
     Branch v4:unknown, block1, block2
 block1:
     v6:unknown = GetGlobal a
-    Jump block9
-block2:
-    v10:unknown = GetGlobal b
-    Jump block12
-block3:
-    v14:unknown = GetGlobal x
-    Jump block15
-block1_split5:
     v8:unknown = Add v6:unknown, 1
-    Jump block10
-block1_split6:
     SetGlobal x v8:unknown
     Jump block3
-block2_split8:
+block2:
+    v10:unknown = GetGlobal b
     v12:unknown = Add v10:unknown, 2
-    Jump block13
-block2_split9:
     SetGlobal x v12:unknown
     Jump block3
-block3_split11:
+block3:
+    v14:unknown = GetGlobal x
     v16:unknown = Add v14:unknown, 100
-    Jump block16
-block3_split12:
     End v16:unknown
 
 function():
@@ -308,27 +296,15 @@ block0:
     Branch v4:unknown, block1, block2
 block1:
     v6:unknown = GetGlobal a
-    Jump block9
-block2:
-    v10:unknown = GetGlobal b
-    Jump block12
-block3:
-    v14:unknown = GetGlobal x
-    Jump block15
-block1_split5:
     v8:unknown = Add v6:unknown, 1
-    Jump block10
-block1_split6:
     SetGlobal x v8:unknown
     Jump block3
-block2_split8:
+block2:
+    v10:unknown = GetGlobal b
     v12:unknown = Add v10:unknown, 2
-    Jump block13
-block2_split9:
     SetGlobal x v12:unknown
     Jump block3
-block3_split11:
+block3:
+    v14:unknown = GetGlobal x
     v16:unknown = Add v14:unknown, 100
-    Jump block16
-block3_split12:
     End v16:unknown

@@ -240,33 +240,19 @@ block0:
     Jump block3
 block1:
     v4:unknown = GetGlobal sum
-    Jump block8
-block2:
+    v5:unknown = GetGlobal x
+    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Add v4:unknown, v7:unknown
+    SetGlobal sum v8:unknown
     v10:number = Increment v17:unknown
     Jump block3
 block3:
-    v17:unknown = Phi [block2:v10:number, block0:v1:int32]
+    v17:unknown = Phi [block1:v10:number, block0:v1:int32]
     v11:unknown = GetGlobal n
-    Jump block12
-block4:
-    v12:unknown = GetGlobal sum
-    Jump block13
-block1_split3:
-    v5:unknown = GetGlobal x
-    Jump block9
-block1_split4:
-    v7:unknown = Mul v5:unknown, 2
-    Jump block10
-block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
-    Jump block11
-block1_split6:
-    SetGlobal sum v8:unknown
-    Jump block2
-block3_split7:
     v13:boolean = LessThan v17:unknown, v11:unknown
     Branch v13:boolean, block1, block4
-block4_split8:
+block4:
+    v12:unknown = GetGlobal sum
     End v12:unknown
 
 function():
@@ -277,31 +263,17 @@ block0:
     Jump block3
 block1:
     v4:unknown = GetGlobal sum
-    Jump block8
-block2:
+    v5:unknown = GetGlobal x
+    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Add v4:unknown, v7:unknown
+    SetGlobal sum v8:unknown
     v10:number = Increment v17:unknown
     Jump block3
 block3:
-    v17:unknown = Phi [block2:v10:number, block0:v1:int32]
+    v17:unknown = Phi [block1:v10:number, block0:v1:int32]
     v11:unknown = GetGlobal n
-    Jump block12
-block4:
-    v12:unknown = GetGlobal sum
-    Jump block13
-block1_split3:
-    v5:unknown = GetGlobal x
-    Jump block9
-block1_split4:
-    v7:unknown = Mul v5:unknown, 2
-    Jump block10
-block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
-    Jump block11
-block1_split6:
-    SetGlobal sum v8:unknown
-    Jump block2
-block3_split7:
     v13:boolean = LessThan v17:unknown, v11:unknown
     Branch v13:boolean, block1, block4
-block4_split8:
+block4:
+    v12:unknown = GetGlobal sum
     End v12:unknown

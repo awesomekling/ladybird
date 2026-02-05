@@ -1819,6 +1819,11 @@ void Lifter::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Value*>>& s
                     auto* current = stack_opt->last();
                     if (current != operand_value)
                         instruction->set_operand(i, current);
+                } else {
+                    // No reaching definition: register was never written on this path.
+                    // Replace with undefined (JavaScript default for uninitialized registers).
+                    auto& undef = m_function->create_constant(js_undefined());
+                    instruction->set_operand(i, &undef);
                 }
             }
 
