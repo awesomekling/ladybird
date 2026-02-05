@@ -557,16 +557,18 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case PutNormalByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutNormalByIdWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_put_by_id(block, base, op.property(), value);
+        m_function->build_put_by_id_with_this(block, base, this_value, op.property(), value);
         break;
     }
     case PutNormalByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutNormalByValueWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_function->build_put_by_value(block, base, property, value);
+        m_function->build_put_by_value_with_this(block, base, this_value, property, value);
         break;
     }
     case DeleteByIdWithThis: {

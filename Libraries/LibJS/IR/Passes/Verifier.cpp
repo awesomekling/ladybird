@@ -362,6 +362,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::IteratorNextUnpack:
                     case Opcode::IteratorClose:
                     case Opcode::IteratorToArray:
+                    case Opcode::PutByIdWithThis:
                     case Opcode::PutByValue:
                     case Opcode::GetByValueWithThis:
                     case Opcode::PutGetterByValue:
@@ -372,6 +373,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::PutPrototypeByIdWithThis:
                         return 3;
                     // 4 operands
+                    case Opcode::PutByValueWithThis:
                     case Opcode::PutGetterByValueWithThis:
                     case Opcode::PutSetterByValueWithThis:
                     case Opcode::PutPrototypeByValueWithThis:

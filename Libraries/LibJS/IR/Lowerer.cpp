@@ -637,8 +637,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::PutById:
         emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), OptionalNone {});
         break;
+    case Opcode::PutByIdWithThis:
+        // operands: base (0), this_value (1), value (2)
+        emit<Bytecode::Op::PutNormalByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
+        break;
     case Opcode::PutByValue:
         emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), OptionalNone {});
+        break;
+    case Opcode::PutByValueWithThis:
+        // operands: base (0), this_value (1), property (2), value (3)
+        emit<Bytecode::Op::PutNormalByValueWithThis>(operand(0), operand(2), operand(1), operand(3));
         break;
     case Opcode::DeleteById:
         emit<Bytecode::Op::DeleteById>(dst(), operand(0), instruction.property_key_index());

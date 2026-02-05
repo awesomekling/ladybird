@@ -281,10 +281,32 @@ void Function::build_put_by_id(BasicBlock& block, Value& base, Bytecode::Propert
     block.append(move(instruction));
 }
 
+void Function::build_put_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& value)
+{
+    auto instruction = Instruction::create<Opcode::PutByIdWithThis>();
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->add_operand(&value);
+    instruction->set_property_key_index(property);
+
+    block.append(move(instruction));
+}
+
 void Function::build_put_by_value(BasicBlock& block, Value& base, Value& property, Value& value)
 {
     auto instruction = Instruction::create<Opcode::PutByValue>();
     instruction->add_operand(&base);
+    instruction->add_operand(&property);
+    instruction->add_operand(&value);
+
+    block.append(move(instruction));
+}
+
+void Function::build_put_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property, Value& value)
+{
+    auto instruction = Instruction::create<Opcode::PutByValueWithThis>();
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
     instruction->add_operand(&property);
     instruction->add_operand(&value);
 

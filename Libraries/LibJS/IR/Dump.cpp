@@ -127,6 +127,7 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
 
     case Opcode::GetById:
     case Opcode::PutById:
+    case Opcode::PutByIdWithThis:
     case Opcode::DeleteById:
         for (auto* operand : instruction.operands())
             append_operand(operand);
