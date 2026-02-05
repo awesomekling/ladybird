@@ -848,6 +848,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Compute dominators for dominance checking
     Dominators dominators(function);
 
+    // Precompute instruction position within each block for O(1) same-block ordering checks
+    HashMap<Instruction const*, size_t> instruction_position;
+    for (auto const& block : function.basic_blocks()) {
+        size_t position = 0;
+        for (auto const& instr : block->instructions())
+            instruction_position.set(instr.ptr(), position++);
+    }
+
     for (auto const& block : function.basic_blocks()) {
         if (!reachable.contains(block.ptr()))
             continue;
@@ -906,18 +914,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     // If in same block, check instruction order
                     if (*def_block == block.ptr()) {
                         // Same block: definition must come before use
-                        bool found_def = false;
-                        for (auto const& check_instr : block->instructions()) {
-                            if (check_instr->result() == operand) {
-                                found_def = true;
-                            }
-                            if (check_instr.ptr() == instr.ptr()) {
-                                if (!found_def) {
-                                    report_error(ByteString::formatted(
-                                        "SSA violation: operand v{} used before definition in block{}",
-                                        operand->index(), block->index()));
-                                }
-                                break;
+                        auto* def_instr = operand->defining_instruction();
+                        if (def_instr) {
+                            auto def_pos = instruction_position.get(def_instr);
+                            auto use_pos = instruction_position.get(instr.ptr());
+                            if (def_pos.has_value() && use_pos.has_value() && *def_pos >= *use_pos) {
+                                report_error(ByteString::formatted(
+                                    "SSA violation: operand v{} used before definition in block{}",
+                                    operand->index(), block->index()));
                             }
                         }
                     } else if (!dominators.dominates(*def_block, block.ptr())) {
