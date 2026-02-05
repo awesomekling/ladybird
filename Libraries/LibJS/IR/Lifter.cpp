@@ -1991,13 +1991,7 @@ void Lifter::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Value*>>& s
                     reaching = &m_function->create_constant(JS::js_undefined());
                 }
 
-                // Find the correct phi operand index and set the value
-                for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                    if (phi.incoming_block(i) == &block) {
-                        phi.set_incoming_value(i, reaching);
-                        break;
-                    }
-                }
+                phi.set_incoming_value_for(block, reaching);
             }
         };
 

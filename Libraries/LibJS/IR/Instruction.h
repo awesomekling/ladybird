@@ -867,6 +867,10 @@ public:
     BasicBlock* incoming_block(size_t index) const { return phi_predecessors()[index]; }
     Value* incoming_value(size_t index) const { return operands()[index]; }
 
+    // Lookup helpers - find the value/index for a given predecessor block
+    Value* incoming_value_for(BasicBlock const& predecessor) const;
+    void set_incoming_value_for(BasicBlock const& predecessor, Value* value);
+
     // Atomic modification methods - these keep predecessor/value pairs in sync
     void add_incoming(BasicBlock* predecessor, Value* value);
     void remove_incoming(size_t index);

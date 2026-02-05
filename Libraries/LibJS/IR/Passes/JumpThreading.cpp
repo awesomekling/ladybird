@@ -138,13 +138,7 @@ PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
 
                 auto& target_phi = static_cast<PhiInstruction&>(*instr);
 
-                Value* value_from_bypassed = nullptr;
-                for (size_t j = 0; j < target_phi.incoming_count(); ++j) {
-                    if (target_phi.incoming_block(j) == block.ptr()) {
-                        value_from_bypassed = target_phi.incoming_value(j);
-                        break;
-                    }
-                }
+                auto* value_from_bypassed = target_phi.incoming_value_for(*block);
 
                 if (!value_from_bypassed)
                     continue;
@@ -154,12 +148,8 @@ PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
                 if (auto* def = value_from_bypassed->defining_instruction();
                     def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
                     auto& def_phi = static_cast<PhiInstruction&>(*def);
-                    for (size_t k = 0; k < def_phi.incoming_count(); ++k) {
-                        if (def_phi.incoming_block(k) == pred_block) {
-                            traced_values.set(instr.ptr(), def_phi.incoming_value(k));
-                            break;
-                        }
-                    }
+                    if (auto* traced = def_phi.incoming_value_for(*pred_block))
+                        traced_values.set(instr.ptr(), traced);
                 } else {
                     traced_values.set(instr.ptr(), value_from_bypassed);
                 }

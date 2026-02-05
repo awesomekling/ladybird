@@ -407,17 +407,13 @@ void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock co
 
         auto const& phi = static_cast<PhiInstruction const&>(*instruction);
 
-        for (size_t i = 0; i < phi.incoming_count(); ++i) {
-            if (phi.incoming_block(i) == &from) {
-                if (!phi.incoming_value(i) || !phi.result())
-                    continue;
-                auto src = operand_for_value(*phi.incoming_value(i));
-                auto dst = operand_for_value(*phi.result());
-                if (src != dst)
-                    moves.append({ dst, src });
-                break;
-            }
-        }
+        auto* incoming = phi.incoming_value_for(from);
+        if (!incoming || !phi.result())
+            continue;
+        auto src = operand_for_value(*incoming);
+        auto dst = operand_for_value(*phi.result());
+        if (src != dst)
+            moves.append({ dst, src });
     }
 
     // Check if any source would be clobbered by another move's destination.
@@ -463,17 +459,13 @@ bool Lowerer::needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const&
 
         auto const& phi = static_cast<PhiInstruction const&>(*instruction);
 
-        for (size_t i = 0; i < phi.incoming_count(); ++i) {
-            if (phi.incoming_block(i) == &from) {
-                if (!phi.incoming_value(i) || !phi.result())
-                    continue;
-                auto src = operand_for_value(*phi.incoming_value(i));
-                auto dst = operand_for_value(*phi.result());
-                if (src != dst)
-                    return true;
-                break;
-            }
-        }
+        auto* incoming = phi.incoming_value_for(from);
+        if (!incoming || !phi.result())
+            continue;
+        auto src = operand_for_value(*incoming);
+        auto dst = operand_for_value(*phi.result());
+        if (src != dst)
+            return true;
     }
     return false;
 }

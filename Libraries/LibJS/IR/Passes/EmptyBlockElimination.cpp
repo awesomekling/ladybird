@@ -58,15 +58,8 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
                             continue;
 
                         auto& phi = static_cast<PhiInstruction&>(*instr);
-                        Value* value_from_empty = nullptr;
-                        Value* value_from_direct = nullptr;
-
-                        for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                            if (phi.incoming_block(i) == block.ptr())
-                                value_from_empty = phi.incoming_value(i);
-                            if (phi.incoming_block(i) == pred)
-                                value_from_direct = phi.incoming_value(i);
-                        }
+                        auto* value_from_empty = phi.incoming_value_for(*block);
+                        auto* value_from_direct = phi.incoming_value_for(*pred);
 
                         if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
                             would_conflict = true;
@@ -116,14 +109,7 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
                     auto& target_phi = static_cast<PhiInstruction&>(instr);
 
                     // Find the value this phi expects from the empty block
-                    Value* value_from_empty = nullptr;
-                    for (size_t i = 0; i < target_phi.incoming_count(); ++i) {
-                        if (target_phi.incoming_block(i) == block.ptr()) {
-                            value_from_empty = target_phi.incoming_value(i);
-                            break;
-                        }
-                    }
-
+                    auto* value_from_empty = target_phi.incoming_value_for(*block);
                     if (!value_from_empty)
                         return nullptr;
 
@@ -131,10 +117,8 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
                     if (auto* def = value_from_empty->defining_instruction();
                         def && def->opcode() == Opcode::Phi) {
                         auto& def_phi = static_cast<PhiInstruction&>(*def);
-                        for (size_t j = 0; j < def_phi.incoming_count(); ++j) {
-                            if (def_phi.incoming_block(j) == pred)
-                                return def_phi.incoming_value(j);
-                        }
+                        if (auto* traced = def_phi.incoming_value_for(*pred))
+                            return traced;
                     }
 
                     return value_from_empty;

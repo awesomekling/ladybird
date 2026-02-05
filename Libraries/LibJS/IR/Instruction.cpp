@@ -86,6 +86,26 @@ void PhiInstruction::remove_incoming_from(BasicBlock* predecessor)
     }
 }
 
+Value* PhiInstruction::incoming_value_for(BasicBlock const& predecessor) const
+{
+    for (size_t i = 0; i < incoming_count(); ++i) {
+        if (incoming_block(i) == &predecessor)
+            return incoming_value(i);
+    }
+    return nullptr;
+}
+
+void PhiInstruction::set_incoming_value_for(BasicBlock const& predecessor, Value* value)
+{
+    for (size_t i = 0; i < incoming_count(); ++i) {
+        if (incoming_block(i) == &predecessor) {
+            set_incoming_value(i, value);
+            return;
+        }
+    }
+    VERIFY_NOT_REACHED();
+}
+
 void PhiInstruction::set_incoming_block(size_t index, BasicBlock* block)
 {
     set_phi_predecessor(index, block);
