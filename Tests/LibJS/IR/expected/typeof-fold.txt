@@ -22,3 +22,183 @@ block0:
     v3:unknown = Call v0:unknown, undefined, 1
     End v3:unknown
 
+=== Before optimization ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v9:string = Typeof v8:int32
+    v11:boolean = StrictlyEquals v9:string, v10:string
+    v12:boolean = Move v11:boolean
+    v13:string = Typeof v8:int32
+    v15:boolean = StrictlyEquals v13:string, v14:string
+    v16:boolean = Move v15:boolean
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    v19:boolean = StrictlyEquals v17:string, v18:string
+    v20:boolean = Move v19:boolean
+    v22:string = Typeof true
+    v24:boolean = StrictlyEquals v22:string, v23:string
+    v25:boolean = Move v24:boolean
+    Return v12:boolean
+
+=== After CopyPropagation ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v9:string = Typeof v7:int32
+    v11:boolean = StrictlyEquals v9:string, v10:string
+    v12:boolean = Move v11:boolean
+    v13:string = Typeof v7:int32
+    v15:boolean = StrictlyEquals v13:string, v14:string
+    v16:boolean = Move v15:boolean
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    v19:boolean = StrictlyEquals v17:string, v18:string
+    v20:boolean = Move v19:boolean
+    v22:string = Typeof true
+    v24:boolean = StrictlyEquals v22:string, v23:string
+    v25:boolean = Move v24:boolean
+    Return v11:boolean
+
+=== After ConstantFolding ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v9:string = Typeof v7:int32
+    v11:boolean = StrictlyEquals v9:string, v10:string
+    v12:boolean = Move v11:boolean
+    v13:string = Typeof v7:int32
+    v15:boolean = StrictlyEquals v13:string, v14:string
+    v16:boolean = Move v15:boolean
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    v19:boolean = StrictlyEquals v17:string, v18:string
+    v20:boolean = Move v19:boolean
+    v22:string = Typeof true
+    v24:boolean = StrictlyEquals v22:string, v23:string
+    v25:boolean = Move v24:boolean
+    Return v11:boolean
+
+=== After InstructionCombining ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v9:string = Typeof v7:int32
+    v11:boolean = StrictlyEquals v26:string, v10:string
+    v12:boolean = Move v11:boolean
+    v13:string = Typeof v7:int32
+    v15:boolean = StrictlyEquals v27:string, v14:string
+    v16:boolean = Move v15:boolean
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    v19:boolean = StrictlyEquals v17:string, v18:string
+    v20:boolean = Move v19:boolean
+    v22:string = Typeof true
+    v24:boolean = StrictlyEquals v28:string, v23:string
+    v25:boolean = Move v24:boolean
+    Return v11:boolean
+
+=== After GlobalValueNumbering ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v9:string = Typeof v7:int32
+    v11:boolean = StrictlyEquals v26:string, v10:string
+    v12:boolean = Move v11:boolean
+    v13:string = Typeof v7:int32
+    v15:boolean = StrictlyEquals v27:string, v14:string
+    v16:boolean = Move v15:boolean
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    v19:boolean = StrictlyEquals v17:string, v18:string
+    v20:boolean = Move v19:boolean
+    v22:string = Typeof true
+    v24:boolean = StrictlyEquals v28:string, v23:string
+    v25:boolean = Move v24:boolean
+    Return v11:boolean
+
+=== After DeadCodeElimination ===
+function(v6:unknown):
+block0:
+    v7:int32 = ToInt32 v6:unknown
+    Jump block1
+block0_split0:
+    v11:boolean = StrictlyEquals v26:string, v10:string
+    v17:string = TypeofBinding
+    Jump block2
+block0_split1:
+    Return v11:boolean
+
+=== After BlockMerging ===
+function(v6:unknown):
+block0:
+    v7:int32 = ToInt32 v6:unknown
+    v11:boolean = StrictlyEquals v26:string, v10:string
+    v17:string = TypeofBinding
+    Return v11:boolean
+
+=== After ConstantFolding ===
+function(v6:unknown):
+block0:
+    v7:int32 = ToInt32 v6:unknown
+    v11:boolean = StrictlyEquals v26:string, v10:string
+    v17:string = TypeofBinding
+    Return true
+
+=== After DeadCodeElimination ===
+function(v6:unknown):
+block0:
+    v7:int32 = ToInt32 v6:unknown
+    v17:string = TypeofBinding
+    Return true
+
+function(v6:unknown):
+block0:
+    v7:int32 = ToInt32 v6:unknown
+    v17:string = TypeofBinding
+    Return true
