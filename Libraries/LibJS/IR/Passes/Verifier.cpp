@@ -142,13 +142,43 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                         block->index(), phi.operands().size(), phi.incoming_count()));
                 }
 
-                // Check 3: Phi predecessors ⊆ block predecessors
+                // Check: Phi predecessors ⊆ block predecessors
                 for (size_t i = 0; i < phi.incoming_count(); ++i) {
                     auto* phi_pred = phi.incoming_block(i);
                     if (!block_predecessor_set.contains(phi_pred)) {
                         report_error(ByteString::formatted(
                             "Phi in block{} has predecessor block{} not in block's predecessor list",
                             block->index(), phi_pred->index()));
+                    }
+                }
+
+                // Check: Block predecessors ⊆ phi predecessors (phi covers all preds)
+                for (auto* pred : block->predecessors()) {
+                    bool found = false;
+                    for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                        if (phi.incoming_block(i) == pred) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        report_error(ByteString::formatted(
+                            "Phi in block{} missing incoming entry for predecessor block{}",
+                            block->index(), pred->index()));
+                    }
+                }
+
+                // Check: Phi predecessor uniqueness (no duplicate incoming blocks)
+                {
+                    HashTable<BasicBlock*> seen_phi_preds;
+                    for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                        auto* phi_pred = phi.incoming_block(i);
+                        if (seen_phi_preds.contains(phi_pred)) {
+                            report_error(ByteString::formatted(
+                                "Phi in block{} has duplicate predecessor block{}",
+                                block->index(), phi_pred->index()));
+                        }
+                        seen_phi_preds.set(phi_pred);
                     }
                 }
             }
@@ -449,6 +479,16 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     }
 
     for (auto const& value : function.values()) {
+        // Check: Value kind consistency
+        // Constants, parameters, and this values must NOT have a defining instruction
+        if (!value->is_instruction() && value->defining_instruction()) {
+            report_error(ByteString::formatted(
+                "Value v{} (kind={}) has a defining instruction but shouldn't",
+                value->index(),
+                value->is_constant() ? "constant" : value->is_parameter() ? "parameter"
+                                                                          : "this"));
+        }
+
         for (auto const* use : value->uses()) {
             if (!all_instructions.contains(use)) {
                 report_error(ByteString::formatted(
