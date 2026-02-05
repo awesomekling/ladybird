@@ -42,12 +42,19 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         report_error("Entry block has predecessors"sv);
     }
 
-    // Build set of all defined values
+    // Build set of all defined values, checking for unique definitions
     HashTable<Value const*> defined_values;
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instr : block->instructions()) {
-            if (instr->result())
+            if (instr->result()) {
+                // Check: No two instructions share the same result Value*
+                if (defined_values.contains(instr->result())) {
+                    report_error(ByteString::formatted(
+                        "Value v{} is defined by multiple instructions",
+                        instr->result()->index()));
+                }
                 defined_values.set(instr->result());
+            }
         }
     }
 
@@ -146,8 +153,166 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                 }
             }
 
-            // NB: The invariant "only terminators may have CFG targets" is now enforced
-            // at compile time via TerminatorInstruction - only that class has target methods.
+            // Check: Opcode operand-arity
+            // NB: Phi and Call have variable arity, so we only check fixed-arity opcodes.
+            // Metadata stored via set_identifier_index/set_property_key_index/etc. does NOT
+            // count as an operand — only values passed via add_operand() count.
+            {
+                auto expected_arity = [](Opcode opcode) -> Optional<size_t> {
+                    switch (opcode) {
+                    // 0 operands: no value operands (all data is metadata or implicit)
+                    case Opcode::Jump:
+                    case Opcode::LoadConstant:
+                    case Opcode::LoadUndefined:
+                    case Opcode::LoadNull:
+                    case Opcode::NewObject:
+                    case Opcode::NewRegExp:
+                    case Opcode::CreateLexicalEnvironment:
+                    case Opcode::LeaveLexicalEnvironment:
+                    case Opcode::CreatePrivateEnvironment:
+                    case Opcode::LeavePrivateEnvironment:
+                    case Opcode::CreateVariableEnvironment:
+                    case Opcode::GetNewTarget:
+                    case Opcode::ResolveThisBinding:
+                    case Opcode::ResolveSuperBase:
+                    case Opcode::GetGlobal:
+                    case Opcode::GetBinding:
+                    case Opcode::TypeofBinding:
+                    case Opcode::DeleteVariable:
+                    case Opcode::GetCalleeAndThisFromEnvironment:
+                    case Opcode::AddPrivateName:
+                    case Opcode::CreateArguments:
+                    case Opcode::CreateRestParams:
+                        return 0;
+                    // 1 operand
+                    case Opcode::Return:
+                    case Opcode::End:
+                    case Opcode::Throw:
+                    case Opcode::Branch:
+                    case Opcode::Negate:
+                    case Opcode::UnaryPlus:
+                    case Opcode::BitwiseNot:
+                    case Opcode::Typeof:
+                    case Opcode::ToBoolean:
+                    case Opcode::ToNumber:
+                    case Opcode::ToString:
+                    case Opcode::ToObject:
+                    case Opcode::ToInt32:
+                    case Opcode::ToLength:
+                    case Opcode::Not:
+                    case Opcode::IsUndefined:
+                    case Opcode::IsNullish:
+                    case Opcode::Increment:
+                    case Opcode::Decrement:
+                    case Opcode::PostfixIncrement:
+                    case Opcode::PostfixDecrement:
+                    case Opcode::GetById:
+                    case Opcode::GetLength:
+                    case Opcode::GetPrivateById:
+                    case Opcode::DeleteById:
+                    case Opcode::GetIterator:
+                    case Opcode::GetObjectPropertyIterator:
+                    case Opcode::Yield:
+                    case Opcode::Await:
+                    case Opcode::Move:
+                    case Opcode::ThrowIfNotObject:
+                    case Opcode::ThrowIfNullish:
+                    case Opcode::ThrowIfTDZ:
+                    case Opcode::EnterObjectEnvironment:
+                    case Opcode::ExtractValue:
+                    case Opcode::CacheObjectShape:
+                    case Opcode::NewArrayWithLength:
+                    case Opcode::SetGlobal:
+                    case Opcode::SetBinding:
+                    case Opcode::InitializeBinding:
+                    case Opcode::GetCompletionFields:
+                    case Opcode::CreateMutableBinding:
+                    case Opcode::CreateImmutableBinding:
+                        return 1;
+                    // 2 operands
+                    case Opcode::Add:
+                    case Opcode::Sub:
+                    case Opcode::Mul:
+                    case Opcode::Div:
+                    case Opcode::Mod:
+                    case Opcode::Exp:
+                    case Opcode::BitwiseAnd:
+                    case Opcode::BitwiseOr:
+                    case Opcode::BitwiseXor:
+                    case Opcode::LeftShift:
+                    case Opcode::RightShift:
+                    case Opcode::UnsignedRightShift:
+                    case Opcode::LessThan:
+                    case Opcode::LessThanEquals:
+                    case Opcode::GreaterThan:
+                    case Opcode::GreaterThanEquals:
+                    case Opcode::LooselyEquals:
+                    case Opcode::StrictlyEquals:
+                    case Opcode::LooselyInequals:
+                    case Opcode::StrictlyInequals:
+                    case Opcode::In:
+                    case Opcode::InstanceOf:
+                    case Opcode::GetByValue:
+                    case Opcode::GetByIdWithThis:
+                    case Opcode::DeleteByValue:
+                    case Opcode::HasProperty:
+                    case Opcode::PutById:
+                    case Opcode::PutPrivateById:
+                    case Opcode::PutGetterById:
+                    case Opcode::PutSetterById:
+                    case Opcode::PutPrototypeById:
+                    case Opcode::PutBySpread:
+                    case Opcode::ConcatString:
+                    case Opcode::ArrayAppend:
+                    case Opcode::ImportCall:
+                    case Opcode::InitObjectLiteralProperty:
+                        return 2;
+                    // 3 operands
+                    case Opcode::IteratorNext:
+                    case Opcode::IteratorNextUnpack:
+                    case Opcode::IteratorClose:
+                    case Opcode::IteratorToArray:
+                    case Opcode::PutByValue:
+                    case Opcode::GetByValueWithThis:
+                    case Opcode::PutGetterByValue:
+                    case Opcode::PutSetterByValue:
+                    case Opcode::PutPrototypeByValue:
+                    case Opcode::PutGetterByIdWithThis:
+                    case Opcode::PutSetterByIdWithThis:
+                    case Opcode::PutPrototypeByIdWithThis:
+                        return 3;
+                    // 4 operands
+                    case Opcode::PutGetterByValueWithThis:
+                    case Opcode::PutSetterByValueWithThis:
+                    case Opcode::PutPrototypeByValueWithThis:
+                        return 4;
+                    // Variable arity
+                    case Opcode::Phi:
+                    case Opcode::Call:
+                    case Opcode::CallBuiltin:
+                    case Opcode::CallDirectEval:
+                    case Opcode::CallWithArgumentArray:
+                    case Opcode::Construct:
+                    case Opcode::ConstructWithArgumentArray:
+                    case Opcode::SuperCallWithArgumentArray:
+                    case Opcode::NewArray:
+                    case Opcode::NewClass:
+                    case Opcode::NewFunction:
+                    case Opcode::CreateVariable:
+                        return {};
+                    case Opcode::__Count:
+                        VERIFY_NOT_REACHED();
+                    }
+                    VERIFY_NOT_REACHED();
+                };
+                auto arity = expected_arity(instr->opcode());
+                if (arity.has_value() && instr->operands().size() != *arity) {
+                    report_error(ByteString::formatted(
+                        "{} in block{} has {} operands (expected {})",
+                        opcode_to_string(instr->opcode()), block->index(),
+                        instr->operands().size(), *arity));
+                }
+            }
 
             // Check: All operands are non-null and reference defined values
             for (size_t i = 0; i < instr->operands().size(); ++i) {
@@ -288,6 +453,21 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             if (!all_instructions.contains(use)) {
                 report_error(ByteString::formatted(
                     "Value v{} has stale use pointing to removed instruction",
+                    value->index()));
+                continue;
+            }
+            // Check: Reverse validation - the using instruction must actually
+            // have this value in its operand list
+            bool found_in_operands = false;
+            for (auto* operand : use->operands()) {
+                if (operand == value.ptr()) {
+                    found_in_operands = true;
+                    break;
+                }
+            }
+            if (!found_in_operands) {
+                report_error(ByteString::formatted(
+                    "Value v{} has use in instruction but is not in its operand list",
                     value->index()));
             }
         }
