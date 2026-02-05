@@ -30,50 +30,50 @@ block1:
     v13:array = NewArray 1, 2
     Jump block49
 block2:
-    v149:unknown = Phi [block50:v152:undefined, block51:v150:unknown]
-    v147:unknown = Phi [block50:v153:undefined, block51:v148:unknown]
-    v143:unknown = Phi [block50:v21:undefined, block51:v25:unknown]
-    v141:unknown = Phi [block50:v154:undefined, block51:v142:unknown]
-    v138:unknown = Phi [block50:v19:int32, block51:v24:unknown]
-    v135:unknown = Phi [block50:v155:undefined, block51:v136:unknown]
-    v133:unknown = Phi [block50:v156:undefined, block51:v134:unknown]
-    v130:unknown = Phi [block50:v157:undefined, block51:v22:unknown]
-    v128:unknown = Phi [block50:v158:undefined, block51:v129:unknown]
-    v125:unknown = Phi [block50:v159:undefined, block51:v126:unknown]
-    v123:unknown = Phi [block50:v160:undefined, block51:v124:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v150:unknown = Phi [block50:v152:undefined, block51:v151:unknown]
+    v148:unknown = Phi [block50:v153:undefined, block51:v149:unknown]
+    v146:unknown = Phi [block50:v154:undefined, block51:v147:unknown]
+    v144:unknown = Phi [block50:v155:undefined, block51:v145:unknown]
+    v141:unknown = Phi [block50:v156:undefined, block51:v142:unknown]
+    v139:unknown = Phi [block50:v157:undefined, block51:v140:unknown]
+    v135:unknown = Phi [block50:v158:undefined, block51:v136:unknown]
+    v132:unknown = Phi [block50:v159:undefined, block51:v133:unknown]
+    v129:unknown = Phi [block50:v21:undefined, block51:v25:unknown]
+    v126:unknown = Phi [block50:v19:int32, block51:v24:unknown]
+    v123:unknown = Phi [block50:v160:undefined, block51:v22:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
-    v148:unknown = Phi [block15:v147:unknown, block17:v147:unknown, block30:v147:unknown, block32:v147:unknown, block46:v44:unknown, block48:v44:unknown, block58:v147:unknown, block69:v147:unknown, block78:v44:unknown]
-    v144:unknown = Phi [block15:v42:unknown, block17:v42:unknown, block30:v62:unknown, block32:v62:unknown, block46:v83:unknown, block48:v83:unknown, block58:v38:unknown, block69:v58:unknown, block78:v79:unknown]
-    v142:unknown = Phi [block15:v141:unknown, block17:v141:unknown, block30:v141:unknown, block32:v141:unknown, block46:v75:unknown, block48:v75:unknown, block58:v141:unknown, block69:v141:unknown, block78:v75:unknown]
-    v139:unknown = Phi [block15:v41:unknown, block17:v41:unknown, block30:v61:unknown, block32:v61:unknown, block46:v82:unknown, block48:v82:unknown, block58:v37:unknown, block69:v57:unknown, block78:v78:unknown]
-    v136:unknown = Phi [block15:v135:unknown, block17:v135:unknown, block30:v43:unknown, block32:v43:unknown, block46:v135:unknown, block48:v135:unknown, block58:v135:unknown, block69:v43:unknown, block78:v135:unknown]
-    v134:unknown = Phi [block15:v34:unknown, block17:v34:unknown, block30:v133:unknown, block32:v133:unknown, block46:v133:unknown, block48:v133:unknown, block58:v34:unknown, block69:v133:unknown, block78:v133:unknown]
-    v131:unknown = Phi [block15:v39:unknown, block17:v39:unknown, block30:v59:unknown, block32:v59:unknown, block46:v80:unknown, block48:v80:unknown, block58:v35:unknown, block69:v55:unknown, block78:v76:unknown]
-    v129:unknown = Phi [block15:v128:unknown, block17:v128:unknown, block30:v54:unknown, block32:v54:unknown, block46:v128:unknown, block48:v128:unknown, block58:v128:unknown, block69:v54:unknown, block78:v128:unknown]
-    v126:unknown = Phi [block15:v31:unknown, block17:v31:unknown, block30:v51:unknown, block32:v51:unknown, block46:v125:unknown, block48:v125:unknown, block58:v31:unknown, block69:v51:unknown, block78:v125:unknown]
-    v124:unknown = Phi [block15:v123:unknown, block17:v123:unknown, block30:v123:unknown, block32:v123:unknown, block46:v72:unknown, block48:v72:unknown, block58:v123:unknown, block69:v123:unknown, block78:v72:unknown]
+    v151:unknown = Phi [block15:v150:unknown, block17:v150:unknown, block30:v150:unknown, block32:v150:unknown, block46:v75:unknown, block48:v75:unknown, block58:v150:unknown, block69:v150:unknown, block78:v75:unknown]
+    v149:unknown = Phi [block15:v148:unknown, block17:v148:unknown, block30:v148:unknown, block32:v148:unknown, block46:v72:unknown, block48:v72:unknown, block58:v148:unknown, block69:v148:unknown, block78:v72:unknown]
+    v147:unknown = Phi [block15:v146:unknown, block17:v146:unknown, block30:v146:unknown, block32:v146:unknown, block46:v44:unknown, block48:v44:unknown, block58:v146:unknown, block69:v146:unknown, block78:v44:unknown]
+    v145:unknown = Phi [block15:v144:unknown, block17:v144:unknown, block30:v54:unknown, block32:v54:unknown, block46:v144:unknown, block48:v144:unknown, block58:v144:unknown, block69:v54:unknown, block78:v144:unknown]
+    v142:unknown = Phi [block15:v141:unknown, block17:v141:unknown, block30:v43:unknown, block32:v43:unknown, block46:v141:unknown, block48:v141:unknown, block58:v141:unknown, block69:v43:unknown, block78:v141:unknown]
+    v140:unknown = Phi [block15:v34:unknown, block17:v34:unknown, block30:v139:unknown, block32:v139:unknown, block46:v139:unknown, block48:v139:unknown, block58:v34:unknown, block69:v139:unknown, block78:v139:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
+    v133:unknown = Phi [block15:v31:unknown, block17:v31:unknown, block30:v51:unknown, block32:v51:unknown, block46:v132:unknown, block48:v132:unknown, block58:v31:unknown, block69:v51:unknown, block78:v132:unknown]
+    v130:unknown = Phi [block15:v42:unknown, block17:v42:unknown, block30:v62:unknown, block32:v62:unknown, block46:v83:unknown, block48:v83:unknown, block58:v38:unknown, block69:v58:unknown, block78:v79:unknown]
+    v127:unknown = Phi [block15:v41:unknown, block17:v41:unknown, block30:v61:unknown, block32:v61:unknown, block46:v82:unknown, block48:v82:unknown, block58:v37:unknown, block69:v57:unknown, block78:v78:unknown]
+    v124:unknown = Phi [block15:v39:unknown, block17:v39:unknown, block30:v59:unknown, block32:v59:unknown, block46:v80:unknown, block48:v80:unknown, block58:v35:unknown, block69:v55:unknown, block78:v76:unknown]
     v22:unknown = Move v0:unknown
     v23:unknown = GetCompletionFields v22:unknown
     v24:unknown = ExtractValue v23:unknown, 0
     v25:unknown = ExtractValue v23:unknown, 1
     Jump block51
 block4:
-    v151:unknown = Phi [block56:v32:unknown, block67:v52:unknown]
-    v146:unknown = Phi [block56:v33:unknown, block67:v53:unknown]
-    v145:unknown = Phi [block56:v30:unknown, block67:v50:unknown]
-    v140:unknown = Phi [block56:v29:unknown, block67:v49:unknown]
-    v137:unknown = Phi [block56:v135:unknown, block67:v43:unknown]
-    v132:unknown = Phi [block56:v27:unknown, block67:v47:unknown]
-    v127:unknown = Phi [block56:v31:unknown, block67:v51:unknown]
+    v143:unknown = Phi [block56:v141:unknown, block67:v43:unknown]
+    v138:unknown = Phi [block56:v33:unknown, block67:v53:unknown]
+    v137:unknown = Phi [block56:v32:unknown, block67:v52:unknown]
+    v134:unknown = Phi [block56:v31:unknown, block67:v51:unknown]
+    v131:unknown = Phi [block56:v30:unknown, block67:v50:unknown]
+    v128:unknown = Phi [block56:v29:unknown, block67:v49:unknown]
+    v125:unknown = Phi [block56:v27:unknown, block67:v47:unknown]
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     Jump block52
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v27:unknown = Move v1:unknown
@@ -122,10 +122,10 @@ block19:
     v44:unknown = GetById v15:unknown.return
     Jump block61
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     Jump block62
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     Jump block63
 block22:
     v47:unknown = Move v4:unknown
@@ -168,9 +168,9 @@ block32:
     SetCompletionType v59:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     Jump block71
 block35:
     v64:unknown = Move v7:unknown
@@ -315,13 +315,13 @@ block1:
     v13:array = NewArray 1, 2
     Jump block49
 block2:
-    v149:unknown = Phi [block50:v152:undefined, block51:v150:unknown]
-    v143:unknown = Phi [block50:v21:undefined, block51:v25:unknown]
-    v138:unknown = Phi [block50:v19:int32, block51:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block50:v158:undefined, block51:v136:unknown]
+    v129:unknown = Phi [block50:v21:undefined, block51:v25:unknown]
+    v126:unknown = Phi [block50:v19:int32, block51:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
     v22:unknown = Move v0:unknown
     v23:unknown = GetCompletionFields v22:unknown
     v24:unknown = ExtractValue v23:unknown, 0
@@ -330,10 +330,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     Jump block52
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v27:unknown = Move v1:unknown
@@ -382,10 +382,10 @@ block19:
     v44:unknown = GetById v15:unknown.return
     Jump block61
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     Jump block62
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     Jump block63
 block22:
     v47:unknown = Move v4:unknown
@@ -428,9 +428,9 @@ block32:
     SetCompletionType v59:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     Jump block71
 block35:
     v64:unknown = Move v7:unknown
@@ -574,13 +574,13 @@ block1:
     v13:array = NewArray 1, 2
     Jump block49
 block2:
-    v149:unknown = Phi [block50:v152:undefined, block51:v150:unknown]
-    v143:unknown = Phi [block50:v20:undefined, block51:v25:unknown]
-    v138:unknown = Phi [block50:v18:int32, block51:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block50:v158:undefined, block51:v136:unknown]
+    v129:unknown = Phi [block50:v20:undefined, block51:v25:unknown]
+    v126:unknown = Phi [block50:v18:int32, block51:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
     v22:unknown = Move v0:unknown
     v23:unknown = GetCompletionFields v0:unknown
     v24:unknown = ExtractValue v23:unknown, 0
@@ -589,10 +589,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     Jump block52
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v27:unknown = Move v1:unknown
@@ -641,10 +641,10 @@ block19:
     v44:unknown = GetById v15:unknown.return
     Jump block61
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     Jump block62
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     Jump block63
 block22:
     v47:unknown = Move v4:unknown
@@ -687,9 +687,9 @@ block32:
     SetCompletionType v6:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     Jump block71
 block35:
     v64:unknown = Move v7:unknown
@@ -833,13 +833,13 @@ block1:
     v13:array = NewArray 1, 2
     Jump block49
 block2:
-    v149:unknown = Phi [block50:v152:undefined, block3:v150:unknown]
-    v143:unknown = Phi [block50:v20:undefined, block3:v25:unknown]
-    v138:unknown = Phi [block50:v18:int32, block3:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block50:v158:undefined, block3:v136:unknown]
+    v129:unknown = Phi [block50:v20:undefined, block3:v25:unknown]
+    v126:unknown = Phi [block50:v18:int32, block3:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block58:v32:unknown, block69:v52:unknown, block78:v73:unknown]
     v22:unknown = Move v0:unknown
     v23:unknown = GetCompletionFields v0:unknown
     v24:unknown = ExtractValue v23:unknown, 0
@@ -848,10 +848,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     Jump block52
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v27:unknown = Move v1:unknown
@@ -900,10 +900,10 @@ block19:
     v44:unknown = GetById v15:unknown.return
     Jump block61
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     Jump block62
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     Jump block63
 block22:
     v47:unknown = Move v4:unknown
@@ -946,9 +946,9 @@ block32:
     SetCompletionType v6:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     Jump block71
 block35:
     v64:unknown = Move v7:unknown
@@ -1091,13 +1091,13 @@ block1:
     v21:undefined = Move undefined
     Jump block2
 block2:
-    v149:unknown = Phi [block1:v152:undefined, block3:v150:unknown]
-    v143:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
-    v138:unknown = Phi [block1:v18:int32, block3:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block1:v158:undefined, block3:v136:unknown]
+    v129:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
+    v126:unknown = Phi [block1:v18:int32, block3:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
     v22:unknown = Move v0:unknown
     v23:unknown = GetCompletionFields v0:unknown
     v24:unknown = ExtractValue v23:unknown, 0
@@ -1106,10 +1106,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     v1:unknown = Await v26:unknown, continuation: block7
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v27:unknown = Move v1:unknown
@@ -1164,10 +1164,10 @@ block19:
     v100:boolean = IsUndefined v44:unknown
     Branch v100:boolean, block33, block34
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     v4:unknown = Await v45:unknown, continuation: block22
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     v46:unknown = NewTypeError
     Throw v46:unknown
 block22:
@@ -1215,9 +1215,9 @@ block32:
     SetCompletionType v6:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     v8:unknown = Await v63:unknown, continuation: block38
 block35:
     v64:unknown = Move v7:unknown
@@ -1286,13 +1286,13 @@ block1:
     v16:unknown = ExtractValue v14:unknown, 1
     Jump block2
 block2:
-    v149:unknown = Phi [block1:v152:undefined, block3:v150:unknown]
-    v143:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
-    v138:unknown = Phi [block1:v18:int32, block3:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block1:v158:undefined, block3:v136:unknown]
+    v129:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
+    v126:unknown = Phi [block1:v18:int32, block3:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
     v23:unknown = GetCompletionFields v0:unknown
     v24:unknown = ExtractValue v23:unknown, 0
     v25:unknown = ExtractValue v23:unknown, 1
@@ -1300,10 +1300,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     v1:unknown = Await v26:unknown, continuation: block7
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v28:unknown = GetCompletionFields v1:unknown
@@ -1354,10 +1354,10 @@ block19:
     v100:boolean = IsUndefined v44:unknown
     Branch v100:boolean, block33, block34
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     v4:unknown = Await v45:unknown, continuation: block22
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     v46:unknown = NewTypeError
     Throw v46:unknown
 block22:
@@ -1401,9 +1401,9 @@ block32:
     SetCompletionType v6:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     v8:unknown = Await v63:unknown, continuation: block38
 block35:
     v65:unknown = GetCompletionFields v7:unknown
@@ -1466,13 +1466,13 @@ block1:
     v16:unknown = ExtractValue v14:unknown, 1
     Jump block2
 block2:
-    v149:unknown = Phi [block1:v152:undefined, block3:v150:unknown]
-    v143:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
-    v138:unknown = Phi [block1:v18:int32, block3:v24:unknown]
-    v86:boolean = StrictlyEquals v138:unknown, 1
+    v135:unknown = Phi [block1:v158:undefined, block3:v136:unknown]
+    v129:unknown = Phi [block1:v20:undefined, block3:v25:unknown]
+    v126:unknown = Phi [block1:v18:int32, block3:v24:unknown]
+    v86:boolean = StrictlyEquals v126:unknown, 1
     Branch v86:boolean, block5, block6
 block3:
-    v150:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
+    v136:unknown = Phi [block15:v32:unknown, block17:v32:unknown, block30:v52:unknown, block32:v52:unknown, block46:v73:unknown, block48:v73:unknown, block12:v32:unknown, block27:v52:unknown, block43:v73:unknown]
     v23:unknown = GetCompletionFields v0:unknown
     v24:unknown = ExtractValue v23:unknown, 0
     v25:unknown = ExtractValue v23:unknown, 1
@@ -1480,10 +1480,10 @@ block3:
 block4:
     v87:unknown = Yield undefined
 block5:
-    v26:unknown = Call v16:unknown, v15:unknown, v143:unknown
+    v26:unknown = Call v16:unknown, v15:unknown, v129:unknown
     v1:unknown = Await v26:unknown, continuation: block7
 block6:
-    v90:boolean = StrictlyEquals v138:unknown, 5
+    v90:boolean = StrictlyEquals v126:unknown, 5
     Branch v90:boolean, block18, block19
 block7:
     v28:unknown = GetCompletionFields v1:unknown
@@ -1534,10 +1534,10 @@ block19:
     v100:boolean = IsUndefined v44:unknown
     Branch v100:boolean, block33, block34
 block20:
-    v45:unknown = Call v43:unknown, v15:unknown, v143:unknown
+    v45:unknown = Call v43:unknown, v15:unknown, v129:unknown
     v4:unknown = Await v45:unknown, continuation: block22
 block21:
-    AsyncIteratorClose v15:unknown, v16:unknown, v149:unknown
+    AsyncIteratorClose v15:unknown, v16:unknown, v135:unknown
     v46:unknown = NewTypeError
     Throw v46:unknown
 block22:
@@ -1581,9 +1581,9 @@ block32:
     SetCompletionType v6:unknown
     Jump block3
 block33:
-    v7:unknown = Await v143:unknown, continuation: block35
+    v7:unknown = Await v129:unknown, continuation: block35
 block34:
-    v63:unknown = Call v44:unknown, v15:unknown, v143:unknown
+    v63:unknown = Call v44:unknown, v15:unknown, v129:unknown
     v8:unknown = Await v63:unknown, continuation: block38
 block35:
     v65:unknown = GetCompletionFields v7:unknown

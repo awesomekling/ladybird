@@ -33,32 +33,32 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v6:number = ToNumeric v16:number
+    v6:number = ToNumeric v15:number
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v5:int32, block2:v7:number]
-    v15:number = Phi [block0:v4:int32, block2:v10:number]
+    v16:number = Phi [block0:v4:int32, block2:v10:number]
+    v15:number = Phi [block0:v5:int32, block2:v7:number]
     v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
-    v12:boolean = LessThan v16:number, 3
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     Jump block11
 block6:
     Jump block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block9
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block9:
     Jump block5
 block10:
-    Return v15:number
+    Return v16:number
 block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
@@ -72,31 +72,31 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v6:number = ToNumeric v16:number
+    v6:number = ToNumeric v15:number
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v5:int32, block2:v7:number]
-    v15:number = Phi [block0:v4:int32, block2:v10:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v4:int32, block2:v10:number]
+    v15:number = Phi [block0:v5:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     Jump block11
 block6:
     Jump block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block9
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block9:
     Jump block5
 block10:
-    Return v15:number
+    Return v16:number
 block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
@@ -110,31 +110,31 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v6:number = ToNumeric v16:number
+    v6:number = ToNumeric v15:number
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     Jump block11
 block6:
     Jump block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block9
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block9:
     Jump block5
 block10:
-    Return v15:number
+    Return v16:number
 block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
@@ -148,30 +148,30 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v7:number = Increment v16:number
+    v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     Jump block11
 block6:
     Jump block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block9
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block9:
     Jump block5
 block10:
-    Return v15:number
+    Return v16:number
 block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
@@ -185,26 +185,26 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v7:number = Increment v16:number
+    v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     Jump block11
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block5
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
-    Return v15:number
+    Return v16:number
 block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block2
@@ -218,27 +218,27 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v7:number = Increment v16:number
+    v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     v10:number = Move v9:number
     ContinuePendingUnwind block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block5
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
-    Return v15:number
+    Return v16:number
 
 === After DeadCodeElimination ===
 function():
@@ -247,26 +247,26 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v7:number = Increment v16:number
+    v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     ContinuePendingUnwind block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block5
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
-    Return v15:number
+    Return v16:number
 
 function():
 block0:
@@ -274,23 +274,23 @@ block0:
 block1:
     EnterUnwindContext block7
 block2:
-    v7:number = Increment v16:number
+    v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v7:number]
-    v15:number = Phi [block0:v3:int32, block2:v9:number]
-    v12:boolean = LessThan v16:number, 3
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
-    Return v15:number
+    Return v16:number
 block5:
     LeaveUnwindContext
-    v9:number = Add v15:number, 1
+    v9:number = Add v16:number, 1
     ContinuePendingUnwind block2
 block7:
-    v13:boolean = StrictlyEquals v16:number, 1
+    v13:boolean = StrictlyEquals v15:number, 1
     Branch v13:boolean, block8, block5
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
-    Return v15:number
+    Return v16:number

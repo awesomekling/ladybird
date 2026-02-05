@@ -7,12 +7,12 @@ block1:
     v12:unknown = GetGlobal sum
     Jump block9
 block2:
-    v25:unknown = Phi [block8:v26:undefined, block14:v14:unknown]
-    v24:unknown = Phi [block8:v11:undefined, block14:v19:unknown]
-    v23:unknown = Phi [block8:v27:undefined, block14:v16:unknown]
-    v22:unknown = Phi [block8:v28:undefined, block14:v15:unknown]
-    v21:unknown = Phi [block8:v29:undefined, block14:v17:unknown]
-    v20:unknown = Phi [block8:v30:undefined, block14:v18:unknown]
+    v25:unknown = Phi [block8:v26:undefined, block14:v16:unknown]
+    v24:unknown = Phi [block8:v27:undefined, block14:v18:unknown]
+    v23:unknown = Phi [block8:v28:undefined, block14:v17:unknown]
+    v22:unknown = Phi [block8:v29:undefined, block14:v15:unknown]
+    v21:unknown = Phi [block8:v30:undefined, block14:v14:unknown]
+    v20:unknown = Phi [block8:v11:undefined, block14:v19:unknown]
     v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
     v14:unknown = ExtractValue v13:unknown, 0
     v15:unknown = ExtractValue v13:unknown, 1

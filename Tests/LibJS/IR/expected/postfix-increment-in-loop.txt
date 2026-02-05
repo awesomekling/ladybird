@@ -31,14 +31,14 @@ block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     Jump block4
 block1:
-    v30:unknown = Phi [block5:v31:undefined, block9:v16:array]
-    v29:unknown = Phi [block5:v32:undefined, block9:v21:unknown]
-    v28:unknown = Phi [block5:v33:undefined, block9:v15:unknown]
-    v27:unknown = Phi [block5:v34:undefined, block9:v20:unknown]
-    v26:unknown = Phi [block5:v35:undefined, block9:v19:int32]
-    v25:unknown = Phi [block5:v36:undefined, block9:v17:number]
-    v24:number = Phi [block5:v12:int32, block9:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block5:v12:int32, block9:v18:number]
+    v29:unknown = Phi [block5:v31:undefined, block9:v20:unknown]
+    v28:unknown = Phi [block5:v32:undefined, block9:v19:int32]
+    v27:unknown = Phi [block5:v33:undefined, block9:v17:number]
+    v26:unknown = Phi [block5:v34:undefined, block9:v16:array]
+    v25:unknown = Phi [block5:v35:undefined, block9:v15:unknown]
+    v24:unknown = Phi [block5:v36:undefined, block9:v21:unknown]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v14:array.push
@@ -55,7 +55,7 @@ block0_split1:
     Jump block1
 block2_split2:
     v16:array = Move v14:array
-    v17:number = ToNumeric v24:number
+    v17:number = ToNumeric v30:number
     v18:number = Increment v17:number
     Jump block7
 block2_split3:
@@ -74,8 +74,8 @@ block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     Jump block4
 block1:
-    v24:number = Phi [block5:v12:int32, block9:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block5:v12:int32, block9:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v14:array.push
@@ -92,7 +92,7 @@ block0_split1:
     Jump block1
 block2_split2:
     v16:array = Move v14:array
-    v17:number = ToNumeric v24:number
+    v17:number = ToNumeric v30:number
     v18:number = Increment v17:number
     Jump block7
 block2_split3:
@@ -110,8 +110,8 @@ block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     Jump block4
 block1:
-    v24:number = Phi [block5:v11:int32, block9:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block5:v11:int32, block9:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
@@ -128,7 +128,7 @@ block0_split1:
     Jump block1
 block2_split2:
     v16:array = Move v13:array
-    v17:number = ToNumeric v24:number
+    v17:number = ToNumeric v30:number
     v18:number = Increment v17:number
     Jump block7
 block2_split3:
@@ -146,8 +146,8 @@ block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     Jump block4
 block1:
-    v24:number = Phi [block5:v11:int32, block9:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block5:v11:int32, block9:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
@@ -164,10 +164,10 @@ block0_split1:
     Jump block1
 block2_split2:
     v16:array = Move v13:array
-    v18:number = Increment v24:number
+    v18:number = Increment v30:number
     Jump block7
 block2_split3:
-    v20:unknown = GetByValue v9:array, v24:number
+    v20:unknown = GetByValue v9:array, v30:number
     Jump block8
 block2_split4:
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
@@ -181,8 +181,8 @@ block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     Jump block4
 block1:
-    v24:number = Phi [block5:v11:int32, block8:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block5:v11:int32, block8:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
@@ -199,10 +199,10 @@ block0_split1:
     Jump block1
 block2_split2:
     v16:array = Move v13:array
-    v18:number = Increment v24:number
+    v18:number = Increment v30:number
     Jump block7
 block2_split3:
-    v20:unknown = GetByValue v9:array, v24:number
+    v20:unknown = GetByValue v9:array, v30:number
     Jump block8
 block2_split4:
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
@@ -218,14 +218,14 @@ block0:
     v14:array = Move v13:array
     Jump block1
 block1:
-    v24:number = Phi [block0:v11:int32, block2:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
     v16:array = Move v13:array
-    v18:number = Increment v24:number
-    v20:unknown = GetByValue v9:array, v24:number
+    v18:number = Increment v30:number
+    v20:unknown = GetByValue v9:array, v30:number
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
     Jump block1
 block3:
@@ -238,13 +238,13 @@ block0:
     v13:array = NewArray
     Jump block1
 block1:
-    v24:number = Phi [block0:v11:int32, block2:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
-    v18:number = Increment v24:number
-    v20:unknown = GetByValue v9:array, v24:number
+    v18:number = Increment v30:number
+    v20:unknown = GetByValue v9:array, v30:number
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
     Jump block1
 block3:
@@ -256,13 +256,13 @@ block0:
     v13:array = NewArray
     Jump block1
 block1:
-    v24:number = Phi [block0:v11:int32, block2:v18:number]
-    v23:boolean = LessThan v24:number, 5
+    v30:number = Phi [block0:v11:int32, block2:v18:number]
+    v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
     v15:unknown = GetById v13:array.push
-    v18:number = Increment v24:number
-    v20:unknown = GetByValue v9:array, v24:number
+    v18:number = Increment v30:number
+    v20:unknown = GetByValue v9:array, v30:number
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
     Jump block1
 block3:

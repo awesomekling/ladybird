@@ -11,8 +11,8 @@ block2:
     Jump block12
 block3:
     v19:unknown = Phi [block11:v8:unknown, block14:v10:unknown]
-    v18:unknown = Phi [block11:v9:unknown, block14:v13:unknown]
-    v17:unknown = Phi [block11:v6:unknown, block14:v12:unknown]
+    v18:unknown = Phi [block11:v6:unknown, block14:v12:unknown]
+    v17:unknown = Phi [block11:v9:unknown, block14:v13:unknown]
     v14:unknown = GetGlobal x
     Jump block15
 block0_split0:

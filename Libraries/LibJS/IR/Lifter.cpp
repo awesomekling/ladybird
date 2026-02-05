@@ -1792,8 +1792,18 @@ void Lifter::eliminate_unreachable_blocks()
 // This implements the standard SSA phi placement algorithm from Cytron et al.
 void Lifter::place_phi_nodes()
 {
+    // NB: Sort written operands for deterministic phi ordering across runs.
+    //     HashTable iteration order depends on capacity, which varies between
+    //     allocators (e.g. system malloc vs ASAN), causing different phi
+    //     numbering in release vs sanitizer builds.
+    Vector<u32> sorted_operands;
+    sorted_operands.ensure_capacity(m_written_operands.size());
+    for (auto raw : m_written_operands)
+        sorted_operands.append(raw);
+    quick_sort(sorted_operands);
+
     // For each written operand, compute where phis are needed
-    for (auto raw : m_written_operands) {
+    for (auto raw : sorted_operands) {
         // Find all blocks that actually define this operand
         HashTable<BasicBlock*> def_blocks;
         for (auto& [block, defs] : m_block_actual_definitions) {
