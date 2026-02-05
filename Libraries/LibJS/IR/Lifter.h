@@ -12,6 +12,7 @@
 #include <AK/OwnPtr.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Export.h>
+#include <LibJS/IR/Builder.h>
 #include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Forward.h>
 
@@ -40,16 +41,17 @@ private:
 
     // Lifting helpers to reduce boilerplate for common instruction patterns
     template<typename BytecodeOp>
-    void lift_binary_op(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&, Value&));
+    void lift_binary_op(Bytecode::Instruction const&, BasicBlock&, Value& (Builder::*)(Value&, Value&));
 
     template<typename BytecodeOp>
-    void lift_unary_op_src(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&));
+    void lift_unary_op_src(Bytecode::Instruction const&, BasicBlock&, Value& (Builder::*)(Value&));
 
     template<typename BytecodeOp>
-    void lift_unary_op_value(Bytecode::Instruction const&, BasicBlock&, Value& (Function::*)(BasicBlock&, Value&));
+    void lift_unary_op_value(Bytecode::Instruction const&, BasicBlock&, Value& (Builder::*)(Value&));
 
     Bytecode::Executable const& m_executable;
     NonnullOwnPtr<Function> m_function;
+    Builder m_builder;
 
     // Maps bytecode basic block index -> IR basic block (first block for each bytecode block)
     HashMap<u32, BasicBlock*> m_block_map;

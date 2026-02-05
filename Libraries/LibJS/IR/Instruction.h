@@ -784,7 +784,6 @@ protected:
 private:
     friend class Builder;
     friend class CFG;
-    friend class Function;
     friend class JumpInstruction;
     friend class BranchInstruction;
 
@@ -886,7 +885,6 @@ private:
     // Classes that need internal access to phi operations
     friend class Builder;
     friend class Lifter;
-    friend class Function;
 };
 
 // Check if an opcode is a call-like opcode (has callee and this_value operands)
