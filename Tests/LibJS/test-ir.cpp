@@ -357,7 +357,7 @@ TEST_CASE(verifier_catches_missing_terminator)
     (void)function->build_load_undefined(entry);
 
     // Verifier should return false (invalid IR)
-    bool valid = JS::IR::Verifier::verify(*function, false);
+    bool valid = JS::IR::Verifier::verify(*function, JS::IR::VerifierMode::Full, false);
     EXPECT(!valid);
 }
 
@@ -380,7 +380,7 @@ TEST_CASE(verifier_catches_predecessor_mismatch)
     function->build_return(target, undef);
 
     // Verifier should return false (predecessor mismatch)
-    bool valid = JS::IR::Verifier::verify(*function, false);
+    bool valid = JS::IR::Verifier::verify(*function, JS::IR::VerifierMode::Full, false);
     EXPECT(!valid);
 }
 
@@ -406,7 +406,7 @@ TEST_CASE(verifier_catches_stale_use_list)
     EXPECT_EQ(param.uses().size(), 1u);
 
     // Verify the function is valid (uses point to present instructions)
-    bool valid = JS::IR::Verifier::verify(*function, false);
+    bool valid = JS::IR::Verifier::verify(*function, JS::IR::VerifierMode::Full, false);
     EXPECT(valid);
 }
 
