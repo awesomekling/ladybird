@@ -1662,7 +1662,9 @@ void Lifter::compute_block_predecessors()
     }
 
     // Add exception edges: if a block has throwing instructions and an exception
-    // handler/finalizer, add edges so phi placement accounts for exception flow
+    // handler/finalizer, add edges so phi placement accounts for exception flow.
+    // Blocks without throwing instructions have their exception handlers stripped
+    // since they can never actually reach the handler.
     for (auto& block : m_function->basic_blocks()) {
         bool has_throwing_instr = false;
         for (auto const& instr : block->instructions()) {
@@ -1685,6 +1687,9 @@ void Lifter::compute_block_predecessors()
                     CFG::add_predecessor(*finalizer, *block);
                 }
             }
+        } else {
+            block->set_exception_handler(nullptr);
+            block->set_finalizer(nullptr);
         }
     }
 }

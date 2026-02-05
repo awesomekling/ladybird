@@ -25,7 +25,7 @@ block1_split3:
     Jump block2
 block2_split4:
     End v4:unknown
-block3_split5: [finalizer: block1]
+block3_split5:
     v6:int32 = Move 1
     Jump block1
 
@@ -55,7 +55,7 @@ block1_split3:
     Jump block2
 block2_split4:
     End v4:unknown
-block3_split5: [finalizer: block1]
+block3_split5:
     Jump block1
 
 === After EmptyBlockElimination ===
