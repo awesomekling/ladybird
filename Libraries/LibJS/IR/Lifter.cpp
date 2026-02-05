@@ -1461,82 +1461,51 @@ void Lifter::connect_control_flow()
             break;
         }
 
-        // Optimized comparison jumps
-        case JumpGreaterThan: {
+        // Optimized comparison jumps — all share the same (lhs, rhs, true_target, false_target) layout.
+        case JumpGreaterThan:
+        case JumpGreaterThanEquals:
+        case JumpLessThan:
+        case JumpLessThanEquals:
+        case JumpLooselyEquals:
+        case JumpLooselyInequals:
+        case JumpStrictlyEquals:
+        case JumpStrictlyInequals: {
+            using BuildFn = Value& (Builder::*)(Value&, Value&);
+            BuildFn build_fn = nullptr;
+            switch (last_instruction->type()) {
+            case JumpGreaterThan:
+                build_fn = &Builder::build_greater_than;
+                break;
+            case JumpGreaterThanEquals:
+                build_fn = &Builder::build_greater_than_equals;
+                break;
+            case JumpLessThan:
+                build_fn = &Builder::build_less_than;
+                break;
+            case JumpLessThanEquals:
+                build_fn = &Builder::build_less_than_equals;
+                break;
+            case JumpLooselyEquals:
+                build_fn = &Builder::build_loosely_equals;
+                break;
+            case JumpLooselyInequals:
+                build_fn = &Builder::build_loosely_inequals;
+                break;
+            case JumpStrictlyEquals:
+                build_fn = &Builder::build_strictly_equals;
+                break;
+            case JumpStrictlyInequals:
+                build_fn = &Builder::build_strictly_inequals;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            // All comparison jump ops share the same memory layout, so we can
+            // use any of them to access lhs/rhs/true_target/false_target.
             auto const& op = static_cast<Bytecode::Op::JumpGreaterThan const&>(*last_instruction);
             auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
             auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_greater_than(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpGreaterThanEquals: {
-            auto const& op = static_cast<Bytecode::Op::JumpGreaterThanEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_greater_than_equals(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpLessThan: {
-            auto const& op = static_cast<Bytecode::Op::JumpLessThan const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_less_than(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpLessThanEquals: {
-            auto const& op = static_cast<Bytecode::Op::JumpLessThanEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_less_than_equals(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpLooselyEquals: {
-            auto const& op = static_cast<Bytecode::Op::JumpLooselyEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_loosely_equals(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpLooselyInequals: {
-            auto const& op = static_cast<Bytecode::Op::JumpLooselyInequals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_loosely_inequals(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpStrictlyEquals: {
-            auto const& op = static_cast<Bytecode::Op::JumpStrictlyEquals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_strictly_equals(lhs, rhs);
-            auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
-            auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
-            m_builder.build_branch(condition, *true_target, *false_target);
-            break;
-        }
-        case JumpStrictlyInequals: {
-            auto const& op = static_cast<Bytecode::Op::JumpStrictlyInequals const&>(*last_instruction);
-            auto& lhs = get_or_create_value_for_operand(op.lhs(), ir_block);
-            auto& rhs = get_or_create_value_for_operand(op.rhs(), ir_block);
-            auto& condition = m_builder.build_strictly_inequals(lhs, rhs);
+            auto& condition = (m_builder.*build_fn)(lhs, rhs);
             auto* true_target = m_block_map.get(address_to_block_index(op.true_target().address())).value();
             auto* false_target = m_block_map.get(address_to_block_index(op.false_target().address())).value();
             m_builder.build_branch(condition, *true_target, *false_target);
