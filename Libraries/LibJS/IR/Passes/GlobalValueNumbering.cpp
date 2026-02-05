@@ -38,24 +38,6 @@ struct AK::Traits<JS::IR::ExpressionKey> : public DefaultTraits<JS::IR::Expressi
 
 namespace JS::IR {
 
-static bool is_commutative(Opcode opcode)
-{
-    switch (opcode) {
-    case Opcode::Add:
-    case Opcode::Mul:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::LooselyEquals:
-    case Opcode::StrictlyEquals:
-    case Opcode::LooselyInequals:
-    case Opcode::StrictlyInequals:
-        return true;
-    default:
-        return false;
-    }
-}
-
 PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pass_manager)
 {
     if (!function.entry_block())
@@ -89,7 +71,7 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
             key.operand2 = operands.size() > 1 ? operands[1] : nullptr;
 
             // Normalize operand order for commutative operations
-            if (is_commutative(key.opcode) && key.operand1 && key.operand2) {
+            if (is_commutative_opcode(key.opcode) && key.operand1 && key.operand2) {
                 if (key.operand1->index() > key.operand2->index())
                     swap(key.operand1, key.operand2);
             }
