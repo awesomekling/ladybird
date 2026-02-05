@@ -914,9 +914,12 @@ Value& Function::build_new_class(BasicBlock& block, Value* super_class, Span<Val
     return result;
 }
 
-Value& Function::build_new_function(BasicBlock& block)
+Value& Function::build_new_function(BasicBlock& block, Value* home_object)
 {
     auto instruction = Instruction::create<Opcode::NewFunction>();
+
+    if (home_object)
+        instruction->add_operand(home_object);
 
     auto& result = create_value_for_instruction();
     result.set_type(Type::Function);

@@ -170,7 +170,7 @@ public:
     [[nodiscard]] Value& build_new_array_with_length(BasicBlock& block, Value& length);
     void build_array_append(BasicBlock& block, Value& array, Value& value, bool is_spread);
     [[nodiscard]] Value& build_new_class(BasicBlock& block, Value* super_class, Span<Value*> element_keys);
-    [[nodiscard]] Value& build_new_function(BasicBlock& block);
+    [[nodiscard]] Value& build_new_function(BasicBlock& block, Value* home_object);
     [[nodiscard]] Value& build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     void build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, CacheIndex shape_cache_index, PropertySlot property_slot);
     void build_cache_object_shape(BasicBlock& block, Value& object, CacheIndex cache_index);

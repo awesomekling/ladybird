@@ -1,0 +1,282 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal test
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal test
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal test
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal test
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v3:object
+    Jump block2
+block0_split1:
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v5:object = Move v3:object
+    v6:object = NewObject
+    Jump block3
+block0_split2:
+    v7:function = NewFunction v6:object
+    Jump block4
+block0_split3:
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v8:object = Move v6:object
+    v9:unknown = GetGlobal Object
+    Jump block5
+block0_split4:
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    Jump block6
+block0_split5:
+    v11:object = Move v8:object
+    v12:object = Move v5:object
+    v13:unknown = Call v10:unknown, v9:unknown, v11:object, v12:object
+    Jump block7
+block0_split6:
+    v14:unknown = GetById v8:object.getNumber
+    Jump block8
+block0_split7:
+    v15:object = Move v8:object
+    v16:unknown = Call v14:unknown, v15:object
+    Jump block9
+block0_split8:
+    Return v16:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v3:object
+    Jump block2
+block0_split1:
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v5:object = Move v3:object
+    v6:object = NewObject
+    Jump block3
+block0_split2:
+    v7:function = NewFunction v6:object
+    Jump block4
+block0_split3:
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v8:object = Move v6:object
+    v9:unknown = GetGlobal Object
+    Jump block5
+block0_split4:
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    Jump block6
+block0_split5:
+    v11:object = Move v6:object
+    v12:object = Move v3:object
+    v13:unknown = Call v10:unknown, v9:unknown, v6:object, v3:object
+    Jump block7
+block0_split6:
+    v14:unknown = GetById v6:object.getNumber
+    Jump block8
+block0_split7:
+    v15:object = Move v6:object
+    v16:unknown = Call v14:unknown, v6:object
+    Jump block9
+block0_split8:
+    Return v16:unknown
+
+=== After ConstantFolding ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v3:object
+    Jump block2
+block0_split1:
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v5:object = Move v3:object
+    v6:object = NewObject
+    Jump block3
+block0_split2:
+    v7:function = NewFunction v6:object
+    Jump block4
+block0_split3:
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v8:object = Move v6:object
+    v9:unknown = GetGlobal Object
+    Jump block5
+block0_split4:
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    Jump block6
+block0_split5:
+    v11:object = Move v6:object
+    v12:object = Move v3:object
+    v13:unknown = Call v10:unknown, v9:unknown, v6:object, v3:object
+    Jump block7
+block0_split6:
+    v14:unknown = GetById v6:object.getNumber
+    Jump block8
+block0_split7:
+    v15:object = Move v6:object
+    v16:unknown = Call v14:unknown, v6:object
+    Jump block9
+block0_split8:
+    Return v16:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v3:object = NewObject
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v3:object
+    Jump block2
+block0_split1:
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v6:object = NewObject
+    Jump block3
+block0_split2:
+    v7:function = NewFunction v6:object
+    Jump block4
+block0_split3:
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v9:unknown = GetGlobal Object
+    Jump block5
+block0_split4:
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    Jump block6
+block0_split5:
+    v13:unknown = Call v10:unknown, v9:unknown, v6:object, v3:object
+    Jump block7
+block0_split6:
+    v14:unknown = GetById v6:object.getNumber
+    Jump block8
+block0_split7:
+    v16:unknown = Call v14:unknown, v6:object
+    Jump block9
+block0_split8:
+    Return v16:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v3:object = NewObject
+    v4:function = NewFunction v3:object
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v6:object = NewObject
+    v7:function = NewFunction v6:object
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v9:unknown = GetGlobal Object
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    v13:unknown = Call v10:unknown, v9:unknown, v6:object, v3:object
+    v14:unknown = GetById v6:object.getNumber
+    v16:unknown = Call v14:unknown, v6:object
+    Return v16:unknown
+
+function():
+block0:
+    v3:object = NewObject
+    v4:function = NewFunction v3:object
+    InitObjectLiteralProperty v3:object, v4:function
+    CacheObjectShape v3:object
+    v6:object = NewObject
+    v7:function = NewFunction v6:object
+    InitObjectLiteralProperty v6:object, v7:function
+    CacheObjectShape v6:object
+    v9:unknown = GetGlobal Object
+    v10:unknown = GetById v9:unknown.setPrototypeOf
+    v13:unknown = Call v10:unknown, v9:unknown, v6:object, v3:object
+    v14:unknown = GetById v6:object.getNumber
+    v16:unknown = Call v14:unknown, v6:object
+    Return v16:unknown
+
+=== Before optimization ===
+function():
+block0:
+    ResolveThisBinding
+    Jump block1
+block0_split0:
+    v0:unknown = ResolveSuperBase
+    Jump block2
+block0_split1:
+    v2:unknown = GetByIdWithThis v0:unknown, v1:unknown
+    Jump block3
+block0_split2:
+    v3:unknown = Call v2:unknown, v1:unknown
+    Jump block4
+block0_split3:
+    v5:unknown = Add 20, v3:unknown
+    Jump block5
+block0_split4:
+    Return v5:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    ResolveThisBinding
+    v0:unknown = ResolveSuperBase
+    v2:unknown = GetByIdWithThis v0:unknown, v1:unknown
+    v3:unknown = Call v2:unknown, v1:unknown
+    v5:unknown = Add 20, v3:unknown
+    Return v5:unknown
+
+function():
+block0:
+    ResolveThisBinding
+    v0:unknown = ResolveSuperBase
+    v2:unknown = GetByIdWithThis v0:unknown, v1:unknown
+    v3:unknown = Call v2:unknown, v1:unknown
+    v5:unknown = Add 20, v3:unknown
+    Return v5:unknown
+
+=== Before optimization ===
+function():
+block0:
+    Return 10
+
+function():
+block0:
+    Return 10
+

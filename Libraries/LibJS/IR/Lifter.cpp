@@ -828,7 +828,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewFunction: {
         auto const& op = static_cast<Bytecode::Op::NewFunction const&>(instruction);
-        auto& result = m_function->build_new_function(block);
+        Value* home_object = nullptr;
+        if (op.home_object().has_value())
+            home_object = &get_or_create_value_for_operand(op.home_object().value(), block);
+        auto& result = m_function->build_new_function(block, home_object);
         result.defining_instruction()->set_function_node(&op.function_node());
         result.defining_instruction()->set_lhs_name(op.lhs_name());
         define_operand(op.dst(), result, block);

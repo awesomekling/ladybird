@@ -855,9 +855,13 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     }
 
     // NewFunction
-    case Opcode::NewFunction:
-        emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), OptionalNone {});
+    case Opcode::NewFunction: {
+        Optional<Bytecode::Operand> home_object;
+        if (!instruction.operands().is_empty())
+            home_object = operand(0);
+        emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), home_object);
         break;
+    }
 
     // NewRegExp
     case Opcode::NewRegExp:
