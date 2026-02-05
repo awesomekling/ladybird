@@ -1,0 +1,316 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal fetchValue
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal fetchValue
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal fetchValue
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    v4:unknown = GetGlobal Promise
+    Jump block11
+block2:
+    v9:unknown = Move v1:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    Jump block14
+block3:
+    v13:unknown = Move v12:unknown
+    v14:unknown = GetGlobal Promise
+    Jump block15
+block4:
+    Throw v12:unknown
+block5:
+    v19:unknown = Move v2:unknown
+    v20:unknown = GetCompletionFields v19:unknown
+    v21:unknown = ExtractValue v20:unknown, 0
+    v22:unknown = ExtractValue v20:unknown, 1
+    Jump block18
+block6:
+    v23:unknown = Move v22:unknown
+    v24:unknown = Add v13:unknown, v23:unknown
+    Jump block19
+block7:
+    Throw v22:unknown
+block8:
+    v25:unknown = Move v3:unknown
+    v26:unknown = GetCompletionFields v25:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    Jump block20
+block9:
+    v40:unknown = Yield v28:unknown
+block10:
+    Throw v28:unknown
+block1_split0:
+    v5:unknown = GetById v4:unknown.resolve
+    Jump block12
+block1_split1:
+    v7:unknown = Call v5:unknown, v4:unknown, 10
+    Jump block13
+block1_split2:
+    v8:unknown = Move v0:unknown
+    v1:unknown = Await v7:unknown, continuation: block2
+block2_split3:
+    v33:boolean = StrictlyEquals v11:unknown, 1
+    Branch v33:boolean, block3, block4
+block3_split4:
+    v15:unknown = GetById v14:unknown.resolve
+    Jump block16
+block3_split5:
+    v17:unknown = Call v15:unknown, v14:unknown, 20
+    Jump block17
+block3_split6:
+    v18:unknown = Move v1:unknown
+    v2:unknown = Await v17:unknown, continuation: block5
+block5_split7:
+    v36:boolean = StrictlyEquals v21:unknown, 1
+    Branch v36:boolean, block6, block7
+block6_split8:
+    v3:unknown = Await v24:unknown, continuation: block8
+block8_split9:
+    v39:boolean = StrictlyEquals v27:unknown, 1
+    Branch v39:boolean, block9, block10
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    v4:unknown = GetGlobal Promise
+    Jump block11
+block2:
+    v9:unknown = Move v1:unknown
+    v10:unknown = GetCompletionFields v1:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    Jump block14
+block3:
+    v13:unknown = Move v12:unknown
+    v14:unknown = GetGlobal Promise
+    Jump block15
+block4:
+    Throw v12:unknown
+block5:
+    v19:unknown = Move v2:unknown
+    v20:unknown = GetCompletionFields v2:unknown
+    v21:unknown = ExtractValue v20:unknown, 0
+    v22:unknown = ExtractValue v20:unknown, 1
+    Jump block18
+block6:
+    v23:unknown = Move v22:unknown
+    v24:unknown = Add v12:unknown, v22:unknown
+    Jump block19
+block7:
+    Throw v22:unknown
+block8:
+    v25:unknown = Move v3:unknown
+    v26:unknown = GetCompletionFields v3:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    Jump block20
+block9:
+    v40:unknown = Yield v28:unknown
+block10:
+    Throw v28:unknown
+block1_split0:
+    v5:unknown = GetById v4:unknown.resolve
+    Jump block12
+block1_split1:
+    v7:unknown = Call v5:unknown, v4:unknown, 10
+    Jump block13
+block1_split2:
+    v8:unknown = Move v0:unknown
+    v1:unknown = Await v7:unknown, continuation: block2
+block2_split3:
+    v33:boolean = StrictlyEquals v11:unknown, 1
+    Branch v33:boolean, block3, block4
+block3_split4:
+    v15:unknown = GetById v14:unknown.resolve
+    Jump block16
+block3_split5:
+    v17:unknown = Call v15:unknown, v14:unknown, 20
+    Jump block17
+block3_split6:
+    v18:unknown = Move v1:unknown
+    v2:unknown = Await v17:unknown, continuation: block5
+block5_split7:
+    v36:boolean = StrictlyEquals v21:unknown, 1
+    Branch v36:boolean, block6, block7
+block6_split8:
+    v3:unknown = Await v24:unknown, continuation: block8
+block8_split9:
+    v39:boolean = StrictlyEquals v27:unknown, 1
+    Branch v39:boolean, block9, block10
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    v4:unknown = GetGlobal Promise
+    Jump block11
+block2:
+    v10:unknown = GetCompletionFields v1:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    Jump block14
+block3:
+    v14:unknown = GetGlobal Promise
+    Jump block15
+block4:
+    Throw v12:unknown
+block5:
+    v20:unknown = GetCompletionFields v2:unknown
+    v21:unknown = ExtractValue v20:unknown, 0
+    v22:unknown = ExtractValue v20:unknown, 1
+    Jump block18
+block6:
+    v24:unknown = Add v12:unknown, v22:unknown
+    Jump block19
+block7:
+    Throw v22:unknown
+block8:
+    v26:unknown = GetCompletionFields v3:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    Jump block20
+block9:
+    v40:unknown = Yield v28:unknown
+block10:
+    Throw v28:unknown
+block1_split0:
+    v5:unknown = GetById v4:unknown.resolve
+    Jump block12
+block1_split1:
+    v7:unknown = Call v5:unknown, v4:unknown, 10
+    Jump block13
+block1_split2:
+    v1:unknown = Await v7:unknown, continuation: block2
+block2_split3:
+    v33:boolean = StrictlyEquals v11:unknown, 1
+    Branch v33:boolean, block3, block4
+block3_split4:
+    v15:unknown = GetById v14:unknown.resolve
+    Jump block16
+block3_split5:
+    v17:unknown = Call v15:unknown, v14:unknown, 20
+    Jump block17
+block3_split6:
+    v2:unknown = Await v17:unknown, continuation: block5
+block5_split7:
+    v36:boolean = StrictlyEquals v21:unknown, 1
+    Branch v36:boolean, block6, block7
+block6_split8:
+    v3:unknown = Await v24:unknown, continuation: block8
+block8_split9:
+    v39:boolean = StrictlyEquals v27:unknown, 1
+    Branch v39:boolean, block9, block10
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    v4:unknown = GetGlobal Promise
+    v5:unknown = GetById v4:unknown.resolve
+    v7:unknown = Call v5:unknown, v4:unknown, 10
+    v1:unknown = Await v7:unknown, continuation: block2
+block2:
+    v10:unknown = GetCompletionFields v1:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v33:boolean = StrictlyEquals v11:unknown, 1
+    Branch v33:boolean, block3, block4
+block3:
+    v14:unknown = GetGlobal Promise
+    v15:unknown = GetById v14:unknown.resolve
+    v17:unknown = Call v15:unknown, v14:unknown, 20
+    v2:unknown = Await v17:unknown, continuation: block5
+block4:
+    Throw v12:unknown
+block5:
+    v20:unknown = GetCompletionFields v2:unknown
+    v21:unknown = ExtractValue v20:unknown, 0
+    v22:unknown = ExtractValue v20:unknown, 1
+    v36:boolean = StrictlyEquals v21:unknown, 1
+    Branch v36:boolean, block6, block7
+block6:
+    v24:unknown = Add v12:unknown, v22:unknown
+    v3:unknown = Await v24:unknown, continuation: block8
+block7:
+    Throw v22:unknown
+block8:
+    v26:unknown = GetCompletionFields v3:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    v39:boolean = StrictlyEquals v27:unknown, 1
+    Branch v39:boolean, block9, block10
+block9:
+    v40:unknown = Yield v28:unknown
+block10:
+    Throw v28:unknown
+
+function():
+block0:
+    v0:unknown = Yield undefined, continuation: block1
+block1:
+    v4:unknown = GetGlobal Promise
+    v5:unknown = GetById v4:unknown.resolve
+    v7:unknown = Call v5:unknown, v4:unknown, 10
+    v1:unknown = Await v7:unknown, continuation: block2
+block2:
+    v10:unknown = GetCompletionFields v1:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v33:boolean = StrictlyEquals v11:unknown, 1
+    Branch v33:boolean, block3, block4
+block3:
+    v14:unknown = GetGlobal Promise
+    v15:unknown = GetById v14:unknown.resolve
+    v17:unknown = Call v15:unknown, v14:unknown, 20
+    v2:unknown = Await v17:unknown, continuation: block5
+block4:
+    Throw v12:unknown
+block5:
+    v20:unknown = GetCompletionFields v2:unknown
+    v21:unknown = ExtractValue v20:unknown, 0
+    v22:unknown = ExtractValue v20:unknown, 1
+    v36:boolean = StrictlyEquals v21:unknown, 1
+    Branch v36:boolean, block6, block7
+block6:
+    v24:unknown = Add v12:unknown, v22:unknown
+    v3:unknown = Await v24:unknown, continuation: block8
+block7:
+    Throw v22:unknown
+block8:
+    v26:unknown = GetCompletionFields v3:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    v39:boolean = StrictlyEquals v27:unknown, 1
+    Branch v39:boolean, block9, block10
+block9:
+    v40:unknown = Yield v28:unknown
+block10:
+    Throw v28:unknown
