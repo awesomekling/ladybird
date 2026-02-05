@@ -1814,6 +1814,33 @@ void Lifter::fill_phi_operands()
 
             if (phi_type != Type::Unknown)
                 instruction->result()->set_type(phi_type);
+
+            // Re-infer result types for users whose types depend on operand
+            // types, since the Phi's type may have widened after these
+            // instructions were created (e.g. int32 → number).
+            for (auto* user : instruction->result()->uses()) {
+                if (!user->result())
+                    continue;
+                switch (user->opcode()) {
+                case Opcode::ToNumeric: {
+                    auto input_type = user->operands()[0]->type();
+                    if (input_type == Type::Int32)
+                        user->result()->set_type(Type::Int32);
+                    else if (input_type == Type::Number)
+                        user->result()->set_type(Type::Number);
+                    else if (input_type == Type::BigInt)
+                        user->result()->set_type(Type::BigInt);
+                    else
+                        user->result()->set_type(Type::Unknown);
+                    break;
+                }
+                case Opcode::Move:
+                    user->result()->set_type(user->operands()[0]->type());
+                    break;
+                default:
+                    break;
+                }
+            }
         }
     }
 }

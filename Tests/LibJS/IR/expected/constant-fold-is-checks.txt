@@ -41,7 +41,7 @@ block1:
     Jump block2
 block2:
     v15:unknown = Phi [block0:v10:null, block1:v12:int32]
-    v13:int32 = Move v15:unknown
+    v13:unknown = Move v15:unknown
     Return v7:boolean
 
 === After CopyPropagation ===
@@ -63,7 +63,7 @@ block1:
     Jump block2
 block2:
     v15:unknown = Phi [block0:v8:null, block1:v11:int32]
-    v13:int32 = Move v15:unknown
+    v13:unknown = Move v15:unknown
     Return v6:boolean
 
 === After ConstantFolding ===
@@ -85,7 +85,7 @@ block1:
     Jump block2
 block2:
     v15:unknown = Phi [block0:v8:null, block1:v11:int32]
-    v13:int32 = Move v15:unknown
+    v13:unknown = Move v15:unknown
     Return true
 
 === After ConstantBranchFolding ===
@@ -107,7 +107,7 @@ block1:
     Jump block2
 block2:
     v15:unknown = Phi [block1:v11:int32]
-    v13:int32 = Move v15:unknown
+    v13:unknown = Move v15:unknown
     Return true
 
 === After DeadCodeElimination ===
