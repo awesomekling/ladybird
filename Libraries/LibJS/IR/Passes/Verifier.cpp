@@ -499,6 +499,37 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             }
 
+            // Check: ExtractValue source must be a tuple-producing instruction
+            // and the index must be within bounds
+            if (instr->opcode() == Opcode::ExtractValue) {
+                auto* source = instr->operands().is_empty() ? nullptr : instr->operands()[0];
+                if (source && source->is_instruction() && source->defining_instruction()) {
+                    auto source_opcode = source->defining_instruction()->opcode();
+                    Optional<u32> tuple_size;
+                    switch (source_opcode) {
+                    case Opcode::GetCalleeAndThisFromEnvironment:
+                    case Opcode::GetCompletionFields:
+                    case Opcode::IteratorNextUnpack:
+                        tuple_size = 2;
+                        break;
+                    case Opcode::GetIterator:
+                    case Opcode::GetObjectPropertyIterator:
+                        tuple_size = 3;
+                        break;
+                    default:
+                        report_error(ByteString::formatted(
+                            "ExtractValue in block{} extracts from non-tuple {} (v{})",
+                            block->index(), opcode_to_string(source_opcode), source->index()));
+                        break;
+                    }
+                    if (tuple_size.has_value() && instr->extract_index() >= *tuple_size) {
+                        report_error(ByteString::formatted(
+                            "ExtractValue in block{} index {} out of bounds (tuple size {})",
+                            block->index(), instr->extract_index(), *tuple_size));
+                    }
+                }
+            }
+
             // Operand validity and dominance checks only for reachable blocks.
             // Unreachable blocks may reference values from other unreachable code
             // or have stale references that DeadBlockElimination will clean up.
