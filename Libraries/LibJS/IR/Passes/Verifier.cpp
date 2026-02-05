@@ -6,6 +6,7 @@
 
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
@@ -54,18 +55,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         reachable.set(entry);
         while (!worklist.is_empty()) {
             auto* current = worklist.take_last();
-            auto enqueue = [&](BasicBlock* target) {
-                if (target && !reachable.contains(target)) {
-                    reachable.set(target);
-                    worklist.append(target);
+            CFG::for_each_successor(*current, [&](BasicBlock& target) {
+                if (!reachable.contains(&target)) {
+                    reachable.set(&target);
+                    worklist.append(&target);
                 }
-            };
-            if (auto* term = current->terminator()) {
-                enqueue(term->true_target());
-                enqueue(term->false_target());
-            }
-            enqueue(current->exception_handler());
-            enqueue(current->finalizer());
+            });
         }
     }
 
@@ -482,17 +477,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         for (auto const& block : function.basic_blocks()) {
             if (!reachable.contains(block.ptr()))
                 continue;
-            if (auto* term = block->terminator()) {
-                if (auto* target = term->true_target())
-                    computed_preds.get(target)->set(block.ptr());
-                if (auto* target = term->false_target())
-                    computed_preds.get(target)->set(block.ptr());
-            }
-            // EH/finalizer edges also create predecessor relationships
-            if (auto* handler = block->exception_handler())
-                computed_preds.get(handler)->set(block.ptr());
-            if (auto* finalizer = block->finalizer())
-                computed_preds.get(finalizer)->set(block.ptr());
+            CFG::for_each_successor(*block, [&](BasicBlock& target) {
+                computed_preds.get(&target)->set(block.ptr());
+            });
         }
 
         for (auto const& block : function.basic_blocks()) {

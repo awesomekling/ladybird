@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -21,10 +22,6 @@ Dominators::Dominators(Function const& function)
 void Dominators::compute_reverse_postorder()
 {
     // DFS to compute reverse postorder using explicit stack with frames.
-    //
-    // NB: This assumes CFG edges only come from terminators (via true_target/false_target)
-    // and block-level exception edges (exception_handler/finalizer). Non-terminator
-    // instructions must not create CFG edges. This invariant is verified by the IR verifier.
 
     if (!m_function.entry_block())
         return;
@@ -58,19 +55,12 @@ void Dominators::compute_reverse_postorder()
 
         // Push successors (will be processed before we return to this block)
         // Include both control flow successors and exception edges
-        auto push_if_new = [&](BasicBlock* target) {
-            if (target && !visited.contains(target)) {
-                visited.set(target);
-                stack.append({ target });
+        CFG::for_each_successor(*block, [&](BasicBlock& target) {
+            if (!visited.contains(&target)) {
+                visited.set(&target);
+                stack.append({ &target });
             }
-        };
-
-        if (auto* term = block->terminator()) {
-            push_if_new(term->false_target());
-            push_if_new(term->true_target());
-        }
-        push_if_new(block->exception_handler());
-        push_if_new(block->finalizer());
+        });
     }
 
     // Reverse to get reverse postorder

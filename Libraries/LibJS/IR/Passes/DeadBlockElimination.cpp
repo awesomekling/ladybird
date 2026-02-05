@@ -29,35 +29,12 @@ PreservedAnalyses DeadBlockElimination::run(Function& function, PassManager&)
     while (!worklist.is_empty()) {
         auto* block = worklist.dequeue();
 
-        // Check terminator targets
-        if (auto* term = block->terminator()) {
-            if (auto* target = term->true_target()) {
-                if (!reachable.contains(target)) {
-                    reachable.set(target);
-                    worklist.enqueue(target);
-                }
+        CFG::for_each_successor(*block, [&](BasicBlock& target) {
+            if (!reachable.contains(&target)) {
+                reachable.set(&target);
+                worklist.enqueue(&target);
             }
-            if (auto* target = term->false_target()) {
-                if (!reachable.contains(target)) {
-                    reachable.set(target);
-                    worklist.enqueue(target);
-                }
-            }
-        }
-
-        // Also check exception handlers
-        if (auto* handler = block->exception_handler()) {
-            if (!reachable.contains(handler)) {
-                reachable.set(handler);
-                worklist.enqueue(handler);
-            }
-        }
-        if (auto* finalizer = block->finalizer()) {
-            if (!reachable.contains(finalizer)) {
-                reachable.set(finalizer);
-                worklist.enqueue(finalizer);
-            }
-        }
+        });
     }
 
     // Collect dead blocks
