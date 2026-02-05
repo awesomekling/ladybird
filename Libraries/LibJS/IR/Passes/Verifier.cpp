@@ -250,7 +250,6 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     switch (opcode) {
                     // 0 operands: no value operands (all data is metadata or implicit)
                     case Opcode::Jump:
-                    case Opcode::LoadConstant:
                     case Opcode::LoadUndefined:
                     case Opcode::LoadNull:
                     case Opcode::NewObject:
@@ -273,6 +272,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::CreateRestParams:
                         return 0;
                     // 1 operand
+                    case Opcode::LoadConstant:
                     case Opcode::Return:
                     case Opcode::End:
                     case Opcode::Throw:
