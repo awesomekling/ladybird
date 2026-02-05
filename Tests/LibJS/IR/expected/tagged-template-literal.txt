@@ -1,0 +1,78 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal tag
+    Jump block1
+block0_split0:
+    v2:array = GetTemplateObject v1:string, v1:string
+    v4:unknown = Call v0:unknown, undefined, v2:array
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal tag
+    v2:array = GetTemplateObject v1:string, v1:string
+    v4:unknown = Call v0:unknown, undefined, v2:array
+    Return v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal tag
+    v2:array = GetTemplateObject v1:string, v1:string
+    v4:unknown = Call v0:unknown, undefined, v2:array
+    Return v4:unknown
+
+=== Before optimization ===
+function(v2:unknown):
+block0:
+    v1:int32 = Move 0
+    v3:unknown = GetByValue v2:unknown, 0
+    Jump block1
+block0_split0:
+    Return v3:unknown
+
+=== After DeadCodeElimination ===
+function(v2:unknown):
+block0:
+    v3:unknown = GetByValue v2:unknown, 0
+    Jump block1
+block0_split0:
+    Return v3:unknown
+
+=== After BlockMerging ===
+function(v2:unknown):
+block0:
+    v3:unknown = GetByValue v2:unknown, 0
+    Return v3:unknown
+
+function(v2:unknown):
+block0:
+    v3:unknown = GetByValue v2:unknown, 0
+    Return v3:unknown

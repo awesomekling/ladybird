@@ -388,6 +388,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::NewArray:
                     case Opcode::NewClass:
                     case Opcode::NewFunction:
+                    case Opcode::GetTemplateObject:
                         return {};
                     case Opcode::__Count:
                         VERIFY_NOT_REACHED();
@@ -469,6 +470,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     // Always Array
                     case Opcode::NewArray:
                     case Opcode::NewArrayWithLength:
+                    case Opcode::GetTemplateObject:
                     case Opcode::IteratorToArray:
                         return Type::Array;
                     // Always Function

@@ -916,6 +916,12 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::NewRegExp>(dst(), instruction.regex_source_index(), instruction.regex_flags_index(), instruction.regex_index());
         break;
 
+    case Opcode::GetTemplateObject: {
+        auto strings = collect_varargs(0);
+        emit_with_extra_operand_slots<Bytecode::Op::GetTemplateObject>(strings.size(), dst(), instruction.cache_index().value(), ReadonlySpan<Bytecode::Operand> { strings });
+        break;
+    }
+
     case Opcode::InitObjectLiteralProperty:
         emit<Bytecode::Op::InitObjectLiteralProperty>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.property_slot().value());
         break;

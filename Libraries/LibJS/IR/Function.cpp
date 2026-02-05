@@ -870,6 +870,21 @@ Value& Function::build_new_regexp(BasicBlock& block, Bytecode::StringTableIndex 
     return result;
 }
 
+Value& Function::build_get_template_object(BasicBlock& block, Span<Value*> strings, u32 cache_index)
+{
+    auto instruction = Instruction::create<Opcode::GetTemplateObject>();
+    for (auto* string : strings)
+        instruction->add_operand(string);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Array);
+    instruction->set_result(&result);
+    instruction->set_cache_index(CacheIndex { cache_index });
+
+    block.append(move(instruction));
+    return result;
+}
+
 void Function::build_init_object_literal_property(BasicBlock& block, Value& object, Bytecode::PropertyKeyTableIndex property, Value& value, CacheIndex shape_cache_index, PropertySlot property_slot)
 {
     auto instruction = Instruction::create<Opcode::InitObjectLiteralProperty>();

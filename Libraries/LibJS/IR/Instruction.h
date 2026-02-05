@@ -162,6 +162,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     NewClass,
     NewFunction,
     NewRegExp,
+    GetTemplateObject,
     InitObjectLiteralProperty,
     CacheObjectShape,
 
@@ -351,6 +352,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::NewClass)]                           = { "NewClass",                           false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::NewFunction)]                        = { "NewFunction",                        false, true,  true,  false, false, false, true  },
     [to_underlying(Opcode::NewRegExp)]                          = { "NewRegExp",                          false, true,  true,  false, false, false, true  },
+    [to_underlying(Opcode::GetTemplateObject)]                  = { "GetTemplateObject",                  false, false, true,  false, false, false, true  },
     [to_underlying(Opcode::InitObjectLiteralProperty)]          = { "InitObjectLiteralProperty",          false, false, true,  false, false, false, false },
     [to_underlying(Opcode::CacheObjectShape)]                   = { "CacheObjectShape",                   false, false, true,  false, false, false, false },
 

@@ -1229,7 +1229,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case GetTemplateObject: {
         auto const& op = static_cast<Bytecode::Op::GetTemplateObject const&>(instruction);
-        auto& result = m_function->create_register_value();
+        Vector<Value*> strings;
+        for (auto operand : op.strings())
+            strings.append(&get_or_create_value_for_operand(operand, block));
+        auto& result = m_function->build_get_template_object(block, strings.span(), op.cache_index());
         define_operand(op.dst(), result, block);
         break;
     }
