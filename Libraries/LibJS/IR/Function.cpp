@@ -88,51 +88,7 @@ Value& Function::build_binary_op(BasicBlock& block, Opcode opcode, Value& lhs, V
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
-
-    // Set known result types
-    switch (opcode) {
-    // Arithmetic operations always produce Number
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-        if (is_safe_numeric_type(lhs.type()) && is_safe_numeric_type(rhs.type()))
-            result.set_type(Type::Number);
-        break;
-    // Bitwise operations always produce Int32 (due to ToInt32 conversion in JS)
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-        result.set_type(Type::Int32);
-        break;
-    // Unsigned right shift produces Uint32 which may not fit in Int32
-    case Opcode::UnsignedRightShift:
-        result.set_type(Type::Number);
-        break;
-    // Comparison and membership operations always produce Boolean
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals:
-    case Opcode::LooselyEquals:
-    case Opcode::StrictlyEquals:
-    case Opcode::LooselyInequals:
-    case Opcode::StrictlyInequals:
-    case Opcode::In:
-    case Opcode::InstanceOf:
-        result.set_type(Type::Boolean);
-        break;
-    // String concatenation always produces String
-    case Opcode::ConcatString:
-        result.set_type(Type::String);
-        break;
-    default:
-        break;
-    }
+    instruction->recompute_result_type();
 
     block.append(move(instruction));
     return result;
@@ -144,46 +100,7 @@ Value& Function::build_unary_op(BasicBlock& block, Opcode opcode, Value& operand
 
     auto& result = create_value_for_instruction();
     instruction->set_result(&result);
-
-    // Set known result types for type conversion and check operations
-    switch (opcode) {
-    case Opcode::Move:
-        result.set_type(operand.type());
-        break;
-    case Opcode::BitwiseNot:
-    case Opcode::ToInt32:
-        result.set_type(Type::Int32);
-        break;
-    case Opcode::ToNumber:
-    case Opcode::UnaryPlus:
-    case Opcode::Negate:
-    case Opcode::Increment:
-    case Opcode::Decrement:
-    case Opcode::PostfixIncrement:
-    case Opcode::PostfixDecrement:
-        result.set_type(Type::Number);
-        break;
-    case Opcode::ToNumeric:
-        if (operand.type() == Type::Int32)
-            result.set_type(Type::Int32);
-        else if (operand.type() == Type::Number)
-            result.set_type(Type::Number);
-        else if (operand.type() == Type::BigInt)
-            result.set_type(Type::BigInt);
-        break;
-    case Opcode::ToBoolean:
-    case Opcode::Not:
-    case Opcode::IsUndefined:
-    case Opcode::IsNullish:
-        result.set_type(Type::Boolean);
-        break;
-    case Opcode::Typeof:
-    case Opcode::ToString:
-        result.set_type(Type::String);
-        break;
-    default:
-        break;
-    }
+    instruction->recompute_result_type();
 
     block.append(move(instruction));
     return result;

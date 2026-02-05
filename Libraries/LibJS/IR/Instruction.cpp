@@ -188,6 +188,107 @@ void Instruction::add_phi_operand(BasicBlock* predecessor, Value* value)
     add_operand(value);
 }
 
+void Instruction::recompute_result_type()
+{
+    if (!m_result)
+        return;
+
+    auto operand_type = [&](size_t i) -> Type {
+        if (i < m_operands.size() && m_operands[i])
+            return m_operands[i]->type();
+        return Type::Unknown;
+    };
+
+    switch (m_opcode) {
+    // Unary: inherit operand type
+    case Opcode::Move:
+        m_result->set_type(operand_type(0));
+        break;
+
+    // Always Int32
+    case Opcode::BitwiseNot:
+    case Opcode::ToInt32:
+        m_result->set_type(Type::Int32);
+        break;
+
+    // Always Number
+    case Opcode::ToNumber:
+    case Opcode::UnaryPlus:
+    case Opcode::Negate:
+    case Opcode::Increment:
+    case Opcode::Decrement:
+    case Opcode::PostfixIncrement:
+    case Opcode::PostfixDecrement:
+    case Opcode::UnsignedRightShift:
+        m_result->set_type(Type::Number);
+        break;
+
+    // Preserve numeric type
+    case Opcode::ToNumeric: {
+        auto t = operand_type(0);
+        if (t == Type::Int32)
+            m_result->set_type(Type::Int32);
+        else if (t == Type::Number)
+            m_result->set_type(Type::Number);
+        else if (t == Type::BigInt)
+            m_result->set_type(Type::BigInt);
+        else
+            m_result->set_type(Type::Unknown);
+        break;
+    }
+
+    // Always Boolean
+    case Opcode::ToBoolean:
+    case Opcode::Not:
+    case Opcode::IsUndefined:
+    case Opcode::IsNullish:
+    case Opcode::LessThan:
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThan:
+    case Opcode::GreaterThanEquals:
+    case Opcode::LooselyEquals:
+    case Opcode::StrictlyEquals:
+    case Opcode::LooselyInequals:
+    case Opcode::StrictlyInequals:
+    case Opcode::In:
+    case Opcode::InstanceOf:
+        m_result->set_type(Type::Boolean);
+        break;
+
+    // Always String
+    case Opcode::Typeof:
+    case Opcode::ToString:
+    case Opcode::ConcatString:
+        m_result->set_type(Type::String);
+        break;
+
+    // Bitwise binary ops always Int32
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+        m_result->set_type(Type::Int32);
+        break;
+
+    // Arithmetic binary ops produce Number when both operands are safe numeric
+    case Opcode::Add:
+    case Opcode::Sub:
+    case Opcode::Mul:
+    case Opcode::Div:
+    case Opcode::Mod:
+    case Opcode::Exp:
+        if (is_safe_numeric_type(operand_type(0)) && is_safe_numeric_type(operand_type(1)))
+            m_result->set_type(Type::Number);
+        else
+            m_result->set_type(Type::Unknown);
+        break;
+
+    default:
+        break;
+    }
+}
+
 bool Instruction::try_invert_comparison()
 {
     switch (m_opcode) {

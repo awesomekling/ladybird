@@ -600,6 +600,10 @@ public:
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
     bool may_throw() const { return may_throw_opcode(m_opcode); }
 
+    // Re-derive result type from current operand types.
+    // Called during initial construction and after Phi type resolution.
+    void recompute_result_type();
+
     // Type-aware effect analysis (examines operand types for safe primitives)
     bool has_side_effects() const;
     bool is_pure() const;
