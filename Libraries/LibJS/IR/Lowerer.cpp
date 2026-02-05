@@ -244,18 +244,49 @@ void Lowerer::compute_phi_coalescing()
                                 break;
                         }
                     }
+
+                    // Also check if phi_result is used as a phi input from the
+                    // same predecessor for a sibling phi in this block.
+                    // If the operand's defining instruction is in the incoming
+                    // block, it would overwrite phi_result's register before the
+                    // phi moves read it for the sibling phi.
+                    if (!has_interference && defining->parent_block() == incoming_block) {
+                        for (auto const& sibling : block->instructions()) {
+                            if (sibling->opcode() != Opcode::Phi)
+                                break;
+                            if (sibling.ptr() == instruction.ptr())
+                                continue;
+                            auto const& sibling_phi = static_cast<PhiInstruction const&>(*sibling);
+                            for (size_t k = 0; k < sibling_phi.incoming_count(); ++k) {
+                                if (sibling_phi.incoming_block(k) == incoming_block && sibling_phi.incoming_value(k) == phi_result) {
+                                    has_interference = true;
+                                    break;
+                                }
+                            }
+                            if (has_interference)
+                                break;
+                        }
+                    }
+
                     if (has_interference)
                         continue;
                 }
 
-                // Chain coalescing: if operand is a phi result, coalesce the two phis.
-                // This makes chains like: v14 = Phi[v0,v2], v15 = Phi[v14,v4], ...
+                // Chain coalescing: if operand is a phi result in a DIFFERENT block,
+                // coalesce the two phis. This makes chains like:
+                // block1: v14 = Phi[v0,v2]
+                // block2: v15 = Phi[v14,v4]
                 // all share the same register.
                 //
                 // However, we must not coalesce two phis that form a swap cycle.
                 // E.g. v1 = Phi[.., v2], v2 = Phi[.., v1] — if coalesced, both
                 // map to the same register and the swap becomes a no-op.
-                if (auto* def = operand->defining_instruction(); def && def->opcode() == Opcode::Phi) {
+                //
+                // We also must not chain-coalesce phi results in the SAME block.
+                // Two phi results in the same block both become live at the block
+                // entry and may hold different values, so they need separate
+                // registers unless the standard check proves otherwise.
+                if (auto* def = operand->defining_instruction(); def && def->opcode() == Opcode::Phi && def->parent_block() != block.ptr()) {
                     auto const& other_phi = static_cast<PhiInstruction const&>(*def);
                     bool forms_cycle = false;
                     for (size_t j = 0; j < other_phi.incoming_count(); ++j) {
@@ -268,8 +299,24 @@ void Lowerer::compute_phi_coalescing()
                         }
                     }
                     if (!forms_cycle) {
-                        coalesce(operand, phi_result);
-                        continue;
+                        // Verify the operand is dead after this phi edge.
+                        // If it has uses outside its defining block (other than
+                        // this phi), its live range extends through blocks where
+                        // phi_result may hold a different value due to back-edge
+                        // updates, making register sharing unsafe.
+                        bool has_external_use = false;
+                        for (auto* use : operand->uses()) {
+                            if (use == instruction.ptr())
+                                continue;
+                            if (use->parent_block() != def->parent_block()) {
+                                has_external_use = true;
+                                break;
+                            }
+                        }
+                        if (!has_external_use) {
+                            coalesce(operand, phi_result);
+                            continue;
+                        }
                     }
                 }
 
