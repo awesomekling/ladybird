@@ -259,7 +259,10 @@ static void run_pass(Pass& pass, Function& function, bool& changed)
             outln("=== After {} ===\n{}", pass.name(), dump(function));
     }
 
-    Verifier::verify(function, true);
+    if (!Verifier::verify(function, false)) {
+        warnln("IR Verifier failed after pass: {}", pass.name());
+        Verifier::verify(function, true);
+    }
 }
 
 void optimize(Function& function)

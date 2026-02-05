@@ -173,6 +173,14 @@ void Instruction::clear_operand_uses()
     }
 }
 
+void Instruction::remove_phi_operand(size_t index)
+{
+    if (m_operands[index])
+        m_operands[index]->remove_use(this);
+    m_phi_predecessors.remove(index);
+    m_operands.remove(index);
+}
+
 void Instruction::add_phi_operand(BasicBlock* predecessor, Value* value)
 {
     VERIFY(m_opcode == Opcode::Phi);
