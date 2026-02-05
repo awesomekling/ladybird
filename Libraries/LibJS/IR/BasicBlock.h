@@ -39,6 +39,7 @@ public:
     TerminatorInstruction* terminator() const;
 
     Vector<BasicBlock*> const& predecessors() const { return m_predecessors; }
+    void clear_predecessors() { m_predecessors.clear(); }
 
     // Exception handling (block-level)
     BasicBlock* exception_handler() const { return m_exception_handler; }

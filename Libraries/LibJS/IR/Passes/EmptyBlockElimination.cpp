@@ -82,16 +82,25 @@ bool EmptyBlockElimination::run(Function& function)
                 continue;
 
             // Entry block has no predecessors - only eliminate if target has no phis
-            // (otherwise the phi would have a dangling predecessor reference)
+            // and no other predecessors (otherwise it would become an entry block
+            // with predecessors, violating the SSA invariant).
             if (is_entry) {
-                bool target_has_phi = false;
+                bool can_eliminate = true;
                 for (auto& instr : target->instructions()) {
                     if (instr->opcode() == Opcode::Phi) {
-                        target_has_phi = true;
+                        can_eliminate = false;
                         break;
                     }
                 }
-                if (target_has_phi)
+                // If the target has predecessors other than us, eliminating would
+                // create an entry block with predecessors.
+                for (auto* pred : target->predecessors()) {
+                    if (pred != block.ptr()) {
+                        can_eliminate = false;
+                        break;
+                    }
+                }
+                if (!can_eliminate)
                     continue;
             } else if (predecessors.is_empty()) {
                 continue;

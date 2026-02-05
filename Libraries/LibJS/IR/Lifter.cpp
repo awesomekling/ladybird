@@ -1603,6 +1603,12 @@ void Lifter::connect_control_flow()
 
 void Lifter::compute_block_predecessors()
 {
+    // Clear existing predecessor data (this may be called more than once,
+    // e.g. after inserting a new entry block).
+    m_predecessors.clear();
+    for (auto& block : m_function->basic_blocks())
+        block->clear_predecessors();
+
     // Build predecessor lists by examining each block's terminator
     for (auto& block : m_function->basic_blocks()) {
         auto* term = block->terminator();
