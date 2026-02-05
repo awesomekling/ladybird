@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Function.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
@@ -33,6 +34,28 @@ public:
     void append(NonnullOwnPtr<Instruction> instruction);
     void prepend(NonnullOwnPtr<Instruction> instruction);
     Instruction* last_instruction() const;
+
+    // Remove a dead instruction at index, cleaning up its operand uses.
+    void remove_instruction(size_t index);
+
+    // Remove the terminator instruction, cleaning up its operand uses.
+    void remove_terminator();
+
+    // Extract ownership of instruction at index (for moving between blocks).
+    // Clears parent_block but does NOT clear operand uses.
+    [[nodiscard]] NonnullOwnPtr<Instruction> take_instruction(size_t index);
+
+    // Extract all instructions, returning ownership. Clears parent_block on each.
+    [[nodiscard]] Vector<NonnullOwnPtr<Instruction>> take_all_instructions();
+
+    // Insert a non-terminator instruction before the terminator.
+    void insert_before_terminator(NonnullOwnPtr<Instruction> instruction);
+
+    // Remove all matching instructions, cleaning up their operand uses.
+    void remove_instructions_if(AK::Function<bool(Instruction const&)> predicate);
+
+    // Remove all instructions, cleaning up their operand uses.
+    void clear_instructions();
 
     // Returns the terminator instruction if this block is terminated, nullptr otherwise.
     // Use this instead of last_instruction() when you need to access CFG targets.

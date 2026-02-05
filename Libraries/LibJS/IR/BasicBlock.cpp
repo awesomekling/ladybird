@@ -47,6 +47,61 @@ TerminatorInstruction* BasicBlock::terminator() const
     return static_cast<TerminatorInstruction*>(last);
 }
 
+void BasicBlock::remove_instruction(size_t index)
+{
+    VERIFY(index < m_instructions.size());
+    m_instructions[index]->clear_operand_uses();
+    m_instructions.remove(index);
+}
+
+void BasicBlock::remove_terminator()
+{
+    VERIFY(is_terminated());
+    m_instructions.last()->clear_operand_uses();
+    m_instructions.remove(m_instructions.size() - 1);
+}
+
+NonnullOwnPtr<Instruction> BasicBlock::take_instruction(size_t index)
+{
+    VERIFY(index < m_instructions.size());
+    auto instruction = m_instructions.take(index);
+    instruction->set_parent_block(nullptr);
+    return instruction;
+}
+
+Vector<NonnullOwnPtr<Instruction>> BasicBlock::take_all_instructions()
+{
+    for (auto& instruction : m_instructions)
+        instruction->set_parent_block(nullptr);
+    return move(m_instructions);
+}
+
+void BasicBlock::insert_before_terminator(NonnullOwnPtr<Instruction> instruction)
+{
+    VERIFY(is_terminated());
+    VERIFY(!instruction->is_terminator());
+    instruction->set_parent_block(this);
+    m_instructions.insert(m_instructions.size() - 1, move(instruction));
+}
+
+void BasicBlock::remove_instructions_if(AK::Function<bool(Instruction const&)> predicate)
+{
+    m_instructions.remove_all_matching([&](auto const& instruction) {
+        if (predicate(*instruction)) {
+            instruction->clear_operand_uses();
+            return true;
+        }
+        return false;
+    });
+}
+
+void BasicBlock::clear_instructions()
+{
+    for (auto& instruction : m_instructions)
+        instruction->clear_operand_uses();
+    m_instructions.clear();
+}
+
 void BasicBlock::add_predecessor(BasicBlock* block)
 {
     if (!m_predecessors.contains_slow(block))
