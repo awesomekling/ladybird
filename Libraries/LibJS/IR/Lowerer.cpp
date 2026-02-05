@@ -678,8 +678,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::DeleteById:
         emit<Bytecode::Op::DeleteById>(dst(), operand(0), instruction.property_key_index());
         break;
+    case Opcode::DeleteByIdWithThis:
+        // operands: base (0), this_value (1)
+        emit<Bytecode::Op::DeleteByIdWithThis>(dst(), operand(0), operand(1), instruction.property_key_index());
+        break;
     case Opcode::DeleteByValue:
         emit<Bytecode::Op::DeleteByValue>(dst(), operand(0), operand(1));
+        break;
+    case Opcode::DeleteByValueWithThis:
+        // operands: base (0), this_value (1), property (2)
+        emit<Bytecode::Op::DeleteByValueWithThis>(dst(), operand(0), operand(1), operand(2));
         break;
     case Opcode::HasProperty:
         emit<Bytecode::Op::In>(dst(), operand(1), operand(0));

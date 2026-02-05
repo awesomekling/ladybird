@@ -344,6 +344,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::InstanceOf:
                     case Opcode::GetByValue:
                     case Opcode::GetByIdWithThis:
+                    case Opcode::DeleteByIdWithThis:
                     case Opcode::DeleteByValue:
                     case Opcode::HasProperty:
                     case Opcode::PutById:
@@ -365,6 +366,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::PutByIdWithThis:
                     case Opcode::PutByValue:
                     case Opcode::GetByValueWithThis:
+                    case Opcode::DeleteByValueWithThis:
                     case Opcode::PutGetterByValue:
                     case Opcode::PutSetterByValue:
                     case Opcode::PutPrototypeByValue:
@@ -430,7 +432,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::InstanceOf:
                     case Opcode::HasProperty:
                     case Opcode::DeleteById:
+                    case Opcode::DeleteByIdWithThis:
                     case Opcode::DeleteByValue:
+                    case Opcode::DeleteByValueWithThis:
                     case Opcode::DeleteVariable:
                         return Type::Boolean;
                     // Always Int32

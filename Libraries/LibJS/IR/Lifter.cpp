@@ -574,15 +574,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case DeleteByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::DeleteByIdWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_function->build_delete_by_id(block, base, op.property());
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& result = m_function->build_delete_by_id_with_this(block, base, this_value, op.property());
         define_operand(op.dst(), result, block);
         break;
     }
     case DeleteByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::DeleteByValueWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
-        auto& result = m_function->build_delete_by_value(block, base, property);
+        auto& result = m_function->build_delete_by_value_with_this(block, base, this_value, property);
         define_operand(op.dst(), result, block);
         break;
     }

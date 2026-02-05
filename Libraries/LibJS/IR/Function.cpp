@@ -327,10 +327,40 @@ Value& Function::build_delete_by_id(BasicBlock& block, Value& base, Bytecode::Pr
     return result;
 }
 
+Value& Function::build_delete_by_id_with_this(BasicBlock& block, Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property)
+{
+    auto instruction = Instruction::create<Opcode::DeleteByIdWithThis>();
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
+    instruction->set_property_key_index(property);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Boolean);
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
 Value& Function::build_delete_by_value(BasicBlock& block, Value& base, Value& property)
 {
     auto instruction = Instruction::create<Opcode::DeleteByValue>();
     instruction->add_operand(&base);
+    instruction->add_operand(&property);
+
+    auto& result = create_value_for_instruction();
+    result.set_type(Type::Boolean);
+    instruction->set_result(&result);
+
+    block.append(move(instruction));
+    return result;
+}
+
+Value& Function::build_delete_by_value_with_this(BasicBlock& block, Value& base, Value& this_value, Value& property)
+{
+    auto instruction = Instruction::create<Opcode::DeleteByValueWithThis>();
+    instruction->add_operand(&base);
+    instruction->add_operand(&this_value);
     instruction->add_operand(&property);
 
     auto& result = create_value_for_instruction();

@@ -134,6 +134,7 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
     case Opcode::PutById:
     case Opcode::PutByIdWithThis:
     case Opcode::DeleteById:
+    case Opcode::DeleteByIdWithThis:
         for (auto* operand : instruction.operands())
             append_operand(operand);
         if (executable && instruction.property_key_index().is_valid()) {
