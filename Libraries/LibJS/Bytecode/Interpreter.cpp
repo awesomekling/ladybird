@@ -655,6 +655,25 @@ void Interpreter::catch_exception(Operand dst)
     reg(Register::exception()) = js_special_empty_value();
 }
 
+void Interpreter::restore_scheduled_jump()
+{
+    m_running_execution_context->scheduled_jump = running_execution_context().rare_data()->previously_scheduled_jumps.take_last();
+}
+
+void Interpreter::leave_finally()
+{
+    reg(Register::exception()) = js_special_empty_value();
+    m_running_execution_context->scheduled_jump = running_execution_context().rare_data()->previously_scheduled_jumps.take_last();
+}
+
+void Interpreter::enter_object_environment(Object& object)
+{
+    auto& old_environment = running_execution_context().lexical_environment;
+    running_execution_context().ensure_rare_data()->saved_lexical_environments.append(old_environment);
+    running_execution_context().lexical_environment = new_object_environment(object, true, old_environment);
+>>>>>>> 6c1cf1f1e2d (LibJS: Support exception handling without unwind contexts)
+}
+
 ThrowCompletionOr<GC::Ref<Bytecode::Executable>> compile(VM& vm, ASTNode const& node, FunctionKind kind, Utf16FlyString const& name)
 {
     auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, node, kind);
