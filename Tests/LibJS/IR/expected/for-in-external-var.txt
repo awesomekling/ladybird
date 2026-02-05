@@ -64,6 +64,36 @@ block2_split0:
 block4_split1:
     Jump block2
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v15:boolean = IsNullish v14:string
+    Branch v15:boolean, block3, block4
+block1:
+    Return v17:unknown
+block2:
+    v17:unknown = Phi [block5:v13:unknown, block7:v1:undefined]
+    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
+    v6:unknown = ExtractValue v5:unknown, 0
+    v7:unknown = ExtractValue v5:unknown, 1
+    Jump block6
+block3:
+    Return v1:undefined
+block4:
+    v9:unknown = GetObjectPropertyIterator v8:string
+    v10:unknown = ExtractValue v9:unknown, 0
+    v11:unknown = ExtractValue v9:unknown, 1
+    v12:unknown = ExtractValue v9:unknown, 2
+    Jump block7
+block5:
+    v13:unknown = Move v6:unknown
+    Jump block2
+block2_split0:
+    Branch v7:unknown, block1, block5
+block4_split1:
+    Jump block2
+
 === After CopyPropagation ===
 function():
 block0:
@@ -73,9 +103,7 @@ block0:
 block1:
     Return v17:unknown
 block2:
-    v18:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
     v17:unknown = Phi [block5:v6:unknown, block7:v0:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
@@ -105,9 +133,7 @@ block0:
 block1:
     Return v17:unknown
 block2:
-    v18:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
     v17:unknown = Phi [block5:v6:unknown, block7:v0:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
@@ -126,6 +152,60 @@ block5:
 block2_split0:
     Branch v7:unknown, block1, block5
 block4_split1:
+    Jump block2
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v15:boolean = IsNullish v14:string
+    Branch false, block3, block4
+block1:
+    Return v17:unknown
+block2:
+    v17:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
+    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
+    v6:unknown = ExtractValue v5:unknown, 0
+    v7:unknown = ExtractValue v5:unknown, 1
+    Jump block6
+block3:
+    Return undefined
+block4:
+    v9:unknown = GetObjectPropertyIterator v8:string
+    v10:unknown = ExtractValue v9:unknown, 0
+    v11:unknown = ExtractValue v9:unknown, 1
+    v12:unknown = ExtractValue v9:unknown, 2
+    Jump block2
+block5:
+    v13:unknown = Move v6:unknown
+    Jump block2
+block2_split0:
+    Branch v7:unknown, block1, block5
+
+=== After BlockMerging ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v15:boolean = IsNullish v14:string
+    Branch false, block3, block4
+block1:
+    Return v17:unknown
+block2:
+    v17:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
+    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
+    v6:unknown = ExtractValue v5:unknown, 0
+    v7:unknown = ExtractValue v5:unknown, 1
+    Branch v7:unknown, block1, block5
+block3:
+    Return undefined
+block4:
+    v9:unknown = GetObjectPropertyIterator v8:string
+    v10:unknown = ExtractValue v9:unknown, 0
+    v11:unknown = ExtractValue v9:unknown, 1
+    v12:unknown = ExtractValue v9:unknown, 2
+    Jump block2
+block5:
+    v13:unknown = Move v6:unknown
     Jump block2
 
 === After ConstantBranchFolding ===
@@ -137,13 +217,11 @@ block0:
 block1:
     Return v17:unknown
 block2:
-    v18:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
-    v17:unknown = Phi [block5:v6:unknown, block7:v0:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
+    v17:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
-    Jump block6
+    Branch v7:unknown, block1, block5
 block3:
     Return undefined
 block4:
@@ -151,13 +229,9 @@ block4:
     v10:unknown = ExtractValue v9:unknown, 0
     v11:unknown = ExtractValue v9:unknown, 1
     v12:unknown = ExtractValue v9:unknown, 2
-    Jump block7
+    Jump block2
 block5:
     v13:unknown = Move v6:unknown
-    Jump block2
-block2_split0:
-    Branch v7:unknown, block1, block5
-block4_split1:
     Jump block2
 
 === After DeadCodeElimination ===
@@ -167,11 +241,11 @@ block0:
 block1:
     Return v17:unknown
 block2:
-    v17:unknown = Phi [block5:v6:unknown, block7:v0:undefined]
+    v17:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
-    Jump block6
+    Branch v7:unknown, block1, block5
 block3:
     Return undefined
 block4:
@@ -179,12 +253,8 @@ block4:
     v10:unknown = ExtractValue v9:unknown, 0
     v11:unknown = ExtractValue v9:unknown, 1
     v12:unknown = ExtractValue v9:unknown, 2
-    Jump block7
-block5:
     Jump block2
-block2_split0:
-    Branch v7:unknown, block1, block5
-block4_split1:
+block5:
     Jump block2
 
 === After DeadBlockElimination ===
@@ -194,22 +264,18 @@ block0:
 block1:
     Return v17:unknown
 block2:
-    v17:unknown = Phi [block5:v6:unknown, block7:v0:undefined]
+    v17:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
-    Jump block6
+    Branch v7:unknown, block1, block5
 block4:
     v9:unknown = GetObjectPropertyIterator v8:string
     v10:unknown = ExtractValue v9:unknown, 0
     v11:unknown = ExtractValue v9:unknown, 1
     v12:unknown = ExtractValue v9:unknown, 2
-    Jump block7
-block5:
     Jump block2
-block2_split0:
-    Branch v7:unknown, block1, block5
-block4_split1:
+block5:
     Jump block2
 
 === After EmptyBlockElimination ===
@@ -217,26 +283,7 @@ function():
 block1:
     Return v17:unknown
 block2:
-    v17:unknown = Phi [block6:v6:unknown, block4:v0:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Jump block6
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
-    Jump block2
-block2_split0:
-    Branch v7:unknown, block1, block2
-
-=== After BlockMerging ===
-function():
-block1:
-    Return v17:unknown
-block2:
-    v17:unknown = Phi [block2:v6:unknown, block4:v0:undefined]
+    v17:unknown = Phi [block4:v0:undefined, block2:v6:unknown]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1
@@ -252,7 +299,7 @@ function():
 block1:
     Return v17:unknown
 block2:
-    v17:unknown = Phi [block2:v6:unknown, block4:v0:undefined]
+    v17:unknown = Phi [block4:v0:undefined, block2:v6:unknown]
     v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
     v6:unknown = ExtractValue v5:unknown, 0
     v7:unknown = ExtractValue v5:unknown, 1

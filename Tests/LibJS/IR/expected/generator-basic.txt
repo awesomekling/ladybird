@@ -158,17 +158,19 @@ block7_split1:
     v23:boolean = StrictlyEquals v9:unknown, 1
     Branch v23:boolean, block8, block9
 
-=== After DeadCodeElimination ===
+=== After BlockMerging ===
 function():
 block0:
     v0:unknown = Yield undefined, continuation: block1
 block1:
     v1:unknown = Yield 1, continuation: block2
 block2:
+    v3:unknown = Move v1:unknown
     v4:unknown = GetCompletionFields v1:unknown
     v5:unknown = ExtractValue v4:unknown, 0
     v6:unknown = ExtractValue v4:unknown, 1
-    Jump block12
+    v16:boolean = StrictlyEquals v5:unknown, 1
+    Branch v16:boolean, block3, block4
 block3:
     v2:unknown = Yield 2, continuation: block7
 block4:
@@ -179,10 +181,12 @@ block5:
 block6:
     v21:unknown = Yield v6:unknown
 block7:
+    v7:unknown = Move v2:unknown
     v8:unknown = GetCompletionFields v2:unknown
     v9:unknown = ExtractValue v8:unknown, 0
     v10:unknown = ExtractValue v8:unknown, 1
-    Jump block13
+    v23:boolean = StrictlyEquals v9:unknown, 1
+    Branch v23:boolean, block8, block9
 block8:
     v25:unknown = Yield 3
 block9:
@@ -192,14 +196,8 @@ block10:
     Throw v10:unknown
 block11:
     v28:unknown = Yield v10:unknown
-block2_split0:
-    v16:boolean = StrictlyEquals v5:unknown, 1
-    Branch v16:boolean, block3, block4
-block7_split1:
-    v23:boolean = StrictlyEquals v9:unknown, 1
-    Branch v23:boolean, block8, block9
 
-=== After BlockMerging ===
+=== After DeadCodeElimination ===
 function():
 block0:
     v0:unknown = Yield undefined, continuation: block1

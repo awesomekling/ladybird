@@ -76,17 +76,55 @@ block0_split9:
 block0_split10:
     Return v29:number
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v10:int32 = Move 5
+    v12:int32 = Move 3
+    v13:int32 = BitwiseOr v10:int32, v12:int32
+    Jump block1
+block0_split0:
+    v14:int32 = Move v13:int32
+    v15:int32 = BitwiseAnd v10:int32, v12:int32
+    Jump block2
+block0_split1:
+    v16:int32 = Move v15:int32
+    v17:int32 = BitwiseXor v10:int32, v12:int32
+    Jump block3
+block0_split2:
+    v18:int32 = Move v17:int32
+    v19:int32 = BitwiseNot v10:int32
+    Jump block4
+block0_split3:
+    v20:int32 = Move v19:int32
+    v21:int32 = LeftShift v10:int32, v12:int32
+    Jump block5
+block0_split4:
+    v22:int32 = Move v21:int32
+    v23:int32 = RightShift v10:int32, v12:int32
+    Jump block6
+block0_split5:
+    v24:int32 = Move v23:int32
+    v25:number = Add v14:int32, v16:int32
+    Jump block7
+block0_split6:
+    v26:number = Add v25:number, v18:int32
+    Jump block8
+block0_split7:
+    v27:number = Add v26:number, v20:int32
+    Jump block9
+block0_split8:
+    v28:number = Add v27:number, v22:int32
+    Jump block10
+block0_split9:
+    v29:number = Add v28:number, v24:int32
+    Jump block11
+block0_split10:
+    Return v29:number
+
 === After CopyPropagation ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v5:undefined = Move undefined
-    v6:undefined = Move undefined
-    v7:undefined = Move undefined
-    v8:undefined = Move undefined
     v10:int32 = Move 5
     v12:int32 = Move 3
     v13:int32 = BitwiseOr 5, 3
@@ -133,14 +171,6 @@ block0_split10:
 === After ConstantFolding ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v5:undefined = Move undefined
-    v6:undefined = Move undefined
-    v7:undefined = Move undefined
-    v8:undefined = Move undefined
     v10:int32 = Move 5
     v12:int32 = Move 3
     v13:int32 = BitwiseOr 5, 3
@@ -187,14 +217,6 @@ block0_split10:
 === After AlgebraicSimplification ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v5:undefined = Move undefined
-    v6:undefined = Move undefined
-    v7:undefined = Move undefined
-    v8:undefined = Move undefined
     v10:int32 = Move 5
     v12:int32 = Move 3
     v13:int32 = BitwiseOr 5, 3
@@ -237,40 +259,35 @@ block0_split9:
 block0_split10:
     Return v28:number
 
-=== After DeadCodeElimination ===
-function():
-block0:
-    Jump block1
-block0_split0:
-    Jump block2
-block0_split1:
-    Jump block3
-block0_split2:
-    Jump block4
-block0_split3:
-    Jump block5
-block0_split4:
-    Jump block6
-block0_split5:
-    v25:number = Add 7, 1
-    Jump block7
-block0_split6:
-    v26:number = Add v25:number, 6
-    Jump block8
-block0_split7:
-    v27:number = Add v26:number, -6
-    Jump block9
-block0_split8:
-    v28:number = Add v27:number, 40
-    Jump block10
-block0_split9:
-    Jump block11
-block0_split10:
-    Return v28:number
-
 === After EmptyBlockElimination ===
 function():
+block0:
+    v10:int32 = Move 5
+    v12:int32 = Move 3
+    v13:int32 = BitwiseOr 5, 3
+    Jump block1
+block0_split0:
+    v14:int32 = Move 7
+    v15:int32 = BitwiseAnd 5, 3
+    Jump block2
+block0_split1:
+    v16:int32 = Move 1
+    v17:int32 = BitwiseXor 5, 3
+    Jump block3
+block0_split2:
+    v18:int32 = Move 6
+    v19:int32 = BitwiseNot 5
+    Jump block4
+block0_split3:
+    v20:int32 = Move -6
+    v21:int32 = LeftShift 5, 3
+    Jump block5
+block0_split4:
+    v22:int32 = Move 40
+    v23:int32 = RightShift 5, 3
+    Jump block6
 block0_split5:
+    v24:int32 = Move 0
     v25:number = Add 7, 1
     Jump block7
 block0_split6:
@@ -287,7 +304,30 @@ block0_split10:
 
 === After BlockMerging ===
 function():
-block0_split5:
+block0:
+    v10:int32 = Move 5
+    v12:int32 = Move 3
+    v13:int32 = BitwiseOr 5, 3
+    v14:int32 = Move 7
+    v15:int32 = BitwiseAnd 5, 3
+    v16:int32 = Move 1
+    v17:int32 = BitwiseXor 5, 3
+    v18:int32 = Move 6
+    v19:int32 = BitwiseNot 5
+    v20:int32 = Move -6
+    v21:int32 = LeftShift 5, 3
+    v22:int32 = Move 40
+    v23:int32 = RightShift 5, 3
+    v24:int32 = Move 0
+    v25:number = Add 7, 1
+    v26:number = Add v25:number, 6
+    v27:number = Add v26:number, -6
+    v28:number = Add v27:number, 40
+    Return v28:number
+
+=== After DeadCodeElimination ===
+function():
+block0:
     v25:number = Add 7, 1
     v26:number = Add v25:number, 6
     v27:number = Add v26:number, -6
@@ -296,7 +336,7 @@ block0_split5:
 
 === After ConstantFolding ===
 function():
-block0_split5:
+block0:
     v25:number = Add 7, 1
     v26:number = Add 8, 6
     v27:number = Add v26:number, -6
@@ -305,7 +345,7 @@ block0_split5:
 
 === After DeadCodeElimination ===
 function():
-block0_split5:
+block0:
     v26:number = Add 8, 6
     v27:number = Add v26:number, -6
     v28:number = Add v27:number, 40
@@ -313,7 +353,7 @@ block0_split5:
 
 === After ConstantFolding ===
 function():
-block0_split5:
+block0:
     v26:number = Add 8, 6
     v27:number = Add 14, -6
     v28:number = Add v27:number, 40
@@ -321,35 +361,35 @@ block0_split5:
 
 === After DeadCodeElimination ===
 function():
-block0_split5:
+block0:
     v27:number = Add 14, -6
     v28:number = Add v27:number, 40
     Return v28:number
 
 === After ConstantFolding ===
 function():
-block0_split5:
+block0:
     v27:number = Add 14, -6
     v28:number = Add 8, 40
     Return v28:number
 
 === After DeadCodeElimination ===
 function():
-block0_split5:
+block0:
     v28:number = Add 8, 40
     Return v28:number
 
 === After ConstantFolding ===
 function():
-block0_split5:
+block0:
     v28:number = Add 8, 40
     Return 48
 
 === After DeadCodeElimination ===
 function():
-block0_split5:
+block0:
     Return 48
 
 function():
-block0_split5:
+block0:
     Return 48

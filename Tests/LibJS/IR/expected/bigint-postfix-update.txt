@@ -35,11 +35,20 @@ block0_split0:
     v7:bigint = Move v5:bigint
     Return v7:bigint
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v4:bigint = Move v3:bigint
+    v5:bigint = ToNumeric v4:bigint
+    v6:number = Increment v5:bigint
+    Jump block1
+block0_split0:
+    v7:bigint = Move v5:bigint
+    Return v7:bigint
+
 === After CopyPropagation ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v4:bigint = Move v3:bigint
     v5:bigint = ToNumeric v3:bigint
     v6:number = Increment v5:bigint
@@ -51,8 +60,6 @@ block0_split0:
 === After ConstantFolding ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v4:bigint = Move v3:bigint
     v5:bigint = ToNumeric v3:bigint
     v6:number = Increment v8:bigint
@@ -61,16 +68,16 @@ block0_split0:
     v7:bigint = Move v8:bigint
     Return v8:bigint
 
-=== After DeadCodeElimination ===
+=== After BlockMerging ===
 function():
 block0:
+    v4:bigint = Move v3:bigint
     v5:bigint = ToNumeric v3:bigint
     v6:number = Increment v8:bigint
-    Jump block1
-block0_split0:
+    v7:bigint = Move v8:bigint
     Return v8:bigint
 
-=== After BlockMerging ===
+=== After DeadCodeElimination ===
 function():
 block0:
     v5:bigint = ToNumeric v3:bigint

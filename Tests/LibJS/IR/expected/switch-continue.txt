@@ -51,10 +51,36 @@ block7:
 block8:
     Jump block2
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v3:int32 = Move 0
+    Jump block3
+block1:
+    Jump block5
+block2:
+    v4:number = ToNumeric v10:number
+    v5:number = Increment v4:number
+    Jump block3
+block3:
+    v10:number = Phi [block0:v3:int32, block2:v5:number]
+    v7:boolean = LessThan v10:number, 3
+    Branch v7:boolean, block1, block4
+block4:
+    Return v10:number
+block5:
+    v8:boolean = StrictlyEquals 0, v10:number
+    Branch v8:boolean, block7, block6
+block6:
+    Jump block8
+block7:
+    Jump block2
+block8:
+    Jump block2
+
 === After CopyPropagation ===
 function():
 block0:
-    v1:undefined = Move undefined
     v3:int32 = Move 0
     Jump block3
 block1:
@@ -65,7 +91,6 @@ block2:
     Jump block3
 block3:
     v10:number = Phi [block0:v2:int32, block2:v5:number]
-    v9:unknown = Phi [block0:v11:undefined, block2:v4:number]
     v7:boolean = LessThan v10:number, 3
     Branch v7:boolean, block1, block4
 block4:
@@ -83,34 +108,7 @@ block8:
 === After AlgebraicSimplification ===
 function():
 block0:
-    v1:undefined = Move undefined
     v3:int32 = Move 0
-    Jump block3
-block1:
-    Jump block5
-block2:
-    v5:number = Increment v10:number
-    Jump block3
-block3:
-    v10:number = Phi [block0:v2:int32, block2:v5:number]
-    v9:unknown = Phi [block0:v11:undefined, block2:v10:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
-block4:
-    Return v10:number
-block5:
-    v8:boolean = StrictlyEquals 0, v10:number
-    Branch v8:boolean, block7, block6
-block6:
-    Jump block8
-block7:
-    Jump block2
-block8:
-    Jump block2
-
-=== After DeadCodeElimination ===
-function():
-block0:
     Jump block3
 block1:
     Jump block5
@@ -136,6 +134,7 @@ block8:
 === After EmptyBlockElimination ===
 function():
 block0:
+    v3:int32 = Move 0
     Jump block3
 block2:
     v5:number = Increment v10:number
@@ -153,6 +152,7 @@ block5:
 === After ConstantBranchFolding ===
 function():
 block0:
+    v3:int32 = Move 0
     Jump block3
 block2:
     v5:number = Increment v10:number

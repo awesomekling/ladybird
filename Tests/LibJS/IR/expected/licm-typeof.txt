@@ -46,10 +46,9 @@ block3:
 block4:
     Return v13:unknown
 
-=== After CopyPropagation ===
+=== After DeadCodeElimination ===
 function(v5:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v4:int32 = Move 0
     Jump block3
@@ -62,23 +61,21 @@ block2:
     v9:number = Increment v8:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v8:number]
+    v14:number = Phi [block0:v4:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v2:undefined, block2:v7:string]
     v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
 
-=== After LoopInvariantCodeMotion ===
+=== After CopyPropagation ===
 function(v5:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v4:int32 = Move 0
-    v6:string = Typeof v5:unknown
     Jump block3
 block1:
+    v6:string = Typeof v5:unknown
     v7:string = Move v6:string
     Jump block2
 block2:
@@ -88,7 +85,6 @@ block2:
 block3:
     v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v8:number]
     v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
@@ -97,7 +93,27 @@ block4:
 === After AlgebraicSimplification ===
 function(v5:unknown):
 block0:
-    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    Jump block3
+block1:
+    v6:string = Typeof v5:unknown
+    v7:string = Move v6:string
+    Jump block2
+block2:
+    v9:number = Increment v14:number
+    Jump block3
+block3:
+    v14:number = Phi [block0:v3:int32, block2:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v11:boolean = LessThan v14:number, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After LoopInvariantCodeMotion ===
+function(v5:unknown):
+block0:
     v2:undefined = Move undefined
     v4:int32 = Move 0
     v6:string = Typeof v5:unknown
@@ -111,7 +127,25 @@ block2:
 block3:
     v14:number = Phi [block0:v3:int32, block2:v9:number]
     v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v12:unknown = Phi [block0:v15:undefined, block2:v14:number]
+    v11:boolean = LessThan v14:number, 10
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:unknown
+
+=== After BlockMerging ===
+function(v5:unknown):
+block0:
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v6:string = Typeof v5:unknown
+    Jump block3
+block1:
+    v7:string = Move v6:string
+    v9:number = Increment v14:number
+    Jump block3
+block3:
+    v14:number = Phi [block0:v3:int32, block1:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block1:v6:string]
     v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
@@ -123,45 +157,27 @@ block0:
     v6:string = Typeof v5:unknown
     Jump block3
 block1:
-    Jump block2
-block2:
     v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v14:number = Phi [block0:v3:int32, block1:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block1:v6:string]
     v11:boolean = LessThan v14:number, 10
     Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown
 
-=== After EmptyBlockElimination ===
 function(v5:unknown):
 block0:
     v6:string = Typeof v5:unknown
     Jump block3
-block2:
+block1:
     v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
+    v14:number = Phi [block0:v3:int32, block1:v9:number]
+    v13:unknown = Phi [block0:v0:undefined, block1:v6:string]
     v11:boolean = LessThan v14:number, 10
-    Branch v11:boolean, block2, block4
-block4:
-    Return v13:unknown
-
-function(v5:unknown):
-block0:
-    v6:string = Typeof v5:unknown
-    Jump block3
-block2:
-    v9:number = Increment v14:number
-    Jump block3
-block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:unknown = Phi [block0:v0:undefined, block2:v6:string]
-    v11:boolean = LessThan v14:number, 10
-    Branch v11:boolean, block2, block4
+    Branch v11:boolean, block1, block4
 block4:
     Return v13:unknown

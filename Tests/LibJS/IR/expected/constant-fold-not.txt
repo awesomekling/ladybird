@@ -38,13 +38,21 @@ block0:
     v13:boolean = StrictlyInequals v10:boolean, v12:boolean
     Return v13:boolean
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v6:int32 = Move 0
+    v8:int32 = Move 1
+    v9:boolean = Not v6:int32
+    v10:boolean = Move v9:boolean
+    v11:boolean = Not v8:int32
+    v12:boolean = Move v11:boolean
+    v13:boolean = StrictlyInequals v10:boolean, v12:boolean
+    Return v13:boolean
+
 === After CopyPropagation ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
     v6:int32 = Move 0
     v8:int32 = Move 1
     v9:boolean = Not 0
@@ -57,10 +65,6 @@ block0:
 === After ConstantFolding ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
     v6:int32 = Move 0
     v8:int32 = Move 1
     v9:boolean = Not 0

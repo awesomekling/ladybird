@@ -34,11 +34,19 @@ block0_split0:
     v6:int32 = Move v5:int32
     Return v6:int32
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    v4:number = Move 100000000000000000000
+    v5:int32 = ToInt32 v4:number
+    Jump block1
+block0_split0:
+    v6:int32 = Move v5:int32
+    Return v6:int32
+
 === After CopyPropagation ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v4:number = Move 100000000000000000000
     v5:int32 = ToInt32 100000000000000000000
     Jump block1
@@ -49,8 +57,6 @@ block0_split0:
 === After ConstantFolding ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v4:number = Move 100000000000000000000
     v5:int32 = ToInt32 100000000000000000000
     Jump block1
@@ -58,15 +64,15 @@ block0_split0:
     v6:int32 = Move 1661992960
     Return 1661992960
 
-=== After DeadCodeElimination ===
+=== After BlockMerging ===
 function():
 block0:
+    v4:number = Move 100000000000000000000
     v5:int32 = ToInt32 100000000000000000000
-    Jump block1
-block0_split0:
+    v6:int32 = Move 1661992960
     Return 1661992960
 
-=== After BlockMerging ===
+=== After DeadCodeElimination ===
 function():
 block0:
     v5:int32 = ToInt32 100000000000000000000

@@ -54,12 +54,9 @@ block3:
 block4:
     Return v18:unknown
 
-=== After CopyPropagation ===
+=== After DeadCodeElimination ===
 function(v7:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
     v4:undefined = Move undefined
     v6:int32 = Move 0
     Jump block3
@@ -68,7 +65,7 @@ block1:
     v9:string = Move v8:string
     v10:string = Typeof v7:unknown
     v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v8:string, v10:string
+    v12:boolean = StrictlyEquals v9:string, v11:string
     v13:boolean = Move v12:boolean
     Jump block2
 block2:
@@ -76,29 +73,23 @@ block2:
     v15:number = Increment v14:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v0:undefined, block2:v8:string]
-    v21:number = Phi [block0:v5:int32, block2:v15:number]
-    v20:unknown = Phi [block0:v0:undefined, block2:v10:string]
-    v19:unknown = Phi [block0:v23:undefined, block2:v14:number]
-    v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
+    v21:number = Phi [block0:v6:int32, block2:v15:number]
+    v18:unknown = Phi [block0:v4:undefined, block2:v13:boolean]
     v17:boolean = LessThan v21:number, 10
     Branch v17:boolean, block1, block4
 block4:
     Return v18:unknown
 
-=== After LoopInvariantCodeMotion ===
+=== After CopyPropagation ===
 function(v7:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
     v4:undefined = Move undefined
     v6:int32 = Move 0
-    v8:string = Typeof v7:unknown
-    v10:string = Typeof v7:unknown
     Jump block3
 block1:
+    v8:string = Typeof v7:unknown
     v9:string = Move v8:string
+    v10:string = Typeof v7:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v8:string, v10:string
     v13:boolean = Move v12:boolean
@@ -108,10 +99,7 @@ block2:
     v15:number = Increment v14:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v0:undefined, block2:v8:string]
     v21:number = Phi [block0:v5:int32, block2:v15:number]
-    v20:unknown = Phi [block0:v0:undefined, block2:v10:string]
-    v19:unknown = Phi [block0:v23:undefined, block2:v14:number]
     v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
     v17:boolean = LessThan v21:number, 10
     Branch v17:boolean, block1, block4
@@ -121,16 +109,13 @@ block4:
 === After AlgebraicSimplification ===
 function(v7:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
     v4:undefined = Move undefined
     v6:int32 = Move 0
-    v8:string = Typeof v7:unknown
-    v10:string = Typeof v7:unknown
     Jump block3
 block1:
+    v8:string = Typeof v7:unknown
     v9:string = Move v8:string
+    v10:string = Typeof v7:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v8:string, v10:string
     v13:boolean = Move v12:boolean
@@ -139,10 +124,7 @@ block2:
     v15:number = Increment v21:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v0:undefined, block2:v8:string]
     v21:number = Phi [block0:v5:int32, block2:v15:number]
-    v20:unknown = Phi [block0:v0:undefined, block2:v10:string]
-    v19:unknown = Phi [block0:v23:undefined, block2:v21:number]
     v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
     v17:boolean = LessThan v21:number, 10
     Branch v17:boolean, block1, block4
@@ -152,9 +134,31 @@ block4:
 === After GlobalValueNumbering ===
 function(v7:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v6:int32 = Move 0
+    Jump block3
+block1:
+    v8:string = Typeof v7:unknown
+    v9:string = Move v8:string
+    v10:string = Typeof v7:unknown
+    v11:string = Move v8:string
+    v12:boolean = StrictlyEquals v8:string, v8:string
+    v13:boolean = Move v12:boolean
+    Jump block2
+block2:
+    v15:number = Increment v21:number
+    Jump block3
+block3:
+    v21:number = Phi [block0:v5:int32, block2:v15:number]
+    v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
+    v17:boolean = LessThan v21:number, 10
+    Branch v17:boolean, block1, block4
+block4:
+    Return v18:unknown
+
+=== After LoopInvariantCodeMotion ===
+function(v7:unknown):
+block0:
     v4:undefined = Move undefined
     v6:int32 = Move 0
     v8:string = Typeof v7:unknown
@@ -170,28 +174,6 @@ block2:
     v15:number = Increment v21:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v0:undefined, block2:v8:string]
-    v21:number = Phi [block0:v5:int32, block2:v15:number]
-    v20:unknown = Phi [block0:v0:undefined, block2:v8:string]
-    v19:unknown = Phi [block0:v23:undefined, block2:v21:number]
-    v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
-    v17:boolean = LessThan v21:number, 10
-    Branch v17:boolean, block1, block4
-block4:
-    Return v18:unknown
-
-=== After DeadCodeElimination ===
-function(v7:unknown):
-block0:
-    v8:string = Typeof v7:unknown
-    Jump block3
-block1:
-    v12:boolean = StrictlyEquals v8:string, v8:string
-    Jump block2
-block2:
-    v15:number = Increment v21:number
-    Jump block3
-block3:
     v21:number = Phi [block0:v5:int32, block2:v15:number]
     v18:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
     v17:boolean = LessThan v21:number, 10
@@ -200,6 +182,29 @@ block4:
     Return v18:unknown
 
 === After BlockMerging ===
+function(v7:unknown):
+block0:
+    v4:undefined = Move undefined
+    v6:int32 = Move 0
+    v8:string = Typeof v7:unknown
+    v10:string = Typeof v7:unknown
+    Jump block3
+block1:
+    v9:string = Move v8:string
+    v11:string = Move v8:string
+    v12:boolean = StrictlyEquals v8:string, v8:string
+    v13:boolean = Move v12:boolean
+    v15:number = Increment v21:number
+    Jump block3
+block3:
+    v21:number = Phi [block0:v5:int32, block1:v15:number]
+    v18:unknown = Phi [block0:v0:undefined, block1:v12:boolean]
+    v17:boolean = LessThan v21:number, 10
+    Branch v17:boolean, block1, block4
+block4:
+    Return v18:unknown
+
+=== After DeadCodeElimination ===
 function(v7:unknown):
 block0:
     v8:string = Typeof v7:unknown

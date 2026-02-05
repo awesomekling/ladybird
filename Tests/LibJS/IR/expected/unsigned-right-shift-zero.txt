@@ -35,10 +35,21 @@ block0_split0:
 block0_split1:
     Return v6:number
 
+=== After DeadCodeElimination ===
+function(v2:unknown):
+block0:
+    v3:int32 = ToInt32 v2:unknown
+    Jump block1
+block0_split0:
+    v4:int32 = Move v3:int32
+    v6:number = UnsignedRightShift v4:int32, 0
+    Jump block2
+block0_split1:
+    Return v6:number
+
 === After CopyPropagation ===
 function(v2:unknown):
 block0:
-    v1:undefined = Move undefined
     v3:int32 = ToInt32 v2:unknown
     Jump block1
 block0_split0:
@@ -48,18 +59,15 @@ block0_split0:
 block0_split1:
     Return v6:number
 
-=== After DeadCodeElimination ===
+=== After BlockMerging ===
 function(v2:unknown):
 block0:
     v3:int32 = ToInt32 v2:unknown
-    Jump block1
-block0_split0:
+    v4:int32 = Move v3:int32
     v6:number = UnsignedRightShift v3:int32, 0
-    Jump block2
-block0_split1:
     Return v6:number
 
-=== After BlockMerging ===
+=== After DeadCodeElimination ===
 function(v2:unknown):
 block0:
     v3:int32 = ToInt32 v2:unknown

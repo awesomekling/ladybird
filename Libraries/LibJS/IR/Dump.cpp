@@ -253,18 +253,31 @@ String dump(Function const& function)
 void optimize(Function& function)
 {
     PassManager pass_manager;
+
+    // Phase 1 — CFG Simplification
+    pass_manager.add_pass(make<ConstantBranchFolding>());
+    pass_manager.add_pass(make<JumpThreading>());
+
+    // Phase 2 — Dead Code Removal
+    pass_manager.add_pass(make<DeadCodeElimination>());
+    pass_manager.add_pass(make<DeadBlockElimination>());
+
+    // Phase 3 — Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
-    pass_manager.add_pass(make<LoopInvariantCodeMotion>());
     pass_manager.add_pass(make<ConstantFolding>());
     pass_manager.add_pass(make<AlgebraicSimplification>());
     pass_manager.add_pass(make<InstructionCombining>());
+
+    // Phase 4 — Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
-    pass_manager.add_pass(make<ConstantBranchFolding>());
-    pass_manager.add_pass(make<JumpThreading>());
-    pass_manager.add_pass(make<DeadCodeElimination>());
-    pass_manager.add_pass(make<DeadBlockElimination>());
+
+    // Phase 5 — Loop Optimizations
+    pass_manager.add_pass(make<LoopInvariantCodeMotion>());
+
+    // Phase 6 — Final CFG Cleanup
     pass_manager.add_pass(make<EmptyBlockElimination>());
     pass_manager.add_pass(make<BlockMerging>());
+
     pass_manager.run(function);
 }
 

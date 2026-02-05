@@ -47,6 +47,52 @@ block3_split7:
 block4_split8:
     End v12:unknown
 
+=== After DeadCodeElimination ===
+function():
+block0:
+    InitializeBinding 10
+    Jump block5
+block1:
+    v4:unknown = GetGlobal sum
+    Jump block8
+block2:
+    v9:number = ToNumeric v17:number
+    v10:number = Increment v9:number
+    Jump block3
+block3:
+    v17:number = Phi [block2:v10:number, block7:v3:int32]
+    v11:unknown = GetGlobal n
+    Jump block12
+block4:
+    v12:unknown = GetGlobal sum
+    Jump block13
+block0_split0:
+    InitializeBinding 0
+    Jump block6
+block0_split1:
+    InitializeBinding 5
+    Jump block7
+block0_split2:
+    v3:int32 = Move 0
+    Jump block3
+block1_split3:
+    v5:unknown = GetGlobal x
+    Jump block9
+block1_split4:
+    v7:unknown = Mul v5:unknown, 2
+    Jump block10
+block1_split5:
+    v8:unknown = Add v4:unknown, v7:unknown
+    Jump block11
+block1_split6:
+    SetGlobal sum v8:unknown
+    Jump block2
+block3_split7:
+    v13:boolean = LessThan v17:number, v11:unknown
+    Branch v13:boolean, block1, block4
+block4_split8:
+    End v12:unknown
+
 === After CopyPropagation ===
 function():
 block0:
@@ -61,9 +107,6 @@ block2:
     Jump block3
 block3:
     v17:number = Phi [block2:v10:number, block7:v1:int32]
-    v16:unknown = Phi [block2:v9:number, block7:v18:undefined]
-    v15:unknown = Phi [block2:v7:unknown, block7:v19:undefined]
-    v14:unknown = Phi [block2:v8:unknown, block7:v20:undefined]
     v11:unknown = GetGlobal n
     Jump block12
 block4:
@@ -109,9 +152,6 @@ block2:
     Jump block3
 block3:
     v17:number = Phi [block2:v10:number, block7:v1:int32]
-    v16:unknown = Phi [block2:v17:number, block7:v18:undefined]
-    v15:unknown = Phi [block2:v7:unknown, block7:v19:undefined]
-    v14:unknown = Phi [block2:v8:unknown, block7:v20:undefined]
     v11:unknown = GetGlobal n
     Jump block12
 block4:
@@ -144,93 +184,32 @@ block3_split7:
 block4_split8:
     End v12:unknown
 
-=== After DeadCodeElimination ===
-function():
-block0:
-    InitializeBinding 10
-    Jump block5
-block1:
-    v4:unknown = GetGlobal sum
-    Jump block8
-block2:
-    v10:number = Increment v17:number
-    Jump block3
-block3:
-    v17:number = Phi [block2:v10:number, block7:v1:int32]
-    v11:unknown = GetGlobal n
-    Jump block12
-block4:
-    v12:unknown = GetGlobal sum
-    Jump block13
-block0_split0:
-    InitializeBinding 0
-    Jump block6
-block0_split1:
-    InitializeBinding 5
-    Jump block7
-block0_split2:
-    Jump block3
-block1_split3:
-    v5:unknown = GetGlobal x
-    Jump block9
-block1_split4:
-    v7:unknown = Mul v5:unknown, 2
-    Jump block10
-block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
-    Jump block11
-block1_split6:
-    SetGlobal sum v8:unknown
-    Jump block2
-block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
-block4_split8:
-    End v12:unknown
-
-=== After EmptyBlockElimination ===
-function():
-block0:
-    InitializeBinding 10
-    Jump block5
-block1:
-    v4:unknown = GetGlobal sum
-    Jump block8
-block2:
-    v10:number = Increment v17:number
-    Jump block3
-block3:
-    v17:number = Phi [block2:v10:number, block6:v1:int32]
-    v11:unknown = GetGlobal n
-    Jump block12
-block4:
-    v12:unknown = GetGlobal sum
-    Jump block13
-block0_split0:
-    InitializeBinding 0
-    Jump block6
-block0_split1:
-    InitializeBinding 5
-    Jump block3
-block1_split3:
-    v5:unknown = GetGlobal x
-    Jump block9
-block1_split4:
-    v7:unknown = Mul v5:unknown, 2
-    Jump block10
-block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
-    Jump block11
-block1_split6:
-    SetGlobal sum v8:unknown
-    Jump block2
-block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
-block4_split8:
-    End v12:unknown
-
 === After BlockMerging ===
+function():
+block0:
+    InitializeBinding 10
+    InitializeBinding 0
+    InitializeBinding 5
+    v3:int32 = Move 0
+    Jump block3
+block1:
+    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal x
+    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Add v4:unknown, v7:unknown
+    SetGlobal sum v8:unknown
+    v10:number = Increment v17:number
+    Jump block3
+block3:
+    v17:number = Phi [block1:v10:number, block0:v1:int32]
+    v11:unknown = GetGlobal n
+    v13:boolean = LessThan v17:number, v11:unknown
+    Branch v13:boolean, block1, block4
+block4:
+    v12:unknown = GetGlobal sum
+    End v12:unknown
+
+=== After DeadCodeElimination ===
 function():
 block0:
     InitializeBinding 10
