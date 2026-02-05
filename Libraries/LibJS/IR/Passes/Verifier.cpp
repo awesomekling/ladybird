@@ -719,6 +719,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 if (auto* target = term->false_target())
                     computed_preds.get(target)->set(block.ptr());
             }
+            // EH/finalizer edges also create predecessor relationships
+            if (auto* handler = block->exception_handler())
+                computed_preds.get(handler)->set(block.ptr());
+            if (auto* finalizer = block->finalizer())
+                computed_preds.get(finalizer)->set(block.ptr());
         }
 
         for (auto const& block : function.basic_blocks()) {
