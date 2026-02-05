@@ -224,9 +224,26 @@ void Lowerer::compute_phi_coalescing()
                 // Chain coalescing: if operand is a phi result, coalesce the two phis.
                 // This makes chains like: v14 = Phi[v0,v2], v15 = Phi[v14,v4], ...
                 // all share the same register.
+                //
+                // However, we must not coalesce two phis that form a swap cycle.
+                // E.g. v1 = Phi[.., v2], v2 = Phi[.., v1] — if coalesced, both
+                // map to the same register and the swap becomes a no-op.
                 if (auto* def = operand->defining_instruction(); def && def->opcode() == Opcode::Phi) {
-                    coalesce(operand, phi_result);
-                    continue;
+                    auto const& other_phi = static_cast<PhiInstruction const&>(*def);
+                    bool forms_cycle = false;
+                    for (size_t j = 0; j < other_phi.incoming_count(); ++j) {
+                        auto* other_input = other_phi.incoming_value(j);
+                        if (!other_input)
+                            continue;
+                        if (find_representative(other_input) == find_representative(phi_result)) {
+                            forms_cycle = true;
+                            break;
+                        }
+                    }
+                    if (!forms_cycle) {
+                        coalesce(operand, phi_result);
+                        continue;
+                    }
                 }
 
                 // Standard coalescing: if all of operand's non-phi uses are terminators
@@ -297,34 +314,56 @@ void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&..
 
 void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to)
 {
-    // For each phi in the successor block, emit a Mov to set up the phi value.
-    //
-    // NB: Parallel move resolution (for handling phi cycles) is not needed here because:
-    // 1. Phi inputs come from predecessor blocks, while phi results are defined in the
-    //    current block. A phi result can't be an input to another phi in the same block.
-    // 2. When phis form chains (phi A's input is phi B's result from a PREVIOUS iteration),
-    //    the phi coalescing in compute_phi_coalescing() assigns them the same register,
-    //    eliminating the need for a move between them.
-    // 3. For "swap" patterns (a = old_b, b = old_a), the inputs come from different
-    //    variables, not from each other's phi results, so no cycle exists.
+    // Collect all (dst, src) moves for phi nodes on this edge.
+    struct PhiMove {
+        Bytecode::Operand dst;
+        Bytecode::Operand src;
+    };
+    Vector<PhiMove> moves;
+
     for (auto const& instruction : to.instructions()) {
         if (instruction->opcode() != Opcode::Phi)
-            break; // Phis are always at the start
+            break;
 
         auto const& phi = static_cast<PhiInstruction const&>(*instruction);
 
         for (size_t i = 0; i < phi.incoming_count(); ++i) {
             if (phi.incoming_block(i) == &from) {
-                // This predecessor provides incoming_value(i) for the phi
                 if (!phi.incoming_value(i) || !phi.result())
                     continue;
                 auto src = operand_for_value(*phi.incoming_value(i));
                 auto dst = operand_for_value(*phi.result());
                 if (src != dst)
-                    emit<Bytecode::Op::Mov>(dst, src);
+                    moves.append({ dst, src });
                 break;
             }
         }
+    }
+
+    // Check if any source would be clobbered by another move's destination.
+    // If so, save it to a temp register first (parallel move resolution).
+    HashMap<u32, Bytecode::Operand> saved;
+    for (auto const& move : moves) {
+        bool is_clobbered = false;
+        for (auto const& other : moves) {
+            if (&other != &move && other.dst == move.src) {
+                is_clobbered = true;
+                break;
+            }
+        }
+        if (is_clobbered && !saved.contains(move.src.index())) {
+            auto tmp = allocate_register();
+            emit<Bytecode::Op::Mov>(tmp, move.src);
+            saved.set(move.src.index(), tmp);
+        }
+    }
+
+    // Emit moves, substituting saved temps where needed.
+    for (auto const& move : moves) {
+        auto actual_src = move.src;
+        if (auto it = saved.find(move.src.index()); it != saved.end())
+            actual_src = it->value;
+        emit<Bytecode::Op::Mov>(move.dst, actual_src);
     }
 }
 
