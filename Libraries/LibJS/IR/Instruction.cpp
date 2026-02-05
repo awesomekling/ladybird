@@ -275,34 +275,11 @@ void Instruction::recompute_result_type()
 
 bool Instruction::try_invert_comparison()
 {
-    switch (m_opcode) {
-    case Opcode::StrictlyEquals:
-        m_opcode = Opcode::StrictlyInequals;
+    if (auto inverted = inverted_comparison_opcode(m_opcode); inverted.has_value()) {
+        m_opcode = *inverted;
         return true;
-    case Opcode::StrictlyInequals:
-        m_opcode = Opcode::StrictlyEquals;
-        return true;
-    case Opcode::LooselyEquals:
-        m_opcode = Opcode::LooselyInequals;
-        return true;
-    case Opcode::LooselyInequals:
-        m_opcode = Opcode::LooselyEquals;
-        return true;
-    case Opcode::LessThan:
-        m_opcode = Opcode::GreaterThanEquals;
-        return true;
-    case Opcode::LessThanEquals:
-        m_opcode = Opcode::GreaterThan;
-        return true;
-    case Opcode::GreaterThan:
-        m_opcode = Opcode::LessThanEquals;
-        return true;
-    case Opcode::GreaterThanEquals:
-        m_opcode = Opcode::LessThan;
-        return true;
-    default:
-        return false;
     }
+    return false;
 }
 
 // Check if all operands are safe primitive types (no ToPrimitive calls possible)

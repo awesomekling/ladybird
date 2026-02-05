@@ -58,52 +58,27 @@ static bool type_cannot_be_nan(Type type)
 // For equality comparisons, inversion is always safe.
 static Optional<Opcode> inverted_comparison_if_safe(Instruction const& cmp_instr)
 {
-    auto opcode = cmp_instr.opcode();
+    auto inverted = inverted_comparison_opcode(cmp_instr.opcode());
+    if (!inverted.has_value())
+        return {};
 
-    switch (opcode) {
-    // Equality comparisons are always safe to invert
-    case Opcode::StrictlyEquals:
-        return Opcode::StrictlyInequals;
-    case Opcode::StrictlyInequals:
-        return Opcode::StrictlyEquals;
-    case Opcode::LooselyEquals:
-        return Opcode::LooselyInequals;
-    case Opcode::LooselyInequals:
-        return Opcode::LooselyEquals;
+    // Relational comparisons are only safe to invert when operands can't be NaN.
+    bool is_relational = cmp_instr.opcode() == Opcode::LessThan
+        || cmp_instr.opcode() == Opcode::LessThanEquals
+        || cmp_instr.opcode() == Opcode::GreaterThan
+        || cmp_instr.opcode() == Opcode::GreaterThanEquals;
 
-    // Relational comparisons: only safe if operands cannot be NaN
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals: {
+    if (is_relational) {
         auto const& operands = cmp_instr.operands();
         if (operands.size() < 2)
             return {};
-
-        // Both operands must be non-NaN types
         bool lhs_safe = operands[0] && type_cannot_be_nan(operands[0]->type());
         bool rhs_safe = operands[1] && type_cannot_be_nan(operands[1]->type());
-
         if (!lhs_safe || !rhs_safe)
             return {};
-
-        switch (opcode) {
-        case Opcode::LessThan:
-            return Opcode::GreaterThanEquals;
-        case Opcode::LessThanEquals:
-            return Opcode::GreaterThan;
-        case Opcode::GreaterThan:
-            return Opcode::LessThanEquals;
-        case Opcode::GreaterThanEquals:
-            return Opcode::LessThan;
-        default:
-            VERIFY_NOT_REACHED();
-        }
     }
 
-    default:
-        return {};
-    }
+    return inverted;
 }
 
 PreservedAnalyses InstructionCombining::run(Function& function, PassManager&)

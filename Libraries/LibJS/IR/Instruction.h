@@ -520,6 +520,31 @@ constexpr bool is_commutative_opcode(Opcode opcode)
     return opcode_traits(opcode).is_commutative;
 }
 
+// Returns the inverted comparison opcode, if the opcode is a comparison.
+constexpr Optional<Opcode> inverted_comparison_opcode(Opcode opcode)
+{
+    switch (opcode) {
+    case Opcode::StrictlyEquals:
+        return Opcode::StrictlyInequals;
+    case Opcode::StrictlyInequals:
+        return Opcode::StrictlyEquals;
+    case Opcode::LooselyEquals:
+        return Opcode::LooselyInequals;
+    case Opcode::LooselyInequals:
+        return Opcode::LooselyEquals;
+    case Opcode::LessThan:
+        return Opcode::GreaterThanEquals;
+    case Opcode::LessThanEquals:
+        return Opcode::GreaterThan;
+    case Opcode::GreaterThan:
+        return Opcode::LessThanEquals;
+    case Opcode::GreaterThanEquals:
+        return Opcode::LessThan;
+    default:
+        return {};
+    }
+}
+
 // Does this opcode require a specialized instruction class?
 // These opcodes must NOT use the generic Instruction::create<Op>().
 constexpr bool requires_specialized_instruction(Opcode opcode)
