@@ -58,6 +58,26 @@ bool Verifier::verify(Function& function, bool crash_on_error)
     }
 
     for (auto const& block : function.basic_blocks()) {
+        // Check: Block parent pointer
+        if (block->parent_function() != &function) {
+            report_error(ByteString::formatted(
+                "Block{} has wrong parent_function",
+                block->index()));
+        }
+
+        // Check: Predecessor list has no duplicates
+        {
+            HashTable<BasicBlock*> seen_preds;
+            for (auto* pred : block->predecessors()) {
+                if (seen_preds.contains(pred)) {
+                    report_error(ByteString::formatted(
+                        "Block{} has duplicate predecessor block{}",
+                        block->index(), pred->index()));
+                }
+                seen_preds.set(pred);
+            }
+        }
+
         HashTable<BasicBlock*> block_predecessor_set;
         for (auto* pred : block->predecessors())
             block_predecessor_set.set(pred);
@@ -99,6 +119,13 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         }
 
         for (auto const& instr : block->instructions()) {
+            // Check: Instruction parent pointer
+            if (instr->parent_block() != block.ptr()) {
+                report_error(ByteString::formatted(
+                    "Instruction in block{} has wrong parent_block (points to block{})",
+                    block->index(), instr->parent_block() ? instr->parent_block()->index() : -1));
+            }
+
             // Check: Phi operand count == phi predecessor count
             if (instr->opcode() == Opcode::Phi) {
                 auto& phi = static_cast<PhiInstruction const&>(*instr);
@@ -156,6 +183,50 @@ bool Verifier::verify(Function& function, bool crash_on_error)
             report_error(ByteString::formatted(
                 "Block{} has finalizer not in function",
                 block->index()));
+        }
+
+        // Check: Terminator target shape matches opcode
+        if (auto* term = block->terminator()) {
+            switch (term->opcode()) {
+            case Opcode::Jump:
+                if (!term->true_target()) {
+                    report_error(ByteString::formatted(
+                        "Jump in block{} has no target",
+                        block->index()));
+                }
+                if (term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "Jump in block{} has false_target (should be null)",
+                        block->index()));
+                }
+                break;
+            case Opcode::Branch:
+                if (!term->true_target() || !term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "Branch in block{} missing true_target or false_target",
+                        block->index()));
+                }
+                break;
+            case Opcode::Return:
+            case Opcode::Throw:
+            case Opcode::End:
+                if (term->true_target() || term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "{} in block{} has targets (should have none)",
+                        opcode_to_string(term->opcode()), block->index()));
+                }
+                break;
+            case Opcode::Yield:
+            case Opcode::Await:
+                if (term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "{} in block{} has false_target (should be null)",
+                        opcode_to_string(term->opcode()), block->index()));
+                }
+                break;
+            default:
+                break;
+            }
         }
 
         // Check: Successor edges must be reflected in predecessor lists
