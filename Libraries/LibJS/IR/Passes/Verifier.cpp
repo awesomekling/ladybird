@@ -42,6 +42,37 @@ bool Verifier::verify(Function& function, bool crash_on_error)
         report_error("Entry block has predecessors"sv);
     }
 
+    // Check: Reachability from entry block
+    // Compute reachable blocks via BFS (including EH/finalizer edges)
+    HashTable<BasicBlock*> reachable;
+    if (auto* entry = function.entry_block()) {
+        Vector<BasicBlock*> worklist;
+        worklist.append(entry);
+        reachable.set(entry);
+        while (!worklist.is_empty()) {
+            auto* current = worklist.take_last();
+            auto enqueue = [&](BasicBlock* target) {
+                if (target && !reachable.contains(target)) {
+                    reachable.set(target);
+                    worklist.append(target);
+                }
+            };
+            if (auto* term = current->terminator()) {
+                enqueue(term->true_target());
+                enqueue(term->false_target());
+            }
+            enqueue(current->exception_handler());
+            enqueue(current->finalizer());
+        }
+    }
+    for (auto const& block : function.basic_blocks()) {
+        if (!reachable.contains(block.ptr())) {
+            report_error(ByteString::formatted(
+                "Block{} is unreachable from entry block",
+                block->index()));
+        }
+    }
+
     // Build set of all defined values, checking for unique definitions
     HashTable<Value const*> defined_values;
     for (auto const& block : function.basic_blocks()) {
@@ -344,6 +375,90 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                 }
             }
 
+            // Check: Result type sanity
+            // If a result type is set (not Unknown), verify it matches the opcode's
+            // expected output type. This catches type corruption from optimization passes.
+            if (instr->result() && instr->result()->type() != Type::Unknown) {
+                auto actual_type = instr->result()->type();
+                auto expected_type = [](Opcode opcode) -> Optional<Type> {
+                    switch (opcode) {
+                    // Always Boolean
+                    case Opcode::ToBoolean:
+                    case Opcode::Not:
+                    case Opcode::IsUndefined:
+                    case Opcode::IsNullish:
+                    case Opcode::LessThan:
+                    case Opcode::LessThanEquals:
+                    case Opcode::GreaterThan:
+                    case Opcode::GreaterThanEquals:
+                    case Opcode::LooselyEquals:
+                    case Opcode::StrictlyEquals:
+                    case Opcode::LooselyInequals:
+                    case Opcode::StrictlyInequals:
+                    case Opcode::In:
+                    case Opcode::InstanceOf:
+                    case Opcode::HasProperty:
+                    case Opcode::DeleteById:
+                    case Opcode::DeleteByValue:
+                    case Opcode::DeleteVariable:
+                        return Type::Boolean;
+                    // Always Int32
+                    case Opcode::BitwiseAnd:
+                    case Opcode::BitwiseOr:
+                    case Opcode::BitwiseXor:
+                    case Opcode::LeftShift:
+                    case Opcode::RightShift:
+                    case Opcode::BitwiseNot:
+                    case Opcode::ToInt32:
+                        return Type::Int32;
+                    // Always String
+                    case Opcode::Typeof:
+                    case Opcode::TypeofBinding:
+                    case Opcode::ToString:
+                    case Opcode::ConcatString:
+                        return Type::String;
+                    // Always Number
+                    case Opcode::UnsignedRightShift:
+                    case Opcode::ToNumber:
+                    case Opcode::UnaryPlus:
+                    case Opcode::Negate:
+                    case Opcode::Increment:
+                    case Opcode::Decrement:
+                    case Opcode::PostfixIncrement:
+                    case Opcode::PostfixDecrement:
+                        return Type::Number;
+                    // Always Undefined
+                    case Opcode::LoadUndefined:
+                        return Type::Undefined;
+                    // Always Null
+                    case Opcode::LoadNull:
+                        return Type::Null;
+                    // Always Object
+                    case Opcode::NewObject:
+                    case Opcode::NewRegExp:
+                    case Opcode::ToObject:
+                        return Type::Object;
+                    // Always Array
+                    case Opcode::NewArray:
+                    case Opcode::NewArrayWithLength:
+                    case Opcode::IteratorToArray:
+                        return Type::Array;
+                    // Always Function
+                    case Opcode::NewClass:
+                    case Opcode::NewFunction:
+                        return Type::Function;
+                    default:
+                        return {};
+                    }
+                }(instr->opcode());
+                if (expected_type.has_value() && actual_type != *expected_type) {
+                    report_error(ByteString::formatted(
+                        "{} in block{} has result type {} (expected {})",
+                        opcode_to_string(instr->opcode()), block->index(),
+                        type_to_string(actual_type), type_to_string(*expected_type)));
+                }
+            }
+
             // Check: All operands are non-null and reference defined values
             for (size_t i = 0; i < instr->operands().size(); ++i) {
                 auto* operand = instr->operands()[i];
@@ -465,6 +580,47 @@ bool Verifier::verify(Function& function, bool crash_on_error)
                     report_error(ByteString::formatted(
                         "Block{} has successor block{} but is not in its predecessor list",
                         block->index(), false_target->index()));
+                }
+            }
+        }
+    }
+
+    // Check: Recompute CFG predecessors from successor edges and compare
+    // This catches desync between terminator targets and predecessor lists
+    {
+        HashMap<BasicBlock*, HashTable<BasicBlock*>> computed_preds;
+        for (auto const& block : function.basic_blocks())
+            computed_preds.set(block.ptr(), {});
+
+        for (auto const& block : function.basic_blocks()) {
+            if (auto* term = block->terminator()) {
+                if (auto* target = term->true_target())
+                    computed_preds.get(target)->set(block.ptr());
+                if (auto* target = term->false_target())
+                    computed_preds.get(target)->set(block.ptr());
+            }
+        }
+
+        for (auto const& block : function.basic_blocks()) {
+            auto const& stored_preds = block->predecessors();
+            auto& expected_preds = *computed_preds.get(block.ptr());
+
+            // Check: Every stored predecessor should be a computed predecessor
+            for (auto* pred : stored_preds) {
+                if (!expected_preds.contains(pred)) {
+                    report_error(ByteString::formatted(
+                        "Block{} has predecessor block{} in stored list but no edge exists",
+                        block->index(), pred->index()));
+                }
+            }
+
+            // Check: Every computed predecessor should be a stored predecessor
+            for (auto* pred : expected_preds) {
+                bool found = stored_preds.contains_slow(pred);
+                if (!found) {
+                    report_error(ByteString::formatted(
+                        "Block{} is missing predecessor block{} (has edge but not in list)",
+                        block->index(), pred->index()));
                 }
             }
         }
