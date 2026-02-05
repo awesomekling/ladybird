@@ -43,6 +43,8 @@ block1:
     v27:unknown = Phi [block5:v28:undefined, block16:v23:object]
     v26:unknown = Phi [block5:v11:object, block16:v24:unknown]
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v14:unknown = Move v13:unknown
     v15:unknown = GetGlobal ReferenceError
     Jump block13
@@ -81,7 +83,7 @@ block0_split5:
     Jump block12
 block0_split6:
     v12:object = Move v11:object
-    Jump block5
+    EnterUnwindContext block5
 block1_split7:
     v16:boolean = InstanceOf v14:unknown, v15:unknown
     Jump block14
@@ -95,6 +97,7 @@ block5_split10: [handler: block1]
     v24:unknown = Call v22:unknown, v23:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 === After DeadCodeElimination ===
@@ -105,6 +108,8 @@ block0:
     Jump block6
 block1:
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v14:unknown = Move v13:unknown
     v15:unknown = GetGlobal ReferenceError
     Jump block13
@@ -143,7 +148,7 @@ block0_split5:
     Jump block12
 block0_split6:
     v12:object = Move v11:object
-    Jump block5
+    EnterUnwindContext block5
 block1_split7:
     v16:boolean = InstanceOf v14:unknown, v15:unknown
     Jump block14
@@ -157,6 +162,7 @@ block5_split10: [handler: block1]
     v24:unknown = Call v22:unknown, v23:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 === After CopyPropagation ===
@@ -167,6 +173,8 @@ block0:
     Jump block6
 block1:
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v14:unknown = Move v13:unknown
     v15:unknown = GetGlobal ReferenceError
     Jump block13
@@ -205,7 +213,7 @@ block0_split5:
     Jump block12
 block0_split6:
     v12:object = Move v11:object
-    Jump block5
+    EnterUnwindContext block5
 block1_split7:
     v16:boolean = InstanceOf v13:unknown, v15:unknown
     Jump block14
@@ -219,6 +227,7 @@ block5_split10: [handler: block1]
     v24:unknown = Call v22:unknown, v11:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 === After BlockMerging ===
@@ -237,9 +246,11 @@ block0:
     v10:function = Move v8:function
     v11:object = Construct v8:function
     v12:object = Move v11:object
-    Jump block5
+    EnterUnwindContext block5
 block1:
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v14:unknown = Move v13:unknown
     v15:unknown = GetGlobal ReferenceError
     v16:boolean = InstanceOf v13:unknown, v15:unknown
@@ -257,6 +268,7 @@ block5: [handler: block1]
     v24:unknown = Call v22:unknown, v11:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 === After DeadCodeElimination ===
@@ -271,9 +283,11 @@ block0:
     v8:function = NewClass v4:function, v7:string
     ThrowIfTDZ v8:function
     v11:object = Construct v8:function
-    Jump block5
+    EnterUnwindContext block5
 block1:
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v15:unknown = GetGlobal ReferenceError
     v16:boolean = InstanceOf v13:unknown, v15:unknown
     Branch v16:boolean, block2, block3
@@ -287,6 +301,7 @@ block5: [handler: block1]
     v24:unknown = Call v22:unknown, v11:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 function():
@@ -300,9 +315,11 @@ block0:
     v8:function = NewClass v4:function, v7:string
     ThrowIfTDZ v8:function
     v11:object = Construct v8:function
-    Jump block5
+    EnterUnwindContext block5
 block1:
     v13:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
     v15:unknown = GetGlobal ReferenceError
     v16:boolean = InstanceOf v13:unknown, v15:unknown
     Branch v16:boolean, block2, block3
@@ -316,6 +333,7 @@ block5: [handler: block1]
     v24:unknown = Call v22:unknown, v11:object
     Jump block17
 block5_split11:
+    LeaveUnwindContext
     Return v25:string
 
 === Before optimization ===

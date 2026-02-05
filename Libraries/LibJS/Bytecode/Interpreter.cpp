@@ -643,8 +643,9 @@ ThrowCompletionOr<Value> Interpreter::run_executable(ExecutionContext& context, 
     vm().finish_execution_generation();
 
     auto exception = reg(Register::exception());
-    if (!exception.is_special_empty_value()) [[unlikely]]
+    if (!exception.is_special_empty_value()) [[unlikely]] {
         return throw_completion(exception);
+    }
 
     return reg(Register::return_value());
 }
@@ -2929,8 +2930,8 @@ void LeavePrivateEnvironment::execute_impl(Bytecode::Interpreter& interpreter) c
 void Yield::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     auto yielded_value = interpreter.get(m_value).is_special_empty_value() ? js_undefined() : interpreter.get(m_value);
-    interpreter.do_return(
-        interpreter.do_yield(yielded_value, m_continuation_label));
+    auto yield_result = interpreter.do_yield(yielded_value, m_continuation_label);
+    interpreter.do_return(yield_result);
 }
 
 void Await::execute_impl(Bytecode::Interpreter& interpreter) const

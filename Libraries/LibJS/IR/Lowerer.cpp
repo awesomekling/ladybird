@@ -884,9 +884,33 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::PostfixDecrement>(dst(), operand(0));
         break;
 
+    // Exception handling (non-terminator)
+    case Opcode::LeaveUnwindContext:
+        emit<Bytecode::Op::LeaveUnwindContext>();
+        break;
+    case Opcode::LeaveFinally:
+        emit<Bytecode::Op::LeaveFinally>();
+        break;
+    case Opcode::RestoreScheduledJump:
+        emit<Bytecode::Op::RestoreScheduledJump>();
+        break;
+    case Opcode::SetSavedReturnValue:
+        emit<Bytecode::Op::Mov>(
+            Bytecode::Operand(Bytecode::Register::saved_return_value()),
+            operand(0));
+        break;
+    case Opcode::GetException:
+        emit<Bytecode::Op::Mov>(dst(), Bytecode::Operand(Bytecode::Register::exception()));
+        break;
+    case Opcode::SetException:
+        emit<Bytecode::Op::Mov>(Bytecode::Operand(Bytecode::Register::exception()), operand(0));
+        break;
+
     // Control flow - handled separately
     case Opcode::Jump:
     case Opcode::ContinuePendingUnwind:
+    case Opcode::EnterUnwindContext:
+    case Opcode::ScheduleJump:
     case Opcode::Branch:
     case Opcode::Return:
     case Opcode::End:
@@ -1272,6 +1296,23 @@ void Lowerer::lower_blocks()
             emit_phi_moves_for_successor(ir_block, *target);
             auto target_index = m_ir_block_to_bytecode_index.get(target).value();
             emit<Bytecode::Op::ContinuePendingUnwind>(Bytecode::Label { static_cast<u32>(target_index) });
+            break;
+        }
+        case Opcode::EnterUnwindContext: {
+            auto* target = terminator->true_target();
+            VERIFY(target);
+            auto target_index = m_ir_block_to_bytecode_index.get(target).value();
+            emit<Bytecode::Op::EnterUnwindContext>(Bytecode::Label { static_cast<u32>(target_index) });
+            break;
+        }
+        case Opcode::ScheduleJump: {
+            // false_target is the deferred jump target (stored in the instruction)
+            auto* deferred_target = terminator->false_target();
+            VERIFY(deferred_target);
+            auto target_index = m_ir_block_to_bytecode_index.get(deferred_target).value();
+            emit<Bytecode::Op::ScheduleJump>(Bytecode::Label { static_cast<u32>(target_index) });
+            // NB: The finalizer (true_target) is not encoded in the ScheduleJump instruction —
+            // the interpreter finds it via exception_handlers_for_offset at runtime.
             break;
         }
         case Opcode::Branch: {

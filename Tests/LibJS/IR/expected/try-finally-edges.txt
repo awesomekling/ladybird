@@ -5,6 +5,7 @@ block0:
     Jump block4
 block1:
     v7:unknown = Phi [block9:v6:int32, block3:v8:undefined]
+    LeaveUnwindContext
     v1:unknown = GetGlobal result
     Jump block5
 block2:
@@ -14,7 +15,7 @@ block3: [finalizer: block1]
     SetGlobal result 1
     Jump block9
 block0_split0:
-    Jump block3
+    EnterUnwindContext block3
 block1_split1:
     v3:unknown = Add v1:unknown, 10
     Jump block6
@@ -35,6 +36,7 @@ block0:
     SetGlobal result 0
     Jump block4
 block1:
+    LeaveUnwindContext
     v1:unknown = GetGlobal result
     Jump block5
 block2:
@@ -44,7 +46,7 @@ block3: [finalizer: block1]
     SetGlobal result 1
     Jump block9
 block0_split0:
-    Jump block3
+    EnterUnwindContext block3
 block1_split1:
     v3:unknown = Add v1:unknown, 10
     Jump block6
@@ -62,8 +64,9 @@ block3_split5:
 function():
 block0:
     SetGlobal result 0
-    Jump block3
+    Jump block4
 block1:
+    LeaveUnwindContext
     v1:unknown = GetGlobal result
     Jump block5
 block2:
@@ -72,6 +75,8 @@ block2:
 block3: [finalizer: block1]
     SetGlobal result 1
     Jump block1
+block0_split0:
+    EnterUnwindContext block3
 block1_split1:
     v3:unknown = Add v1:unknown, 10
     Jump block6
@@ -87,8 +92,9 @@ block2_split4:
 function():
 block0:
     SetGlobal result 0
-    Jump block3
+    EnterUnwindContext block3
 block1:
+    LeaveUnwindContext
     v1:unknown = GetGlobal result
     v3:unknown = Add v1:unknown, 10
     SetGlobal result v3:unknown
@@ -103,8 +109,9 @@ block3: [finalizer: block1]
 function():
 block0:
     SetGlobal result 0
-    Jump block3
+    EnterUnwindContext block3
 block1:
+    LeaveUnwindContext
     v1:unknown = GetGlobal result
     v3:unknown = Add v1:unknown, 10
     SetGlobal result v3:unknown

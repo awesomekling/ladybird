@@ -274,6 +274,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::CreateRestParams:
                     case Opcode::NewTypeError:
                     case Opcode::Catch:
+                    case Opcode::EnterUnwindContext:
+                    case Opcode::LeaveUnwindContext:
+                    case Opcode::ScheduleJump:
+                    case Opcode::LeaveFinally:
+                    case Opcode::RestoreScheduledJump:
+                    case Opcode::GetException:
                         return 0;
                     // 1 operand
                     case Opcode::LoadConstant:
@@ -323,6 +329,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     case Opcode::SetCompletionType:
                     case Opcode::CreateMutableBinding:
                     case Opcode::CreateImmutableBinding:
+                    case Opcode::SetSavedReturnValue:
+                    case Opcode::SetException:
                         return 1;
                     // 2 operands
                     case Opcode::Add:
@@ -603,6 +611,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             switch (term->opcode()) {
             case Opcode::Jump:
             case Opcode::ContinuePendingUnwind:
+            case Opcode::EnterUnwindContext:
                 if (!term->true_target()) {
                     report_error(ByteString::formatted(
                         "{} in block{} has no target",
@@ -612,6 +621,13 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     report_error(ByteString::formatted(
                         "{} in block{} has false_target (should be null)",
                         opcode_to_string(term->opcode()), block->index()));
+                }
+                break;
+            case Opcode::ScheduleJump:
+                if (!term->true_target() || !term->false_target()) {
+                    report_error(ByteString::formatted(
+                        "ScheduleJump in block{} missing true_target or false_target",
+                        block->index()));
                 }
                 break;
             case Opcode::Branch:
@@ -658,6 +674,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             switch (term->opcode()) {
             case Opcode::Jump:
             case Opcode::ContinuePendingUnwind:
+            case Opcode::EnterUnwindContext:
+            case Opcode::ScheduleJump:
                 expected_operands = 0;
                 break;
             case Opcode::Branch:

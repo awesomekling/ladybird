@@ -1039,6 +1039,63 @@ Value& Function::build_catch(BasicBlock& block)
     return result;
 }
 
+void Function::build_enter_unwind_context(BasicBlock& from, BasicBlock& entry_point)
+{
+    auto instruction = JumpInstruction::create_enter_unwind_context(entry_point);
+    CFG::add_predecessor(entry_point, from);
+    from.append(move(instruction));
+}
+
+void Function::build_leave_unwind_context(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::LeaveUnwindContext>();
+    block.append(move(instruction));
+}
+
+void Function::build_schedule_jump(BasicBlock& from, BasicBlock& finalizer, BasicBlock& deferred_target)
+{
+    auto instruction = TerminatorInstruction::create<Opcode::ScheduleJump>();
+    instruction->set_true_target(&finalizer);
+    instruction->set_false_target(&deferred_target);
+    CFG::add_predecessor(finalizer, from);
+    from.append(move(instruction));
+}
+
+void Function::build_leave_finally(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::LeaveFinally>();
+    block.append(move(instruction));
+}
+
+void Function::build_restore_scheduled_jump(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::RestoreScheduledJump>();
+    block.append(move(instruction));
+}
+
+void Function::build_set_saved_return_value(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create<Opcode::SetSavedReturnValue>();
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
+Value& Function::build_get_exception(BasicBlock& block)
+{
+    auto instruction = Instruction::create<Opcode::GetException>();
+    auto& result = create_value_for_instruction();
+    instruction->set_result(&result);
+    block.append(move(instruction));
+    return result;
+}
+
+void Function::build_set_exception(BasicBlock& block, Value& value)
+{
+    auto instruction = Instruction::create<Opcode::SetException>();
+    instruction->add_operand(&value);
+    block.append(move(instruction));
+}
+
 // Guard operations (may throw but produce no value)
 void Function::build_throw_if_not_object(BasicBlock& block, Value& value)
 {

@@ -457,6 +457,26 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Move
     case Mov: {
         auto const& op = static_cast<Bytecode::Op::Mov const&>(instruction);
+        // Detect writes to special registers used by the unwind mechanism:
+        // - Mov to saved_return_value (register 1): emit SetSavedReturnValue
+        // - Mov to exception (register 2) with empty value: emit ClearException
+        if (op.dst().is_register() && op.dst().index() == Bytecode::Register::saved_return_value_index) {
+            auto& src = get_or_create_value_for_operand(op.src(), block);
+            m_function->build_set_saved_return_value(block, src);
+            break;
+        }
+        if (op.dst().is_register() && op.dst().index() == Bytecode::Register::exception_index) {
+            // Mov to exception register: use SetException to write physical reg2.
+            auto& src = get_or_create_value_for_operand(op.src(), block);
+            m_function->build_set_exception(block, src);
+            break;
+        }
+        if (op.src().is_register() && op.src().index() == Bytecode::Register::exception_index) {
+            // Mov from exception register: use GetException to read physical reg2.
+            auto& result = m_function->build_get_exception(block);
+            define_operand(op.dst(), result, block);
+            break;
+        }
         auto& src = get_or_create_value_for_operand(op.src(), block);
         auto& result = m_function->build_move(block, src);
         define_operand(op.dst(), result, block);
@@ -1153,13 +1173,20 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.dst(), result, block);
         break;
     }
-    case EnterUnwindContext:
     case LeaveUnwindContext:
-    case ContinuePendingUnwind:
+        m_function->build_leave_unwind_context(block);
+        break;
     case LeaveFinally:
-    case ScheduleJump:
+        m_function->build_leave_finally(block);
+        break;
     case RestoreScheduledJump:
-        // Exception handling control flow - no IR values produced
+        m_function->build_restore_scheduled_jump(block);
+        break;
+
+    // Terminators handled in connect_control_flow()
+    case EnterUnwindContext:
+    case ContinuePendingUnwind:
+    case ScheduleJump:
         break;
 
     // Throw guard ops
@@ -1614,7 +1641,16 @@ void Lifter::connect_control_flow()
         case EnterUnwindContext: {
             auto const& op = static_cast<Bytecode::Op::EnterUnwindContext const&>(*last_instruction);
             auto* target = m_block_map.get(address_to_block_index(op.entry_point().address())).value();
-            m_function->build_jump(ir_block, *target);
+            m_function->build_enter_unwind_context(ir_block, *target);
+            break;
+        }
+        case ScheduleJump: {
+            auto const& op = static_cast<Bytecode::Op::ScheduleJump const&>(*last_instruction);
+            auto* deferred_target = m_block_map.get(address_to_block_index(op.target().address())).value();
+            auto handlers = m_executable.exception_handlers_for_offset(start_offset);
+            VERIFY(handlers.has_value() && handlers->finalizer_offset.has_value());
+            auto* finalizer = m_block_map.get(address_to_block_index(handlers->finalizer_offset.value())).value();
+            m_function->build_schedule_jump(ir_block, *finalizer, *deferred_target);
             break;
         }
         case ContinuePendingUnwind: {
@@ -1674,7 +1710,13 @@ void Lifter::compute_block_predecessors()
             }
         }
 
-        if (has_throwing_instr) {
+        // NB: ScheduleJump needs the finalizer annotation preserved because
+        //     the runtime handler finds the finalizer via exception_handlers_for_offset.
+        bool needs_eh_annotations = has_throwing_instr;
+        if (auto* term = block->terminator(); term && term->opcode() == Opcode::ScheduleJump)
+            needs_eh_annotations = true;
+
+        if (needs_eh_annotations) {
             if (auto* handler = block->exception_handler()) {
                 if (!m_predecessors.ensure(handler).contains_slow(block.ptr())) {
                     m_predecessors.ensure(handler).append(block.ptr());

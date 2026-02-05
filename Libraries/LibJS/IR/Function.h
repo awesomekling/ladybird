@@ -191,6 +191,14 @@ public:
 
     // Exception handling
     [[nodiscard]] Value& build_catch(BasicBlock& block);
+    void build_enter_unwind_context(BasicBlock& from, BasicBlock& entry_point);
+    void build_leave_unwind_context(BasicBlock& block);
+    void build_schedule_jump(BasicBlock& from, BasicBlock& finalizer, BasicBlock& deferred_target);
+    void build_leave_finally(BasicBlock& block);
+    void build_restore_scheduled_jump(BasicBlock& block);
+    void build_set_saved_return_value(BasicBlock& block, Value& value);
+    [[nodiscard]] Value& build_get_exception(BasicBlock& block);
+    void build_set_exception(BasicBlock& block, Value& value);
 
     // Guard operations (may throw but produce no value)
     void build_throw_if_not_object(BasicBlock& block, Value& value);

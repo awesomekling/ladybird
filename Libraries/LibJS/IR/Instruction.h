@@ -209,6 +209,14 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
 
     // Exception handling
     Catch,
+    EnterUnwindContext,
+    LeaveUnwindContext,
+    ScheduleJump,
+    LeaveFinally,
+    RestoreScheduledJump,
+    SetSavedReturnValue,
+    GetException,
+    SetException,
 
     // Guard operations (may throw but produce no value)
     ThrowIfNotObject,
@@ -412,6 +420,14 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
 
     // Exception handling
     [to_underlying(Opcode::Catch)]                              = { "Catch",                              false, false, true,  false, false, false, true  },
+    [to_underlying(Opcode::EnterUnwindContext)]                  = { "EnterUnwindContext",                  true,  false, true,  false, false, false, false },
+    [to_underlying(Opcode::LeaveUnwindContext)]                  = { "LeaveUnwindContext",                  false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::ScheduleJump)]                       = { "ScheduleJump",                       true,  false, true,  false, false, false, false },
+    [to_underlying(Opcode::LeaveFinally)]                       = { "LeaveFinally",                       false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::RestoreScheduledJump)]               = { "RestoreScheduledJump",               false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::SetSavedReturnValue)]                = { "SetSavedReturnValue",                false, false, true,  false, false, false, false },
+    [to_underlying(Opcode::GetException)]                       = { "GetException",                       false, false, true,  false, false, false, true  },
+    [to_underlying(Opcode::SetException)]                       = { "SetException",                       false, false, true,  false, false, false, false },
 
     // Guard operations (may throw but produce no value)
     [to_underlying(Opcode::ThrowIfNotObject)]                   = { "ThrowIfNotObject",                   false, true,  true,  false, false, false, false },
@@ -483,6 +499,7 @@ constexpr bool requires_specialized_instruction(Opcode opcode)
     // Use JumpInstruction::create() or BranchInstruction::create()
     case Opcode::Jump:
     case Opcode::ContinuePendingUnwind:
+    case Opcode::EnterUnwindContext:
     case Opcode::Branch:
     // Use PhiInstruction::create()
     case Opcode::Phi:
@@ -750,7 +767,7 @@ private:
 };
 
 // JumpInstruction: Unconditional jump to a single target.
-// Also used for ContinuePendingUnwind (same structure: no operands, one target).
+// Also used for ContinuePendingUnwind and EnterUnwindContext (same structure: no operands, one target).
 // Operands: none
 // Target: exactly one (true_target)
 class JS_API JumpInstruction final : public TerminatorInstruction {
@@ -758,6 +775,7 @@ public:
     // Target is required at construction for compile-time safety.
     [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
     [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create_continue_pending_unwind(BasicBlock& resume_target);
+    [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create_enter_unwind_context(BasicBlock& entry_point);
 
     BasicBlock& target() const
     {
