@@ -40,15 +40,15 @@ void PassManager::run(Function& function)
 
             if (!preserved.is_all()) {
                 changed = true;
+                invalidate(preserved);
+
                 if (g_dump_ir_between_passes)
                     dbgln("=== After {} ===\n{}", pass->name(), dump(function));
-            }
 
-            invalidate(preserved);
-
-            if (!Verifier::verify(function, VerifierMode::InterPass, false)) {
-                warnln("IR Verifier failed after pass: {}", pass->name());
-                Verifier::verify(function, VerifierMode::InterPass, true);
+                if (!Verifier::verify(function, VerifierMode::InterPass, false)) {
+                    warnln("IR Verifier failed after pass: {}", pass->name());
+                    Verifier::verify(function, VerifierMode::InterPass, true);
+                }
             }
         }
 
