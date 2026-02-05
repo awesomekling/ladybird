@@ -1553,7 +1553,7 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
         if (target_block_it == lowerer.m_ir_block_to_bytecode_index.end())
             return {};
 
-        return basic_block_start_offsets[target_block_it->value];
+        return executable->basic_block_start_offsets[target_block_it->value];
     };
 
     for (auto const& source_handler : source_executable->exception_handlers) {
