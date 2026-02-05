@@ -194,4 +194,29 @@ void CFG::retarget_all_edges(Function& function, BasicBlock& old_target, BasicBl
         CFG::replace_predecessor(*block, old_target, new_target);
 }
 
+void CFG::remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks_to_remove)
+{
+    if (blocks_to_remove.is_empty())
+        return;
+
+    // Clear operand uses in blocks being removed so use lists don't retain stale references.
+    for (auto* block : blocks_to_remove) {
+        for (auto& instruction : block->instructions())
+            instruction->clear_operand_uses();
+    }
+
+    // Remove all references to dead blocks from surviving blocks.
+    for (auto& block : function.basic_blocks()) {
+        if (blocks_to_remove.contains(block.ptr()))
+            continue;
+        for (auto* dead_block : blocks_to_remove)
+            remove_block_reference(*block, *dead_block);
+    }
+
+    // Remove dead blocks from the function.
+    function.basic_blocks().remove_all_matching([&](auto const& block) {
+        return blocks_to_remove.contains(block.ptr());
+    });
+}
+
 } // namespace JS::IR

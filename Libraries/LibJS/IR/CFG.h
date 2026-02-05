@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/HashTable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 
@@ -86,6 +87,13 @@ public:
     // point to `new_target`. Updates terminator targets and predecessor lists
     // in all blocks.
     static void retarget_all_edges(Function& function, BasicBlock& old_target, BasicBlock& new_target);
+
+    // Remove blocks from the function, cleaning up all references.
+    // Handles: clearing operand uses, removing all references from surviving
+    // blocks (predecessors, phi operands, terminator targets, EH edges),
+    // and removing the blocks from function.basic_blocks().
+    // Precondition: the caller has already redirected edges as needed.
+    static void remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks_to_remove);
 };
 
 } // namespace JS::IR

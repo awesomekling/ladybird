@@ -118,26 +118,11 @@ PreservedAnalyses DeadBlockElimination::run(Function& function, PassManager&)
         }
     }
 
-    // Clean up all references to dead blocks in live blocks
-    for (auto& block : function.basic_blocks()) {
-        if (!reachable.contains(block.ptr()))
-            continue;
-
-        for (auto* dead_block : dead_blocks)
-            CFG::remove_block_reference(*block, *dead_block);
-    }
-
-    // Clear operand uses for instructions in dead blocks before removing them,
-    // so use lists don't contain stale references
-    for (auto* dead_block : dead_blocks) {
-        for (auto& instruction : dead_block->instructions())
-            instruction->clear_operand_uses();
-    }
-
-    // Remove unreachable blocks
-    function.basic_blocks().remove_all_matching([&](auto const& block) {
-        return !reachable.contains(block.ptr());
-    });
+    // Remove dead blocks and clean up all references to them.
+    HashTable<BasicBlock*> dead_set;
+    for (auto* block : dead_blocks)
+        dead_set.set(block);
+    CFG::remove_blocks(function, dead_set);
 
     return PreservedAnalyses::none();
 }

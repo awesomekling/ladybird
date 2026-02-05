@@ -100,10 +100,13 @@ PreservedAnalyses BlockMerging::run(Function& function, PassManager&)
         }
     } while (merged_any);
 
-    // Remove empty blocks that were merged
-    function.basic_blocks().remove_all_matching([](auto const& block) {
-        return block->instructions().is_empty();
-    });
+    // Remove merged blocks and clean up all references to them.
+    HashTable<BasicBlock*> blocks_to_remove;
+    for (auto& block : function.basic_blocks()) {
+        if (block->instructions().is_empty())
+            blocks_to_remove.set(block.ptr());
+    }
+    CFG::remove_blocks(function, blocks_to_remove);
 
     return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

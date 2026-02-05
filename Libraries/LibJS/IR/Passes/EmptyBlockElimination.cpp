@@ -150,26 +150,13 @@ PreservedAnalyses EmptyBlockElimination::run(Function& function, PassManager&)
         }
     } while (eliminated_any);
 
-    // Collect blocks to remove
+    // Remove empty blocks and clean up all references to them.
     HashTable<BasicBlock*> blocks_to_remove;
     for (auto& block : function.basic_blocks()) {
         if (block->instructions().is_empty())
             blocks_to_remove.set(block.ptr());
     }
-
-    // Clean up ALL references to blocks being removed
-    for (auto& block : function.basic_blocks()) {
-        if (blocks_to_remove.contains(block.ptr()))
-            continue;
-
-        for (auto* removed : blocks_to_remove)
-            CFG::remove_block_reference(*block, *removed);
-    }
-
-    // Remove empty blocks
-    function.basic_blocks().remove_all_matching([](auto const& block) {
-        return block->instructions().is_empty();
-    });
+    CFG::remove_blocks(function, blocks_to_remove);
 
     return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
