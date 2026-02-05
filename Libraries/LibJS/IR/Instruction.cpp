@@ -21,15 +21,21 @@ TerminatorInstruction::TerminatorInstruction(Opcode opcode)
     VERIFY(is_terminator_opcode(opcode));
 }
 
-JumpInstruction::JumpInstruction(BasicBlock& target)
-    : TerminatorInstruction(Opcode::Jump)
+JumpInstruction::JumpInstruction(Opcode opcode, BasicBlock& target)
+    : TerminatorInstruction(opcode)
 {
+    VERIFY(opcode == Opcode::Jump || opcode == Opcode::ContinuePendingUnwind);
     set_true_target(&target);
 }
 
 NonnullOwnPtr<JumpInstruction> JumpInstruction::create(BasicBlock& target)
 {
-    return adopt_own(*new JumpInstruction(target));
+    return adopt_own(*new JumpInstruction(Opcode::Jump, target));
+}
+
+NonnullOwnPtr<JumpInstruction> JumpInstruction::create_continue_pending_unwind(BasicBlock& resume_target)
+{
+    return adopt_own(*new JumpInstruction(Opcode::ContinuePendingUnwind, resume_target));
 }
 
 BranchInstruction::BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target)

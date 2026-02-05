@@ -250,6 +250,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     switch (opcode) {
                     // 0 operands: no value operands (all data is metadata or implicit)
                     case Opcode::Jump:
+                    case Opcode::ContinuePendingUnwind:
                     case Opcode::LoadUndefined:
                     case Opcode::LoadNull:
                     case Opcode::NewObject:
@@ -601,15 +602,16 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (auto* term = block->terminator()) {
             switch (term->opcode()) {
             case Opcode::Jump:
+            case Opcode::ContinuePendingUnwind:
                 if (!term->true_target()) {
                     report_error(ByteString::formatted(
-                        "Jump in block{} has no target",
-                        block->index()));
+                        "{} in block{} has no target",
+                        opcode_to_string(term->opcode()), block->index()));
                 }
                 if (term->false_target()) {
                     report_error(ByteString::formatted(
-                        "Jump in block{} has false_target (should be null)",
-                        block->index()));
+                        "{} in block{} has false_target (should be null)",
+                        opcode_to_string(term->opcode()), block->index()));
                 }
                 break;
             case Opcode::Branch:
@@ -655,6 +657,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             Optional<size_t> expected_operands;
             switch (term->opcode()) {
             case Opcode::Jump:
+            case Opcode::ContinuePendingUnwind:
                 expected_operands = 0;
                 break;
             case Opcode::Branch:

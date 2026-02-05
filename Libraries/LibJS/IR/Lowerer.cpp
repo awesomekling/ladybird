@@ -886,6 +886,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Control flow - handled separately
     case Opcode::Jump:
+    case Opcode::ContinuePendingUnwind:
     case Opcode::Branch:
     case Opcode::Return:
     case Opcode::End:
@@ -1263,6 +1264,14 @@ void Lowerer::lower_blocks()
                 if (target_index != i + 1)
                     emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
+            break;
+        }
+        case Opcode::ContinuePendingUnwind: {
+            auto* target = terminator->true_target();
+            VERIFY(target);
+            emit_phi_moves_for_successor(ir_block, *target);
+            auto target_index = m_ir_block_to_bytecode_index.get(target).value();
+            emit<Bytecode::Op::ContinuePendingUnwind>(Bytecode::Label { static_cast<u32>(target_index) });
             break;
         }
         case Opcode::Branch: {

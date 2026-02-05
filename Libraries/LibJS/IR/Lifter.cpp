@@ -1620,7 +1620,7 @@ void Lifter::connect_control_flow()
         case ContinuePendingUnwind: {
             auto const& op = static_cast<Bytecode::Op::ContinuePendingUnwind const&>(*last_instruction);
             auto* target = m_block_map.get(address_to_block_index(op.resume_target().address())).value();
-            m_function->build_jump(ir_block, *target);
+            m_function->build_continue_pending_unwind(ir_block, *target);
             break;
         }
 

@@ -36,6 +36,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     Return,
     End,
     Throw,
+    ContinuePendingUnwind,
 
     // SSA
     Phi,
@@ -238,6 +239,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::Return)]                             = { "Return",                             true,  false, true,  false, false, false, false },
     [to_underlying(Opcode::End)]                                = { "End",                                true,  false, true,  false, false, false, false },
     [to_underlying(Opcode::Throw)]                              = { "Throw",                              true,  true,  true,  false, false, false, false },
+    [to_underlying(Opcode::ContinuePendingUnwind)]              = { "ContinuePendingUnwind",              true,  true,  true,  false, false, false, false },
 
     // SSA
     [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, false, false, false, false, false, true  },
@@ -480,6 +482,7 @@ constexpr bool requires_specialized_instruction(Opcode opcode)
     switch (opcode) {
     // Use JumpInstruction::create() or BranchInstruction::create()
     case Opcode::Jump:
+    case Opcode::ContinuePendingUnwind:
     case Opcode::Branch:
     // Use PhiInstruction::create()
     case Opcode::Phi:
@@ -747,12 +750,14 @@ private:
 };
 
 // JumpInstruction: Unconditional jump to a single target.
+// Also used for ContinuePendingUnwind (same structure: no operands, one target).
 // Operands: none
 // Target: exactly one (true_target)
 class JS_API JumpInstruction final : public TerminatorInstruction {
 public:
     // Target is required at construction for compile-time safety.
     [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
+    [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create_continue_pending_unwind(BasicBlock& resume_target);
 
     BasicBlock& target() const
     {
@@ -765,7 +770,7 @@ private:
 
     void set_target(BasicBlock& block) { set_true_target(&block); }
 
-    explicit JumpInstruction(BasicBlock& target);
+    JumpInstruction(Opcode opcode, BasicBlock& target);
 };
 
 // BranchInstruction: Conditional branch with true and false targets.

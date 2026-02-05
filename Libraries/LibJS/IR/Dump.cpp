@@ -79,7 +79,8 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
 
     // Handle special opcodes
     switch (instruction.opcode()) {
-    case Opcode::Jump: {
+    case Opcode::Jump:
+    case Opcode::ContinuePendingUnwind: {
         auto const& jump = static_cast<TerminatorInstruction const&>(instruction);
         if (jump.true_target())
             builder.appendff(" block{}", jump.true_target()->index());

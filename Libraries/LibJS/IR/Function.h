@@ -218,6 +218,7 @@ public:
 
     // Control flow (void, no result)
     void build_jump(BasicBlock& from, BasicBlock& to);
+    void build_continue_pending_unwind(BasicBlock& from, BasicBlock& resume_target);
     void build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false);
     void build_return(BasicBlock& block, Value& value);
     void build_end(BasicBlock& block, Value& value);

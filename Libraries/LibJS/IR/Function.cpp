@@ -1137,6 +1137,13 @@ void Function::build_jump(BasicBlock& from, BasicBlock& to)
     from.append(move(instruction));
 }
 
+void Function::build_continue_pending_unwind(BasicBlock& from, BasicBlock& resume_target)
+{
+    auto instruction = JumpInstruction::create_continue_pending_unwind(resume_target);
+    CFG::add_predecessor(resume_target, from);
+    from.append(move(instruction));
+}
+
 void Function::build_branch(BasicBlock& from, Value& condition, BasicBlock& if_true, BasicBlock& if_false)
 {
     auto instruction = BranchInstruction::create(&condition, if_true, if_false);
