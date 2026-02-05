@@ -1526,51 +1526,42 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
     // Copy length_identifier for GetLength instruction support
     executable->length_identifier = source_executable->length_identifier;
 
-    // Remap exception handlers from source executable
-    // Maps: source offset -> source block -> IR block -> target block -> target offset
-    auto const& source_block_map = function.source_block_map();
+    // Generate exception handlers from IR block annotations.
+    // Each IR block may have an exception_handler and/or finalizer pointer
+    // that was set during lifting and preserved through optimization passes.
+    for (auto const& ir_block : function.basic_blocks()) {
+        auto* handler_block = ir_block->exception_handler();
+        auto* finalizer_block = ir_block->finalizer();
 
-    auto source_offset_to_target_offset = [&](size_t source_offset) -> Optional<size_t> {
-        // Find source block index for this offset
-        auto const& source_offsets = source_executable->basic_block_start_offsets;
-        u32 source_block_index = 0;
-        for (size_t i = 0; i < source_offsets.size(); ++i) {
-            if (source_offsets[i] <= source_offset) {
-                source_block_index = static_cast<u32>(i);
-            } else {
-                break;
-            }
-        }
+        if (!handler_block && !finalizer_block)
+            continue;
 
-        // Find IR block for this source block
-        auto ir_block_it = source_block_map.find(source_block_index);
-        if (ir_block_it == source_block_map.end())
-            return {};
-        auto* ir_block = ir_block_it->value;
+        auto block_idx_it = lowerer.m_ir_block_to_bytecode_index.find(ir_block.ptr());
+        if (block_idx_it == lowerer.m_ir_block_to_bytecode_index.end())
+            continue;
+        auto block_idx = block_idx_it->value;
 
-        // Find target block index for this IR block
-        auto target_block_it = lowerer.m_ir_block_to_bytecode_index.find(ir_block);
-        if (target_block_it == lowerer.m_ir_block_to_bytecode_index.end())
-            return {};
+        auto start_offset = executable->basic_block_start_offsets[block_idx];
+        auto end_offset = (block_idx + 1 < executable->basic_block_start_offsets.size())
+            ? executable->basic_block_start_offsets[block_idx + 1]
+            : executable->bytecode.size();
 
-        return executable->basic_block_start_offsets[target_block_it->value];
-    };
-
-    for (auto const& source_handler : source_executable->exception_handlers) {
-        auto start = source_offset_to_target_offset(source_handler.start_offset);
-        auto end = source_offset_to_target_offset(source_handler.end_offset);
-        if (!start.has_value() || !end.has_value())
+        if (start_offset == end_offset)
             continue;
 
         Bytecode::Executable::ExceptionHandlers handler;
-        handler.start_offset = *start;
-        handler.end_offset = *end;
+        handler.start_offset = start_offset;
+        handler.end_offset = end_offset;
 
-        if (source_handler.handler_offset.has_value()) {
-            handler.handler_offset = source_offset_to_target_offset(*source_handler.handler_offset);
+        if (handler_block) {
+            auto it = lowerer.m_ir_block_to_bytecode_index.find(handler_block);
+            if (it != lowerer.m_ir_block_to_bytecode_index.end())
+                handler.handler_offset = executable->basic_block_start_offsets[it->value];
         }
-        if (source_handler.finalizer_offset.has_value()) {
-            handler.finalizer_offset = source_offset_to_target_offset(*source_handler.finalizer_offset);
+        if (finalizer_block) {
+            auto it = lowerer.m_ir_block_to_bytecode_index.find(finalizer_block);
+            if (it != lowerer.m_ir_block_to_bytecode_index.end())
+                handler.finalizer_offset = executable->basic_block_start_offsets[it->value];
         }
 
         executable->exception_handlers.append(handler);
