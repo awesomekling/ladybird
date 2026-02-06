@@ -1,0 +1,146 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal choose
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, true, 10, 20
+    Jump block2
+block0_split1:
+    End v5:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal choose
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, true, 10, 20
+    Jump block2
+block0_split1:
+    End v5:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal choose
+    v5:unknown = Call v0:unknown, undefined, true, 10, 20
+    End v5:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal choose
+    v5:unknown = Call v0:unknown, undefined, true, 10, 20
+    End v5:unknown
+
+=== After SSAConstruction ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Jump block5
+block3:
+    Return v9:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v9:unknown = Move v8:unknown
+    Jump block3
+
+=== Before optimization ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Jump block5
+block3:
+    Return v9:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v9:unknown = Move v8:unknown
+    Jump block3
+
+=== After DeadCodeElimination ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Jump block5
+block3:
+    Return v9:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v9:unknown = Move v8:unknown
+    Jump block3
+
+=== After CopyPropagation ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Jump block5
+block3:
+    Return v8:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v4:unknown
+block2_split1:
+    v9:unknown = Move v8:unknown
+    Jump block3
+
+=== After SimplifyCFG ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Move v4:unknown
+    Return v4:unknown
+block2:
+    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Move v8:unknown
+    Return v8:unknown
+
+=== After DeadCodeElimination ===
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Return v4:unknown
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Return v8:unknown
+
+function(v2:unknown, v6:unknown, v10:unknown):
+block0:
+    Branch v10:unknown, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Return v4:unknown
+block2:
+    v8:unknown = Add v6:unknown, 2
+    Return v8:unknown

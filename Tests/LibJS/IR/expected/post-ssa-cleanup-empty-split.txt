@@ -1,0 +1,274 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal loopWithBranch
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 10
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal loopWithBranch
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 10
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal loopWithBranch
+    v3:unknown = Call v0:unknown, undefined, 10
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal loopWithBranch
+    v3:unknown = Call v0:unknown, undefined, 10
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v7:unknown):
+block0:
+    v1:undefined = Move undefined
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
+    v16:unknown = Phi [block0:v3:int32, block2:v17:unknown]
+    v14:unknown = Phi [block0:v19:undefined, block2:v15:unknown]
+    v13:unknown = Phi [block0:v20:undefined, block2:v8:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block2:
+    v12:boolean = GreaterThan v9:unknown, 0
+    Branch v12:boolean, block1, block3
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block6
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block6:v6:number]
+    v15:unknown = Phi [block1:v14:unknown, block6:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    Jump block7
+block4_split0:
+    v6:number = Move v5:unknown
+    Jump block5
+block5_split1:
+    v9:unknown = Move v8:unknown
+    Jump block2
+
+=== Before optimization ===
+function(v7:unknown):
+block0:
+    v1:undefined = Move undefined
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
+    v16:unknown = Phi [block0:v3:int32, block2:v17:unknown]
+    v14:unknown = Phi [block0:v19:undefined, block2:v15:unknown]
+    v13:unknown = Phi [block0:v20:undefined, block2:v8:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block2:
+    v12:boolean = GreaterThan v9:unknown, 0
+    Branch v12:boolean, block1, block3
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block6
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block6:v6:number]
+    v15:unknown = Phi [block1:v14:unknown, block6:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    Jump block7
+block4_split0:
+    v6:number = Move v5:unknown
+    Jump block5
+block5_split1:
+    v9:unknown = Move v8:unknown
+    Jump block2
+
+=== After DeadCodeElimination ===
+function(v7:unknown):
+block0:
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
+    v16:unknown = Phi [block0:v3:int32, block2:v17:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block2:
+    v12:boolean = GreaterThan v9:unknown, 0
+    Branch v12:boolean, block1, block3
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block6
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block6:v6:number]
+    v8:unknown = Sub v18:unknown, 1
+    Jump block7
+block4_split0:
+    v6:number = Move v5:unknown
+    Jump block5
+block5_split1:
+    v9:unknown = Move v8:unknown
+    Jump block2
+
+=== After CopyPropagation ===
+function(v7:unknown):
+block0:
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block2:v8:unknown]
+    v16:unknown = Phi [block0:v2:int32, block2:v17:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block2:
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block1, block3
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block6
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block6:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    Jump block7
+block4_split0:
+    v6:number = Move v5:unknown
+    Jump block5
+block5_split1:
+    v9:unknown = Move v8:unknown
+    Jump block2
+
+=== After SimplifyCFG ===
+function(v7:unknown):
+block0:
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block5:v8:unknown]
+    v16:unknown = Phi [block0:v2:int32, block5:v17:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    v6:number = Move v5:unknown
+    Jump block5
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block4:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    v9:unknown = Move v8:unknown
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block1, block3
+
+=== After DeadCodeElimination ===
+function(v7:unknown):
+block0:
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block5:v8:unknown]
+    v16:unknown = Phi [block0:v2:int32, block5:v17:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block5
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block4:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block1, block3
+
+=== After SplitCriticalEdges ===
+function(v7:unknown):
+block0:
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block9:v8:unknown]
+    v16:unknown = Phi [block0:v2:int32, block9:v17:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block8
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block5
+block5:
+    v17:unknown = Phi [block4:v5:unknown, block8:v16:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block9, block3
+split_block1_block5:
+    Jump block5
+split_block5_block1:
+    Jump block1
+
+=== After SsaDestructionPass ===
+function(v7:unknown):
+block0:
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    Jump block1
+block1:
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block8
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    ParallelCopy [v17:unknown <- v5:unknown]
+    Jump block5
+block5:
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block9, block3
+split_block1_block5:
+    ParallelCopy [v17:unknown <- v16:unknown]
+    Jump block5
+split_block5_block1:
+    ParallelCopy [v18:unknown <- v8:unknown, v16:unknown <- v17:unknown]
+    Jump block1
+
+function(v7:unknown):
+block0:
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    Jump block1
+block1:
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block8
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    ParallelCopy [v17:unknown <- v5:unknown]
+    Jump block5
+block5:
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block9, block3
+split_block1_block5:
+    ParallelCopy [v17:unknown <- v16:unknown]
+    Jump block5
+split_block5_block1:
+    ParallelCopy [v18:unknown <- v8:unknown, v16:unknown <- v17:unknown]
+    Jump block1
