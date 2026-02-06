@@ -1283,8 +1283,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case PrepareYield: {
         auto const& op = static_cast<Bytecode::Op::PrepareYield const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_builder.build_move(value);
-        define_operand(op.dest(), result, block);
+        m_builder.build_prepare_yield(value);
         break;
     }
     case CreateAsyncFromSyncIterator: {

@@ -191,6 +191,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     // Generators/Async
     Yield,
     Await,
+    PrepareYield,
     GetCompletionFields,
     SetCompletionType,
     NewTypeError,
@@ -407,6 +408,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     // Generators/Async
     [to_underlying(Opcode::Yield)]                              = { "Yield",                              true,  true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
     [to_underlying(Opcode::Await)]                              = { "Await",                              true,  true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::PrepareYield)]                       = { "PrepareYield",                       false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
     [to_underlying(Opcode::GetCompletionFields)]                = { "GetCompletionFields",                false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
     [to_underlying(Opcode::SetCompletionType)]                  = { "SetCompletionType",                  false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
     [to_underlying(Opcode::NewTypeError)]                       = { "NewTypeError",                       false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },

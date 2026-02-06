@@ -1019,6 +1019,13 @@ void Builder::build_set_saved_return_value(Value& value)
     current_block().append(move(instruction));
 }
 
+void Builder::build_prepare_yield(Value& value)
+{
+    auto instruction = Instruction::create<Opcode::PrepareYield>();
+    instruction->add_operand(&value);
+    current_block().append(move(instruction));
+}
+
 Value& Builder::build_get_exception()
 {
     auto instruction = Instruction::create<Opcode::GetException>();

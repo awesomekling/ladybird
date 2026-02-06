@@ -912,6 +912,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
             Bytecode::Operand(Bytecode::Register::saved_return_value()),
             operand(0));
         break;
+    case Opcode::PrepareYield:
+        emit<Bytecode::Op::PrepareYield>(
+            Bytecode::Operand(Bytecode::Register::saved_return_value()),
+            operand(0));
+        break;
     case Opcode::GetException:
         emit<Bytecode::Op::Mov>(dst(), Bytecode::Operand(Bytecode::Register::exception()));
         break;

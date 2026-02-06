@@ -173,6 +173,7 @@ public:
     void build_leave_finally();
     void build_restore_scheduled_jump();
     void build_set_saved_return_value(Value& value);
+    void build_prepare_yield(Value& value);
     [[nodiscard]] Value& build_get_exception();
     void build_set_exception(Value& value);
 
