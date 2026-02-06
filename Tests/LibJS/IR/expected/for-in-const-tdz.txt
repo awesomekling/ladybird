@@ -425,6 +425,7 @@ split_block7_split5_block6:
 split_block7_split5_block7:
     Jump block7
 
+=== After PostSSACleanup ===
 function():
 block0:
     EnterUnwindContext block5
@@ -459,12 +460,44 @@ block9: [handler: block1]
     Jump block7
 block5_split4:
     v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block18, block9
+    Branch v21:boolean, block6, block9
 block7_split5:
-    Branch v15:unknown, block19, block20
-split_block5_split4_block6:
-    Jump block6
-split_block7_split5_block6:
-    Jump block6
-split_block7_split5_block7:
+    Branch v15:unknown, block6, block7
+
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v2:unknown = GetGlobal ReferenceError
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Branch v3:boolean, block2, block3
+block2:
+    Return v4:string
+block3:
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block6, block9
+block7_split5:
+    Branch v15:unknown, block6, block7

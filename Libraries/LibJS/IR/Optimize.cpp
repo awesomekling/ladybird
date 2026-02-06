@@ -14,6 +14,7 @@
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
+#include <LibJS/IR/Passes/PostSSACleanup.h>
 #include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
@@ -92,6 +93,11 @@ void optimize(Function& function)
     // Must run after SplitCriticalEdges so copies have clean blocks.
     SsaDestructionPass ssa_destruction_pass;
     run_once(ssa_destruction_pass);
+
+    // Post-SSA Cleanup: eliminate trivial [ParallelCopy...] + Jump blocks
+    // left over from SSA destruction by moving copies into predecessors.
+    PostSSACleanup post_ssa_cleanup_pass;
+    run_once(post_ssa_cleanup_pass);
 
     function.set_stage(IRStage::PostSSA);
 }
