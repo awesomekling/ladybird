@@ -22,6 +22,7 @@ NonnullOwnPtr<BasicBlock> BasicBlock::create(BlockIndex index, String name)
 
 void BasicBlock::append(NonnullOwnPtr<Instruction> instruction)
 {
+    VERIFY(!is_terminated());
     instruction->set_parent_block(this);
     m_instructions.append(move(instruction));
 }
