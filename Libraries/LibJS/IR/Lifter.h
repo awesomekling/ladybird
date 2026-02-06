@@ -27,9 +27,6 @@ private:
 
     void lift_basic_blocks();
     void lift_instruction(Bytecode::Instruction const&, BasicBlock&);
-    void place_phi_nodes();
-    void fill_phi_operands();
-    void rename_ssa(BasicBlock& block, HashMap<u32, Vector<Value*>>& stacks);
     void connect_control_flow();
     void compute_block_predecessors();
     void compute_dominators();
