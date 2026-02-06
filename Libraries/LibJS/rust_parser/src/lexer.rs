@@ -1013,6 +1013,32 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    // === State accessors for parser save/restore ===
+
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
+    pub fn line_number(&self) -> u32 {
+        self.line_number
+    }
+
+    pub fn line_column(&self) -> u32 {
+        self.line_column
+    }
+
+    pub fn restore(&mut self, position: usize, line_number: u32, line_column: u32) {
+        self.position = position;
+        self.line_number = line_number;
+        self.line_column = line_column;
+        self.eof = position > self.source_len();
+        if position < self.source_len() {
+            self.current_code_unit = self.source[position];
+        } else {
+            self.current_code_unit = 0;
+        }
+    }
+
     /// Re-lex the current Slash or SlashEquals token as a regex literal.
     pub fn force_slash_as_regex(&mut self) -> Token {
         let has_equals = self.current_token_type == TokenType::SlashEquals;
