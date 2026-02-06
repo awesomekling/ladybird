@@ -167,6 +167,13 @@ extern "C" {
         argument_values: *const NodeHandle, argument_is_spread: *const bool,
         argument_count: usize,
     ) -> NodeHandle;
+    pub fn ast_create_super_call(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        argument_values: *const NodeHandle, argument_is_spread: *const bool,
+        argument_count: usize,
+    ) -> NodeHandle;
     pub fn ast_create_new_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -601,6 +608,11 @@ impl AstBuilder {
     pub fn create_call_expression(&self, span: Span, callee: NodeHandle, argument_values: &[NodeHandle], argument_is_spread: &[bool]) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_call_expression(a, sc, sl, scol, so, el, ecol, eo, callee, argument_values.as_ptr(), argument_is_spread.as_ptr(), argument_values.len()) }
+    }
+
+    pub fn create_super_call(&self, span: Span, argument_values: &[NodeHandle], argument_is_spread: &[bool]) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_super_call(a, sc, sl, scol, so, el, ecol, eo, argument_values.as_ptr(), argument_is_spread.as_ptr(), argument_values.len()) }
     }
 
     pub fn create_new_expression(&self, span: Span, callee: NodeHandle, argument_values: &[NodeHandle], argument_is_spread: &[bool]) -> NodeHandle {

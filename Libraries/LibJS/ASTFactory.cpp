@@ -355,6 +355,24 @@ ASTNodeHandle ast_create_call_expression(ASTArenaHandle arena_handle, SourceCode
         InsideParenthesesEnum::NotInsideParentheses));
 }
 
+ASTNodeHandle ast_create_super_call(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle const* argument_values, bool const* argument_is_spread, size_t argument_count)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Vector<CallExpression::Argument> args;
+    args.ensure_capacity(argument_count);
+    for (size_t i = 0; i < argument_count; ++i) {
+        args.unchecked_append({
+            .value = as_ref<Expression>(argument_values[i]),
+            .is_spread = argument_is_spread[i],
+        });
+    }
+    return arena_add(arena, create_ast_node<SuperCall>(range, move(args)));
+}
+
 ASTNodeHandle ast_create_new_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
     u32 start_line, u32 start_column, u32 start_offset,
     u32 end_line, u32 end_column, u32 end_offset,

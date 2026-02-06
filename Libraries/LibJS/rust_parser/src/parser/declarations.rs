@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
             start.2, self.position().2 - start.2,
             body.0, params, function_length, kind as u8,
             self.strict_mode || body.1,
-            false, false, false, false,
+            true, false, false, true,
         )
     }
 
@@ -207,7 +207,7 @@ impl<'a> Parser<'a> {
             start.2, self.position().2 - start.2,
             body.0, params, function_length, kind as u8,
             self.strict_mode || body.1, false,
-            false, false, false, false,
+            true, false, false, true,
         )
     }
 
@@ -267,6 +267,20 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
         self.strict_mode = strict_before;
+
+        // Create synthetic constructor if none was declared
+        if constructor_func == NULL_HANDLE {
+            let ctor_body = self.builder.create_function_body(self.span_from(start));
+            // TODO: For classes with super_class, generate `constructor(...args) { return super(...args); }`
+            let ctor_params = self.builder.create_function_parameters_empty();
+            constructor_func = self.builder.create_function_expression(
+                self.span_from(start), name,
+                start.2, self.position().2 - start.2,
+                ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
+                true, false,
+                true, true, false, false,
+            );
+        }
 
         self.builder.create_class_expression(
             self.span_from(start), name,

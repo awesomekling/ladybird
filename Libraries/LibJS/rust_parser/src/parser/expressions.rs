@@ -224,10 +224,16 @@ impl<'a> Parser<'a> {
 
             TokenType::Super => {
                 self.consume();
-                if !self.allow_super_property_lookup {
-                    self.syntax_error("'super' keyword unexpected here");
+                if self.match_token(TokenType::ParenOpen) {
+                    // super(...) - SuperCall
+                    let (arg_values, arg_spreads) = self.parse_arguments();
+                    (self.builder.create_super_call(self.span_from(start), &arg_values, &arg_spreads), true)
+                } else {
+                    if !self.allow_super_property_lookup {
+                        self.syntax_error("'super' keyword unexpected here");
+                    }
+                    (self.builder.create_super_expression(self.span_from(start)), true)
                 }
-                (self.builder.create_super_expression(self.span_from(start)), true)
             }
 
             TokenType::NumericLiteral => {
@@ -627,7 +633,8 @@ impl<'a> Parser<'a> {
             return inner;
         }
 
-        let callee = self.parse_expression(19, Associativity::Right, ForbiddenTokens::none());
+        let forbidden = ForbiddenTokens::none().forbid(&[TokenType::ParenOpen, TokenType::QuestionMarkPeriod]);
+        let callee = self.parse_expression(19, Associativity::Right, forbidden);
 
         if self.match_token(TokenType::ParenOpen) {
             let (arg_values, arg_spreads) = self.parse_arguments();
@@ -1068,7 +1075,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body.0, params, function_length, kind,
                 self.strict_mode || body.1, true,
-                false, false, false, false,
+                true, false, false, true,
             ))
         } else {
             // Expression body
@@ -1083,7 +1090,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body, params, function_length, kind,
                 self.strict_mode, true,
-                false, false, false, false,
+                true, false, false, true,
             ))
         }
     }
@@ -1109,7 +1116,7 @@ impl<'a> Parser<'a> {
             start.2, self.position().2 - start.2,
             body.0, params, function_length, kind,
             self.strict_mode || body.1, false,
-            false, false, false, false,
+            true, false, false, true,
         )
     }
 }
