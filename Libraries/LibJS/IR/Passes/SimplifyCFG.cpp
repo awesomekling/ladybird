@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Bitmap.h>
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/Queue.h>
@@ -16,6 +17,17 @@
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
+
+static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
+static size_t block_index_capacity(Function const& function)
+{
+    size_t max_index = 0;
+    for (auto const& block : function.basic_blocks())
+        max_index = max(max_index, to_index(block->index()) + 1);
+    return max_index;
+}
 
 static void remove_dead_blocks(Function& function)
 {
@@ -423,21 +435,24 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
 
 static bool try_eliminate_unreachable_blocks(Function& function)
 {
+    auto capacity = block_index_capacity(function);
+
     // Find all reachable blocks using BFS from entry
-    HashTable<BasicBlock*> reachable;
+    auto reachable = MUST(AK::Bitmap::create(capacity, false));
     Queue<BasicBlock*> worklist;
 
     if (auto* entry = function.entry_block()) {
         worklist.enqueue(entry);
-        reachable.set(entry);
+        reachable.set(to_index(entry->index()), true);
     }
 
     while (!worklist.is_empty()) {
         auto* block = worklist.dequeue();
 
         CFG::for_each_successor(*block, [&](BasicBlock& target) {
-            if (!reachable.contains(&target)) {
-                reachable.set(&target);
+            auto ti = to_index(target.index());
+            if (!reachable.get(ti)) {
+                reachable.set(ti, true);
                 worklist.enqueue(&target);
             }
         });
@@ -446,7 +461,7 @@ static bool try_eliminate_unreachable_blocks(Function& function)
     // Collect dead blocks
     Vector<BasicBlock*> dead_blocks;
     for (auto& block : function.basic_blocks()) {
-        if (!reachable.contains(block.ptr()))
+        if (!reachable.get(to_index(block->index())))
             dead_blocks.append(block.ptr());
     }
 
@@ -456,7 +471,10 @@ static bool try_eliminate_unreachable_blocks(Function& function)
     // Build a map of phi results from dead blocks to their replacement values
     // If a phi in a dead block has all identical operands, we can replace uses of
     // the phi result with that operand value
-    HashMap<Value*, Value*> dead_phi_replacements;
+    auto value_capacity = function.values().size();
+    Vector<Optional<ValueIndex>> dead_phi_replacements;
+    dead_phi_replacements.resize(value_capacity);
+
     for (auto* dead_block : dead_blocks) {
         dead_block->for_each_phi([&](PhiInstruction const& phi) {
             auto const& operands = phi.operands();
@@ -474,26 +492,28 @@ static bool try_eliminate_unreachable_blocks(Function& function)
             }
 
             if (all_same && replacement && phi.result())
-                dead_phi_replacements.set(phi.result(), replacement);
+                dead_phi_replacements[to_index(phi.result()->index())] = replacement->index();
         });
     }
 
     // Replace uses of dead phi results in live blocks
     for (auto& block : function.basic_blocks()) {
-        if (!reachable.contains(block.ptr()))
+        if (!reachable.get(to_index(block->index())))
             continue;
 
         for (auto& instruction : block->instructions()) {
             for (size_t i = 0; i < instruction->operands().size(); ++i) {
                 auto* operand = instruction->operands()[i];
+                if (!operand)
+                    continue;
+
                 // Follow the replacement chain
-                auto replacement = dead_phi_replacements.get(operand);
-                while (replacement.has_value()) {
-                    operand = *replacement;
-                    replacement = dead_phi_replacements.get(operand);
-                }
-                if (operand != instruction->operands()[i])
-                    instruction->set_operand(i, operand);
+                auto vi = to_index(operand->index());
+                while (vi < dead_phi_replacements.size() && dead_phi_replacements[vi].has_value())
+                    vi = to_index(*dead_phi_replacements[vi]);
+
+                if (vi != to_index(operand->index()))
+                    instruction->set_operand(i, function.values()[vi].ptr());
             }
         }
     }
