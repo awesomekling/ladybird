@@ -6,7 +6,7 @@
 
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
-#include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
@@ -18,7 +18,7 @@ namespace JS::IR {
 PreservedAnalyses JumpThreading::run(Function& function, PassManager& pass_manager)
 {
     bool changed = false;
-    auto& dominators = pass_manager.dominators(function);
+    auto& dominators = pass_manager.dominator_tree(function);
 
     // Look for blocks where a Branch condition is a Phi node
     // and some phi inputs are constants

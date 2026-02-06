@@ -62,17 +62,17 @@ void PassManager::run(Function& function)
     }
 }
 
-Dominators const& PassManager::dominators(Function const& function)
+DominatorTree const& PassManager::dominator_tree(Function const& function)
 {
-    if (!m_dominators)
-        m_dominators = make<Dominators>(function);
-    return *m_dominators;
+    if (!m_dominator_tree)
+        m_dominator_tree = make<DominatorTree>(function);
+    return *m_dominator_tree;
 }
 
 void PassManager::invalidate(PreservedAnalyses const& preserved)
 {
     if (!preserved.are_dominators_preserved())
-        m_dominators = nullptr;
+        m_dominator_tree = nullptr;
 }
 
 }

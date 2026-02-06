@@ -15,9 +15,9 @@ namespace JS::IR {
 
 // Computes dominator tree and dominance frontiers for a control flow graph.
 // Uses a simple iterative algorithm for dominator computation.
-class Dominators {
+class DominatorTree {
 public:
-    explicit Dominators(Function const& function);
+    explicit DominatorTree(Function const& function);
 
     // Returns the immediate dominator of a block, or nullptr for the entry block
     BasicBlock* immediate_dominator(BasicBlock const* block) const;

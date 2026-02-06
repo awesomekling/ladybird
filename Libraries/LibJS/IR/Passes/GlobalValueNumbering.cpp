@@ -44,7 +44,7 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
         return PreservedAnalyses::all();
 
     bool changed = false;
-    auto const& dominators = pass_manager.dominators(function);
+    auto const& dominators = pass_manager.dominator_tree(function);
     HashMap<ExpressionKey, Value*> expressions;
 
     // Walk the dominator tree in pre-order with a scoped expression table.

@@ -13,7 +13,7 @@
 
 namespace JS::IR {
 
-SSAConstruction::SSAConstruction(Function& function, Dominators const& dominators, Bytecode::Executable const& executable,
+SSAConstruction::SSAConstruction(Function& function, DominatorTree const& dominators, Bytecode::Executable const& executable,
     HashTable<u32> const& written_operands,
     HashMap<BasicBlock*, HashTable<u32>> const& block_actual_definitions,
     HashMap<BasicBlock*, HashMap<u32, Value*>>& block_definitions,

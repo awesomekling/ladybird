@@ -13,7 +13,7 @@
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Export.h>
 #include <LibJS/IR/Builder.h>
-#include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Forward.h>
 
 namespace JS::IR {
@@ -74,7 +74,7 @@ private:
     HashMap<Value*, u32> m_value_to_operand_raw;
 
     // Dominator information for proper SSA construction
-    OwnPtr<Dominators> m_dominators;
+    OwnPtr<DominatorTree> m_dominators;
 };
 
 }

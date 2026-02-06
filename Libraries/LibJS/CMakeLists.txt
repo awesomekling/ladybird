@@ -19,7 +19,7 @@ set(SOURCES
     IR/BasicBlock.cpp
     IR/Builder.cpp
     IR/CFG.cpp
-    IR/Dominators.cpp
+    IR/DominatorTree.cpp
     IR/Dump.cpp
     IR/Function.cpp
     IR/Instruction.cpp

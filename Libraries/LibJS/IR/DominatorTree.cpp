@@ -6,20 +6,20 @@
 
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
-#include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 
 namespace JS::IR {
 
-Dominators::Dominators(Function const& function)
+DominatorTree::DominatorTree(Function const& function)
     : m_function(function)
 {
     compute_reverse_postorder();
     compute_dominators();
 }
 
-void Dominators::compute_reverse_postorder()
+void DominatorTree::compute_reverse_postorder()
 {
     // DFS to compute reverse postorder using explicit stack with frames.
 
@@ -69,7 +69,7 @@ void Dominators::compute_reverse_postorder()
         m_reverse_postorder.append(postorder[i - 1]);
 }
 
-void Dominators::compute_dominators()
+void DominatorTree::compute_dominators()
 {
     // Simple iterative algorithm for computing dominators
     // Based on "A Simple, Fast Dominance Algorithm" by Cooper, Harvey, Kennedy
@@ -144,7 +144,7 @@ void Dominators::compute_dominators()
     }
 }
 
-void Dominators::ensure_dominance_frontiers() const
+void DominatorTree::ensure_dominance_frontiers() const
 {
     if (m_dominance_frontiers_computed)
         return;
@@ -175,7 +175,7 @@ void Dominators::ensure_dominance_frontiers() const
     }
 }
 
-BasicBlock* Dominators::immediate_dominator(BasicBlock const* block) const
+BasicBlock* DominatorTree::immediate_dominator(BasicBlock const* block) const
 {
     auto it = m_immediate_dominator.find(block);
     if (it == m_immediate_dominator.end())
@@ -186,14 +186,14 @@ BasicBlock* Dominators::immediate_dominator(BasicBlock const* block) const
     return it->value;
 }
 
-bool Dominators::strictly_dominates(BasicBlock const* a, BasicBlock const* b) const
+bool DominatorTree::strictly_dominates(BasicBlock const* a, BasicBlock const* b) const
 {
     if (a == b)
         return false;
     return dominates(a, b);
 }
 
-bool Dominators::dominates(BasicBlock const* a, BasicBlock const* b) const
+bool DominatorTree::dominates(BasicBlock const* a, BasicBlock const* b) const
 {
     if (a == b)
         return true;
@@ -212,7 +212,7 @@ bool Dominators::dominates(BasicBlock const* a, BasicBlock const* b) const
     return false;
 }
 
-HashTable<BasicBlock*> const& Dominators::dominance_frontier(BasicBlock const* block) const
+HashTable<BasicBlock*> const& DominatorTree::dominance_frontier(BasicBlock const* block) const
 {
     ensure_dominance_frontiers();
     static HashTable<BasicBlock*> empty;
@@ -222,7 +222,7 @@ HashTable<BasicBlock*> const& Dominators::dominance_frontier(BasicBlock const* b
     return it->value;
 }
 
-void Dominators::ensure_dominator_children() const
+void DominatorTree::ensure_dominator_children() const
 {
     if (m_dominator_children_computed)
         return;
@@ -240,7 +240,7 @@ void Dominators::ensure_dominator_children() const
     }
 }
 
-Vector<BasicBlock*> const& Dominators::dominator_children(BasicBlock const* block) const
+Vector<BasicBlock*> const& DominatorTree::dominator_children(BasicBlock const* block) const
 {
     ensure_dominator_children();
     static Vector<BasicBlock*> empty;

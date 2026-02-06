@@ -10,7 +10,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <LibJS/Export.h>
-#include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Forward.h>
 
 namespace JS::IR {
@@ -49,7 +49,7 @@ private:
 };
 
 // Manages optimization pass execution and caches analyses across passes.
-// Passes that need analyses (e.g., Dominators) request them through the
+// Passes that need analyses (e.g., DominatorTree) request them through the
 // PassManager, which lazily computes and caches them. When a pass mutates
 // the IR, it returns PreservedAnalyses to indicate which cached results
 // remain valid.
@@ -63,15 +63,15 @@ public:
     // Run all passes in a fixed-point loop until convergence.
     void run(Function&);
 
-    // Lazily compute and cache the Dominators analysis.
-    Dominators const& dominators(Function const&);
+    // Lazily compute and cache the DominatorTree analysis.
+    DominatorTree const& dominator_tree(Function const&);
 
     // Invalidate cached analyses based on what a pass preserved.
     void invalidate(PreservedAnalyses const&);
 
 private:
     Vector<NonnullOwnPtr<Pass>> m_passes;
-    OwnPtr<Dominators> m_dominators;
+    OwnPtr<DominatorTree> m_dominator_tree;
 };
 
 }

@@ -49,7 +49,7 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
     bool changed = false;
 
     // Compute dominators for proper back-edge detection
-    auto const& dominators = pass_manager.dominators(function);
+    auto const& dominators = pass_manager.dominator_tree(function);
 
     // Find natural loops by looking for back-edges
     // A back-edge is an edge B -> H where H dominates B

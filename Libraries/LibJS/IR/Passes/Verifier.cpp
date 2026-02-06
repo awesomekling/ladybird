@@ -7,7 +7,7 @@
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
-#include <LibJS/IR/Dominators.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -617,7 +617,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     }
 
     // Compute dominators for dominance checking
-    Dominators dominators(function);
+    DominatorTree dominators(function);
 
     // Precompute instruction position within each block for O(1) same-block ordering checks
     HashMap<Instruction const*, size_t> instruction_position;

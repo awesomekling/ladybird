@@ -1647,7 +1647,7 @@ void Lifter::compute_block_predecessors()
 
 void Lifter::compute_dominators()
 {
-    m_dominators = make<Dominators>(*m_function);
+    m_dominators = make<DominatorTree>(*m_function);
 }
 
 void Lifter::eliminate_unreachable_blocks()
