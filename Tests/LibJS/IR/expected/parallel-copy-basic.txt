@@ -1,0 +1,153 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal diamond
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal diamond
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal diamond
+    v3:unknown = Call v0:unknown, undefined, 5
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal diamond
+    v3:unknown = Call v0:unknown, undefined, 5
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v2:unknown):
+block0:
+    v1:undefined = Move undefined
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Jump block5
+block3:
+    Return v7:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v7:unknown = Move v6:unknown
+    Jump block3
+
+=== Before optimization ===
+function(v2:unknown):
+block0:
+    v1:undefined = Move undefined
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Jump block5
+block3:
+    Return v7:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v7:unknown = Move v6:unknown
+    Jump block3
+
+=== After DeadCodeElimination ===
+function(v2:unknown):
+block0:
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Jump block5
+block3:
+    Return v7:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v5:unknown
+block2_split1:
+    v7:unknown = Move v6:unknown
+    Jump block3
+
+=== After CopyPropagation ===
+function(v2:unknown):
+block0:
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Jump block4
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Jump block5
+block3:
+    Return v6:unknown
+block1_split0:
+    v5:unknown = Move v4:unknown
+    Return v4:unknown
+block2_split1:
+    v7:unknown = Move v6:unknown
+    Jump block3
+
+=== After SimplifyCFG ===
+function(v2:unknown):
+block0:
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Move v4:unknown
+    Return v4:unknown
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    v7:unknown = Move v6:unknown
+    Return v6:unknown
+
+=== After DeadCodeElimination ===
+function(v2:unknown):
+block0:
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Return v4:unknown
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Return v6:unknown
+
+function(v2:unknown):
+block0:
+    v9:boolean = GreaterThan v2:unknown, 0
+    Branch v9:boolean, block1, block2
+block1:
+    v4:unknown = Add v2:unknown, 1
+    Return v4:unknown
+block2:
+    v6:unknown = Sub v2:unknown, 1
+    Return v6:unknown

@@ -1,0 +1,268 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal ehEdge
+    Jump block1
+block0_split0:
+    v1:function = NewFunction
+    Jump block2
+block0_split1:
+    v2:function = NewFunction
+    Jump block3
+block0_split2:
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal ehEdge
+    Jump block1
+block0_split0:
+    v1:function = NewFunction
+    Jump block2
+block0_split1:
+    v2:function = NewFunction
+    Jump block3
+block0_split2:
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal ehEdge
+    v1:function = NewFunction
+    v2:function = NewFunction
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal ehEdge
+    v1:function = NewFunction
+    v2:function = NewFunction
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    End v4:unknown
+
+=== After SSAConstruction ===
+function(v6:unknown, v9:unknown):
+block0:
+    v1:undefined = Move undefined
+    v3:string = Move v2:string
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v3:string, block4:v8:unknown]
+    v12:unknown = Phi [block2:v7:unknown, block4:v10:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v5:unknown = Move v4:unknown
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block3:
+    Return v11:unknown
+block2_split0: [handler: block1]
+    v8:unknown = Move v7:unknown
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    v11:unknown = Move v10:unknown
+    LeaveUnwindContext
+    Jump block3
+
+=== Before optimization ===
+function(v6:unknown, v9:unknown):
+block0:
+    v1:undefined = Move undefined
+    v3:string = Move v2:string
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v3:string, block4:v8:unknown]
+    v12:unknown = Phi [block2:v7:unknown, block4:v10:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v5:unknown = Move v4:unknown
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block3:
+    Return v11:unknown
+block2_split0: [handler: block1]
+    v8:unknown = Move v7:unknown
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    v11:unknown = Move v10:unknown
+    LeaveUnwindContext
+    Jump block3
+
+=== After DeadCodeElimination ===
+function(v6:unknown, v9:unknown):
+block0:
+    v3:string = Move v2:string
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v3:string, block4:v8:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block3:
+    Return v11:unknown
+block2_split0: [handler: block1]
+    v8:unknown = Move v7:unknown
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    v11:unknown = Move v10:unknown
+    LeaveUnwindContext
+    Jump block3
+
+=== After CopyPropagation ===
+function(v6:unknown, v9:unknown):
+block0:
+    v3:string = Move v2:string
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v2:string, block4:v7:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block3:
+    Return v10:unknown
+block2_split0: [handler: block1]
+    v8:unknown = Move v7:unknown
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    v11:unknown = Move v10:unknown
+    LeaveUnwindContext
+    Jump block3
+
+=== After SimplifyCFG ===
+function(v6:unknown, v9:unknown):
+block0:
+    v3:string = Move v2:string
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v2:string, block4:v7:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block2_split0: [handler: block1]
+    v8:unknown = Move v7:unknown
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    v11:unknown = Move v10:unknown
+    LeaveUnwindContext
+    Return v10:unknown
+
+=== After DeadCodeElimination ===
+function(v6:unknown, v9:unknown):
+block0:
+    EnterUnwindContext block2
+block1:
+    v13:unknown = Phi [block2:v2:string, block4:v7:unknown]
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block2_split0: [handler: block1]
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    LeaveUnwindContext
+    Return v10:unknown
+
+=== After SsaDestructionPass ===
+function(v6:unknown, v9:unknown):
+block0:
+    EnterUnwindContext block2
+block1:
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    ParallelCopy [v13:unknown <- v2:string]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block2_split0: [handler: block1]
+    ParallelCopy [v13:unknown <- v7:unknown]
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    LeaveUnwindContext
+    Return v10:unknown
+
+function(v6:unknown, v9:unknown):
+block0:
+    EnterUnwindContext block2
+block1:
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    ParallelCopy [v13:unknown <- v2:string]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block2_split0: [handler: block1]
+    ParallelCopy [v13:unknown <- v7:unknown]
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    LeaveUnwindContext
+    Return v10:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    Return 1
+
+=== Before optimization ===
+function():
+block0:
+    Return 1
+
+function():
+block0:
+    Return 1
+
+=== After SSAConstruction ===
+function():
+block0:
+    Return 2
+
+=== Before optimization ===
+function():
+block0:
+    Return 2
+
+function():
+block0:
+    Return 2
