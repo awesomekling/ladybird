@@ -1,3 +1,36 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateLexicalEnvironment
+    CreateVariable
+    Jump block1
+block0_split0:
+    CreatePrivateEnvironment
+    AddPrivateName
+    v2:function = NewClass null, null, v1:string
+    Jump block2
+block0_split1:
+    LeavePrivateEnvironment
+    InitializeBinding Foo v2:function
+    Jump block3
+block0_split2:
+    v3:unknown = GetGlobal Foo
+    Jump block4
+block0_split3:
+    v4:unknown = GetById v3:unknown.check
+    Jump block5
+block0_split4:
+    v5:unknown = GetGlobal Foo
+    Jump block6
+block0_split5:
+    v6:object = Construct v5:unknown
+    Jump block7
+block0_split6:
+    v7:unknown = Call v4:unknown, v3:unknown, v6:object
+    Jump block8
+block0_split7:
+    End v7:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -64,6 +97,11 @@ block0:
     v7:unknown = Call v4:unknown, v3:unknown, v6:object
     End v7:unknown
 
+=== After SSAConstruction ===
+function():
+block0:
+    End undefined
+
 === Before optimization ===
 function():
 block0:
@@ -72,6 +110,14 @@ block0:
 function():
 block0:
     End undefined
+
+=== After SSAConstruction ===
+function(v0:unknown):
+block0:
+    v1:boolean = HasPrivateId v0:unknown
+    Jump block1
+block0_split0:
+    Return v1:boolean
 
 === Before optimization ===
 function(v0:unknown):

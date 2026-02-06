@@ -1257,6 +1257,8 @@ void Lowerer::lower_blocks()
 // eliminate the phi move.
 GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 {
+    VERIFY(function.stage() == IRStage::SSA || function.stage() == IRStage::OptimizedSSA);
+
     Lowerer lowerer(vm, function);
     if (function.source_executable())
         lowerer.m_strict = function.source_executable()->is_strict_mode ? Strict::Yes : Strict::No;

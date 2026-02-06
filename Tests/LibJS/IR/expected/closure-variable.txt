@@ -1,3 +1,17 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal make_counter
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = Call v2:unknown, undefined
+    Jump block3
+block0_split2:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -27,6 +41,21 @@ block0:
     v3:unknown = Call v2:unknown, undefined
     End v3:unknown
 
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateLexicalEnvironment
+    CreateVariable
+    Jump block1
+block0_split0:
+    InitializeBinding count 0
+    Jump block2
+block0_split1:
+    v2:function = NewFunction
+    Jump block3
+block0_split2:
+    Return v2:function
+
 === Before optimization ===
 function():
 block0:
@@ -58,6 +87,21 @@ block0:
     InitializeBinding count 0
     v2:function = NewFunction
     Return v2:function
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetBinding count
+    Jump block1
+block0_split0:
+    v1:unknown = ToNumeric v0:unknown
+    v2:number = Increment v1:unknown
+    Jump block2
+block0_split1:
+    SetBinding count v2:number
+    Jump block3
+block0_split2:
+    Return v1:unknown
 
 === Before optimization ===
 function():

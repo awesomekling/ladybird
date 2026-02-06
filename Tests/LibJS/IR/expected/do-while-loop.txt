@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, false
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,15 @@ block0:
     v0:unknown = GetGlobal foo
     v3:unknown = Call v0:unknown, undefined, false
     End v3:unknown
+
+=== After SSAConstruction ===
+function(v1:unknown):
+block0:
+    Branch v1:unknown, block0, block1
+block1:
+    End undefined
+entry:
+    Jump block0
 
 === Before optimization ===
 function(v1:unknown):

@@ -1,3 +1,74 @@
+=== After SSAConstruction ===
+function():
+block0:
+    SetGlobal result v0:string
+    Jump block8
+block1:
+    v22:unknown = Phi [block4:v24:unknown, block13:v9:unknown, block14:v9:unknown, block15:v9:unknown]
+    v1:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal result
+    Jump block9
+block2:
+    v27:unknown = Phi [block5:v33:unknown, block11:v2:unknown]
+    v23:unknown = Phi [block5:v11:undefined, block11:v4:unknown]
+    v21:unknown = Phi [block5:v34:undefined, block11:v5:unknown]
+    v19:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
+    v6:unknown = GetGlobal result
+    Jump block12
+block3:
+    EnterUnwindContext block7
+block4: [handler: block1]
+    v26:unknown = Phi [block6:v13:unknown, block7:v28:unknown, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v25:unknown = Phi [block6:v32:undefined, block7:v29:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
+    v24:unknown = Phi [block6:v12:unknown, block7:v30:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
+    v20:unknown = Phi [block6:v14:unknown, block7:v31:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]
+    LeaveUnwindContext
+    v7:unknown = GetGlobal result
+    Jump block13
+block5:
+    v11:undefined = Move undefined
+    LeaveUnwindContext
+    Jump block2
+block6: [finalizer: block4]
+    v12:unknown = Catch
+    v13:unknown = Move v12:unknown
+    v14:unknown = GetGlobal result
+    Jump block16
+block7: [handler: block6] [finalizer: block4]
+    Throw v18:string
+block0_split0:
+    EnterUnwindContext block3
+block1_split1:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block10
+block1_split2:
+    SetGlobal result v4:unknown
+    Jump block11
+block1_split3:
+    v5:unknown = Move v4:unknown
+    Jump block2
+block2_split4:
+    End v6:unknown
+block4_split5: [handler: block1]
+    v9:unknown = Add v7:unknown, v8:string
+    Jump block14
+block4_split6: [handler: block1]
+    SetGlobal result v9:unknown
+    Jump block15
+block4_split7: [handler: block1]
+    ContinuePendingUnwind block5
+block6_split8: [finalizer: block4]
+    v16:unknown = Add v14:unknown, v15:string
+    Jump block17
+block6_split9: [finalizer: block4]
+    SetGlobal result v16:unknown
+    Jump block18
+block6_split10: [finalizer: block4]
+    Throw v17:string
+
 === Before optimization ===
 function():
 block0:

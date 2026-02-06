@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,40 @@ block0:
     v0:unknown = GetGlobal go
     v2:unknown = Call v0:unknown, undefined
     End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v8:undefined = Move undefined
+    v9:undefined = Move undefined
+    v10:undefined = Move undefined
+    v11:undefined = Move undefined
+    v12:undefined = Move undefined
+    v14:number = Move 1.5
+    v16:number = Move 1.5
+    v17:boolean = StrictlyEquals v14:number, v16:number
+    v18:boolean = Move v17:boolean
+    v20:int32 = Move 1
+    v21:int32 = Move 1
+    v22:boolean = StrictlyEquals v20:int32, v21:int32
+    v23:boolean = Move v22:boolean
+    v25:null = Move null
+    v26:null = Move null
+    v27:boolean = StrictlyEquals v25:null, v26:null
+    v28:boolean = Move v27:boolean
+    v29:undefined = Move undefined
+    v30:boolean = StrictlyEquals v29:undefined, v29:undefined
+    v31:boolean = Move v30:boolean
+    v32:boolean = StrictlyInequals v25:null, v29:undefined
+    v33:boolean = Move v32:boolean
+    Return v18:boolean
 
 === Before optimization ===
 function():

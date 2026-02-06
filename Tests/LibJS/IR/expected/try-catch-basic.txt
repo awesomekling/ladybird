@@ -1,3 +1,13 @@
+=== After SSAConstruction ===
+function():
+block0:
+    EnterUnwindContext block3
+block3:
+    v4:int32 = Move 3
+    v5:int32 = Move v4:int32
+    LeaveUnwindContext
+    End v5:int32
+
 === Before optimization ===
 function():
 block0:

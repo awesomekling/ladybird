@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal fetchValue
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,77 @@ block0:
     v0:unknown = GetGlobal fetchValue
     v2:unknown = Call v0:unknown, undefined
     End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v27:unknown = Yield undefined, continuation: block1
+block1:
+    v0:unknown = GetGlobal Promise
+    Jump block11
+block2:
+    v6:unknown = Move v28:unknown
+    v7:unknown = GetCompletionFields v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    Jump block14
+block3:
+    v10:unknown = Move v9:unknown
+    v11:unknown = GetGlobal Promise
+    Jump block15
+block4:
+    Throw v9:unknown
+block5:
+    v16:unknown = Move v31:unknown
+    v17:unknown = GetCompletionFields v16:unknown
+    v18:unknown = ExtractValue v17:unknown, 0
+    v19:unknown = ExtractValue v17:unknown, 1
+    Jump block18
+block6:
+    v20:unknown = Move v19:unknown
+    v21:unknown = Add v10:unknown, v20:unknown
+    Jump block19
+block7:
+    Throw v19:unknown
+block8:
+    v22:unknown = Move v34:unknown
+    v23:unknown = GetCompletionFields v22:unknown
+    v24:unknown = ExtractValue v23:unknown, 0
+    v25:unknown = ExtractValue v23:unknown, 1
+    Jump block20
+block9:
+    v37:unknown = Yield v25:unknown
+block10:
+    Throw v25:unknown
+block1_split0:
+    v1:unknown = GetById v0:unknown.resolve
+    Jump block12
+block1_split1:
+    v3:unknown = Call v1:unknown, v0:unknown, 10
+    Jump block13
+block1_split2:
+    v5:unknown = Move v27:unknown
+    v28:unknown = Await v3:unknown, continuation: block2
+block2_split3:
+    v30:boolean = StrictlyEquals v8:unknown, 1
+    Branch v30:boolean, block3, block4
+block3_split4:
+    v12:unknown = GetById v11:unknown.resolve
+    Jump block16
+block3_split5:
+    v14:unknown = Call v12:unknown, v11:unknown, 20
+    Jump block17
+block3_split6:
+    v15:unknown = Move v28:unknown
+    v31:unknown = Await v14:unknown, continuation: block5
+block5_split7:
+    v33:boolean = StrictlyEquals v18:unknown, 1
+    Branch v33:boolean, block6, block7
+block6_split8:
+    v34:unknown = Await v21:unknown, continuation: block8
+block8_split9:
+    v36:boolean = StrictlyEquals v24:unknown, 1
+    Branch v36:boolean, block9, block10
 
 === Before optimization ===
 function():

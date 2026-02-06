@@ -1,3 +1,32 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal f1
+    Jump block5
+block1:
+    Throw v6:string
+block2:
+    v7:unknown = GetGlobal f2
+    Jump block7
+block3:
+    Throw v12:string
+block4:
+    End v11:undefined
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block6
+block0_split1:
+    v4:boolean = StrictlyInequals v2:unknown, 42
+    v5:undefined = Move undefined
+    Branch v4:boolean, block1, block2
+block2_split2:
+    v8:unknown = Call v7:unknown, undefined
+    Jump block8
+block2_split3:
+    v10:boolean = StrictlyInequals v8:unknown, 2
+    v11:undefined = Move undefined
+    Branch v10:boolean, block3, block4
+
 === Before optimization ===
 function():
 block0:
@@ -140,6 +169,13 @@ block3:
 block4:
     End undefined
 
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateArguments kind:mapped, immutable:false
+    v2:int32 = Move 42
+    Return v2:int32
+
 === Before optimization ===
 function():
 block0:
@@ -164,6 +200,19 @@ function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     Return 42
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateArguments kind:mapped, immutable:false
+    v3:array = NewArray 1, 2
+    Jump block1
+block0_split0:
+    v4:array = Move v3:array
+    v5:unknown = GetLength v4:array
+    Jump block2
+block0_split1:
+    Return v5:unknown
 
 === Before optimization ===
 function():

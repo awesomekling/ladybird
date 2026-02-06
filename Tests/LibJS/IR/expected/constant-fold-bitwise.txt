@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,60 @@ block0:
     v0:unknown = GetGlobal go
     v2:unknown = Call v0:unknown, undefined
     End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v8:undefined = Move undefined
+    v10:int32 = Move 5
+    v12:int32 = Move 3
+    v13:int32 = BitwiseOr v10:int32, v12:int32
+    Jump block1
+block0_split0:
+    v14:int32 = Move v13:int32
+    v15:int32 = BitwiseAnd v10:int32, v12:int32
+    Jump block2
+block0_split1:
+    v16:int32 = Move v15:int32
+    v17:int32 = BitwiseXor v10:int32, v12:int32
+    Jump block3
+block0_split2:
+    v18:int32 = Move v17:int32
+    v19:int32 = BitwiseNot v10:int32
+    Jump block4
+block0_split3:
+    v20:int32 = Move v19:int32
+    v21:int32 = LeftShift v10:int32, v12:int32
+    Jump block5
+block0_split4:
+    v22:int32 = Move v21:int32
+    v23:int32 = RightShift v10:int32, v12:int32
+    Jump block6
+block0_split5:
+    v24:int32 = Move v23:int32
+    v25:number = Add v14:int32, v16:int32
+    Jump block7
+block0_split6:
+    v26:number = Add v25:number, v18:int32
+    Jump block8
+block0_split7:
+    v27:number = Add v26:number, v20:int32
+    Jump block9
+block0_split8:
+    v28:number = Add v27:number, v22:int32
+    Jump block10
+block0_split9:
+    v29:number = Add v28:number, v24:int32
+    Jump block11
+block0_split10:
+    Return v29:number
 
 === Before optimization ===
 function():

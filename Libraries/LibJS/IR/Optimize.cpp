@@ -14,6 +14,7 @@
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
+#include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
 
@@ -24,17 +25,26 @@ bool g_optimize_ir = false;
 bool g_dump_ir_between_passes = false;
 bool g_lower_ir = false;
 
-// IR Pipeline Phase 3: Optimization (operates on SSA-form IR)
+// IR Pipeline Phases 2-3: SSA construction + optimization
 //
 // The full IR pipeline is:
 //   Phase 1: Bytecode → IR (CFG construction)           — Lifter::lift()
-//   Phase 2: SSA construction                            — Lifter::lift() via SSAConstruction
-//   Phase 3: Optimization passes on SSA-form IR          — optimize() (this function)
+//   Phase 2: SSA construction                            — SSAConstructionPass (always runs)
+//   Phase 3: Optimization passes on SSA-form IR          — (gated by g_optimize_ir)
 //   Phase 4: SSA destruction (phi coalescing) + lowering — Lowerer::lower() via PhiCoalescing
 void optimize(Function& function)
 {
+    // Phase 2: SSA construction (always runs, required before lowering)
     PassManager pass_manager;
 
+    SSAConstructionPass ssa_pass;
+    auto preserved = ssa_pass.run(function, pass_manager);
+    pass_manager.invalidate(preserved);
+
+    if (g_dump_ir_between_passes)
+        dbgln("=== After {} ===\n{}", ssa_pass.name(), dump(function));
+
+    // Phase 3: Optimization passes
     // Dead Code Removal
     pass_manager.add_pass(make<DeadCodeElimination>());
 
@@ -76,6 +86,8 @@ void optimize(Function& function)
     // split blocks back, recreating the critical edges.
     SplitCriticalEdges split_pass;
     run_once(split_pass);
+
+    function.set_stage(IRStage::OptimizedSSA);
 }
 
 }

@@ -13,7 +13,6 @@
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lifter.h>
-#include <LibJS/IR/SSAConstruction.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
@@ -45,11 +44,13 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.compute_dominators();
     lifter.eliminate_unreachable_blocks();
 
-    // IR Pipeline Phase 2: SSA construction (via DominatorTree + SSAConstruction)
-    SSAConstruction ssa(*lifter.m_function, *lifter.m_dominators, lifter.m_executable,
-        lifter.m_written_operands, lifter.m_block_actual_definitions,
-        lifter.m_block_definitions, lifter.m_value_to_operand_raw);
-    ssa.run();
+    // Package up SSA side tables for the SSAConstructionPass to consume later.
+    auto ssa_data = make<SsaConstructionData>();
+    ssa_data->written_operands = move(lifter.m_written_operands);
+    ssa_data->block_actual_definitions = move(lifter.m_block_actual_definitions);
+    ssa_data->block_definitions = move(lifter.m_block_definitions);
+    ssa_data->value_to_operand_raw = move(lifter.m_value_to_operand_raw);
+    lifter.m_function->set_ssa_construction_data(move(ssa_data));
 
     // Store the source block map for exception handler remapping in the lowerer
     lifter.m_function->set_source_block_map(move(lifter.m_block_map));

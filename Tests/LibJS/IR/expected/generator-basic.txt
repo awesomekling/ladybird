@@ -1,3 +1,44 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal count
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    InitializeBinding g v2:unknown
+    Jump block3
+block0_split2:
+    v3:unknown = GetGlobal g
+    Jump block4
+block0_split3:
+    v4:unknown = GetById v3:unknown.next
+    Jump block5
+block0_split4:
+    v5:unknown = Call v4:unknown, v3:unknown
+    Jump block6
+block0_split5:
+    v6:unknown = GetGlobal g
+    Jump block7
+block0_split6:
+    v7:unknown = GetById v6:unknown.next
+    Jump block8
+block0_split7:
+    v8:unknown = Call v7:unknown, v6:unknown
+    Jump block9
+block0_split8:
+    v9:unknown = GetGlobal g
+    Jump block10
+block0_split9:
+    v10:unknown = GetById v9:unknown.next
+    Jump block11
+block0_split10:
+    v11:unknown = Call v10:unknown, v9:unknown
+    Jump block12
+block0_split11:
+    End v11:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -71,6 +112,49 @@ block0:
     v10:unknown = GetById v9:unknown.next
     v11:unknown = Call v10:unknown, v9:unknown
     End v11:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v10:unknown = Yield undefined, continuation: block1
+block1:
+    v12:unknown = Yield 1, continuation: block2
+block2:
+    v1:unknown = Move v12:unknown
+    v2:unknown = GetCompletionFields v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    Jump block12
+block3:
+    v16:unknown = Yield 2, continuation: block7
+block4:
+    v18:boolean = StrictlyEquals v3:unknown, 5
+    Branch v18:boolean, block5, block6
+block5:
+    Throw v4:unknown
+block6:
+    v19:unknown = Yield v4:unknown
+block7:
+    v5:unknown = Move v16:unknown
+    v6:unknown = GetCompletionFields v5:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Jump block13
+block8:
+    v23:unknown = Yield 3
+block9:
+    v25:boolean = StrictlyEquals v7:unknown, 5
+    Branch v25:boolean, block10, block11
+block10:
+    Throw v8:unknown
+block11:
+    v26:unknown = Yield v8:unknown
+block2_split0:
+    v14:boolean = StrictlyEquals v3:unknown, 1
+    Branch v14:boolean, block3, block4
+block7_split1:
+    v21:boolean = StrictlyEquals v7:unknown, 1
+    Branch v21:boolean, block8, block9
 
 === Before optimization ===
 function():

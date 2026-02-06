@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, false
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,39 @@ block0:
     v0:unknown = GetGlobal go
     v3:unknown = Call v0:unknown, undefined, false
     End v3:unknown
+
+=== After SSAConstruction ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    Branch v10:unknown, block5, block6
+block2:
+    v15:unknown = Phi [block5:v16:unknown, block7:v9:number]
+    v13:unknown = Phi [block5:v14:unknown, block7:v8:unknown]
+    v6:number = ToNumeric v17:number
+    v7:number = Increment v6:number
+    Jump block3
+block3:
+    v17:number = Phi [block0:v5:int32, block2:v7:number]
+    v16:unknown = Phi [block0:v4:int32, block2:v15:unknown]
+    v14:unknown = Phi [block0:v18:undefined, block2:v6:number]
+    v12:boolean = LessThan v17:number, 10
+    Branch v12:boolean, block1, block4
+block4:
+    Return v16:unknown
+block5:
+    Jump block2
+block6:
+    v8:unknown = Add v16:unknown, v17:number
+    Jump block7
+block6_split0:
+    v9:number = Move v8:unknown
+    Jump block2
 
 === Before optimization ===
 function(v10:unknown):

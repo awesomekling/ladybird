@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,22 @@ block0:
     v0:unknown = GetGlobal go
     v2:unknown = Call v0:unknown, undefined
     End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v6:int32 = Move 0
+    v8:int32 = Move 1
+    v9:boolean = Not v6:int32
+    v10:boolean = Move v9:boolean
+    v11:boolean = Not v8:int32
+    v12:boolean = Move v11:boolean
+    v13:boolean = StrictlyInequals v10:boolean, v12:boolean
+    Return v13:boolean
 
 === Before optimization ===
 function():

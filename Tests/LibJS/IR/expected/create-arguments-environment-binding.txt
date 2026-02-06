@@ -1,3 +1,14 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Jump block2
+block0_split1:
+    End v5:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -21,6 +32,15 @@ block0:
     v0:unknown = GetGlobal foo
     v5:unknown = Call v0:unknown, undefined, 1, 2, 3
     End v5:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateArguments kind:mapped, immutable:false
+    v1:unknown = GetLength v0:unknown
+    Jump block1
+block0_split0:
+    Return v1:unknown
 
 === Before optimization ===
 function():
