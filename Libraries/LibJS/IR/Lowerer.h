@@ -15,6 +15,7 @@
 #include <LibJS/Bytecode/Operand.h>
 #include <LibJS/Bytecode/Register.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/PhiCoalescing.h>
 
 namespace JS::IR {
 
@@ -31,7 +32,6 @@ private:
     bool target_has_phis(BasicBlock const& target) const;
     bool needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const& to);
     size_t get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to);
-    void compute_phi_coalescing();
 
     template<typename OpType, typename... Args>
     void emit(Args&&... args);
@@ -52,8 +52,7 @@ private:
     Vector<Optional<Bytecode::Operand>> m_value_to_operand;
     Vector<Optional<Bytecode::Operand>> m_tuple_base_operand;
     HashMap<BasicBlock const*, size_t> m_ir_block_to_bytecode_index;
-    // Phi coalescing: maps values to their coalescing representative (nullptr = self)
-    Vector<Value const*> m_coalesce_representative;
+    PhiCoalescing m_phi_coalescing;
     // Maps (from_block, to_block) pairs to trampoline block indices for critical edge splitting
     HashMap<u64, size_t> m_edge_to_trampoline;
     Vector<JS::Value> m_constants;

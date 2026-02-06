@@ -25,6 +25,7 @@ set(SOURCES
     IR/Instruction.cpp
     IR/Lifter.cpp
     IR/Lowerer.cpp
+    IR/PhiCoalescing.cpp
     IR/SSAConstruction.cpp
     IR/Passes/AlgebraicSimplification.cpp
     IR/Passes/BlockMerging.cpp
