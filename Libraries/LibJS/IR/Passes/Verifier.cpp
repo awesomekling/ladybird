@@ -378,26 +378,26 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             case Opcode::Jump:
             case Opcode::ContinuePendingUnwind:
             case Opcode::EnterUnwindContext:
-                if (!term->true_target()) {
+                if (!term->true_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "{} in block{} has no target",
                         opcode_to_string(term->opcode()), block->index()));
                 }
-                if (term->false_target()) {
+                if (term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "{} in block{} has false_target (should be null)",
                         opcode_to_string(term->opcode()), block->index()));
                 }
                 break;
             case Opcode::ScheduleJump:
-                if (!term->true_target() || !term->false_target()) {
+                if (!term->true_target_index().has_value() || !term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "ScheduleJump in block{} missing true_target or false_target",
                         block->index()));
                 }
                 break;
             case Opcode::Branch:
-                if (!term->true_target() || !term->false_target()) {
+                if (!term->true_target_index().has_value() || !term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "Branch in block{} missing true_target or false_target",
                         block->index()));
@@ -406,26 +406,26 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             case Opcode::Return:
             case Opcode::Throw:
             case Opcode::End:
-                if (term->true_target() || term->false_target()) {
+                if (term->true_target_index().has_value() || term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "{} in block{} has targets (should have none)",
                         opcode_to_string(term->opcode()), block->index()));
                 }
                 break;
             case Opcode::Yield:
-                if (term->false_target()) {
+                if (term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "Yield in block{} has false_target (should be null)",
                         block->index()));
                 }
                 break;
             case Opcode::Await:
-                if (!term->true_target()) {
+                if (!term->true_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "Await in block{} has no continuation target",
                         block->index()));
                 }
-                if (term->false_target()) {
+                if (term->false_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "Await in block{} has false_target (should be null)",
                         block->index()));
@@ -440,12 +440,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (block_is_reachable) {
             if (auto* term = block->terminator()) {
                 // Check: All terminator targets exist in function
-                if (term->true_target() && !all_blocks.get(to_index(term->true_target()->index()))) {
+                if (term->true_target_index().has_value() && !all_blocks.get(to_index(*term->true_target_index()))) {
                     report_error(ByteString::formatted(
                         "Terminator in block{} has true_target not in function",
                         block->index()));
                 }
-                if (term->false_target() && !all_blocks.get(to_index(term->false_target()->index()))) {
+                if (term->false_target_index().has_value() && !all_blocks.get(to_index(*term->false_target_index()))) {
                     report_error(ByteString::formatted(
                         "Terminator in block{} has false_target not in function",
                         block->index()));

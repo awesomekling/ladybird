@@ -65,17 +65,17 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
     case Opcode::ContinuePendingUnwind:
     case Opcode::EnterUnwindContext: {
         auto const& jump = static_cast<TerminatorInstruction const&>(instruction);
-        if (jump.true_target())
-            builder.appendff(" block{}", jump.true_target()->index());
+        if (auto target = jump.true_target_index(); target.has_value())
+            builder.appendff(" block{}", *target);
         break;
     }
 
     case Opcode::ScheduleJump: {
         auto const& term = static_cast<TerminatorInstruction const&>(instruction);
-        if (term.true_target())
-            builder.appendff(" finalizer: block{}", term.true_target()->index());
-        if (term.false_target())
-            builder.appendff(", target: block{}", term.false_target()->index());
+        if (auto target = term.true_target_index(); target.has_value())
+            builder.appendff(" finalizer: block{}", *target);
+        if (auto target = term.false_target_index(); target.has_value())
+            builder.appendff(", target: block{}", *target);
         break;
     }
 
@@ -83,10 +83,10 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         auto const& branch = static_cast<TerminatorInstruction const&>(instruction);
         for (auto* operand : instruction.operands())
             append_operand(operand);
-        if (branch.true_target())
-            builder.appendff(", block{}", branch.true_target()->index());
-        if (branch.false_target())
-            builder.appendff(", block{}", branch.false_target()->index());
+        if (auto target = branch.true_target_index(); target.has_value())
+            builder.appendff(", block{}", *target);
+        if (auto target = branch.false_target_index(); target.has_value())
+            builder.appendff(", block{}", *target);
         break;
     }
 
@@ -168,8 +168,8 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         auto const& term = static_cast<TerminatorInstruction const&>(instruction);
         for (auto* operand : instruction.operands())
             append_operand(operand);
-        if (term.true_target())
-            builder.appendff(", continuation: block{}", term.true_target()->index());
+        if (auto target = term.true_target_index(); target.has_value())
+            builder.appendff(", continuation: block{}", *target);
         break;
     }
 

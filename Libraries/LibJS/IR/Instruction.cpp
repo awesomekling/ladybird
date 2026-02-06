@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Type.h>
 #include <LibJS/IR/Value.h>
@@ -22,11 +23,40 @@ TerminatorInstruction::TerminatorInstruction(Opcode opcode)
     VERIFY(is_terminator_opcode(opcode));
 }
 
+BasicBlock* TerminatorInstruction::true_target() const
+{
+    if (!m_true_target.has_value())
+        return nullptr;
+    return parent_block()->parent_function()->block_by_index(*m_true_target);
+}
+
+BasicBlock* TerminatorInstruction::false_target() const
+{
+    if (!m_false_target.has_value())
+        return nullptr;
+    return parent_block()->parent_function()->block_by_index(*m_false_target);
+}
+
+void TerminatorInstruction::set_true_target(BasicBlock* block)
+{
+    m_true_target = block ? Optional<BlockIndex>(block->index()) : Optional<BlockIndex>();
+}
+
+void TerminatorInstruction::set_false_target(BasicBlock* block)
+{
+    m_false_target = block ? Optional<BlockIndex>(block->index()) : Optional<BlockIndex>();
+}
+
 JumpInstruction::JumpInstruction(Opcode opcode, BasicBlock& target)
     : TerminatorInstruction(opcode)
 {
     VERIFY(opcode == Opcode::Jump || opcode == Opcode::ContinuePendingUnwind || opcode == Opcode::EnterUnwindContext);
-    set_true_target(&target);
+    set_true_target(target.index());
+}
+
+void JumpInstruction::set_target(BasicBlock& block)
+{
+    set_true_target(block.index());
 }
 
 NonnullOwnPtr<JumpInstruction> JumpInstruction::create(BasicBlock& target)
@@ -48,8 +78,18 @@ BranchInstruction::BranchInstruction(Value* condition, BasicBlock& true_target, 
     : TerminatorInstruction(Opcode::Branch)
 {
     add_operand(condition);
-    set_true_target(&true_target);
-    set_false_target(&false_target);
+    set_true_target(true_target.index());
+    set_false_target(false_target.index());
+}
+
+void BranchInstruction::set_true_branch(BasicBlock& block)
+{
+    set_true_target(block.index());
+}
+
+void BranchInstruction::set_false_branch(BasicBlock& block)
+{
+    set_false_target(block.index());
 }
 
 NonnullOwnPtr<BranchInstruction> BranchInstruction::create(Value* condition, BasicBlock& true_target, BasicBlock& false_target)

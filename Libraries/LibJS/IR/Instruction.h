@@ -447,8 +447,10 @@ public:
         return adopt_own(*new TerminatorInstruction(Op));
     }
 
-    BasicBlock* true_target() const { return m_true_target; }
-    BasicBlock* false_target() const { return m_false_target; }
+    Optional<BlockIndex> true_target_index() const { return m_true_target; }
+    Optional<BlockIndex> false_target_index() const { return m_false_target; }
+    BasicBlock* true_target() const;
+    BasicBlock* false_target() const;
 
 protected:
     explicit TerminatorInstruction(Opcode opcode);
@@ -460,11 +462,13 @@ private:
     friend class BranchInstruction;
 
     // All target mutation goes through CFG helpers or subclass-specific APIs.
-    void set_true_target(BasicBlock* block) { m_true_target = block; }
-    void set_false_target(BasicBlock* block) { m_false_target = block; }
+    void set_true_target(Optional<BlockIndex> block) { m_true_target = block; }
+    void set_false_target(Optional<BlockIndex> block) { m_false_target = block; }
+    void set_true_target(BasicBlock* block);
+    void set_false_target(BasicBlock* block);
 
-    BasicBlock* m_true_target { nullptr };
-    BasicBlock* m_false_target { nullptr };
+    Optional<BlockIndex> m_true_target;
+    Optional<BlockIndex> m_false_target;
 };
 
 // JumpInstruction: Unconditional jump to a single target.
@@ -487,7 +491,7 @@ public:
 private:
     friend class CFG;
 
-    void set_target(BasicBlock& block) { set_true_target(&block); }
+    void set_target(BasicBlock& block);
 
     JumpInstruction(Opcode opcode, BasicBlock& target);
 };
@@ -521,8 +525,8 @@ public:
 private:
     friend class CFG;
 
-    void set_true_branch(BasicBlock& block) { set_true_target(&block); }
-    void set_false_branch(BasicBlock& block) { set_false_target(&block); }
+    void set_true_branch(BasicBlock& block);
+    void set_false_branch(BasicBlock& block);
 
     BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target);
 };
