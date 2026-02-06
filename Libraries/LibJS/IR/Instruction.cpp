@@ -116,6 +116,22 @@ void PhiInstruction::set_incoming_value(size_t index, Value* value)
     set_operand(index, value);
 }
 
+ParallelCopyInstruction::ParallelCopyInstruction()
+    : Instruction(Opcode::ParallelCopy)
+{
+}
+
+NonnullOwnPtr<ParallelCopyInstruction> ParallelCopyInstruction::create()
+{
+    return adopt_own(*new ParallelCopyInstruction());
+}
+
+void ParallelCopyInstruction::add_copy(Value* dst, Value* src)
+{
+    m_copies.append({ dst, src });
+    add_operand(src);
+}
+
 CallInstruction::CallInstruction(Opcode opcode, Value* callee, Value* this_value)
     : Instruction(opcode)
 {

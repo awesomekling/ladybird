@@ -41,6 +41,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
 
     // SSA
     Phi,
+    ParallelCopy,
 
     // Constants
     LoadConstant,
@@ -258,6 +259,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
 
     // SSA
     [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, false, false, false, false, false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::ParallelCopy)]                       = { "ParallelCopy",                       false, false, true,  false, false, false, false, 255, Type::Unknown,    false },
 
     // Constants
     [to_underlying(Opcode::LoadConstant)]                       = { "LoadConstant",                       false, false, false, false, false, false, true,  1,   Type::Unknown,    false },
@@ -559,6 +561,8 @@ constexpr bool requires_specialized_instruction(Opcode opcode)
     case Opcode::Branch:
     // Use PhiInstruction::create()
     case Opcode::Phi:
+    // Use ParallelCopyInstruction::create()
+    case Opcode::ParallelCopy:
     // Use GetByIdInstruction::create()
     case Opcode::GetById:
     // Use CallInstruction::create()
@@ -919,6 +923,30 @@ private:
     // Classes that need internal access to phi operations
     friend class Builder;
     friend class Lifter;
+};
+
+// ParallelCopyInstruction: Pseudo-instruction for SSA destruction.
+// Represents a set of parallel copies (phi moves) that must all read their
+// sources before writing any destinations. The lowerer resolves this into
+// an ordered sequence of Mov bytecodes.
+// Operands: the source values (tracked for use-def chains)
+// Destinations: stored in m_copies (phi results, not tracked as operands)
+class JS_API ParallelCopyInstruction final : public Instruction {
+public:
+    struct Copy {
+        Value* dst;
+        Value* src;
+    };
+
+    [[nodiscard]] static NonnullOwnPtr<ParallelCopyInstruction> create();
+
+    Vector<Copy> const& copies() const { return m_copies; }
+    void add_copy(Value* dst, Value* src);
+
+private:
+    ParallelCopyInstruction();
+
+    Vector<Copy> m_copies;
 };
 
 // Check if an opcode is a call-like opcode (has callee and this_value operands)

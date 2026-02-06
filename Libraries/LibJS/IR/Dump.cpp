@@ -106,6 +106,27 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
     }
 
+    case Opcode::ParallelCopy: {
+        auto const& pcopy = static_cast<ParallelCopyInstruction const&>(instruction);
+        builder.append(" ["sv);
+        for (size_t i = 0; i < pcopy.copies().size(); ++i) {
+            if (i > 0)
+                builder.append(", "sv);
+            auto const& copy = pcopy.copies()[i];
+            if (copy.dst)
+                dump(*copy.dst, builder);
+            else
+                builder.append("null"sv);
+            builder.append(" <- "sv);
+            if (copy.src)
+                dump(*copy.src, builder);
+            else
+                builder.append("null"sv);
+        }
+        builder.append(']');
+        break;
+    }
+
     case Opcode::GetGlobal:
     case Opcode::SetGlobal:
     case Opcode::GetBinding:

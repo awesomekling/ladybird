@@ -26,6 +26,7 @@ class Function;
 class GetByIdInstruction;
 class Instruction;
 class JumpInstruction;
+class ParallelCopyInstruction;
 class Loop;
 class LoopTree;
 class PhiInstruction;

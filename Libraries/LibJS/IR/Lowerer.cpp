@@ -312,6 +312,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         // Phi nodes are handled by emitting moves in predecessors
         break;
 
+    case Opcode::ParallelCopy:
+        // ParallelCopy is resolved in Commit 3
+        VERIFY_NOT_REACHED();
+        break;
+
     case Opcode::Move: {
         auto d = dst();
         auto s = operand(0);
