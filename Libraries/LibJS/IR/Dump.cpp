@@ -206,10 +206,10 @@ static void dump_block(BasicBlock const& block, StringBuilder& builder, Bytecode
     else
         builder.appendff("{}:", block.name());
 
-    if (block.exception_handler())
-        builder.appendff(" [handler: block{}]", block.exception_handler()->index());
-    if (block.finalizer())
-        builder.appendff(" [finalizer: block{}]", block.finalizer()->index());
+    if (block.exception_handler_index().has_value())
+        builder.appendff(" [handler: block{}]", *block.exception_handler_index());
+    if (block.finalizer_index().has_value())
+        builder.appendff(" [finalizer: block{}]", *block.finalizer_index());
 
     builder.append('\n');
 

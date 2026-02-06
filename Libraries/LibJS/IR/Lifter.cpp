@@ -113,8 +113,8 @@ void Lifter::lift_basic_blocks()
                 finalizer = m_block_map.get(finalizer_block_index).value();
             }
         }
-        current_block->set_exception_handler(exception_handler);
-        current_block->set_finalizer(finalizer);
+        current_block->set_exception_handler(exception_handler ? Optional<BlockIndex>(exception_handler->index()) : Optional<BlockIndex>());
+        current_block->set_finalizer(finalizer ? Optional<BlockIndex>(finalizer->index()) : Optional<BlockIndex>());
 
         auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
         Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
@@ -165,8 +165,8 @@ void Lifter::lift_basic_blocks()
                     String::formatted("block{}_split{}", block_index, split_counter++).release_value_but_fixme_should_propagate_errors());
 
                 // Continuation inherits exception handlers
-                continuation.set_exception_handler(exception_handler);
-                continuation.set_finalizer(finalizer);
+                continuation.set_exception_handler(exception_handler ? Optional<BlockIndex>(exception_handler->index()) : Optional<BlockIndex>());
+                continuation.set_finalizer(finalizer ? Optional<BlockIndex>(finalizer->index()) : Optional<BlockIndex>());
 
                 // Emit fallthrough jump from current block to continuation
                 m_builder.set_insertion_block(current_block);
@@ -1614,8 +1614,8 @@ void Lifter::compute_block_predecessors()
             if (auto* finalizer = block->finalizer())
                 CFG::add_predecessor(*finalizer, *block);
         } else {
-            block->set_exception_handler(nullptr);
-            block->set_finalizer(nullptr);
+            block->set_exception_handler({});
+            block->set_finalizer({});
         }
     }
 }
@@ -1660,9 +1660,9 @@ void Lifter::eliminate_unreachable_blocks()
         if (unreachable.contains(block.ptr()))
             continue;
         if (block->exception_handler() && unreachable.contains(block->exception_handler()))
-            block->set_exception_handler(nullptr);
+            block->set_exception_handler({});
         if (block->finalizer() && unreachable.contains(block->finalizer()))
-            block->set_finalizer(nullptr);
+            block->set_finalizer({});
     }
 
     m_function->basic_blocks().remove_all_matching([&](auto const& block) {

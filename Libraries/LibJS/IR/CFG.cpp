@@ -101,20 +101,20 @@ void CFG::remove_block_reference(BasicBlock& live_block, BasicBlock& block_to_re
     }
 
     // Clear EH edges
-    if (live_block.exception_handler() == &block_to_remove)
-        live_block.set_exception_handler(nullptr);
-    if (live_block.finalizer() == &block_to_remove)
-        live_block.set_finalizer(nullptr);
+    if (live_block.exception_handler_index() == block_to_remove.index())
+        live_block.set_exception_handler({});
+    if (live_block.finalizer_index() == block_to_remove.index())
+        live_block.set_finalizer({});
 }
 
 void CFG::set_exception_handler(BasicBlock& block, BasicBlock* handler)
 {
-    block.set_exception_handler(handler);
+    block.set_exception_handler(handler ? Optional<BlockIndex>(handler->index()) : Optional<BlockIndex>());
 }
 
 void CFG::set_finalizer(BasicBlock& block, BasicBlock* finalizer)
 {
-    block.set_finalizer(finalizer);
+    block.set_finalizer(finalizer ? Optional<BlockIndex>(finalizer->index()) : Optional<BlockIndex>());
 }
 
 void CFG::replace_branch_with_jump(BasicBlock& block, BasicBlock& target, BasicBlock* not_taken)

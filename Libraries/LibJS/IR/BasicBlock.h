@@ -71,8 +71,10 @@ public:
     void clear_predecessors() { m_predecessors.clear(); }
 
     // Exception handling (block-level)
-    BasicBlock* exception_handler() const { return m_exception_handler; }
-    BasicBlock* finalizer() const { return m_finalizer; }
+    Optional<BlockIndex> exception_handler_index() const { return m_exception_handler; }
+    Optional<BlockIndex> finalizer_index() const { return m_finalizer; }
+    BasicBlock* exception_handler() const;
+    BasicBlock* finalizer() const;
 
     bool is_terminated() const;
 
@@ -85,8 +87,8 @@ private:
     void remove_predecessor(BlockIndex block);
     void remove_phi_operands_for_predecessor(BlockIndex predecessor);
     void replace_phi_predecessor(BlockIndex old_pred, BlockIndex new_pred);
-    void set_exception_handler(BasicBlock* handler) { m_exception_handler = handler; }
-    void set_finalizer(BasicBlock* finalizer) { m_finalizer = finalizer; }
+    void set_exception_handler(Optional<BlockIndex> handler) { m_exception_handler = handler; }
+    void set_finalizer(Optional<BlockIndex> finalizer) { m_finalizer = finalizer; }
 
     BasicBlock(BlockIndex index, String name);
 
@@ -96,8 +98,8 @@ private:
     Vector<NonnullOwnPtr<Instruction>> m_instructions;
     Vector<BlockIndex> m_predecessors;
 
-    BasicBlock* m_exception_handler { nullptr };
-    BasicBlock* m_finalizer { nullptr };
+    Optional<BlockIndex> m_exception_handler;
+    Optional<BlockIndex> m_finalizer;
 };
 
 }

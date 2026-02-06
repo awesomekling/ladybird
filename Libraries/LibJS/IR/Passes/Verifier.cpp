@@ -361,12 +361,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         }
 
         // Check: Exception handler/finalizer targets exist
-        if (block->exception_handler() && !all_blocks.get(to_index(block->exception_handler()->index()))) {
+        if (block->exception_handler_index().has_value() && !all_blocks.get(to_index(*block->exception_handler_index()))) {
             report_error(ByteString::formatted(
                 "Block{} has exception_handler not in function",
                 block->index()));
         }
-        if (block->finalizer() && !all_blocks.get(to_index(block->finalizer()->index()))) {
+        if (block->finalizer_index().has_value() && !all_blocks.get(to_index(*block->finalizer_index()))) {
             report_error(ByteString::formatted(
                 "Block{} has finalizer not in function",
                 block->index()));

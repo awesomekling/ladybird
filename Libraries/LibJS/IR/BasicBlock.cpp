@@ -5,6 +5,7 @@
  */
 
 #include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 
 namespace JS::IR {
@@ -101,6 +102,20 @@ void BasicBlock::clear_instructions()
     for (auto& instruction : m_instructions)
         instruction->clear_operand_uses();
     m_instructions.clear();
+}
+
+BasicBlock* BasicBlock::exception_handler() const
+{
+    if (!m_exception_handler.has_value())
+        return nullptr;
+    return m_parent_function->block_by_index(*m_exception_handler);
+}
+
+BasicBlock* BasicBlock::finalizer() const
+{
+    if (!m_finalizer.has_value())
+        return nullptr;
+    return m_parent_function->block_by_index(*m_finalizer);
 }
 
 void BasicBlock::add_predecessor(BlockIndex block)
