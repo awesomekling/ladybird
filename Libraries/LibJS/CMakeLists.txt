@@ -39,6 +39,7 @@ set(SOURCES
     IR/Passes/SSAConstructionPass.cpp
     IR/Passes/SimplifyCFG.cpp
     IR/Passes/SplitCriticalEdges.cpp
+    IR/Passes/SsaDestructionPass.cpp
     IR/Passes/Verifier.cpp
     IR/Value.cpp
     Console.cpp
