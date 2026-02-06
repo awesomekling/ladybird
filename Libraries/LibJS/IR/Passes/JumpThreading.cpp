@@ -6,16 +6,19 @@
 
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
+#include <LibJS/IR/Dominators.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
+#include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
 
-PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
+PreservedAnalyses JumpThreading::run(Function& function, PassManager& pass_manager)
 {
     bool changed = false;
+    auto& dominators = pass_manager.dominators(function);
 
     // Look for blocks where a Branch condition is a Phi node
     // and some phi inputs are constants
@@ -119,6 +122,15 @@ PreservedAnalyses JumpThreading::run(Function& function, PassManager&)
 
             if (phi_used_outside_block)
                 continue; // Can't thread - phi result is used elsewhere
+
+            // The bypassed block must dominate pred_block. This ensures that all
+            // values live at thread_target (including live-through values used in
+            // successor blocks) remain properly dominated after adding the new
+            // edge from pred_block to thread_target. Without this, a new path
+            // from pred_block to thread_target could bypass definitions that
+            // thread_target and its successors depend on.
+            if (!dominators.dominates(block.ptr(), pred_block))
+                continue;
 
             // Redirect edge from pred_block: bypass the current block, go to thread_target
             if (!pred_block->terminator())
