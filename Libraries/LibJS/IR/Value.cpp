@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Value.h>
 
@@ -15,25 +16,25 @@ Value::Value(Kind kind, ValueIndex index)
 {
 }
 
-void Value::add_use(Instruction* instruction)
+void Value::add_use(InstructionIndex instruction, u32 operand_slot)
 {
-    m_uses.append(instruction);
+    m_uses.append({ instruction, operand_slot });
 }
 
-void Value::remove_use(Instruction* instruction)
+void Value::remove_use(InstructionIndex instruction, u32 operand_slot)
 {
-    m_uses.remove_first_matching([instruction](auto* i) { return i == instruction; });
+    m_uses.remove_first_matching([&](Use const& use) {
+        return use.instruction == instruction && use.operand_slot == operand_slot;
+    });
 }
 
 void Value::replace_all_uses_with(Value* replacement)
 {
     // Make a copy since we're modifying the use list as we iterate
     auto uses_copy = m_uses;
-    for (auto* instruction : uses_copy) {
-        for (size_t i = 0; i < instruction->operand_count(); ++i) {
-            if (instruction->operand(i) == this)
-                instruction->set_operand(i, replacement);
-        }
+    for (auto const& use : uses_copy) {
+        auto* instruction = m_function->instruction_by_index(use.instruction);
+        instruction->set_operand(use.operand_slot, replacement);
     }
 }
 

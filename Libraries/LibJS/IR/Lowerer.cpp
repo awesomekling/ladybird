@@ -54,12 +54,12 @@ static bool should_fuse_comparison_with_branch(Instruction const& instruction)
     if (uses.size() != 1)
         return false;
 
-    auto* use = uses[0];
-    if (use->opcode() != Opcode::Branch)
+    auto* using_instruction = instruction.parent_function()->instruction_by_index(uses[0].instruction);
+    if (using_instruction->opcode() != Opcode::Branch)
         return false;
 
     // The Branch must use this comparison as its condition (operand 0)
-    if (use->operand_count() == 0 || use->operand(0) != result)
+    if (using_instruction->operand_count() == 0 || using_instruction->operand(0) != result)
         return false;
 
     return true;

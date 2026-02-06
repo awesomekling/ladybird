@@ -16,6 +16,12 @@
 
 namespace JS::IR {
 
+struct Use {
+    InstructionIndex instruction;
+    u32 operand_slot;
+    bool operator==(Use const&) const = default;
+};
+
 class JS_API Value {
     AK_MAKE_NONCOPYABLE(Value);
     AK_MAKE_NONMOVABLE(Value);
@@ -39,9 +45,9 @@ public:
 
     Instruction* defining_instruction() const { return m_defining_instruction; }
 
-    Vector<Instruction*> const& uses() const { return m_uses; }
-    void add_use(Instruction* instruction);
-    void remove_use(Instruction* instruction);
+    ReadonlySpan<Use> uses() const { return m_uses.span(); }
+    void add_use(InstructionIndex instruction, u32 operand_slot);
+    void remove_use(InstructionIndex instruction, u32 operand_slot);
     void replace_all_uses_with(Value* replacement);
 
     JS::Value constant_value() const
@@ -83,9 +89,11 @@ public:
     static NonnullOwnPtr<Value> create_for_this(ValueIndex index);
 
 private:
+    friend class Function;
     friend class Instruction;
 
     void set_defining_instruction(Instruction* instruction) { m_defining_instruction = instruction; }
+    void set_parent_function(Function* function) { m_function = function; }
 
     Value(Kind kind, ValueIndex index);
 
@@ -93,8 +101,9 @@ private:
     Type m_type { Type::Unknown };
     ValueIndex m_index;
     u32 m_parameter_index { 0 };
+    Function* m_function { nullptr };
     Instruction* m_defining_instruction { nullptr };
-    Vector<Instruction*> m_uses;
+    Vector<Use> m_uses;
     JS::Value m_constant_value;
 };
 

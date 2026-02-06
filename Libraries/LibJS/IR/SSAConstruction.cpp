@@ -201,8 +201,8 @@ void SSAConstruction::fill_phi_operands()
             // Re-derive result types for users whose types depend on operand
             // types, since the Phi's type may have widened after these
             // instructions were created (e.g. int32 -> number).
-            for (auto* user : phi.result()->uses())
-                user->recompute_result_type();
+            for (auto const& use : phi.result()->uses())
+                m_function.instruction_by_index(use.instruction)->recompute_result_type();
         });
     }
 }

@@ -577,26 +577,21 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 value->index(), kind_name));
         }
 
-        for (auto const* use : value->uses()) {
-            if (!all_instructions.contains(use)) {
+        for (auto const& use : value->uses()) {
+            auto* using_instruction = function.instruction_by_index(use.instruction);
+            if (!all_instructions.contains(using_instruction)) {
                 report_error(ByteString::formatted(
                     "Value v{} has stale use pointing to removed instruction",
                     value->index()));
                 continue;
             }
             // Check: Reverse validation - the using instruction must actually
-            // have this value in its operand list
-            bool found_in_operands = false;
-            for (size_t i = 0; i < use->operand_count(); ++i) {
-                if (use->operand(i) == value.ptr()) {
-                    found_in_operands = true;
-                    break;
-                }
-            }
-            if (!found_in_operands) {
+            // have this value in its operand list at the specified slot
+            if (use.operand_slot >= using_instruction->operand_count()
+                || using_instruction->operand(use.operand_slot) != value.ptr()) {
                 report_error(ByteString::formatted(
-                    "Value v{} has use in instruction but is not in its operand list",
-                    value->index()));
+                    "Value v{} has use at slot {} but instruction does not reference it there",
+                    value->index(), use.operand_slot));
             }
         }
 

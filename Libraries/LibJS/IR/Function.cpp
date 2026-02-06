@@ -51,6 +51,7 @@ Value& Function::create_parameter(u32 parameter_index)
             return *param;
     }
     auto value = Value::create_for_parameter(m_next_value_index++, parameter_index);
+    value->set_parent_function(this);
     auto& ref = *value;
     m_values.append(move(value));
     m_parameters.append(&ref);
@@ -62,6 +63,7 @@ Value& Function::create_this()
     if (m_this_value)
         return *m_this_value;
     auto value = Value::create_for_this(m_next_value_index++);
+    value->set_parent_function(this);
     auto& ref = *value;
     m_values.append(move(value));
     m_this_value = &ref;
@@ -78,6 +80,7 @@ Value& Function::create_register_value()
     // Failure to do so will cause SSA renaming to skip this value, leaving it
     // as a dangling placeholder that the verifier will catch.
     auto value = Value::create_for_instruction(m_next_value_index++);
+    value->set_parent_function(this);
     auto& ref = *value;
     m_values.append(move(value));
     return ref;
@@ -86,6 +89,7 @@ Value& Function::create_register_value()
 Value& Function::create_constant(JS::Value constant)
 {
     auto value = Value::create_for_constant(m_next_value_index++, constant);
+    value->set_parent_function(this);
     auto& ref = *value;
     m_values.append(move(value));
     return ref;
@@ -94,6 +98,7 @@ Value& Function::create_constant(JS::Value constant)
 Value& Function::create_value_for_instruction()
 {
     auto value = Value::create_for_instruction(m_next_value_index++);
+    value->set_parent_function(this);
     auto& ref = *value;
     m_values.append(move(value));
     return ref;
@@ -104,6 +109,7 @@ InstructionIndex Function::register_instruction(NonnullOwnPtr<Instruction> instr
     auto index = m_next_instruction_index++;
     instruction->set_index(index);
     instruction->set_parent_function(this);
+    instruction->add_operand_uses();
     m_all_instructions.append(move(instruction));
     return index;
 }

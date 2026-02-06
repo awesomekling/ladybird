@@ -263,15 +263,25 @@ void Instruction::set_result(Value* value)
 void Instruction::add_operand(Value* value)
 {
     m_operands.append(value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>());
-    if (value)
-        value->add_use(this);
+    // NB: Use entries are added later by add_operand_uses() when the instruction
+    // is registered in the function arena and has a valid InstructionIndex.
+}
+
+void Instruction::add_operand_uses()
+{
+    for (size_t i = 0; i < m_operands.size(); ++i) {
+        if (m_operands[i].has_value()) {
+            auto* value = m_function->values()[to_index(*m_operands[i])].ptr();
+            value->add_use(m_index, static_cast<u32>(i));
+        }
+    }
 }
 
 void Instruction::set_operand(size_t index, Value* value)
 {
     if (index < m_operands.size() && m_operands[index].has_value()) {
         auto* old_value = m_function->values()[to_index(*m_operands[index])].ptr();
-        old_value->remove_use(this);
+        old_value->remove_use(m_index, static_cast<u32>(index));
     }
 
     if (index >= m_operands.size())
@@ -279,15 +289,15 @@ void Instruction::set_operand(size_t index, Value* value)
 
     m_operands[index] = value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>();
     if (value)
-        value->add_use(this);
+        value->add_use(m_index, static_cast<u32>(index));
 }
 
 void Instruction::clear_operand_uses()
 {
-    for (auto const& op : m_operands) {
-        if (op.has_value()) {
-            auto* value = m_function->values()[to_index(*op)].ptr();
-            value->remove_use(this);
+    for (size_t i = 0; i < m_operands.size(); ++i) {
+        if (m_operands[i].has_value()) {
+            auto* value = m_function->values()[to_index(*m_operands[i])].ptr();
+            value->remove_use(m_index, static_cast<u32>(i));
         }
     }
     if (m_result.has_value()) {
@@ -300,10 +310,20 @@ void Instruction::remove_phi_operand(size_t index)
 {
     if (m_operands[index].has_value()) {
         auto* value = m_function->values()[to_index(*m_operands[index])].ptr();
-        value->remove_use(this);
+        value->remove_use(m_index, static_cast<u32>(index));
     }
     m_phi_predecessors.remove(index);
     m_operands.remove(index);
+    // Renumber use-list entries for operands that shifted down
+    for (size_t i = index; i < m_operands.size(); ++i) {
+        if (m_operands[i].has_value()) {
+            auto* value = m_function->values()[to_index(*m_operands[i])].ptr();
+            for (auto& use : value->m_uses) {
+                if (use.instruction == m_index && use.operand_slot == static_cast<u32>(i + 1))
+                    use.operand_slot = static_cast<u32>(i);
+            }
+        }
+    }
 }
 
 void Instruction::add_phi_operand(BlockIndex predecessor, Value* value)

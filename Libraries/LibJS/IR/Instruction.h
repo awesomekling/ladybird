@@ -256,6 +256,7 @@ public:
     Value* operand(size_t index) const;
     Optional<ValueIndex> operand_index(size_t index) const { return m_operands[index]; }
     void add_operand(Value* value);
+    void add_operand_uses();
     void set_operand(size_t index, Value* value);
     void clear_operand_uses();
 

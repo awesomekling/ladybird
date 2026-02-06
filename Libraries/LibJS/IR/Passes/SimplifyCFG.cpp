@@ -382,8 +382,8 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             // Check if the phi result is used outside the bypassed block.
             bool phi_used_outside_block = false;
             if (auto* phi_result = phi.result()) {
-                for (auto* use : phi_result->uses()) {
-                    if (use != terminator) {
+                for (auto const& use : phi_result->uses()) {
+                    if (function.instruction_by_index(use.instruction) != terminator) {
                         phi_used_outside_block = true;
                         break;
                     }
