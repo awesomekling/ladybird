@@ -312,59 +312,18 @@ static bool all_operands_are_safe_primitives(Instruction const& instruction)
     return true;
 }
 
-// Opcodes that may call user code via ToPrimitive when operands are objects,
-// but become effect-free when all operands are safe primitive types.
-static bool opcode_may_call_user_code_on_objects(Opcode opcode)
-{
-    switch (opcode) {
-    // Arithmetic operations call ToNumber -> ToPrimitive on objects
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
-    case Opcode::ToNumeric:
-    case Opcode::Increment:
-    case Opcode::Decrement:
-    case Opcode::PostfixIncrement:
-    case Opcode::PostfixDecrement:
-    // Bitwise operations call ToInt32 -> ToNumber -> ToPrimitive on objects
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-    // Relational comparisons call ToPrimitive on objects
-    case Opcode::LessThan:
-    case Opcode::LessThanEquals:
-    case Opcode::GreaterThan:
-    case Opcode::GreaterThanEquals:
-    // Loose equality can call ToPrimitive
-    case Opcode::LooselyEquals:
-    case Opcode::LooselyInequals:
-        return true;
-    default:
-        return false;
-    }
-}
-
 Effects Instruction::effects() const
 {
-    auto e = opcode_effects(m_opcode);
+    auto const& traits = opcode_traits(m_opcode);
 
-    // For ops that may call user code on objects, narrow to None when all
-    // operands are safe primitive types (no ToPrimitive possible).
-    if (has_flag(e, Effects::Calls) && opcode_may_call_user_code_on_objects(m_opcode)) {
+    // For ops marked PureOnSafePrimitives, narrow to None when all operands
+    // are safe primitive types (no ToPrimitive calls possible).
+    if (traits.refinement == EffectRefinement::PureOnSafePrimitives) {
         if (all_operands_are_safe_primitives(*this))
             return Effects::None;
     }
 
-    return e;
+    return traits.effects;
 }
 
 bool Instruction::has_side_effects() const

@@ -49,6 +49,12 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
 };
 #undef IR_OPCODE_ENUM
 
+// Whether an opcode's effects can be refined based on operand types.
+enum class EffectRefinement : u8 {
+    None,                 // No refinement possible
+    PureOnSafePrimitives, // Becomes pure when all operands are safe primitives
+};
+
 // Centralized opcode metadata table.
 // All opcode properties are defined here to prevent divergence between switches.
 struct OpcodeTraits {
@@ -61,11 +67,12 @@ struct OpcodeTraits {
     Type guaranteed_result_type; // Static result type (Type::Unknown = no guarantee)
     bool is_commutative;         // Commutative binary op (operand order doesn't matter)
     u8 tuple_arity;              // Number of tuple elements produced (0 = not a tuple)
+    EffectRefinement refinement; // Whether effects can be refined based on operand types
 };
 
 static constexpr u8 VariableArity = 255;
 
-// Shorthand aliases for Effects combinations used in the table below.
+// Shorthand aliases for Effects combinations used in the opcode list.
 static constexpr auto E_NONE = Effects::None;
 static constexpr auto E_THROW = Effects::MayThrow;
 static constexpr auto E_READ = Effects::ReadsState;
@@ -73,9 +80,13 @@ static constexpr auto E_WRITE = Effects::WritesState;
 static constexpr auto E_CALL = Effects::Calls;
 static constexpr auto E_THROW_WRITE = Effects::MayThrow | Effects::WritesState;
 
+// Shorthand aliases for EffectRefinement used in the opcode list.
+static constexpr auto R_NONE = EffectRefinement::None;
+static constexpr auto R_PRIM = EffectRefinement::PureOnSafePrimitives;
+
 // clang-format off
-#define IR_OPCODE_TRAITS(name, is_term, eff, call, result, arity, type, comm, tuple) \
-    { #name, is_term, eff, call, result, arity, type, comm, tuple },
+#define IR_OPCODE_TRAITS(name, is_term, eff, call, result, arity, type, comm, tuple, refine) \
+    { #name, is_term, eff, call, result, arity, type, comm, tuple, refine },
 static constexpr OpcodeTraits s_opcode_traits[] = {
     IR_OPCODE_LIST(IR_OPCODE_TRAITS)
 };
