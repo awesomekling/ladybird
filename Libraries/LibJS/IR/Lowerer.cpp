@@ -215,6 +215,14 @@ void Lowerer::compute_phi_coalescing()
                 if (operand->is_constant() || operand->is_parameter() || operand->is_this())
                     continue;
 
+                // Yield and Await results are fixed to the accumulator (reg0)
+                // at runtime. Coalescing them with a phi result would assign
+                // them a different register, losing the resume value.
+                if (auto* def = operand->defining_instruction()) {
+                    if (def->opcode() == Opcode::Yield || def->opcode() == Opcode::Await)
+                        continue;
+                }
+
                 // Back-edge operands (from the same block as the phi) cannot be
                 // coalesced with the phi result. The operand is defined later in
                 // the block while the phi result is still live, so they have
@@ -1444,13 +1452,20 @@ void Lowerer::lower_blocks()
             auto value = operand_for_value(*terminator->operands()[0]);
             auto* continuation = terminator->true_target();
             if (continuation) {
-                emit_phi_moves_for_successor(ir_block, *continuation);
-                auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
-                emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
-                // The resume value appears in the accumulator (reg0) at runtime
-                // Map the Yield's result to reg0 so uses in the continuation block work
+                // The resume value appears in the accumulator (reg0) at runtime.
+                // Map it BEFORE phi move resolution so trampolines use reg0 as source.
                 if (terminator->result())
                     m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
+
+                // Phi moves must execute AFTER the generator resumes (when reg0
+                // has the resume value). Route through a trampoline if needed.
+                auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
+                if (needs_phi_moves_for_edge(ir_block, *continuation)) {
+                    auto trampoline_idx = get_or_create_trampoline(ir_block, *continuation);
+                    emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(trampoline_idx) }, value);
+                } else {
+                    emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
+                }
             } else {
                 // Final yield (generator return) - Yield with no continuation label
                 emit<Bytecode::Op::Yield>(Optional<Bytecode::Label> {}, value);
@@ -1462,13 +1477,21 @@ void Lowerer::lower_blocks()
             auto argument = operand_for_value(*terminator->operands()[0]);
             auto* continuation = terminator->true_target();
             VERIFY(continuation);
-            emit_phi_moves_for_successor(ir_block, *continuation);
-            auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
-            emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
-            // The resume value (resolved promise) appears in the accumulator (reg0) at runtime
-            // Map the Await's result to reg0 so uses in the continuation block work
+
+            // The resume value (resolved promise) appears in the accumulator (reg0) at runtime.
+            // Map it BEFORE phi move resolution so trampolines use reg0 as source.
             if (terminator->result())
                 m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
+
+            // Phi moves must execute AFTER the await resumes (when reg0
+            // has the resume value). Route through a trampoline if needed.
+            auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
+            if (needs_phi_moves_for_edge(ir_block, *continuation)) {
+                auto trampoline_idx = get_or_create_trampoline(ir_block, *continuation);
+                emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(trampoline_idx) }, argument);
+            } else {
+                emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
+            }
             break;
         }
         default:
