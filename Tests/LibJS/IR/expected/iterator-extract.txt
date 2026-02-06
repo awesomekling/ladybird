@@ -7,7 +7,7 @@ block1:
     v12:unknown = GetGlobal sum
     Jump block9
 block2:
-    v25:unknown = Phi [block8:v26:undefined, block14:v16:unknown]
+    v25:unknown = Phi [block8:v26:unknown, block14:v16:unknown]
     v24:unknown = Phi [block8:v27:undefined, block14:v18:unknown]
     v23:unknown = Phi [block8:v28:undefined, block14:v17:unknown]
     v22:unknown = Phi [block8:v29:undefined, block14:v15:unknown]

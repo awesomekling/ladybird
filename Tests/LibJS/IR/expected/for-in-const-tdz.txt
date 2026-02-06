@@ -1,0 +1,385 @@
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal test_for_in_tdz
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After BlockMerging ===
+function():
+block0:
+    v0:unknown = GetGlobal test_for_in_tdz
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal test_for_in_tdz
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v34:unknown = Phi [block5:v37:unknown, block7:v36:unknown, block9:v59:unknown, block13:v43:unknown, block14:v49:unknown]
+    v31:unknown = Phi [block5:v38:undefined, block7:v15:unknown, block9:v60:undefined, block13:v44:undefined, block14:v50:undefined]
+    v29:unknown = Phi [block5:v39:undefined, block7:v19:unknown, block9:v19:unknown, block13:v45:undefined, block14:v51:undefined]
+    v27:unknown = Phi [block5:v40:undefined, block7:v18:unknown, block9:v18:unknown, block13:v46:undefined, block14:v52:undefined]
+    v25:unknown = Phi [block5:v41:undefined, block7:v17:unknown, block9:v17:unknown, block13:v47:undefined, block14:v53:undefined]
+    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object, block14:v8:object]
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = GetGlobal ReferenceError
+    Jump block11
+block2:
+    v5:string = Move v4:string
+    Return v5:string
+block3:
+    v7:string = Move v6:string
+    Jump block4
+block4:
+    Return v7:string
+block5: [handler: block1]
+    v8:object = NewObject
+    Jump block13
+block6:
+    v35:unknown = Phi [block8:v54:unknown, block16:v36:unknown]
+    v32:unknown = Phi [block8:v55:undefined, block16:v15:unknown]
+    v30:unknown = Phi [block8:v56:undefined, block16:v19:unknown]
+    v28:unknown = Phi [block8:v57:undefined, block16:v18:unknown]
+    v26:unknown = Phi [block8:v58:undefined, block16:v17:unknown]
+    v23:unknown = Phi [block8:v8:object, block16:v14:unknown]
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v36:unknown = Phi [block10:v20:unknown, block17:v61:unknown]
+    v33:unknown = Phi [block10:v15:unknown, block17:v62:undefined]
+    v24:unknown = Phi [block10:v14:unknown, block17:v8:object]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block8:
+    Jump block6
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block17
+block10:
+    v20:unknown = Move v14:unknown
+    Jump block7
+block1_split0:
+    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    Jump block12
+block1_split1:
+    Branch v3:boolean, block2, block3
+block5_split2: [handler: block1]
+    ThrowIfTDZ v42:unknown
+    Jump block14
+block5_split3: [handler: block1]
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block8, block9
+block7_split5:
+    Branch v15:unknown, block6, block10
+block9_split6:
+    Jump block7
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = GetGlobal ReferenceError
+    Jump block11
+block2:
+    v5:string = Move v4:string
+    Return v5:string
+block3:
+    v7:string = Move v6:string
+    Jump block4
+block4:
+    Return v7:string
+block5: [handler: block1]
+    v8:object = NewObject
+    Jump block13
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block8:
+    Jump block6
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block17
+block10:
+    Jump block7
+block1_split0:
+    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    Jump block12
+block1_split1:
+    Branch v3:boolean, block2, block3
+block5_split2: [handler: block1]
+    ThrowIfTDZ v42:unknown
+    Jump block14
+block5_split3: [handler: block1]
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block8, block9
+block7_split5:
+    Branch v15:unknown, block6, block10
+block9_split6:
+    Jump block7
+
+=== After CopyPropagation ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = GetGlobal ReferenceError
+    Jump block11
+block2:
+    v5:string = Move v4:string
+    Return v4:string
+block3:
+    v7:string = Move v6:string
+    Jump block4
+block4:
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    Jump block13
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block8:
+    Jump block6
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block17
+block10:
+    Jump block7
+block1_split0:
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Jump block12
+block1_split1:
+    Branch v3:boolean, block2, block3
+block5_split2: [handler: block1]
+    ThrowIfTDZ v42:unknown
+    Jump block14
+block5_split3: [handler: block1]
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block8, block9
+block7_split5:
+    Branch v15:unknown, block6, block10
+block9_split6:
+    Jump block7
+
+=== After EmptyBlockElimination ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = GetGlobal ReferenceError
+    Jump block11
+block2:
+    v5:string = Move v4:string
+    Return v4:string
+block3:
+    v7:string = Move v6:string
+    Jump block4
+block4:
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    Jump block13
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block7
+block1_split0:
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Jump block12
+block1_split1:
+    Branch v3:boolean, block2, block3
+block5_split2: [handler: block1]
+    ThrowIfTDZ v42:unknown
+    Jump block14
+block5_split3: [handler: block1]
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block6, block9
+block7_split5:
+    Branch v15:unknown, block6, block7
+
+=== After BlockMerging ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = GetGlobal ReferenceError
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Branch v3:boolean, block2, block3
+block2:
+    v5:string = Move v4:string
+    Return v4:string
+block3:
+    v7:string = Move v6:string
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block7
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block6, block9
+block7_split5:
+    Branch v15:unknown, block6, block7
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v2:unknown = GetGlobal ReferenceError
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Branch v3:boolean, block2, block3
+block2:
+    Return v4:string
+block3:
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block7
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block6, block9
+block7_split5:
+    Branch v15:unknown, block6, block7
+
+function():
+block0:
+    EnterUnwindContext block5
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v2:unknown = GetGlobal ReferenceError
+    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    Branch v3:boolean, block2, block3
+block2:
+    Return v4:string
+block3:
+    Return v6:string
+block5: [handler: block1]
+    v8:object = NewObject
+    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v48:unknown, 1
+    Jump block15
+block6:
+    LeaveUnwindContext
+    Return v11:string
+block7: [handler: block1]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v15:unknown = ExtractValue v13:unknown, 1
+    Jump block16
+block9: [handler: block1]
+    v16:unknown = GetObjectPropertyIterator v8:object
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
+    Jump block7
+block5_split4:
+    v21:boolean = IsNullish v8:object
+    Branch v21:boolean, block6, block9
+block7_split5:
+    Branch v15:unknown, block6, block7

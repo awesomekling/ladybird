@@ -12,7 +12,7 @@ block1:
     v3:unknown = GetGlobal result
     Jump block9
 block2:
-    v27:unknown = Phi [block5:v33:undefined, block11:v2:unknown]
+    v27:unknown = Phi [block5:v33:unknown, block11:v2:unknown]
     v23:unknown = Phi [block5:v11:undefined, block11:v4:unknown]
     v21:unknown = Phi [block5:v34:undefined, block11:v5:unknown]
     v19:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
@@ -21,7 +21,7 @@ block2:
 block3:
     EnterUnwindContext block7
 block4: [handler: block1]
-    v26:unknown = Phi [block6:v13:unknown, block7:v28:undefined, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v26:unknown = Phi [block6:v13:unknown, block7:v28:unknown, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
     v25:unknown = Phi [block6:v32:undefined, block7:v29:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
     v24:unknown = Phi [block6:v12:unknown, block7:v30:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
     v20:unknown = Phi [block6:v14:unknown, block7:v31:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]

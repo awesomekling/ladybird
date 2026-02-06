@@ -40,8 +40,8 @@ block3:
     v21:number = Phi [block0:v1:int32, block2:v9:number]
     v20:number = Phi [block0:v3:int32, block2:v10:number]
     v19:number = Phi [block0:v4:int32, block2:v12:number]
-    v18:unknown = Phi [block0:v22:undefined, block2:v6:number]
-    v17:unknown = Phi [block0:v23:undefined, block2:v8:number]
+    v18:unknown = Phi [block0:v22:unknown, block2:v6:number]
+    v17:unknown = Phi [block0:v23:unknown, block2:v8:number]
     v16:unknown = Phi [block0:v24:undefined, block2:v11:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4

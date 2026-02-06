@@ -4,7 +4,7 @@ block0:
     v0:object = NewObject
     Jump block6
 block1:
-    v45:unknown = Phi [block3:v47:undefined, block16:v46:unknown]
+    v45:unknown = Phi [block3:v47:unknown, block16:v46:unknown]
     v43:unknown = Phi [block3:v48:undefined, block16:v44:unknown]
     v41:unknown = Phi [block3:v49:undefined, block16:v42:unknown]
     v39:unknown = Phi [block3:v50:undefined, block16:v40:unknown]
@@ -18,7 +18,7 @@ block1:
     v6:unknown = GetGlobal keys
     Jump block11
 block2:
-    v46:unknown = Phi [block17:v57:undefined, block21:v21:unknown]
+    v46:unknown = Phi [block17:v57:unknown, block21:v21:unknown]
     v44:unknown = Phi [block17:v58:undefined, block21:v24:unknown]
     v42:unknown = Phi [block17:v59:undefined, block21:v23:unknown]
     v40:unknown = Phi [block17:v60:undefined, block21:v22:unknown]

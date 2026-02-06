@@ -1905,10 +1905,12 @@ void Lifter::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Value*>>& s
                     if (current != operand_value)
                         instruction->set_operand(i, current);
                 } else {
-                    // No reaching definition: register was never written on this path.
-                    // Replace with undefined (JavaScript default for uninitialized registers).
-                    auto& undef = m_function->create_constant(js_undefined());
-                    instruction->set_operand(i, &undef);
+                    // No reaching definition: variable was never written on this path.
+                    // Locals use the empty value (TDZ marker), registers use undefined.
+                    auto decoded = m_executable.original_operand_from_raw(*raw_opt);
+                    auto& default_value = m_function->create_constant(
+                        decoded.is_local() ? js_special_empty_value() : js_undefined());
+                    instruction->set_operand(i, &default_value);
                 }
             }
 
@@ -1956,8 +1958,11 @@ void Lifter::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Value*>>& s
                 if (stack_opt.has_value() && !stack_opt->is_empty()) {
                     reaching = stack_opt->last();
                 } else {
-                    // No definition reaches here - use undefined
-                    reaching = &m_function->create_constant(JS::js_undefined());
+                    // No definition reaches here.
+                    // Locals use the empty value (TDZ marker), registers use undefined.
+                    auto decoded = m_executable.original_operand_from_raw(*raw_opt);
+                    reaching = &m_function->create_constant(
+                        decoded.is_local() ? js_special_empty_value() : JS::js_undefined());
                 }
 
                 phi.set_incoming_value_for(block, reaching);
