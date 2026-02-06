@@ -26,6 +26,8 @@ class Function;
 class GetByIdInstruction;
 class Instruction;
 class JumpInstruction;
+class Loop;
+class LoopTree;
 class PhiInstruction;
 class TerminatorInstruction;
 class UnaryOpInstruction;

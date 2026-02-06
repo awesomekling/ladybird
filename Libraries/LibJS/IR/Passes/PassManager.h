@@ -12,6 +12,7 @@
 #include <LibJS/Export.h>
 #include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/LoopTree.h>
 
 namespace JS::IR {
 
@@ -66,12 +67,16 @@ public:
     // Lazily compute and cache the DominatorTree analysis.
     DominatorTree const& dominator_tree(Function const&);
 
+    // Lazily compute and cache the LoopTree analysis.
+    LoopTree const& loop_tree(Function const&);
+
     // Invalidate cached analyses based on what a pass preserved.
     void invalidate(PreservedAnalyses const&);
 
 private:
     Vector<NonnullOwnPtr<Pass>> m_passes;
     OwnPtr<DominatorTree> m_dominator_tree;
+    OwnPtr<LoopTree> m_loop_tree;
 };
 
 }

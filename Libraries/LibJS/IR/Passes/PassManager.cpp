@@ -69,10 +69,19 @@ DominatorTree const& PassManager::dominator_tree(Function const& function)
     return *m_dominator_tree;
 }
 
+LoopTree const& PassManager::loop_tree(Function const& function)
+{
+    if (!m_loop_tree)
+        m_loop_tree = make<LoopTree>(function, dominator_tree(function));
+    return *m_loop_tree;
+}
+
 void PassManager::invalidate(PreservedAnalyses const& preserved)
 {
-    if (!preserved.are_dominators_preserved())
+    if (!preserved.are_dominators_preserved()) {
         m_dominator_tree = nullptr;
+        m_loop_tree = nullptr;
+    }
 }
 
 }
