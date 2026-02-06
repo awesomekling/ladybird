@@ -1032,8 +1032,9 @@ impl<'a> Lexer<'a> {
         self.line_number = line_number;
         self.line_column = line_column;
         self.eof = position > self.source_len();
-        if position < self.source_len() {
-            self.current_code_unit = self.source[position];
+        // position is one past current_code_unit, so restore from position - 1
+        if position > 0 && position <= self.source_len() {
+            self.current_code_unit = self.source[position - 1];
         } else {
             self.current_code_unit = 0;
         }
