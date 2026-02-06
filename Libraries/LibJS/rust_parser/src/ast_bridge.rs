@@ -33,6 +33,7 @@ extern "C" {
     // Arena
     pub fn ast_arena_create() -> ArenaHandle;
     pub fn ast_arena_destroy(arena: ArenaHandle);
+    pub fn ast_node_ref(handle: NodeHandle);
 
     // Program / ScopeNode
     pub fn ast_create_program(
@@ -376,6 +377,11 @@ extern "C" {
 
     // Functions
     pub fn ast_create_function_parameters_empty() -> NodeHandle;
+    pub fn ast_create_function_parameters(
+        arena: ArenaHandle,
+        bindings: *const NodeHandle, default_values: *const NodeHandle,
+        is_rest: *const bool, count: usize,
+    ) -> NodeHandle;
     pub fn ast_create_function_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -460,6 +466,12 @@ impl AstBuilder {
 
     pub fn arena(&self) -> ArenaHandle {
         self.arena
+    }
+
+    /// Add an extra ref to a node so it survives arena destruction.
+    /// The caller takes ownership of the extra ref.
+    pub fn ref_node(&self, handle: NodeHandle) {
+        unsafe { ast_node_ref(handle) }
     }
 
     // === Helpers ===
@@ -780,6 +792,20 @@ impl AstBuilder {
 
     pub fn create_function_parameters_empty(&self) -> NodeHandle {
         unsafe { ast_create_function_parameters_empty() }
+    }
+
+    pub fn create_function_parameters(&self, bindings: &[NodeHandle], default_values: &[NodeHandle], is_rest: &[bool]) -> NodeHandle {
+        assert_eq!(bindings.len(), default_values.len());
+        assert_eq!(bindings.len(), is_rest.len());
+        if bindings.is_empty() {
+            return self.create_function_parameters_empty();
+        }
+        unsafe {
+            ast_create_function_parameters(
+                self.arena, bindings.as_ptr(), default_values.as_ptr(),
+                is_rest.as_ptr(), bindings.len(),
+            )
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

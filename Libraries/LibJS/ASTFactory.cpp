@@ -26,6 +26,7 @@ static Utf16View make_utf16_view(u16 const* data, size_t length)
 // Arena holds NonnullRefPtr<ASTNode const> to prevent premature deallocation.
 struct ASTArena {
     Vector<NonnullRefPtr<ASTNode const>> nodes;
+    Vector<NonnullRefPtr<FunctionParameters const>> parameters;
 };
 
 static SourceRange make_range(SourceCodeHandle source_code,
@@ -90,6 +91,11 @@ ASTArenaHandle ast_arena_create()
 void ast_arena_destroy(ASTArenaHandle arena)
 {
     delete static_cast<ASTArena*>(arena);
+}
+
+void ast_node_ref(ASTNodeHandle handle)
+{
+    static_cast<ASTNode*>(handle)->ref();
 }
 
 // === Program / ScopeNode ===
@@ -776,6 +782,35 @@ ASTNodeHandle ast_create_function_parameters_empty()
     return const_cast<FunctionParameters*>(FunctionParameters::empty().ptr());
 }
 
+ASTNodeHandle ast_create_function_parameters(ASTArenaHandle arena_handle,
+    ASTNodeHandle const* bindings, ASTNodeHandle const* default_values,
+    bool const* is_rest_flags, size_t count)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    Vector<FunctionParameter> params;
+    params.ensure_capacity(count);
+    for (size_t i = 0; i < count; ++i) {
+        auto* binding = static_cast<ASTNode*>(bindings[i]);
+        RefPtr<Expression const> default_value;
+        if (default_values[i])
+            default_value = as_ref<Expression>(default_values[i]);
+        if (is<BindingPattern>(*binding)) {
+            params.empend(
+                Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> { as_ref<BindingPattern>(bindings[i]) },
+                move(default_value),
+                is_rest_flags[i]);
+        } else {
+            params.empend(
+                Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> { as_ref<Identifier>(bindings[i]) },
+                move(default_value),
+                is_rest_flags[i]);
+        }
+    }
+    auto parameters = FunctionParameters::create(move(params));
+    arena.parameters.append(parameters);
+    return const_cast<FunctionParameters*>(parameters.ptr());
+}
+
 ASTNodeHandle ast_create_function_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
     u32 start_line, u32 start_column, u32 start_offset,
     u32 end_line, u32 end_column, u32 end_offset,
@@ -949,3 +984,44 @@ void ast_switch_case_append(ASTNodeHandle switch_case, ASTNodeHandle statement)
 }
 
 } // extern "C"
+
+// === High-level integration ===
+
+// Declared in Rust (lib.rs)
+extern "C" ASTNodeHandle rust_parse_program(
+    u16 const* source,
+    size_t source_len,
+    void const* source_code,
+    u8 program_type,
+    bool starts_in_strict_mode);
+
+namespace JS {
+
+NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode)
+{
+    auto const& code_view = source_code->code_view();
+    auto length = code_view.length_in_code_units();
+
+    ASTNodeHandle program;
+
+    u8 pt = program_type == Program::Type::Script ? 0 : 1;
+
+    if (code_view.has_ascii_storage()) {
+        // Widen ASCII to UTF-16
+        auto ascii = code_view.ascii_span();
+        Vector<u16> utf16_buf;
+        utf16_buf.ensure_capacity(length);
+        for (size_t i = 0; i < length; ++i)
+            utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+        program = rust_parse_program(utf16_buf.data(), length, source_code.ptr(), pt, starts_in_strict_mode);
+    } else {
+        auto utf16 = code_view.utf16_span();
+        program = rust_parse_program(reinterpret_cast<u16 const*>(utf16.data()), length, source_code.ptr(), pt, starts_in_strict_mode);
+    }
+
+    // The Rust side added an extra ref before dropping the arena.
+    // Adopt it without incrementing the refcount again.
+    return adopt_ref(static_cast<Program&>(*static_cast<ASTNode*>(program)));
+}
+
+} // namespace JS

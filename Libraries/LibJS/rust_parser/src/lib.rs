@@ -35,5 +35,9 @@ pub unsafe extern "C" fn rust_parse_program(
         ProgramType::Script
     };
     let mut parser = Parser::new(source_slice, source_code, pt);
-    parser.parse_program(starts_in_strict_mode)
+    let program = parser.parse_program(starts_in_strict_mode);
+    // Add an extra ref so the program node survives arena destruction.
+    // The C++ caller adopts this ref.
+    parser.builder.ref_node(program);
+    program
 }

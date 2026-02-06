@@ -14,6 +14,17 @@ typedef void* ASTNodeHandle;
 typedef void* SourceCodeHandle;
 
 #ifdef __cplusplus
+
+#include <AK/NonnullRefPtr.h>
+
+namespace JS {
+class Program;
+class SourceCode;
+
+// High-level entry point: parse a script/module using the Rust parser.
+NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode = false);
+}
+
 extern "C" {
 #endif
 
@@ -21,6 +32,7 @@ extern "C" {
 typedef void* ASTArenaHandle;
 ASTArenaHandle ast_arena_create();
 void ast_arena_destroy(ASTArenaHandle arena);
+void ast_node_ref(ASTNodeHandle handle);
 
 // SourceRange construction helper.
 // All factory functions take source range info inline.
@@ -309,6 +321,9 @@ ASTNodeHandle ast_create_tagged_template_literal(ASTArenaHandle arena, SourceCod
 // === Functions ===
 // Creates FunctionParameters from a list of parameter descriptions
 ASTNodeHandle ast_create_function_parameters_empty();
+ASTNodeHandle ast_create_function_parameters(ASTArenaHandle arena,
+    ASTNodeHandle const* bindings, ASTNodeHandle const* default_values,
+    bool const* is_rest, size_t count);
 
 ASTNodeHandle ast_create_function_expression(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,
