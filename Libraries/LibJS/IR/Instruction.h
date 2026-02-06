@@ -30,6 +30,17 @@ class FunctionNode;
 
 namespace JS::IR {
 
+// Effect bitmask describing what observable effects an instruction may have.
+// Used by passes (DCE, GVN, LICM, SimplifyCFG) to reason about instruction safety.
+enum class Effects : u8 {
+    None = 0,
+    MayThrow = 1 << 0,    // May throw an exception
+    ReadsState = 1 << 1,  // Reads mutable state (heap, environment)
+    WritesState = 1 << 2, // Writes mutable state
+    Calls = 1 << 3,       // May invoke arbitrary user code (subsumes all others)
+};
+AK_ENUM_BITWISE_OPERATORS(Effects)
+
 enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
     // Control flow
     Jump,
@@ -234,10 +245,7 @@ enum class [[clang::enum_extensibility(closed)]] Opcode : u8 {
 struct OpcodeTraits {
     char const* name;
     bool is_terminator;
-    bool may_throw;
-    bool has_side_effects;
-    bool is_pure;
-    bool is_hoistable;
+    Effects effects; // Conservative effect bitmask (refined by Instruction::effects())
     bool is_call_like;
     bool has_result;
     u8 operand_arity;            // Expected operand count (VariableArity = variable)
@@ -247,202 +255,210 @@ struct OpcodeTraits {
 
 static constexpr u8 VariableArity = 255;
 
+// Shorthand aliases for Effects combinations used in the table below.
+static constexpr auto E_NONE = Effects::None;
+static constexpr auto E_THROW = Effects::MayThrow;
+static constexpr auto E_READ = Effects::ReadsState;
+static constexpr auto E_WRITE = Effects::WritesState;
+static constexpr auto E_CALL = Effects::Calls;
+static constexpr auto E_THROW_WRITE = Effects::MayThrow | Effects::WritesState;
+
 // clang-format off
 static constexpr OpcodeTraits s_opcode_traits[] = {
-    // Control flow                                                                                       term   throw  side   pure   hoist  call   result arity type              commu
-    [to_underlying(Opcode::Jump)]                               = { "Jump",                               true,  false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::Branch)]                             = { "Branch",                             true,  false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::Return)]                             = { "Return",                             true,  false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::End)]                                = { "End",                                true,  false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::Throw)]                              = { "Throw",                              true,  true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::ContinuePendingUnwind)]              = { "ContinuePendingUnwind",              true,  true,  true,  false, false, false, false, 0,   Type::Unknown,    false },
+    // Control flow                                                                                       term   effects     call   result arity type              commu
+    [to_underlying(Opcode::Jump)]                               = { "Jump",                               true,  E_NONE,     false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::Branch)]                             = { "Branch",                             true,  E_NONE,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Return)]                             = { "Return",                             true,  E_NONE,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::End)]                                = { "End",                                true,  E_NONE,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Throw)]                              = { "Throw",                              true,  E_THROW,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ContinuePendingUnwind)]              = { "ContinuePendingUnwind",              true,  E_THROW,    false, false, 0,   Type::Unknown,    false },
 
     // SSA
-    [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, false, false, false, false, false, true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::ParallelCopy)]                       = { "ParallelCopy",                       false, false, true,  false, false, false, false, 255, Type::Unknown,    false },
+    [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, E_READ,     false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::ParallelCopy)]                       = { "ParallelCopy",                       false, E_WRITE,    false, false, 255, Type::Unknown,    false },
 
     // Constants
-    [to_underlying(Opcode::LoadConstant)]                       = { "LoadConstant",                       false, false, false, false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::LoadUndefined)]                      = { "LoadUndefined",                      false, false, false, false, false, false, true,  0,   Type::Undefined,  false },
-    [to_underlying(Opcode::LoadNull)]                           = { "LoadNull",                           false, false, false, false, false, false, true,  0,   Type::Null,       false },
+    [to_underlying(Opcode::LoadConstant)]                       = { "LoadConstant",                       false, E_NONE,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::LoadUndefined)]                      = { "LoadUndefined",                      false, E_NONE,     false, true,  0,   Type::Undefined,  false },
+    [to_underlying(Opcode::LoadNull)]                           = { "LoadNull",                           false, E_NONE,     false, true,  0,   Type::Null,       false },
 
     // Arithmetic (may call ToPrimitive on objects)
-    [to_underlying(Opcode::Add)]                                = { "Add",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    true  },
-    [to_underlying(Opcode::Sub)]                                = { "Sub",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::Mul)]                                = { "Mul",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    true  },
-    [to_underlying(Opcode::Div)]                                = { "Div",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::Mod)]                                = { "Mod",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::Exp)]                                = { "Exp",                                false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::Negate)]                             = { "Negate",                             false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
-    [to_underlying(Opcode::UnaryPlus)]                          = { "UnaryPlus",                          false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::Add)]                                = { "Add",                                false, E_CALL,     false, true,  2,   Type::Unknown,    true  },
+    [to_underlying(Opcode::Sub)]                                = { "Sub",                                false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::Mul)]                                = { "Mul",                                false, E_CALL,     false, true,  2,   Type::Unknown,    true  },
+    [to_underlying(Opcode::Div)]                                = { "Div",                                false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::Mod)]                                = { "Mod",                                false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::Exp)]                                = { "Exp",                                false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::Negate)]                             = { "Negate",                             false, E_CALL,     false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::UnaryPlus)]                          = { "UnaryPlus",                          false, E_CALL,     false, true,  1,   Type::Number,     false },
 
     // Bitwise (may call ToInt32 -> ToPrimitive on objects)
-    [to_underlying(Opcode::BitwiseAnd)]                         = { "BitwiseAnd",                         false, true,  true,  false, false, false, true,  2,   Type::Int32,      true  },
-    [to_underlying(Opcode::BitwiseOr)]                          = { "BitwiseOr",                          false, true,  true,  false, false, false, true,  2,   Type::Int32,      true  },
-    [to_underlying(Opcode::BitwiseXor)]                         = { "BitwiseXor",                         false, true,  true,  false, false, false, true,  2,   Type::Int32,      true  },
-    [to_underlying(Opcode::BitwiseNot)]                         = { "BitwiseNot",                         false, true,  true,  false, false, false, true,  1,   Type::Int32,      false },
-    [to_underlying(Opcode::LeftShift)]                          = { "LeftShift",                          false, true,  true,  false, false, false, true,  2,   Type::Int32,      false },
-    [to_underlying(Opcode::RightShift)]                         = { "RightShift",                         false, true,  true,  false, false, false, true,  2,   Type::Int32,      false },
-    [to_underlying(Opcode::UnsignedRightShift)]                 = { "UnsignedRightShift",                 false, true,  true,  false, false, false, true,  2,   Type::Number,     false },
+    [to_underlying(Opcode::BitwiseAnd)]                         = { "BitwiseAnd",                         false, E_CALL,     false, true,  2,   Type::Int32,      true  },
+    [to_underlying(Opcode::BitwiseOr)]                          = { "BitwiseOr",                          false, E_CALL,     false, true,  2,   Type::Int32,      true  },
+    [to_underlying(Opcode::BitwiseXor)]                         = { "BitwiseXor",                         false, E_CALL,     false, true,  2,   Type::Int32,      true  },
+    [to_underlying(Opcode::BitwiseNot)]                         = { "BitwiseNot",                         false, E_CALL,     false, true,  1,   Type::Int32,      false },
+    [to_underlying(Opcode::LeftShift)]                          = { "LeftShift",                          false, E_CALL,     false, true,  2,   Type::Int32,      false },
+    [to_underlying(Opcode::RightShift)]                         = { "RightShift",                         false, E_CALL,     false, true,  2,   Type::Int32,      false },
+    [to_underlying(Opcode::UnsignedRightShift)]                 = { "UnsignedRightShift",                 false, E_CALL,     false, true,  2,   Type::Number,     false },
 
     // Comparison (relational may call ToPrimitive, loose equality too)
-    [to_underlying(Opcode::LessThan)]                           = { "LessThan",                           false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::LessThanEquals)]                     = { "LessThanEquals",                     false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::GreaterThan)]                        = { "GreaterThan",                        false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::GreaterThanEquals)]                  = { "GreaterThanEquals",                  false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::LooselyEquals)]                      = { "LooselyEquals",                      false, true,  true,  false, false, false, true,  2,   Type::Boolean,    true  },
-    [to_underlying(Opcode::StrictlyEquals)]                     = { "StrictlyEquals",                     false, false, false, true,  false, false, true,  2,   Type::Boolean,    true  },
-    [to_underlying(Opcode::LooselyInequals)]                    = { "LooselyInequals",                    false, true,  true,  false, false, false, true,  2,   Type::Boolean,    true  },
-    [to_underlying(Opcode::StrictlyInequals)]                   = { "StrictlyInequals",                   false, false, false, true,  false, false, true,  2,   Type::Boolean,    true  },
+    [to_underlying(Opcode::LessThan)]                           = { "LessThan",                           false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::LessThanEquals)]                     = { "LessThanEquals",                     false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::GreaterThan)]                        = { "GreaterThan",                        false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::GreaterThanEquals)]                  = { "GreaterThanEquals",                  false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::LooselyEquals)]                      = { "LooselyEquals",                      false, E_CALL,     false, true,  2,   Type::Boolean,    true  },
+    [to_underlying(Opcode::StrictlyEquals)]                     = { "StrictlyEquals",                     false, E_NONE,     false, true,  2,   Type::Boolean,    true  },
+    [to_underlying(Opcode::LooselyInequals)]                    = { "LooselyInequals",                    false, E_CALL,     false, true,  2,   Type::Boolean,    true  },
+    [to_underlying(Opcode::StrictlyInequals)]                   = { "StrictlyInequals",                   false, E_NONE,     false, true,  2,   Type::Boolean,    true  },
 
     // Type ops
-    [to_underlying(Opcode::Typeof)]                             = { "Typeof",                             false, false, false, true,  true,  false, true,  1,   Type::String,     false },
-    [to_underlying(Opcode::TypeofBinding)]                      = { "TypeofBinding",                      false, true,  true,  false, false, false, true,  0,   Type::String,     false },
-    [to_underlying(Opcode::ToBoolean)]                          = { "ToBoolean",                          false, false, false, true,  true,  false, true,  1,   Type::Boolean,    false },
-    [to_underlying(Opcode::ToNumber)]                           = { "ToNumber",                           false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
-    [to_underlying(Opcode::ToNumeric)]                          = { "ToNumeric",                          false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::ToString)]                           = { "ToString",                           false, true,  true,  false, false, false, true,  1,   Type::String,     false },
-    [to_underlying(Opcode::ToObject)]                           = { "ToObject",                           false, true,  true,  false, false, false, true,  1,   Type::Object,     false },
-    [to_underlying(Opcode::ToInt32)]                            = { "ToInt32",                            false, true,  true,  false, false, false, true,  1,   Type::Int32,      false },
-    [to_underlying(Opcode::ToLength)]                           = { "ToLength",                           false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::Not)]                                = { "Not",                                false, false, false, true,  true,  false, true,  1,   Type::Boolean,    false },
-    [to_underlying(Opcode::IsUndefined)]                        = { "IsUndefined",                        false, false, false, true,  true,  false, true,  1,   Type::Boolean,    false },
-    [to_underlying(Opcode::IsNullish)]                          = { "IsNullish",                          false, false, false, true,  true,  false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::Typeof)]                             = { "Typeof",                             false, E_NONE,     false, true,  1,   Type::String,     false },
+    [to_underlying(Opcode::TypeofBinding)]                      = { "TypeofBinding",                      false, E_CALL,     false, true,  0,   Type::String,     false },
+    [to_underlying(Opcode::ToBoolean)]                          = { "ToBoolean",                          false, E_NONE,     false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::ToNumber)]                           = { "ToNumber",                           false, E_CALL,     false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::ToNumeric)]                          = { "ToNumeric",                          false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ToString)]                           = { "ToString",                           false, E_CALL,     false, true,  1,   Type::String,     false },
+    [to_underlying(Opcode::ToObject)]                           = { "ToObject",                           false, E_THROW,    false, true,  1,   Type::Object,     false },
+    [to_underlying(Opcode::ToInt32)]                            = { "ToInt32",                            false, E_CALL,     false, true,  1,   Type::Int32,      false },
+    [to_underlying(Opcode::ToLength)]                           = { "ToLength",                           false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Not)]                                = { "Not",                                false, E_NONE,     false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::IsUndefined)]                        = { "IsUndefined",                        false, E_NONE,     false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::IsNullish)]                          = { "IsNullish",                          false, E_NONE,     false, true,  1,   Type::Boolean,    false },
 
     // Increment/Decrement (may call ToNumber -> ToPrimitive)
-    [to_underlying(Opcode::Increment)]                          = { "Increment",                          false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
-    [to_underlying(Opcode::Decrement)]                          = { "Decrement",                          false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
-    [to_underlying(Opcode::PostfixIncrement)]                   = { "PostfixIncrement",                   false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
-    [to_underlying(Opcode::PostfixDecrement)]                   = { "PostfixDecrement",                   false, true,  true,  false, false, false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::Increment)]                          = { "Increment",                          false, E_CALL,     false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::Decrement)]                          = { "Decrement",                          false, E_CALL,     false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::PostfixIncrement)]                   = { "PostfixIncrement",                   false, E_CALL,     false, true,  1,   Type::Number,     false },
+    [to_underlying(Opcode::PostfixDecrement)]                   = { "PostfixDecrement",                   false, E_CALL,     false, true,  1,   Type::Number,     false },
 
     // String ops
-    [to_underlying(Opcode::ConcatString)]                       = { "ConcatString",                       false, true,  true,  false, false, false, true,  2,   Type::String,     false },
+    [to_underlying(Opcode::ConcatString)]                       = { "ConcatString",                       false, E_CALL,     false, true,  2,   Type::String,     false },
 
     // Property access
-    [to_underlying(Opcode::GetById)]                            = { "GetById",                            false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetByIdWithThis)]                    = { "GetByIdWithThis",                    false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetByValue)]                         = { "GetByValue",                         false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetByValueWithThis)]                 = { "GetByValueWithThis",                 false, true,  true,  false, false, false, true,  3,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetLength)]                          = { "GetLength",                          false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutById)]                            = { "PutById",                            false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutByIdWithThis)]                    = { "PutByIdWithThis",                    false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutByValue)]                         = { "PutByValue",                         false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutByValueWithThis)]                 = { "PutByValueWithThis",                 false, true,  true,  false, false, false, false, 4,   Type::Unknown,    false },
-    [to_underlying(Opcode::DeleteById)]                         = { "DeleteById",                         false, true,  true,  false, false, false, true,  1,   Type::Boolean,    false },
-    [to_underlying(Opcode::DeleteByIdWithThis)]                 = { "DeleteByIdWithThis",                 false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::DeleteByValue)]                      = { "DeleteByValue",                      false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::DeleteByValueWithThis)]              = { "DeleteByValueWithThis",              false, true,  true,  false, false, false, true,  3,   Type::Boolean,    false },
-    [to_underlying(Opcode::HasProperty)]                        = { "HasProperty",                        false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::HasPrivateId)]                       = { "HasPrivateId",                       false, true,  true,  false, false, false, true,  1,   Type::Boolean,    false },
-    [to_underlying(Opcode::GetPrivateById)]                     = { "GetPrivateById",                     false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutPrivateById)]                     = { "PutPrivateById",                     false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutGetterById)]                      = { "PutGetterById",                      false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutSetterById)]                      = { "PutSetterById",                      false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutPrototypeById)]                   = { "PutPrototypeById",                   false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutGetterByIdWithThis)]              = { "PutGetterByIdWithThis",              false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutSetterByIdWithThis)]              = { "PutSetterByIdWithThis",              false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutPrototypeByIdWithThis)]           = { "PutPrototypeByIdWithThis",           false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutGetterByValue)]                   = { "PutGetterByValue",                   false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutSetterByValue)]                   = { "PutSetterByValue",                   false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutPrototypeByValue)]                = { "PutPrototypeByValue",                false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutGetterByValueWithThis)]           = { "PutGetterByValueWithThis",           false, true,  true,  false, false, false, false, 4,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutSetterByValueWithThis)]           = { "PutSetterByValueWithThis",           false, true,  true,  false, false, false, false, 4,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutPrototypeByValueWithThis)]        = { "PutPrototypeByValueWithThis",        false, true,  true,  false, false, false, false, 4,   Type::Unknown,    false },
-    [to_underlying(Opcode::PutBySpread)]                        = { "PutBySpread",                        false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetById)]                            = { "GetById",                            false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetByIdWithThis)]                    = { "GetByIdWithThis",                    false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetByValue)]                         = { "GetByValue",                         false, E_CALL,     false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetByValueWithThis)]                 = { "GetByValueWithThis",                 false, E_CALL,     false, true,  3,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetLength)]                          = { "GetLength",                          false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutById)]                            = { "PutById",                            false, E_CALL,     false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutByIdWithThis)]                    = { "PutByIdWithThis",                    false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutByValue)]                         = { "PutByValue",                         false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutByValueWithThis)]                 = { "PutByValueWithThis",                 false, E_CALL,     false, false, 4,   Type::Unknown,    false },
+    [to_underlying(Opcode::DeleteById)]                         = { "DeleteById",                         false, E_CALL,     false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::DeleteByIdWithThis)]                 = { "DeleteByIdWithThis",                 false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::DeleteByValue)]                      = { "DeleteByValue",                      false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::DeleteByValueWithThis)]              = { "DeleteByValueWithThis",              false, E_CALL,     false, true,  3,   Type::Boolean,    false },
+    [to_underlying(Opcode::HasProperty)]                        = { "HasProperty",                        false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::HasPrivateId)]                       = { "HasPrivateId",                       false, E_CALL,     false, true,  1,   Type::Boolean,    false },
+    [to_underlying(Opcode::GetPrivateById)]                     = { "GetPrivateById",                     false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutPrivateById)]                     = { "PutPrivateById",                     false, E_CALL,     false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutGetterById)]                      = { "PutGetterById",                      false, E_CALL,     false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutSetterById)]                      = { "PutSetterById",                      false, E_CALL,     false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutPrototypeById)]                   = { "PutPrototypeById",                   false, E_CALL,     false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutGetterByIdWithThis)]              = { "PutGetterByIdWithThis",              false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutSetterByIdWithThis)]              = { "PutSetterByIdWithThis",              false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutPrototypeByIdWithThis)]           = { "PutPrototypeByIdWithThis",           false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutGetterByValue)]                   = { "PutGetterByValue",                   false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutSetterByValue)]                   = { "PutSetterByValue",                   false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutPrototypeByValue)]                = { "PutPrototypeByValue",                false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutGetterByValueWithThis)]           = { "PutGetterByValueWithThis",           false, E_CALL,     false, false, 4,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutSetterByValueWithThis)]           = { "PutSetterByValueWithThis",           false, E_CALL,     false, false, 4,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutPrototypeByValueWithThis)]        = { "PutPrototypeByValueWithThis",        false, E_CALL,     false, false, 4,   Type::Unknown,    false },
+    [to_underlying(Opcode::PutBySpread)]                        = { "PutBySpread",                        false, E_CALL,     false, false, 2,   Type::Unknown,    false },
 
     // Calls
-    [to_underlying(Opcode::Call)]                               = { "Call",                               false, true,  true,  false, false, true,  true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::CallBuiltin)]                        = { "CallBuiltin",                        false, true,  true,  false, false, true,  true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::CallDirectEval)]                     = { "CallDirectEval",                     false, true,  true,  false, false, true,  true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::CallWithArgumentArray)]              = { "CallWithArgumentArray",              false, true,  true,  false, false, true,  true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::Construct)]                          = { "Construct",                          false, true,  true,  false, false, false, true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::ConstructWithArgumentArray)]         = { "ConstructWithArgumentArray",         false, true,  true,  false, false, false, true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::SuperCallWithArgumentArray)]         = { "SuperCallWithArgumentArray",         false, true,  true,  false, false, false, true,  255, Type::Unknown,    false },
-    [to_underlying(Opcode::ImportCall)]                         = { "ImportCall",                         false, true,  true,  false, false, false, true,  2,   Type::Unknown,    false },
+    [to_underlying(Opcode::Call)]                               = { "Call",                               false, E_CALL,     true,  true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::CallBuiltin)]                        = { "CallBuiltin",                        false, E_CALL,     true,  true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::CallDirectEval)]                     = { "CallDirectEval",                     false, E_CALL,     true,  true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::CallWithArgumentArray)]              = { "CallWithArgumentArray",              false, E_CALL,     true,  true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::Construct)]                          = { "Construct",                          false, E_CALL,     false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::ConstructWithArgumentArray)]         = { "ConstructWithArgumentArray",         false, E_CALL,     false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::SuperCallWithArgumentArray)]         = { "SuperCallWithArgumentArray",         false, E_CALL,     false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::ImportCall)]                         = { "ImportCall",                         false, E_CALL,     false, true,  2,   Type::Unknown,    false },
 
-    // Environment
-    [to_underlying(Opcode::GetCalleeAndThisFromEnvironment)]    = { "GetCalleeAndThisFromEnvironment",    false, true,  true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateVariable)]                     = { "CreateVariable",                     false, true,  true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateLexicalEnvironment)]           = { "CreateLexicalEnvironment",           false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateMutableBinding)]               = { "CreateMutableBinding",               false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateImmutableBinding)]             = { "CreateImmutableBinding",             false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::LeaveLexicalEnvironment)]            = { "LeaveLexicalEnvironment",            false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::EnterObjectEnvironment)]             = { "EnterObjectEnvironment",             false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetBinding)]                         = { "GetBinding",                         false, true,  true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::InitializeBinding)]                  = { "InitializeBinding",                  false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::SetBinding)]                         = { "SetBinding",                         false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetGlobal)]                          = { "GetGlobal",                          false, true,  true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::SetGlobal)]                          = { "SetGlobal",                          false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::DeleteVariable)]                     = { "DeleteVariable",                     false, true,  true,  false, false, false, true,  0,   Type::Boolean,    false },
-    [to_underlying(Opcode::ResolveThisBinding)]                 = { "ResolveThisBinding",                 false, true,  true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::ResolveSuperBase)]                   = { "ResolveSuperBase",                   false, true,  true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreatePrivateEnvironment)]           = { "CreatePrivateEnvironment",           false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::LeavePrivateEnvironment)]            = { "LeavePrivateEnvironment",            false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::AddPrivateName)]                     = { "AddPrivateName",                     false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateVariableEnvironment)]          = { "CreateVariableEnvironment",          false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
+    // Environment (may call user code)
+    [to_underlying(Opcode::GetCalleeAndThisFromEnvironment)]    = { "GetCalleeAndThisFromEnvironment",    false, E_CALL,     false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateVariable)]                     = { "CreateVariable",                     false, E_CALL,     false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateLexicalEnvironment)]           = { "CreateLexicalEnvironment",           false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateMutableBinding)]               = { "CreateMutableBinding",               false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateImmutableBinding)]             = { "CreateImmutableBinding",             false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::LeaveLexicalEnvironment)]            = { "LeaveLexicalEnvironment",            false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::EnterObjectEnvironment)]             = { "EnterObjectEnvironment",             false, E_CALL,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetBinding)]                         = { "GetBinding",                         false, E_CALL,     false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::InitializeBinding)]                  = { "InitializeBinding",                  false, E_CALL,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::SetBinding)]                         = { "SetBinding",                         false, E_CALL,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetGlobal)]                          = { "GetGlobal",                          false, E_CALL,     false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::SetGlobal)]                          = { "SetGlobal",                          false, E_CALL,     false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::DeleteVariable)]                     = { "DeleteVariable",                     false, E_CALL,     false, true,  0,   Type::Boolean,    false },
+    [to_underlying(Opcode::ResolveThisBinding)]                 = { "ResolveThisBinding",                 false, E_CALL,     false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::ResolveSuperBase)]                   = { "ResolveSuperBase",                   false, E_CALL,     false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreatePrivateEnvironment)]           = { "CreatePrivateEnvironment",           false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::LeavePrivateEnvironment)]            = { "LeavePrivateEnvironment",            false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::AddPrivateName)]                     = { "AddPrivateName",                     false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateVariableEnvironment)]          = { "CreateVariableEnvironment",          false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
 
     // Object creation
-    [to_underlying(Opcode::NewObject)]                          = { "NewObject",                          false, true,  true,  false, false, false, true,  0,   Type::Object,     false },
-    [to_underlying(Opcode::NewArray)]                           = { "NewArray",                           false, true,  true,  false, false, false, true,  255, Type::Array,      false },
-    [to_underlying(Opcode::NewArrayWithLength)]                 = { "NewArrayWithLength",                 false, true,  true,  false, false, false, true,  1,   Type::Array,      false },
-    [to_underlying(Opcode::ArrayAppend)]                        = { "ArrayAppend",                        false, true,  true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::NewClass)]                           = { "NewClass",                           false, true,  true,  false, false, false, true,  255, Type::Function,   false },
-    [to_underlying(Opcode::NewFunction)]                        = { "NewFunction",                        false, true,  true,  false, false, false, true,  255, Type::Function,   false },
-    [to_underlying(Opcode::NewRegExp)]                          = { "NewRegExp",                          false, true,  true,  false, false, false, true,  0,   Type::Object,     false },
-    [to_underlying(Opcode::GetTemplateObject)]                  = { "GetTemplateObject",                  false, false, true,  false, false, false, true,  255, Type::Array,      false },
-    [to_underlying(Opcode::InitObjectLiteralProperty)]          = { "InitObjectLiteralProperty",          false, false, true,  false, false, false, false, 2,   Type::Unknown,    false },
-    [to_underlying(Opcode::CacheObjectShape)]                   = { "CacheObjectShape",                   false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::CopyObjectExcludingProperties)]      = { "CopyObjectExcludingProperties",      false, true,  true,  false, false, false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::NewObject)]                          = { "NewObject",                          false, E_THROW,    false, true,  0,   Type::Object,     false },
+    [to_underlying(Opcode::NewArray)]                           = { "NewArray",                           false, E_THROW,    false, true,  255, Type::Array,      false },
+    [to_underlying(Opcode::NewArrayWithLength)]                 = { "NewArrayWithLength",                 false, E_THROW,    false, true,  1,   Type::Array,      false },
+    [to_underlying(Opcode::ArrayAppend)]                        = { "ArrayAppend",                        false, E_THROW_WRITE, false, false, 2, Type::Unknown,   false },
+    [to_underlying(Opcode::NewClass)]                           = { "NewClass",                           false, E_CALL,     false, true,  255, Type::Function,   false },
+    [to_underlying(Opcode::NewFunction)]                        = { "NewFunction",                        false, E_THROW,    false, true,  255, Type::Function,   false },
+    [to_underlying(Opcode::NewRegExp)]                          = { "NewRegExp",                          false, E_THROW,    false, true,  0,   Type::Object,     false },
+    [to_underlying(Opcode::GetTemplateObject)]                  = { "GetTemplateObject",                  false, E_WRITE,    false, true,  255, Type::Array,      false },
+    [to_underlying(Opcode::InitObjectLiteralProperty)]          = { "InitObjectLiteralProperty",          false, E_WRITE,    false, false, 2,   Type::Unknown,    false },
+    [to_underlying(Opcode::CacheObjectShape)]                   = { "CacheObjectShape",                   false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::CopyObjectExcludingProperties)]      = { "CopyObjectExcludingProperties",      false, E_CALL,     false, true,  255, Type::Unknown,    false },
 
     // Special
-    [to_underlying(Opcode::In)]                                 = { "In",                                 false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
-    [to_underlying(Opcode::InstanceOf)]                         = { "InstanceOf",                         false, true,  true,  false, false, false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::In)]                                 = { "In",                                 false, E_CALL,     false, true,  2,   Type::Boolean,    false },
+    [to_underlying(Opcode::InstanceOf)]                         = { "InstanceOf",                         false, E_CALL,     false, true,  2,   Type::Boolean,    false },
 
     // Iterators
-    [to_underlying(Opcode::GetIterator)]                        = { "GetIterator",                        false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetObjectPropertyIterator)]          = { "GetObjectPropertyIterator",          false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::IteratorNext)]                       = { "IteratorNext",                       false, true,  true,  false, false, false, true,  3,   Type::Unknown,    false },
-    [to_underlying(Opcode::IteratorNextUnpack)]                 = { "IteratorNextUnpack",                 false, true,  true,  false, false, false, true,  3,   Type::Unknown,    false },
-    [to_underlying(Opcode::IteratorClose)]                      = { "IteratorClose",                      false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::AsyncIteratorClose)]                 = { "AsyncIteratorClose",                 false, true,  true,  false, false, false, false, 3,   Type::Unknown,    false },
-    [to_underlying(Opcode::IteratorToArray)]                    = { "IteratorToArray",                    false, true,  true,  false, false, false, true,  3,   Type::Array,      false },
+    [to_underlying(Opcode::GetIterator)]                        = { "GetIterator",                        false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetObjectPropertyIterator)]          = { "GetObjectPropertyIterator",          false, E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::IteratorNext)]                       = { "IteratorNext",                       false, E_CALL,     false, true,  3,   Type::Unknown,    false },
+    [to_underlying(Opcode::IteratorNextUnpack)]                 = { "IteratorNextUnpack",                 false, E_CALL,     false, true,  3,   Type::Unknown,    false },
+    [to_underlying(Opcode::IteratorClose)]                      = { "IteratorClose",                      false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::AsyncIteratorClose)]                 = { "AsyncIteratorClose",                 false, E_CALL,     false, false, 3,   Type::Unknown,    false },
+    [to_underlying(Opcode::IteratorToArray)]                    = { "IteratorToArray",                    false, E_CALL,     false, true,  3,   Type::Array,      false },
 
     // Generators/Async
-    [to_underlying(Opcode::Yield)]                              = { "Yield",                              true,  true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::Await)]                              = { "Await",                              true,  true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::PrepareYield)]                       = { "PrepareYield",                       false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetCompletionFields)]                = { "GetCompletionFields",                false, true,  true,  false, false, false, true,  1,   Type::Unknown,    false },
-    [to_underlying(Opcode::SetCompletionType)]                  = { "SetCompletionType",                  false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::NewTypeError)]                       = { "NewTypeError",                       false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::Yield)]                              = { "Yield",                              true,  E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Await)]                              = { "Await",                              true,  E_CALL,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::PrepareYield)]                       = { "PrepareYield",                       false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetCompletionFields)]                = { "GetCompletionFields",                false, E_THROW,    false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::SetCompletionType)]                  = { "SetCompletionType",                  false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::NewTypeError)]                       = { "NewTypeError",                       false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
 
     // Copy
-    [to_underlying(Opcode::Move)]                               = { "Move",                               false, false, false, false, false, false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Move)]                               = { "Move",                               false, E_NONE,     false, true,  1,   Type::Unknown,    false },
 
     // Tuple extraction
-    [to_underlying(Opcode::ExtractValue)]                       = { "ExtractValue",                       false, false, false, false, false, false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ExtractValue)]                       = { "ExtractValue",                       false, E_READ,     false, true,  1,   Type::Unknown,    false },
 
     // Arguments
-    [to_underlying(Opcode::CreateArguments)]                    = { "CreateArguments",                    false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::CreateRestParams)]                   = { "CreateRestParams",                   false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateArguments)]                    = { "CreateArguments",                    false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::CreateRestParams)]                   = { "CreateRestParams",                   false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
 
     // New target
-    [to_underlying(Opcode::GetNewTarget)]                       = { "GetNewTarget",                       false, true,  true,  false, false, false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetNewTarget)]                       = { "GetNewTarget",                       false, E_THROW,    false, true,  0,   Type::Unknown,    false },
 
     // Exception handling
-    [to_underlying(Opcode::Catch)]                              = { "Catch",                              false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::EnterUnwindContext)]                  = { "EnterUnwindContext",                  true,  false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::LeaveUnwindContext)]                  = { "LeaveUnwindContext",                  false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::ScheduleJump)]                       = { "ScheduleJump",                       true,  false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::LeaveFinally)]                       = { "LeaveFinally",                       false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::RestoreScheduledJump)]               = { "RestoreScheduledJump",               false, false, true,  false, false, false, false, 0,   Type::Unknown,    false },
-    [to_underlying(Opcode::SetSavedReturnValue)]                = { "SetSavedReturnValue",                false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::GetException)]                       = { "GetException",                       false, false, true,  false, false, false, true,  0,   Type::Unknown,    false },
-    [to_underlying(Opcode::SetException)]                       = { "SetException",                       false, false, true,  false, false, false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::Catch)]                              = { "Catch",                              false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::EnterUnwindContext)]                  = { "EnterUnwindContext",                  true,  E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::LeaveUnwindContext)]                  = { "LeaveUnwindContext",                  false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::ScheduleJump)]                       = { "ScheduleJump",                       true,  E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::LeaveFinally)]                       = { "LeaveFinally",                       false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::RestoreScheduledJump)]               = { "RestoreScheduledJump",               false, E_WRITE,    false, false, 0,   Type::Unknown,    false },
+    [to_underlying(Opcode::SetSavedReturnValue)]                = { "SetSavedReturnValue",                false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::GetException)]                       = { "GetException",                       false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
+    [to_underlying(Opcode::SetException)]                       = { "SetException",                       false, E_WRITE,    false, false, 1,   Type::Unknown,    false },
 
     // Guard operations (may throw but produce no value)
-    [to_underlying(Opcode::ThrowIfNotObject)]                   = { "ThrowIfNotObject",                   false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::ThrowIfNullish)]                     = { "ThrowIfNullish",                     false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
-    [to_underlying(Opcode::ThrowIfTDZ)]                         = { "ThrowIfTDZ",                         false, true,  true,  false, false, false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ThrowIfNotObject)]                   = { "ThrowIfNotObject",                   false, E_THROW,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ThrowIfNullish)]                     = { "ThrowIfNullish",                     false, E_THROW,    false, false, 1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ThrowIfTDZ)]                         = { "ThrowIfTDZ",                         false, E_THROW,    false, false, 1,   Type::Unknown,    false },
 };
 // clang-format on
 
@@ -460,34 +476,16 @@ constexpr bool is_terminator_opcode(Opcode opcode)
     return opcode_traits(opcode).is_terminator;
 }
 
+// Conservative opcode-level effects (no type refinement).
+constexpr Effects opcode_effects(Opcode opcode)
+{
+    return opcode_traits(opcode).effects;
+}
+
+// Derived opcode-level queries from effects.
 constexpr bool may_throw_opcode(Opcode opcode)
 {
-    return opcode_traits(opcode).may_throw;
-}
-
-// Does this opcode have observable side effects at the opcode level?
-// NB: This is conservative - arithmetic/comparison ops CAN have side effects
-// when operands are objects (ToPrimitive calls valueOf/toString).
-// Use Instruction::has_side_effects() for type-aware analysis.
-constexpr bool has_side_effects_opcode(Opcode opcode)
-{
-    return opcode_traits(opcode).has_side_effects;
-}
-
-// Is this opcode pure (no side effects, deterministic) at the opcode level?
-// NB: This is conservative - arithmetic/comparison ops are NOT pure when
-// operands could be objects. Use Instruction::is_pure() for type-aware analysis.
-constexpr bool is_pure_opcode(Opcode opcode)
-{
-    return opcode_traits(opcode).is_pure;
-}
-
-// Can this instruction be safely hoisted out of a loop at the opcode level?
-// Must be pure AND not throw. NB: This is conservative - arithmetic ops can
-// call ToPrimitive on objects. Use Instruction::is_hoistable() for type-aware analysis.
-constexpr bool is_hoistable_opcode(Opcode opcode)
-{
-    return opcode_traits(opcode).is_hoistable;
+    return has_any_flag(opcode_effects(opcode), Effects::MayThrow | Effects::Calls);
 }
 
 constexpr char const* opcode_to_string(Opcode opcode)
@@ -715,16 +713,19 @@ public:
     void set_source_record(Bytecode::SourceRecord record) { m_source_record = record; }
 
     bool is_terminator() const { return is_terminator_opcode(m_opcode); }
-    bool may_throw() const { return may_throw_opcode(m_opcode); }
 
     // Re-derive result type from current operand types.
     // Called during initial construction and after Phi type resolution.
     void recompute_result_type();
 
-    // Type-aware effect analysis (examines operand types for safe primitives)
+    // Type-aware effect bitmask (refines opcode-level effects using operand types).
+    Effects effects() const;
+
+    // Derived queries from effects().
     bool has_side_effects() const;
     bool is_pure() const;
     bool is_hoistable() const;
+    bool may_throw() const;
 
 protected:
     explicit Instruction(Opcode opcode);

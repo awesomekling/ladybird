@@ -199,6 +199,36 @@ block4_split0:
 block4_split1:
     Return v18:number
 
+=== After GlobalValueNumbering ===
+function(v19:unknown):
+block0:
+    v6:int32 = Move 1
+    v8:int32 = Move 2
+    v10:int32 = Move 0
+    Jump block3
+block1:
+    v11:int32 = Move v22:int32
+    v12:int32 = Move v23:int32
+    v13:int32 = Move v22:int32
+    Jump block2
+block2:
+    v15:number = Increment v25:number
+    Jump block3
+block3:
+    v25:number = Phi [block0:v9:int32, block2:v15:number]
+    v23:int32 = Phi [block0:v7:int32, block2:v22:int32]
+    v22:int32 = Phi [block0:v5:int32, block2:v23:int32]
+    v20:boolean = LessThan v25:number, v19:unknown
+    Branch v20:boolean, block1, block4
+block4:
+    v17:number = Mul v22:int32, 10
+    Jump block5
+block4_split0:
+    v18:number = Add v17:number, v23:int32
+    Jump block6
+block4_split1:
+    Return v18:number
+
 === After SimplifyCFG ===
 function(v19:unknown):
 block0:

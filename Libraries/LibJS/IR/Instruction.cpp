@@ -312,19 +312,8 @@ static bool all_operands_are_safe_primitives(Instruction const& instruction)
     return true;
 }
 
-// Check if all operands are safe numeric types (no throws, no user code)
-static bool all_operands_are_safe_numerics(Instruction const& instruction)
-{
-    for (auto* operand : instruction.operands()) {
-        if (!operand)
-            continue;
-        if (!is_safe_numeric_type(operand->type()))
-            return false;
-    }
-    return true;
-}
-
-// Opcodes that may call user code via ToPrimitive when operands are objects
+// Opcodes that may call user code via ToPrimitive when operands are objects,
+// but become effect-free when all operands are safe primitive types.
 static bool opcode_may_call_user_code_on_objects(Opcode opcode)
 {
     switch (opcode) {
@@ -364,68 +353,38 @@ static bool opcode_may_call_user_code_on_objects(Opcode opcode)
     }
 }
 
-bool Instruction::has_side_effects() const
+Effects Instruction::effects() const
 {
-    // First check opcode-level side effects
-    if (!has_side_effects_opcode(m_opcode))
-        return false;
+    auto e = opcode_effects(m_opcode);
 
-    // For ops that may call user code on objects, check if operands are safe primitives
-    if (opcode_may_call_user_code_on_objects(m_opcode)) {
+    // For ops that may call user code on objects, narrow to None when all
+    // operands are safe primitive types (no ToPrimitive possible).
+    if (has_flag(e, Effects::Calls) && opcode_may_call_user_code_on_objects(m_opcode)) {
         if (all_operands_are_safe_primitives(*this))
-            return false;
+            return Effects::None;
     }
 
-    return true;
+    return e;
+}
+
+bool Instruction::has_side_effects() const
+{
+    return has_any_flag(effects(), Effects::MayThrow | Effects::WritesState | Effects::Calls);
 }
 
 bool Instruction::is_pure() const
 {
-    // First check opcode-level purity
-    if (is_pure_opcode(m_opcode))
-        return true;
-
-    // For ops that may call user code on objects, check if operands are safe primitives
-    if (opcode_may_call_user_code_on_objects(m_opcode)) {
-        if (all_operands_are_safe_primitives(*this))
-            return true;
-    }
-
-    return false;
+    return effects() == Effects::None;
 }
 
 bool Instruction::is_hoistable() const
 {
-    // First check opcode-level hoistability
-    if (is_hoistable_opcode(m_opcode))
-        return true;
+    return effects() == Effects::None;
+}
 
-    // For numeric ops, check if operands are safe numeric types (excludes String, BigInt, Symbol)
-    // These operations are safe to hoist when we know no user code or throws can occur.
-    switch (m_opcode) {
-    case Opcode::Add:
-    case Opcode::Sub:
-    case Opcode::Mul:
-    case Opcode::Div:
-    case Opcode::Mod:
-    case Opcode::Exp:
-    case Opcode::Negate:
-    case Opcode::UnaryPlus:
-    case Opcode::BitwiseAnd:
-    case Opcode::BitwiseOr:
-    case Opcode::BitwiseXor:
-    case Opcode::BitwiseNot:
-    case Opcode::LeftShift:
-    case Opcode::RightShift:
-    case Opcode::UnsignedRightShift:
-        if (all_operands_are_safe_numerics(*this))
-            return true;
-        break;
-    default:
-        break;
-    }
-
-    return false;
+bool Instruction::may_throw() const
+{
+    return has_any_flag(effects(), Effects::MayThrow | Effects::Calls);
 }
 
 }
