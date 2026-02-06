@@ -29,6 +29,7 @@ set(SOURCES
     IR/Lowerer.cpp
 
     IR/SSAConstruction.cpp
+    IR/Passes/CopyCoalescing.cpp
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp
     IR/Passes/GlobalValueNumbering.cpp

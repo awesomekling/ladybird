@@ -7,6 +7,7 @@
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Optimize.h>
+#include <LibJS/IR/Passes/CopyCoalescing.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/GlobalValueNumbering.h>
@@ -93,6 +94,11 @@ void optimize(Function& function)
     // Must run after SplitCriticalEdges so copies have clean blocks.
     SsaDestructionPass ssa_destruction_pass;
     run_once(ssa_destruction_pass);
+
+    // Copy Coalescing: merge non-interfering ParallelCopy src/dst pairs
+    // so copies become no-ops, enabling PostSSACleanup to fold more blocks.
+    CopyCoalescing copy_coalescing_pass;
+    run_once(copy_coalescing_pass);
 
     // Post-SSA Cleanup: eliminate trivial [ParallelCopy...] + Jump blocks
     // left over from SSA destruction by moving copies into predecessors.
