@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal countdown
@@ -93,7 +93,7 @@ block2_split1:
     v9:unknown = Move v8:unknown
     Jump block1
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v4:unknown):
 block0:
     v3:int32 = Move 0

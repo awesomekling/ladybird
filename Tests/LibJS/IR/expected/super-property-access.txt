@@ -15,7 +15,7 @@ block0_split2:
 block0_split3:
     End v4:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -157,7 +157,7 @@ block0_split7:
 block0_split8:
     Return v16:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v3:object = NewObject
@@ -235,7 +235,7 @@ block0_split3:
 block0_split4:
     Return v5:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     ResolveThisBinding

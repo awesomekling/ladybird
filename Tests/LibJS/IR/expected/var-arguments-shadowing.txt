@@ -83,7 +83,7 @@ block2_split3:
     v11:undefined = Move undefined
     Branch v10:boolean, block3, block4
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal f1
@@ -191,7 +191,7 @@ block0_split0:
 block0_split1:
     Return v5:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false

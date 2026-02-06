@@ -21,6 +21,7 @@
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
+#include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
 
 namespace JS::IR {
@@ -58,9 +59,8 @@ void optimize(Function& function)
     // Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
 
-    // Final CFG Cleanup
-    pass_manager.add_pass(make<EmptyBlockElimination>());
-    pass_manager.add_pass(make<BlockMerging>());
+    // CFG Cleanup
+    pass_manager.add_pass(make<SimplifyCFG>());
 
     pass_manager.run(function);
 

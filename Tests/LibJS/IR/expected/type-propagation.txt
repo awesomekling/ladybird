@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v4:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal go
@@ -112,7 +112,7 @@ block0_split6:
     v15:boolean = Move v14:boolean
     Return v14:boolean
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v4:unknown, v6:unknown):
 block0:
     v5:int32 = ToInt32 v4:unknown

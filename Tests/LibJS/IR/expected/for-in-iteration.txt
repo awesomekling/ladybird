@@ -244,76 +244,7 @@ block5_split14:
 block5_split15:
     Jump block2
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    v0:object = NewObject
-    Jump block6
-block1:
-    v6:unknown = GetGlobal keys
-    Jump block11
-block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Jump block16
-block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
-    Jump block2
-block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
-    Jump block18
-block0_split0:
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    Jump block7
-block0_split1:
-    v4:array = NewArray
-    Jump block8
-block0_split2:
-    InitializeBinding keys v4:array
-    Jump block9
-block0_split3:
-    v5:unknown = GetGlobal obj
-    Jump block10
-block0_split4:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
-block1_split5:
-    v7:unknown = GetById v6:unknown.sort
-    Jump block12
-block1_split6:
-    v8:unknown = Call v7:unknown, v6:unknown
-    Jump block13
-block1_split7:
-    v9:unknown = GetById v8:unknown.join
-    Jump block14
-block1_split8:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    Jump block15
-block1_split9:
-    End v11:unknown
-block2_split10:
-    Branch v14:unknown, block1, block5
-block5_split12:
-    v23:unknown = GetById v22:unknown.push
-    Jump block19
-block5_split13:
-    ThrowIfTDZ v13:unknown
-    Jump block20
-block5_split14:
-    v24:unknown = Move v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
-    Jump block2
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:object = NewObject

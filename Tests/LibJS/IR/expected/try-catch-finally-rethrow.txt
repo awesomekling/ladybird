@@ -187,64 +187,7 @@ block6_split9: [finalizer: block4]
 block6_split10: [finalizer: block4]
     Throw v17:string
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v6:unknown = GetGlobal result
-    Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
-    Jump block13
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
-    Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
-block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v4:unknown = Add v3:unknown, v1:unknown
-    Jump block10
-block1_split2:
-    SetGlobal result v4:unknown
-    Jump block2
-block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
-    Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     SetGlobal result v0:string

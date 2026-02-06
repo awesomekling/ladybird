@@ -12,7 +12,7 @@ block0_split1:
 block0_split2:
     End v6:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -246,7 +246,7 @@ block8_split3:
     v21:unknown = Move v20:unknown
     Jump block9
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v14:unknown):
 block0:
     v6:int32 = Move 0
@@ -319,7 +319,7 @@ block9:
     v39:unknown = Phi [block6:v38:unknown, block8:v20:unknown]
     Jump block5
 
-=== After EmptyBlockElimination ===
+=== After SimplifyCFG ===
 function(v14:unknown):
 block0:
     Jump block3

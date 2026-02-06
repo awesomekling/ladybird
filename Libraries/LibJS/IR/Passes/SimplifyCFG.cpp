@@ -1,0 +1,254 @@
+/*
+ * Copyright (c) 2026, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/HashTable.h>
+#include <LibJS/IR/BasicBlock.h>
+#include <LibJS/IR/CFG.h>
+#include <LibJS/IR/Function.h>
+#include <LibJS/IR/Instruction.h>
+#include <LibJS/IR/Passes/SimplifyCFG.h>
+#include <LibJS/IR/Value.h>
+
+namespace JS::IR {
+
+static void remove_dead_blocks(Function& function)
+{
+    HashTable<BasicBlock*> blocks_to_remove;
+    for (auto& block : function.basic_blocks()) {
+        if (block->instructions().is_empty())
+            blocks_to_remove.set(block.ptr());
+    }
+    CFG::remove_blocks(function, blocks_to_remove);
+}
+
+static bool try_eliminate_empty_blocks(Function& function)
+{
+    bool changed = false;
+    bool eliminated_any;
+
+    do {
+        eliminated_any = false;
+
+        for (auto& block : function.basic_blocks()) {
+            bool is_entry = block.ptr() == function.entry_block();
+
+            // Check if block is empty (only a Jump instruction)
+            if (block->instructions().size() != 1)
+                continue;
+
+            auto* jump = block->terminator();
+            if (!jump || jump->opcode() != Opcode::Jump)
+                continue;
+
+            auto* target = jump->true_target();
+            if (!target)
+                continue;
+
+            // Don't eliminate if jumping to self
+            if (target == block.ptr())
+                continue;
+
+            // Get predecessors of the empty block
+            auto predecessors = block->predecessors();
+
+            // Don't eliminate if any predecessor would end up reaching the target
+            // via two different paths with different phi values
+            bool would_conflict = false;
+            for (auto* pred : predecessors) {
+                // Check if this predecessor already reaches the target directly
+                auto* pred_term = pred->terminator();
+                if (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target)) {
+                    // This predecessor can reach target both directly and via empty block
+                    // Check if any phi in target would have different values for these paths
+                    for (auto const& instr : target->instructions()) {
+                        if (instr->opcode() != Opcode::Phi)
+                            continue;
+
+                        auto& phi = static_cast<PhiInstruction&>(*instr);
+                        auto* value_from_empty = phi.incoming_value_for(*block);
+                        auto* value_from_direct = phi.incoming_value_for(*pred);
+
+                        if (value_from_empty && value_from_direct && value_from_empty != value_from_direct) {
+                            would_conflict = true;
+                            break;
+                        }
+                    }
+                }
+                if (would_conflict)
+                    break;
+            }
+
+            if (would_conflict)
+                continue;
+
+            // Entry block has no predecessors - only eliminate if target has no phis
+            // and no other predecessors (otherwise it would become an entry block
+            // with predecessors, violating the SSA invariant).
+            if (is_entry) {
+                bool can_eliminate = true;
+                for (auto const& instr : target->instructions()) {
+                    if (instr->opcode() == Opcode::Phi) {
+                        can_eliminate = false;
+                        break;
+                    }
+                }
+                // If the target has predecessors other than us, eliminating would
+                // create an entry block with predecessors.
+                for (auto* pred : target->predecessors()) {
+                    if (pred != block.ptr()) {
+                        can_eliminate = false;
+                        break;
+                    }
+                }
+                if (!can_eliminate)
+                    continue;
+            } else if (predecessors.is_empty()) {
+                continue;
+            }
+
+            // If eliminating the entry block, make target the new entry
+            if (is_entry)
+                function.set_entry_block(target);
+
+            // Redirect each predecessor edge from the empty block to the target
+            for (auto* pred : predecessors) {
+                CFG::redirect_edge(*pred, *block, *target, [&](Instruction& instr) -> Value* {
+                    auto& target_phi = static_cast<PhiInstruction&>(instr);
+
+                    // Find the value this phi expects from the empty block
+                    auto* value_from_empty = target_phi.incoming_value_for(*block);
+                    if (!value_from_empty)
+                        return nullptr;
+
+                    // If value_from_empty is a phi, trace to find what this pred would contribute
+                    if (auto* def = value_from_empty->defining_instruction();
+                        def && def->opcode() == Opcode::Phi) {
+                        auto& def_phi = static_cast<PhiInstruction&>(*def);
+                        if (auto* traced = def_phi.incoming_value_for(*pred))
+                            return traced;
+                    }
+
+                    return value_from_empty;
+                });
+            }
+
+            // Clear the block's instructions (will be removed later)
+            block->clear_instructions();
+
+            eliminated_any = true;
+            changed = true;
+            break; // Restart since we modified the CFG
+        }
+    } while (eliminated_any);
+
+    return changed;
+}
+
+static bool try_merge_blocks(Function& function)
+{
+    bool changed = false;
+
+    // Keep merging until no more opportunities
+    bool merged_any;
+    do {
+        merged_any = false;
+
+        for (auto& block_a : function.basic_blocks()) {
+            auto* terminator = block_a->terminator();
+            if (!terminator)
+                continue;
+
+            // Only merge if A ends with an unconditional jump
+            if (terminator->opcode() != Opcode::Jump)
+                continue;
+
+            auto* block_b = terminator->true_target();
+            if (!block_b)
+                continue;
+
+            // Don't merge self-loops
+            if (block_b == block_a.ptr())
+                continue;
+
+            // B must have exactly one predecessor (A)
+            if (block_b->predecessors().size() != 1)
+                continue;
+
+            // B shouldn't be the entry block
+            if (block_b == function.entry_block())
+                continue;
+
+            // Don't merge into blocks with phi nodes (preserves loop preheaders)
+            if (!block_b->instructions().is_empty() && block_b->instructions().first()->opcode() == Opcode::Phi)
+                continue;
+
+            // Don't merge if exception handling context differs - this would change
+            // which handler catches exceptions from B's instructions
+            if (block_a->exception_handler() != block_b->exception_handler())
+                continue;
+            if (block_a->finalizer() != block_b->finalizer())
+                continue;
+
+            // Don't merge if the shared exception handler or finalizer has phi nodes.
+            // Both A and B are EH predecessors of the handler, so merging would create
+            // duplicate phi entries that can't be properly consolidated (A and B may
+            // contribute different values to the handler's phis).
+            auto handler_has_phis = [](BasicBlock* target) {
+                return target && !target->instructions().is_empty()
+                    && target->instructions().first()->opcode() == Opcode::Phi;
+            };
+            if (handler_has_phis(block_a->exception_handler()) || handler_has_phis(block_a->finalizer()))
+                continue;
+
+            // Merge B into A:
+            // 1. Capture B's successors before modifying anything
+            auto* b_terminator = block_b->terminator();
+            BasicBlock* b_true_target = b_terminator ? b_terminator->true_target() : nullptr;
+            BasicBlock* b_false_target = b_terminator ? b_terminator->false_target() : nullptr;
+
+            // 2. Remove the Jump from A
+            block_a->remove_terminator();
+
+            // 3. Move all instructions from B to A
+            for (auto& instruction : block_b->take_all_instructions())
+                block_a->append(move(instruction));
+
+            // 4. Update all references to B to point to A
+            CFG::retarget_all_edges(function, *block_b, *block_a);
+
+            // 5. Add A to the predecessor lists of B's former successors
+            if (b_true_target && b_true_target != block_b)
+                CFG::add_predecessor(*b_true_target, *block_a);
+            if (b_false_target && b_false_target != block_b && b_false_target != b_true_target)
+                CFG::add_predecessor(*b_false_target, *block_a);
+
+            merged_any = true;
+            changed = true;
+            break; // Restart iteration since we modified the list
+        }
+    } while (merged_any);
+
+    return changed;
+}
+
+PreservedAnalyses SimplifyCFG::run(Function& function, PassManager&)
+{
+    bool changed = false;
+
+    bool iteration_changed;
+    do {
+        iteration_changed = false;
+        iteration_changed |= try_eliminate_empty_blocks(function);
+        iteration_changed |= try_merge_blocks(function);
+        changed |= iteration_changed;
+    } while (iteration_changed);
+
+    remove_dead_blocks(function);
+
+    return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
+}

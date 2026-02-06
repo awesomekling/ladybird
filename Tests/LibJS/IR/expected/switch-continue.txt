@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal foo
@@ -131,7 +131,7 @@ block7:
 block8:
     Jump block2
 
-=== After EmptyBlockElimination ===
+=== After SimplifyCFG ===
 function():
 block0:
     v3:int32 = Move 0
@@ -183,7 +183,7 @@ block4:
 block5:
     Jump block2
 
-=== After EmptyBlockElimination ===
+=== After SimplifyCFG ===
 function():
 block0:
     Jump block3

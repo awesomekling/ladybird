@@ -43,6 +43,7 @@ set(SOURCES
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
     IR/Passes/PassManager.cpp
+    IR/Passes/SimplifyCFG.cpp
     IR/Passes/SplitCriticalEdges.cpp
     IR/Passes/Verifier.cpp
     IR/Value.cpp

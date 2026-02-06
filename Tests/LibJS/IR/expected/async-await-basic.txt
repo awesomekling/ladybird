@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal fetchValue
@@ -231,7 +231,7 @@ block8_split9:
     v36:boolean = StrictlyEquals v24:unknown, 1
     Branch v36:boolean, block9, block10
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v27:unknown = Yield undefined, continuation: block1

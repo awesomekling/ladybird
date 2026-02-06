@@ -156,53 +156,7 @@ block3_split9:
 block3_split10:
     Jump block2
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    v3:array = NewArray 1, 2, 3
-    Jump block4
-block1:
-    v12:unknown = GetGlobal sum
-    Jump block9
-block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block10
-block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
-    Jump block11
-block0_split0:
-    InitializeBinding arr v3:array
-    Jump block5
-block0_split1:
-    InitializeBinding sum 0
-    Jump block6
-block0_split2:
-    v5:unknown = GetGlobal arr
-    Jump block7
-block0_split3:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
-    Jump block2
-block1_split5:
-    End v12:unknown
-block2_split6:
-    Branch v15:unknown, block1, block3
-block3_split7:
-    ThrowIfTDZ v14:unknown
-    Jump block12
-block3_split8:
-    v18:unknown = Add v17:unknown, v14:unknown
-    Jump block13
-block3_split9:
-    SetGlobal sum v18:unknown
-    Jump block2
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v3:array = NewArray 1, 2, 3

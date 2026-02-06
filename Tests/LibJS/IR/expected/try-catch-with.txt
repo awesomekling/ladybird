@@ -48,7 +48,7 @@ block3_split1: [handler: block1]
     LeaveLexicalEnvironment
     Throw v5:string
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     EnterUnwindContext block3

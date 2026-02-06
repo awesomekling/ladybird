@@ -12,7 +12,7 @@ block0_split1:
 block0_split2:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal make_counter
@@ -42,7 +42,7 @@ block0_split1:
 block0_split2:
     Return v2:function
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = CreateLexicalEnvironment
@@ -74,7 +74,7 @@ block0_split1:
 block0_split2:
     Return v1:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetBinding count

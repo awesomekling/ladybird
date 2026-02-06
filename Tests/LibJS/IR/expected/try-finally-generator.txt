@@ -21,7 +21,7 @@ block0_split4:
 block0_split5:
     End v5:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal gen
@@ -169,7 +169,7 @@ block9_split1: [finalizer: block2]
 block9_split2: [finalizer: block2]
     Throw v8:object
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v10:unknown = Yield undefined, continuation: block1

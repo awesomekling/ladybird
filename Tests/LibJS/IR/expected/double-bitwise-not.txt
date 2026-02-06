@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal go
@@ -33,7 +33,7 @@ block0_split0:
 block0_split1:
     Return v2:int32
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v0:unknown):
 block0:
     v1:int32 = BitwiseNot v0:unknown

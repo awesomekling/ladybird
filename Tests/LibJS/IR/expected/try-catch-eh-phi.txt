@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -142,7 +142,7 @@ block2_split4:
     LeaveUnwindContext
     Jump block3
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v2:int32 = Move 0
@@ -246,7 +246,7 @@ block1_split0:
 block1_split1:
     Throw v2:object
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v1:unknown, v3:unknown):
 block0:
     Branch v3:unknown, block1, block2

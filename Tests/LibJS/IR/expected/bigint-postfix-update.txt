@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal foo
@@ -68,7 +68,7 @@ block0_split0:
     v7:bigint = Move v8:bigint
     Return v8:bigint
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v4:bigint = Move v3:bigint

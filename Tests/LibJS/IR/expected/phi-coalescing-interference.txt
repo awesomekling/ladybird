@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal rotate
@@ -180,7 +180,7 @@ block1_split3:
 block4_split4:
     Return v13:number
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v14:unknown):
 block0:
     v1:int32 = Move 100

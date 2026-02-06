@@ -39,7 +39,7 @@ block0_split10:
 block0_split11:
     End v13:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal putById
@@ -80,7 +80,7 @@ block0:
 block0_split0:
     End undefined
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v0:unknown):
 block0:
     PutById v0:unknown, 1.foo
@@ -99,7 +99,7 @@ block0:
 block0_split0:
     End undefined
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
     PutByValue v0:unknown, v1:unknown, 1

@@ -30,7 +30,7 @@ block0_split7:
 block0_split8:
     End v9:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal g
@@ -198,51 +198,7 @@ block6_split3: [finalizer: block2]
 block6_split4:
     Jump block2
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    v12:unknown = Yield undefined, continuation: block1
-block1:
-    EnterUnwindContext block4
-block2:
-    LeaveUnwindContext
-    v0:unknown = GetGlobal cleanup
-    Jump block10
-block3:
-    v13:unknown = Yield undefined
-block4: [finalizer: block2]
-    v15:unknown = Yield 1, continuation: block5
-block5: [finalizer: block2]
-    v4:unknown = Move v15:unknown
-    v5:unknown = GetCompletionFields v15:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Jump block12
-block6: [finalizer: block2]
-    v8:unknown = GetGlobal unreachable
-    Jump block13
-block7:
-    v19:boolean = StrictlyEquals v6:unknown, 5
-    Branch v19:boolean, block8, block9
-block8: [finalizer: block2]
-    Throw v7:unknown
-block9:
-    PrepareYield v7:unknown
-    SetException v10:unknown
-    Jump block2
-block2_split0:
-    v2:unknown = Call v0:unknown, undefined
-    Jump block11
-block2_split1:
-    ContinuePendingUnwind block3
-block5_split2:
-    v17:boolean = StrictlyEquals v6:unknown, 1
-    Branch v17:boolean, block6, block7
-block6_split3: [finalizer: block2]
-    v9:unknown = Call v8:unknown, undefined
-    Jump block2
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v12:unknown = Yield undefined, continuation: block1

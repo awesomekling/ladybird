@@ -15,7 +15,7 @@ block0_split2:
 block0_split3:
     End v4:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -159,7 +159,7 @@ block0_split8:
 block0_split9:
     Return v16:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v2:unknown = CreateLexicalEnvironment
@@ -232,7 +232,7 @@ block0_split2:
 block0_split3:
     Return v2:object
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     CreateVariable
@@ -274,7 +274,7 @@ block0_split1:
 block0_split2:
     End undefined
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     ResolveThisBinding

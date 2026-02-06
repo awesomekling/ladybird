@@ -15,7 +15,7 @@ block0_split2:
 block0_split3:
     End v4:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -154,35 +154,7 @@ block2_split0:
 block4_split1:
     Jump block2
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    v1:undefined = Move undefined
-    v15:boolean = IsNullish v14:string
-    Branch false, block3, block4
-block1:
-    Return v18:unknown
-block2:
-    v18:unknown = Phi [block5:v6:unknown, block4:v0:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Jump block6
-block3:
-    Return undefined
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
-    Jump block2
-block5:
-    v13:unknown = Move v6:unknown
-    Jump block2
-block2_split0:
-    Branch v7:unknown, block1, block5
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v1:undefined = Move undefined
@@ -278,7 +250,7 @@ block4:
 block5:
     Jump block2
 
-=== After EmptyBlockElimination ===
+=== After SimplifyCFG ===
 function():
 block1:
     Return v18:unknown

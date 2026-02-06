@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal cycle
@@ -167,37 +167,7 @@ block1_split1:
 block4_split2:
     Return v20:number
 
-=== After EmptyBlockElimination ===
-function(v21:unknown):
-block0:
-    v7:int32 = Move 1
-    v9:int32 = Move 2
-    v11:int32 = Move 0
-    Jump block3
-block2:
-    v19:number = Increment v28:number
-    Jump block3
-block3:
-    v28:number = Phi [block0:v10:int32, block2:v19:number]
-    v25:int32 = Phi [block0:v8:int32, block2:v24:int32]
-    v24:int32 = Phi [block0:v6:int32, block2:v25:int32]
-    v22:boolean = LessThan v28:number, v21:unknown
-    Branch v22:boolean, block5, block4
-block4:
-    v20:number = Add v24:int32, v25:int32
-    Jump block7
-block1_split0:
-    v13:int32 = Move v24:int32
-    Jump block6
-block1_split1:
-    v15:int32 = Move v25:int32
-    v16:int32 = Move v25:int32
-    v17:int32 = Move v24:int32
-    Jump block2
-block4_split2:
-    Return v20:number
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function(v21:unknown):
 block0:
     v7:int32 = Move 1

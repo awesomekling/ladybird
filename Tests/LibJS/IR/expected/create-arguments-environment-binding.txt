@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v5:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal foo
@@ -31,7 +31,7 @@ block0:
 block0_split0:
     Return v1:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false

@@ -9,7 +9,7 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test_for_in_tdz
@@ -213,59 +213,7 @@ block7_split5:
 block9_split6:
     Jump block7
 
-=== After EmptyBlockElimination ===
-function():
-block0:
-    EnterUnwindContext block5
-block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
-    Jump block11
-block2:
-    v5:string = Move v4:string
-    Return v4:string
-block3:
-    v7:string = Move v6:string
-    Jump block4
-block4:
-    Return v6:string
-block5: [handler: block1]
-    v8:object = NewObject
-    Jump block13
-block6:
-    LeaveUnwindContext
-    Return v11:string
-block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
-    Jump block7
-block1_split0:
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Jump block12
-block1_split1:
-    Branch v3:boolean, block2, block3
-block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
-    Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block6, block9
-block7_split5:
-    Branch v15:unknown, block6, block7
-
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     EnterUnwindContext block5

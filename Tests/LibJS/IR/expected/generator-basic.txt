@@ -39,7 +39,7 @@ block0_split10:
 block0_split11:
     End v11:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal count
@@ -158,7 +158,7 @@ block7_split1:
     v21:boolean = StrictlyEquals v7:unknown, 1
     Branch v21:boolean, block8, block9
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v10:unknown = Yield undefined, continuation: block1

@@ -15,7 +15,7 @@ block0_split2:
 block0_split3:
     End v4:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal test
@@ -230,7 +230,7 @@ block6_split10:
     v25:boolean = StrictlyInequals v19:unknown, undefined
     Branch v25:boolean, block7, block8
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v4:object = NewObject

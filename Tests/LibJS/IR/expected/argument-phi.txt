@@ -15,7 +15,7 @@ block0_split2:
 block0_split3:
     End v5:unknown
 
-=== After BlockMerging ===
+=== After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal foo
