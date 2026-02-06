@@ -242,12 +242,16 @@ public:
     BasicBlock* parent_block() const { return m_parent_block; }
     void set_parent_block(BasicBlock* block) { m_parent_block = block; }
 
-    Value* result() const { return m_result; }
+    Function* parent_function() const { return m_function; }
+    void set_parent_function(Function* function) { m_function = function; }
+
+    Value* result() const;
+    Optional<ValueIndex> result_index() const { return m_result; }
     void set_result(Value* value);
 
     size_t operand_count() const { return m_operands.size(); }
-    Value* operand(size_t index) const { return m_operands[index]; }
-    Vector<Value*> const& operands() const { return m_operands; }
+    Value* operand(size_t index) const;
+    Optional<ValueIndex> operand_index(size_t index) const { return m_operands[index]; }
     void add_operand(Value* value);
     void set_operand(size_t index, Value* value);
     void clear_operand_uses();
@@ -372,8 +376,9 @@ protected:
 private:
     Opcode m_opcode;
     BasicBlock* m_parent_block { nullptr };
-    Value* m_result { nullptr };
-    Vector<Value*> m_operands;
+    Function* m_function { nullptr };
+    Optional<ValueIndex> m_result;
+    Vector<Optional<ValueIndex>> m_operands;
 
     // For Phi
     Vector<BlockIndex> m_phi_predecessors;

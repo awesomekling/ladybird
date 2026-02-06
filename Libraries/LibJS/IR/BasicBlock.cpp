@@ -25,12 +25,14 @@ void BasicBlock::append(NonnullOwnPtr<Instruction> instruction)
 {
     VERIFY(!is_terminated());
     instruction->set_parent_block(this);
+    instruction->set_parent_function(m_parent_function);
     m_instructions.append(move(instruction));
 }
 
 void BasicBlock::prepend(NonnullOwnPtr<Instruction> instruction)
 {
     instruction->set_parent_block(this);
+    instruction->set_parent_function(m_parent_function);
     m_instructions.prepend(move(instruction));
 }
 
@@ -68,13 +70,16 @@ NonnullOwnPtr<Instruction> BasicBlock::take_instruction(size_t index)
     VERIFY(index < m_instructions.size());
     auto instruction = m_instructions.take(index);
     instruction->set_parent_block(nullptr);
+    instruction->set_parent_function(nullptr);
     return instruction;
 }
 
 Vector<NonnullOwnPtr<Instruction>> BasicBlock::take_all_instructions()
 {
-    for (auto& instruction : m_instructions)
+    for (auto& instruction : m_instructions) {
         instruction->set_parent_block(nullptr);
+        instruction->set_parent_function(nullptr);
+    }
     return move(m_instructions);
 }
 
@@ -83,6 +88,7 @@ void BasicBlock::insert_before_terminator(NonnullOwnPtr<Instruction> instruction
     VERIFY(is_terminated());
     VERIFY(!instruction->is_terminator());
     instruction->set_parent_block(this);
+    instruction->set_parent_function(m_parent_function);
     m_instructions.insert(m_instructions.size() - 1, move(instruction));
 }
 

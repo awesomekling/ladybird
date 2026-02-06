@@ -232,51 +232,76 @@ NonnullOwnPtr<UnaryOpInstruction> UnaryOpInstruction::create(Opcode opcode, Valu
     return adopt_own(*new UnaryOpInstruction(opcode, operand));
 }
 
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
+Value* Instruction::result() const
+{
+    if (!m_result.has_value())
+        return nullptr;
+    return m_function->values()[to_index(*m_result)].ptr();
+}
+
+Value* Instruction::operand(size_t index) const
+{
+    auto const& vi = m_operands[index];
+    if (!vi.has_value())
+        return nullptr;
+    return m_function->values()[to_index(*vi)].ptr();
+}
+
 void Instruction::set_result(Value* value)
 {
     // Only opcodes that produce results should have a result set.
     // Setting nullptr is always allowed (to clear a result).
     if (value)
         VERIFY(opcode_has_result(m_opcode));
-    m_result = value;
+    m_result = value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>();
     if (value)
         value->set_defining_instruction(this);
 }
 
 void Instruction::add_operand(Value* value)
 {
-    m_operands.append(value);
+    m_operands.append(value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>());
     if (value)
         value->add_use(this);
 }
 
 void Instruction::set_operand(size_t index, Value* value)
 {
-    if (index < m_operands.size() && m_operands[index])
-        m_operands[index]->remove_use(this);
+    if (index < m_operands.size() && m_operands[index].has_value()) {
+        auto* old_value = m_function->values()[to_index(*m_operands[index])].ptr();
+        old_value->remove_use(this);
+    }
 
     if (index >= m_operands.size())
         m_operands.resize(index + 1);
 
-    m_operands[index] = value;
+    m_operands[index] = value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>();
     if (value)
         value->add_use(this);
 }
 
 void Instruction::clear_operand_uses()
 {
-    for (auto* operand : m_operands) {
-        if (operand)
-            operand->remove_use(this);
+    for (auto const& op : m_operands) {
+        if (op.has_value()) {
+            auto* value = m_function->values()[to_index(*op)].ptr();
+            value->remove_use(this);
+        }
     }
-    if (m_result)
-        m_result->set_defining_instruction(nullptr);
+    if (m_result.has_value()) {
+        auto* value = m_function->values()[to_index(*m_result)].ptr();
+        value->set_defining_instruction(nullptr);
+    }
 }
 
 void Instruction::remove_phi_operand(size_t index)
 {
-    if (m_operands[index])
-        m_operands[index]->remove_use(this);
+    if (m_operands[index].has_value()) {
+        auto* value = m_function->values()[to_index(*m_operands[index])].ptr();
+        value->remove_use(this);
+    }
     m_phi_predecessors.remove(index);
     m_operands.remove(index);
 }
@@ -290,19 +315,23 @@ void Instruction::add_phi_operand(BlockIndex predecessor, Value* value)
 
 void Instruction::recompute_result_type()
 {
-    if (!m_result)
+    if (!m_result.has_value())
         return;
 
+    auto* result_value = m_function->values()[to_index(*m_result)].ptr();
+
     auto operand_type = [&](size_t i) -> Type {
-        if (i < m_operands.size() && m_operands[i])
-            return m_operands[i]->type();
+        if (i < m_operands.size() && m_operands[i].has_value()) {
+            auto* value = m_function->values()[to_index(*m_operands[i])].ptr();
+            return value->type();
+        }
         return Type::Unknown;
     };
 
     // Use the static guarantee from OpcodeTraits when available.
     auto guaranteed = opcode_guaranteed_result_type(m_opcode);
     if (guaranteed != Type::Unknown) {
-        m_result->set_type(guaranteed);
+        result_value->set_type(guaranteed);
         return;
     }
 
@@ -310,19 +339,19 @@ void Instruction::recompute_result_type()
     switch (m_opcode) {
     case Opcode::Move:
     case Opcode::LoadConstant:
-        m_result->set_type(operand_type(0));
+        result_value->set_type(operand_type(0));
         break;
 
     case Opcode::ToNumeric: {
         auto t = operand_type(0);
         if (t == Type::Int32)
-            m_result->set_type(Type::Int32);
+            result_value->set_type(Type::Int32);
         else if (t == Type::Number)
-            m_result->set_type(Type::Number);
+            result_value->set_type(Type::Number);
         else if (t == Type::BigInt)
-            m_result->set_type(Type::BigInt);
+            result_value->set_type(Type::BigInt);
         else
-            m_result->set_type(Type::Unknown);
+            result_value->set_type(Type::Unknown);
         break;
     }
 
@@ -333,9 +362,9 @@ void Instruction::recompute_result_type()
     case Opcode::Mod:
     case Opcode::Exp:
         if (is_safe_numeric_type(operand_type(0)) && is_safe_numeric_type(operand_type(1)))
-            m_result->set_type(Type::Number);
+            result_value->set_type(Type::Number);
         else
-            m_result->set_type(Type::Unknown);
+            result_value->set_type(Type::Unknown);
         break;
 
     default:

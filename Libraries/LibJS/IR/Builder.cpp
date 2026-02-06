@@ -23,8 +23,10 @@ Value& Builder::emit_with_result(NonnullOwnPtr<Instruction> instruction)
 {
     auto& result = m_function.create_value_for_instruction();
     instruction->set_result(&result);
-    instruction->recompute_result_type();
     current_block().append(move(instruction));
+    // NB: recompute_result_type() needs m_function to resolve operand types,
+    // so we call it after append() which sets the function pointer.
+    result.defining_instruction()->recompute_result_type();
     return result;
 }
 
