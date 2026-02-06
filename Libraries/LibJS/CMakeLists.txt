@@ -29,13 +29,10 @@ set(SOURCES
     IR/Lowerer.cpp
     IR/PhiCoalescing.cpp
     IR/SSAConstruction.cpp
-    IR/Passes/AlgebraicSimplification.cpp
-    IR/Passes/GlobalValueNumbering.cpp
-    IR/Passes/ConstantFolding.cpp
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp
+    IR/Passes/GlobalValueNumbering.cpp
     IR/Passes/InstCombine.cpp
-    IR/Passes/InstructionCombining.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
     IR/Passes/PassManager.cpp
