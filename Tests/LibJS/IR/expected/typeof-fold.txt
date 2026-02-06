@@ -80,7 +80,7 @@ block0_split0:
 block0_split1:
     Return v11:boolean
 
-=== After InstructionCombining ===
+=== After InstCombine ===
 function(v6:unknown):
 block0:
     v7:int32 = ToInt32 v6:unknown

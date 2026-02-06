@@ -34,6 +34,7 @@ set(SOURCES
     IR/Passes/ConstantFolding.cpp
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp
+    IR/Passes/InstCombine.cpp
     IR/Passes/InstructionCombining.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp

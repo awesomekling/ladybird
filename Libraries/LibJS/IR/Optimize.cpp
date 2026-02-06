@@ -12,7 +12,7 @@
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/GlobalValueNumbering.h>
-#include <LibJS/IR/Passes/InstructionCombining.h>
+#include <LibJS/IR/Passes/InstCombine.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
@@ -44,7 +44,7 @@ void optimize(Function& function)
     pass_manager.add_pass(make<CopyPropagation>());
     pass_manager.add_pass(make<ConstantFolding>());
     pass_manager.add_pass(make<AlgebraicSimplification>());
-    pass_manager.add_pass(make<InstructionCombining>());
+    pass_manager.add_pass(make<InstCombine>());
 
     // Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
