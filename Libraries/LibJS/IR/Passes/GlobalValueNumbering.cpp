@@ -18,8 +18,10 @@ namespace JS::IR {
 // Key for identifying equivalent expressions
 struct ExpressionKey {
     Opcode opcode;
-    Value* operand1 { nullptr };
-    Value* operand2 { nullptr };
+    ValueIndex operand1 { 0 };
+    ValueIndex operand2 { 0 };
+    bool has_operand1 { false };
+    bool has_operand2 { false };
     u32 extra { 0 }; // For ExtractValue: extract_index
 
     bool operator==(ExpressionKey const&) const = default;
@@ -33,7 +35,9 @@ struct AK::Traits<JS::IR::ExpressionKey> : public DefaultTraits<JS::IR::Expressi
     {
         return pair_int_hash(
             pair_int_hash(static_cast<u8>(key.opcode), key.extra),
-            pair_int_hash(ptr_hash(key.operand1), ptr_hash(key.operand2)));
+            pair_int_hash(
+                key.has_operand1 ? int_hash(static_cast<u32>(key.operand1)) : 0,
+                key.has_operand2 ? int_hash(static_cast<u32>(key.operand2)) : 0));
     }
 };
 
@@ -46,7 +50,7 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
 
     bool changed = false;
     auto const& dominators = pass_manager.dominator_tree(function);
-    HashMap<ExpressionKey, Value*> expressions;
+    HashMap<ExpressionKey, ValueIndex> expressions;
 
     // Walk the dominator tree in pre-order with a scoped expression table.
     // When entering a block, expressions from all dominating blocks are
@@ -73,24 +77,31 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
 
             ExpressionKey key;
             key.opcode = instruction->opcode();
-            key.operand1 = operands.size() > 0 ? operands[0] : nullptr;
-            key.operand2 = operands.size() > 1 ? operands[1] : nullptr;
+            if (operands.size() > 0 && operands[0]) {
+                key.operand1 = operands[0]->index();
+                key.has_operand1 = true;
+            }
+            if (operands.size() > 1 && operands[1]) {
+                key.operand2 = operands[1]->index();
+                key.has_operand2 = true;
+            }
 
             if (key.opcode == Opcode::ExtractValue)
                 key.extra = instruction->extract_index();
 
             // Normalize operand order for commutative operations
-            if (is_commutative_opcode(key.opcode) && key.operand1 && key.operand2) {
-                if (key.operand1->index() > key.operand2->index())
+            if (is_commutative_opcode(key.opcode) && key.has_operand1 && key.has_operand2) {
+                if (key.operand1 > key.operand2)
                     swap(key.operand1, key.operand2);
             }
 
             auto existing = expressions.get(key);
             if (existing.has_value()) {
-                instruction->result()->replace_all_uses_with(*existing);
+                auto* existing_value = function.values()[static_cast<u32>(*existing)].ptr();
+                instruction->result()->replace_all_uses_with(existing_value);
                 changed = true;
             } else {
-                expressions.set(key, instruction->result());
+                expressions.set(key, instruction->result()->index());
                 added_keys.append(key);
             }
         }
