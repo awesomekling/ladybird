@@ -30,16 +30,11 @@ set(SOURCES
     IR/PhiCoalescing.cpp
     IR/SSAConstruction.cpp
     IR/Passes/AlgebraicSimplification.cpp
-    IR/Passes/BlockMerging.cpp
     IR/Passes/GlobalValueNumbering.cpp
-    IR/Passes/ConstantBranchFolding.cpp
     IR/Passes/ConstantFolding.cpp
     IR/Passes/CopyPropagation.cpp
-    IR/Passes/DeadBlockElimination.cpp
     IR/Passes/DeadCodeElimination.cpp
-    IR/Passes/EmptyBlockElimination.cpp
     IR/Passes/InstructionCombining.cpp
-    IR/Passes/JumpThreading.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
     IR/Passes/PassManager.cpp
