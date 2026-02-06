@@ -28,13 +28,14 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
     // - Are used by terminators
     // - Are results of instructions with side effects
     for (auto const& block : function.basic_blocks()) {
-        for (auto const& instruction : block->instructions()) {
-            bool is_live_root = instruction->is_terminator() || instruction->has_side_effects();
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            bool is_live_root = instruction.is_terminator() || instruction.has_side_effects();
 
             if (is_live_root) {
                 // All operands of live instructions are live
-                for (size_t j = 0; j < instruction->operand_count(); ++j) {
-                    auto* op = instruction->operand(j);
+                for (size_t j = 0; j < instruction.operand_count(); ++j) {
+                    auto* op = instruction.operand(j);
                     if (op && !live_values.get(to_index(op->index()))) {
                         live_values.set(to_index(op->index()), true);
                         worklist.append(op->index());
@@ -65,18 +66,18 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
     // Step 3: Remove dead instructions (those whose results are not live)
     for (auto& block : function.basic_blocks()) {
         for (size_t i = block->instructions().size(); i > 0; --i) {
-            auto& instruction = block->instructions()[i - 1];
+            auto& instruction = *function.instruction_by_index(block->instructions()[i - 1]);
 
             // Skip instructions without results (terminators, etc.)
-            if (!instruction->result())
+            if (!instruction.result())
                 continue;
 
             // Skip instructions with side effects
-            if (instruction->has_side_effects())
+            if (instruction.has_side_effects())
                 continue;
 
             // If the result is not live, remove the instruction
-            if (!live_values.get(to_index(instruction->result()->index()))) {
+            if (!live_values.get(to_index(instruction.result()->index()))) {
                 block->remove_instruction(i - 1);
                 changed = true;
             }

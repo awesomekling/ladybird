@@ -905,7 +905,8 @@ PreservedAnalyses InstCombine::run(Function& function, PassManager&)
     HashTable<Instruction*> dead_instructions;
 
     for (auto& block : function.basic_blocks()) {
-        for (auto& instruction : block->instructions()) {
+        for (auto instruction_index : block->instructions()) {
+            auto* instruction = function.instruction_by_index(instruction_index);
             // 1. Try constant folding (all operands are constants)
             bool folded = false;
             try_constant_fold(*instruction, function, folded);
@@ -918,7 +919,7 @@ PreservedAnalyses InstCombine::run(Function& function, PassManager&)
             if (auto* replacement = try_algebraic_simplify(*instruction, function)) {
                 if (!instruction->result()->uses().is_empty()) {
                     instruction->result()->replace_all_uses_with(replacement);
-                    dead_instructions.set(instruction.ptr());
+                    dead_instructions.set(instruction);
                     changed = true;
                     continue;
                 }

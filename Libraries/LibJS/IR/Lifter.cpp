@@ -139,13 +139,13 @@ void Lifter::lift_basic_blocks()
             // Attach source record to all IR instructions created from this bytecode instruction
             if (source_entry) {
                 for (size_t i = instr_count_before; i < current_block->instructions().size(); ++i)
-                    current_block->instructions()[i]->set_source_record(source_entry->source_record);
+                    m_function->instruction_by_index(current_block->instructions()[i])->set_source_record(source_entry->source_record);
             }
 
             // Check if we added any may-throw instructions
             bool added_may_throw = false;
             for (size_t i = instr_count_before; i < current_block->instructions().size(); ++i) {
-                if (may_throw_opcode(current_block->instructions()[i]->opcode())) {
+                if (may_throw_opcode(m_function->instruction_by_index(current_block->instructions()[i])->opcode())) {
                     added_may_throw = true;
                     break;
                 }
@@ -478,7 +478,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_by_id(base, op.property(), value, op.base_identifier());
-        block.instructions().last()->set_cache_index(CacheIndex { op.cache_index() });
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutNormalByValue: {
@@ -773,7 +773,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::SetGlobal const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_set_global(op.identifier(), value);
-        block.instructions().last()->set_cache_index(CacheIndex { op.cache_index() });
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
 
@@ -1037,9 +1037,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_builder.build_iterator_close(iterator_object);
         // NB: Add iterator_next and iterator_done as operands even though they're not used by IR.
         // This preserves data flow for lowering back to bytecode.
-        auto* instr = block.instructions().last().ptr();
-        instr->add_operand(&iterator_next);
-        instr->add_operand(&iterator_done);
+        auto* last_instruction = m_function->instruction_by_index(block.instructions().last());
+        last_instruction->add_operand(&iterator_next);
+        last_instruction->add_operand(&iterator_done);
         break;
     }
     case IteratorToArray: {
@@ -1276,9 +1276,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_builder.build_async_iterator_close(iterator_object);
         // NB: Add iterator_next and iterator_done as operands even though they're not used by IR.
         // This preserves data flow for lowering back to bytecode.
-        auto* instr = block.instructions().last().ptr();
-        instr->add_operand(&iterator_next);
-        instr->add_operand(&iterator_done);
+        auto* last_instruction = m_function->instruction_by_index(block.instructions().last());
+        last_instruction->add_operand(&iterator_next);
+        last_instruction->add_operand(&iterator_done);
         break;
     }
 
@@ -1595,8 +1595,8 @@ void Lifter::compute_block_predecessors()
     // since they can never actually reach the handler.
     for (auto& block : m_function->basic_blocks()) {
         bool has_throwing_instr = false;
-        for (auto const& instr : block->instructions()) {
-            if (may_throw_opcode(instr->opcode())) {
+        for (auto instruction_index : block->instructions()) {
+            if (may_throw_opcode(m_function->instruction_by_index(instruction_index)->opcode())) {
                 has_throwing_instr = true;
                 break;
             }
@@ -1638,8 +1638,8 @@ void Lifter::eliminate_unreachable_blocks()
             continue;
         if (m_dominators->immediate_dominator(block.ptr()))
             continue;
-        for (auto& instruction : block->instructions())
-            instruction->clear_operand_uses();
+        for (auto instruction_index : block->instructions())
+            m_function->instruction_by_index(instruction_index)->clear_operand_uses();
     }
 
     // Collect unreachable blocks so we can clear stale pointers.

@@ -59,34 +59,35 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
     auto process_block = [&](auto& self, BasicBlock* block) -> void {
         Vector<ExpressionKey> added_keys;
 
-        for (auto const& instruction : block->instructions()) {
-            if (!instruction->result())
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            if (!instruction.result())
                 continue;
 
             // Never value-number Phi nodes. A Phi's result depends on which
             // predecessor edge was taken, not just its operand set.
-            if (instruction->opcode() == Opcode::Phi)
+            if (instruction.opcode() == Opcode::Phi)
                 continue;
 
-            if (!instruction->is_pure())
+            if (!instruction.is_pure())
                 continue;
 
-            if (instruction->operand_count() == 0)
+            if (instruction.operand_count() == 0)
                 continue;
 
             ExpressionKey key;
-            key.opcode = instruction->opcode();
-            if (instruction->operand_count() > 0 && instruction->operand(0)) {
-                key.operand1 = instruction->operand(0)->index();
+            key.opcode = instruction.opcode();
+            if (instruction.operand_count() > 0 && instruction.operand(0)) {
+                key.operand1 = instruction.operand(0)->index();
                 key.has_operand1 = true;
             }
-            if (instruction->operand_count() > 1 && instruction->operand(1)) {
-                key.operand2 = instruction->operand(1)->index();
+            if (instruction.operand_count() > 1 && instruction.operand(1)) {
+                key.operand2 = instruction.operand(1)->index();
                 key.has_operand2 = true;
             }
 
             if (key.opcode == Opcode::ExtractValue)
-                key.extra = instruction->extract_index();
+                key.extra = instruction.extract_index();
 
             // Normalize operand order for commutative operations
             if (is_commutative_opcode(key.opcode) && key.has_operand1 && key.has_operand2) {
@@ -97,10 +98,10 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
             auto existing = expressions.get(key);
             if (existing.has_value()) {
                 auto* existing_value = function.values()[static_cast<u32>(*existing)].ptr();
-                instruction->result()->replace_all_uses_with(existing_value);
+                instruction.result()->replace_all_uses_with(existing_value);
                 changed = true;
             } else {
-                expressions.set(key, instruction->result()->index());
+                expressions.set(key, instruction.result()->index());
                 added_keys.append(key);
             }
         }

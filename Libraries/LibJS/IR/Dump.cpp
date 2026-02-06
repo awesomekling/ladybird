@@ -213,7 +213,8 @@ static void dump_block(BasicBlock const& block, StringBuilder& builder, Bytecode
 
     builder.append('\n');
 
-    for (auto const& instruction : block.instructions()) {
+    for (auto instruction_index : block.instructions()) {
+        auto* instruction = block.parent_function()->instruction_by_index(instruction_index);
         builder.append("    "sv);
         dump_instruction(*instruction, builder, executable);
         builder.append('\n');

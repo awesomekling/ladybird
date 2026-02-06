@@ -27,10 +27,11 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     bool has_copies = false;
 
     for (auto const& block : function.basic_blocks()) {
-        for (auto const& instruction : block->instructions()) {
-            if (instruction->opcode() == Opcode::Move && instruction->result()) {
-                auto* src = instruction->operand(0);
-                copies[to_index(instruction->result()->index())] = src->index();
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            if (instruction.opcode() == Opcode::Move && instruction.result()) {
+                auto* src = instruction.operand(0);
+                copies[to_index(instruction.result()->index())] = src->index();
                 has_copies = true;
             }
         }
@@ -56,23 +57,23 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
                 return;
 
             // Check if all operands resolve to the same ultimate source
-            Optional<ValueIndex> common_idx;
+            Optional<ValueIndex> common_index;
             bool all_same = true;
             for (size_t i = 0; i < phi.operand_count(); ++i) {
                 auto* operand = phi.operand(i);
                 if (!operand)
                     continue;
                 auto resolved = resolve(operand->index());
-                if (!common_idx.has_value()) {
-                    common_idx = resolved;
-                } else if (resolved != *common_idx) {
+                if (!common_index.has_value()) {
+                    common_index = resolved;
+                } else if (resolved != *common_index) {
                     all_same = false;
                     break;
                 }
             }
 
-            if (all_same && common_idx.has_value() && phi.result()) {
-                auto* common_value = function.values()[to_index(*common_idx)].ptr();
+            if (all_same && common_index.has_value() && phi.result()) {
+                auto* common_value = function.values()[to_index(*common_index)].ptr();
                 phi.result()->replace_all_uses_with(common_value);
                 changed = true;
             }
@@ -84,9 +85,10 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
 
     // Replace uses of copied values with their sources
     for (auto& block : function.basic_blocks()) {
-        for (auto& instruction : block->instructions()) {
-            for (size_t i = 0; i < instruction->operand_count(); ++i) {
-                auto* operand = instruction->operand(i);
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            for (size_t i = 0; i < instruction.operand_count(); ++i) {
+                auto* operand = instruction.operand(i);
                 if (!operand)
                     continue;
 
@@ -95,7 +97,7 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
 
                 if (resolved != operand->index()) {
                     auto* replacement = function.values()[to_index(resolved)].ptr();
-                    instruction->set_operand(i, replacement);
+                    instruction.set_operand(i, replacement);
                     changed = true;
                 }
             }

@@ -89,7 +89,7 @@ static bool try_eliminate_empty_blocks(Function& function)
             bool is_entry = block.ptr() == function.entry_block();
 
             // Check if block is empty (only a Jump instruction)
-            if (block->instructions().size() != 1)
+            if (block->instructions().size() != 1u)
                 continue;
 
             auto* jump = block->terminator();
@@ -118,11 +118,12 @@ static bool try_eliminate_empty_blocks(Function& function)
                 if (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target)) {
                     // This predecessor can reach target both directly and via empty block
                     // Check if any phi in target would have different values for these paths
-                    for (auto const& instr : target->instructions()) {
-                        if (instr->opcode() != Opcode::Phi)
+                    for (auto instruction_index : target->instructions()) {
+                        auto* instruction = function.instruction_by_index(instruction_index);
+                        if (instruction->opcode() != Opcode::Phi)
                             continue;
 
-                        auto& phi = static_cast<PhiInstruction&>(*instr);
+                        auto& phi = static_cast<PhiInstruction&>(*instruction);
                         auto* value_from_empty = phi.incoming_value_for(*block);
                         auto* value_from_direct = phi.incoming_value_for(*pred);
 
@@ -144,8 +145,8 @@ static bool try_eliminate_empty_blocks(Function& function)
             // with predecessors, violating the SSA invariant).
             if (is_entry) {
                 bool can_eliminate = true;
-                for (auto const& instr : target->instructions()) {
-                    if (instr->opcode() == Opcode::Phi) {
+                for (auto instruction_index : target->instructions()) {
+                    if (function.instruction_by_index(instruction_index)->opcode() == Opcode::Phi) {
                         can_eliminate = false;
                         break;
                     }
@@ -237,7 +238,7 @@ static bool try_merge_blocks(Function& function)
                 continue;
 
             // Don't merge into blocks with phi nodes (preserves loop preheaders)
-            if (!block_b->instructions().is_empty() && block_b->instructions().first()->opcode() == Opcode::Phi)
+            if (!block_b->instructions().is_empty() && function.instruction_by_index(block_b->instructions().first())->opcode() == Opcode::Phi)
                 continue;
 
             // Don't merge if exception handling context differs - this would change
@@ -251,9 +252,9 @@ static bool try_merge_blocks(Function& function)
             // Both A and B are EH predecessors of the handler, so merging would create
             // duplicate phi entries that can't be properly consolidated (A and B may
             // contribute different values to the handler's phis).
-            auto handler_has_phis = [](BasicBlock* target) {
+            auto handler_has_phis = [&](BasicBlock* target) {
                 return target && !target->instructions().is_empty()
-                    && target->instructions().first()->opcode() == Opcode::Phi;
+                    && function.instruction_by_index(target->instructions().first())->opcode() == Opcode::Phi;
             };
             if (handler_has_phis(block_a->exception_handler()) || handler_has_phis(block_a->finalizer()))
                 continue;
@@ -268,8 +269,8 @@ static bool try_merge_blocks(Function& function)
             block_a->remove_terminator();
 
             // 3. Move all instructions from B to A
-            for (auto& instruction : block_b->take_all_instructions())
-                block_a->append(move(instruction));
+            for (auto instruction_index : block_b->take_all_instructions())
+                block_a->append_instruction(instruction_index);
 
             // 4. Update all references to B to point to A
             CFG::retarget_all_edges(function, *block_b, *block_a);
@@ -341,13 +342,14 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
 
             // Check if the bypassed block has side effects that must execute.
             bool bypassed_block_has_side_effects = false;
-            for (auto& instr : block->instructions()) {
-                if (instr->opcode() == Opcode::Phi)
+            for (auto instruction_index : block->instructions()) {
+                auto& instruction = *function.instruction_by_index(instruction_index);
+                if (instruction.opcode() == Opcode::Phi)
                     continue;
-                if (instr->is_terminator())
+                if (instruction.is_terminator())
                     continue;
 
-                if (instr->has_side_effects()) {
+                if (instruction.has_side_effects()) {
                     bypassed_block_has_side_effects = true;
                     break;
                 }
@@ -359,11 +361,12 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             // Check if thread_target uses any values defined in the bypassed block
             // (except through phi nodes in thread_target that we'll update)
             bool target_uses_bypassed_values = false;
-            for (auto& instr : thread_target->instructions()) {
-                if (instr->opcode() == Opcode::Phi)
+            for (auto instruction_index : thread_target->instructions()) {
+                auto& instruction = *function.instruction_by_index(instruction_index);
+                if (instruction.opcode() == Opcode::Phi)
                     continue;
-                for (size_t oi = 0; oi < instr->operand_count(); ++oi) {
-                    auto* operand = instr->operand(oi);
+                for (size_t oi = 0; oi < instruction.operand_count(); ++oi) {
+                    auto* operand = instruction.operand(oi);
                     if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr()) {
                         target_uses_bypassed_values = true;
                         break;
@@ -503,9 +506,10 @@ static bool try_eliminate_unreachable_blocks(Function& function)
         if (!reachable.get(to_index(block->index())))
             continue;
 
-        for (auto& instruction : block->instructions()) {
-            for (size_t i = 0; i < instruction->operand_count(); ++i) {
-                auto* operand = instruction->operand(i);
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            for (size_t i = 0; i < instruction.operand_count(); ++i) {
+                auto* operand = instruction.operand(i);
                 if (!operand)
                     continue;
 
@@ -515,7 +519,7 @@ static bool try_eliminate_unreachable_blocks(Function& function)
                     vi = to_index(*dead_phi_replacements[vi]);
 
                 if (vi != to_index(operand->index()))
-                    instruction->set_operand(i, function.values()[vi].ptr());
+                    instruction.set_operand(i, function.values()[vi].ptr());
             }
         }
     }

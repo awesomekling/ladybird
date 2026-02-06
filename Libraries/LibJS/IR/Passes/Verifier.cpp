@@ -106,14 +106,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Build set of all defined values, checking for unique definitions
     auto defined_values = MUST(AK::Bitmap::create(value_capacity, false));
     for (auto const& block : function.basic_blocks()) {
-        for (auto const& instr : block->instructions()) {
-            if (instr->result()) {
-                auto vi = to_index(instr->result()->index());
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            if (instruction.result()) {
+                auto vi = to_index(instruction.result()->index());
                 // Check: No two instructions share the same result Value*
                 if (defined_values.get(vi)) {
                     report_error(ByteString::formatted(
                         "Value v{} is defined by multiple instructions",
-                        instr->result()->index()));
+                        instruction.result()->index()));
                 }
                 defined_values.set(vi, true);
             }
@@ -157,8 +158,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (!block->instructions().is_empty()) {
             // Check: "Phis first" - all phi nodes must come before non-phi instructions
             bool seen_non_phi = false;
-            for (auto const& instr : block->instructions()) {
-                if (instr->opcode() == Opcode::Phi) {
+            for (auto instruction_index : block->instructions()) {
+                auto& instruction = *function.instruction_by_index(instruction_index);
+                if (instruction.opcode() == Opcode::Phi) {
                     if (seen_non_phi) {
                         report_error(ByteString::formatted(
                             "Block{} has Phi after non-Phi instruction",
@@ -172,7 +174,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
             // Check: "Terminator last" - terminator must be last instruction
             for (size_t i = 0; i < block->instructions().size() - 1; ++i) {
-                if (block->instructions()[i]->is_terminator()) {
+                if (function.instruction_by_index(block->instructions()[i])->is_terminator()) {
                     report_error(ByteString::formatted(
                         "Block{} has terminator before last instruction",
                         block->index()));
@@ -181,8 +183,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             }
 
             // Check: Block must end with a terminator
-            auto* last_instr = block->instructions().last().ptr();
-            if (!last_instr->is_terminator()) {
+            auto* last_instruction = function.instruction_by_index(block->instructions().last());
+            if (!last_instruction->is_terminator()) {
                 report_error(ByteString::formatted(
                     "Block{} does not end with a terminator",
                     block->index()));
@@ -194,17 +196,18 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 block->index()));
         }
 
-        for (auto const& instr : block->instructions()) {
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
             // Check: Instruction parent pointer
-            if (instr->parent_block() != block.ptr()) {
+            if (instruction.parent_block() != block.ptr()) {
                 report_error(ByteString::formatted(
                     "Instruction in block{} has wrong parent_block (points to block{})",
-                    block->index(), instr->parent_block() ? instr->parent_block()->index() : -1));
+                    block->index(), instruction.parent_block() ? instruction.parent_block()->index() : -1));
             }
 
             // Check: Phi operand count == phi predecessor count
-            if (instr->opcode() == Opcode::Phi) {
-                auto const& phi = static_cast<PhiInstruction const&>(*instr);
+            if (instruction.opcode() == Opcode::Phi) {
+                auto const& phi = static_cast<PhiInstruction const&>(instruction);
                 if (phi.operand_count() != phi.incoming_count()) {
                     report_error(ByteString::formatted(
                         "Phi in block{} has {} operands but {} predecessors",
@@ -254,48 +257,48 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
             // Check: Opcode operand-arity
             {
-                auto arity = opcode_operand_arity(instr->opcode());
-                if (arity != VariableArity && instr->operand_count() != arity) {
+                auto arity = opcode_operand_arity(instruction.opcode());
+                if (arity != VariableArity && instruction.operand_count() != arity) {
                     report_error(ByteString::formatted(
                         "{} in block{} has {} operands (expected {})",
-                        opcode_to_string(instr->opcode()), block->index(),
-                        instr->operand_count(), arity));
+                        opcode_to_string(instruction.opcode()), block->index(),
+                        instruction.operand_count(), arity));
                 }
             }
 
             // Check: Result type sanity
             // If a result type is set (not Unknown), verify it matches the opcode's
             // expected output type. This catches type corruption from optimization passes.
-            if (instr->result() && instr->result()->type() != Type::Unknown) {
-                auto actual_type = instr->result()->type();
-                auto expected = opcode_guaranteed_result_type(instr->opcode());
+            if (instruction.result() && instruction.result()->type() != Type::Unknown) {
+                auto actual_type = instruction.result()->type();
+                auto expected = opcode_guaranteed_result_type(instruction.opcode());
                 if (expected != Type::Unknown && actual_type != expected) {
                     report_error(ByteString::formatted(
                         "{} in block{} has result type {} (expected {})",
-                        opcode_to_string(instr->opcode()), block->index(),
+                        opcode_to_string(instruction.opcode()), block->index(),
                         type_to_string(actual_type), type_to_string(expected)));
                 }
             }
 
             // Check: Result presence vs. opcode traits
             {
-                bool trait_has_result = opcode_has_result(instr->opcode());
-                if (trait_has_result && !instr->result()) {
+                bool trait_has_result = opcode_has_result(instruction.opcode());
+                if (trait_has_result && !instruction.result()) {
                     report_error(ByteString::formatted(
                         "{} in block{} should have a result but doesn't",
-                        opcode_to_string(instr->opcode()), block->index()));
+                        opcode_to_string(instruction.opcode()), block->index()));
                 }
-                if (!trait_has_result && instr->result()) {
+                if (!trait_has_result && instruction.result()) {
                     report_error(ByteString::formatted(
                         "{} in block{} should not have a result but does",
-                        opcode_to_string(instr->opcode()), block->index()));
+                        opcode_to_string(instruction.opcode()), block->index()));
                 }
             }
 
             // Check: ExtractValue source must be a tuple-producing instruction
             // and the index must be within bounds
-            if (instr->opcode() == Opcode::ExtractValue && block_is_reachable) {
-                auto* source = instr->operand_count() == 0 ? nullptr : instr->operand(0);
+            if (instruction.opcode() == Opcode::ExtractValue && block_is_reachable) {
+                auto* source = instruction.operand_count() == 0 ? nullptr : instruction.operand(0);
                 if (source && source->is_instruction() && source->defining_instruction()) {
                     auto source_opcode = source->defining_instruction()->opcode();
                     Optional<u32> tuple_size;
@@ -315,10 +318,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             block->index(), opcode_to_string(source_opcode), source->index()));
                         break;
                     }
-                    if (tuple_size.has_value() && instr->extract_index() >= *tuple_size) {
+                    if (tuple_size.has_value() && instruction.extract_index() >= *tuple_size) {
                         report_error(ByteString::formatted(
                             "ExtractValue in block{} index {} out of bounds (tuple size {})",
-                            block->index(), instr->extract_index(), *tuple_size));
+                            block->index(), instruction.extract_index(), *tuple_size));
                     }
                 } else if (source && !source->is_instruction()) {
                     report_error(ByteString::formatted(
@@ -333,9 +336,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             if (block_is_reachable) {
                 // Check: All operands are non-null and reference defined values
                 // NB: NewClass allows null operands (no superclass, optional element keys).
-                bool allows_null_operands = instr->opcode() == Opcode::NewClass;
-                for (size_t i = 0; i < instr->operand_count(); ++i) {
-                    auto* op = instr->operand(i);
+                bool allows_null_operands = instruction.opcode() == Opcode::NewClass;
+                for (size_t i = 0; i < instruction.operand_count(); ++i) {
+                    auto* op = instruction.operand(i);
                     if (!op) {
                         if (allows_null_operands)
                             continue;
@@ -517,8 +520,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // (catches stale references from dead block elimination or other passes)
     HashTable<Instruction const*> all_instructions;
     for (auto const& block : function.basic_blocks()) {
-        for (auto const& instr : block->instructions())
-            all_instructions.set(instr.ptr());
+        for (auto instruction_index : block->instructions())
+            all_instructions.set(function.instruction_by_index(instruction_index));
     }
 
     for (auto const& value : function.values()) {
@@ -611,9 +614,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     Vector<BasicBlock*> value_to_block;
     value_to_block.resize_with_default_value(value_capacity, nullptr);
     for (auto const& block : function.basic_blocks()) {
-        for (auto const& instr : block->instructions()) {
-            if (instr->result())
-                value_to_block[to_index(instr->result()->index())] = block.ptr();
+        for (auto instruction_index : block->instructions()) {
+            auto* instruction = function.instruction_by_index(instruction_index);
+            if (instruction->result())
+                value_to_block[to_index(instruction->result()->index())] = block.ptr();
         }
     }
 
@@ -624,19 +628,20 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     HashMap<Instruction const*, size_t> instruction_position;
     for (auto const& block : function.basic_blocks()) {
         size_t position = 0;
-        for (auto const& instr : block->instructions())
-            instruction_position.set(instr.ptr(), position++);
+        for (auto instruction_index : block->instructions())
+            instruction_position.set(function.instruction_by_index(instruction_index), position++);
     }
 
     for (auto const& block : function.basic_blocks()) {
         if (!reachable.get(to_index(block->index())))
             continue;
 
-        for (auto const& instr : block->instructions()) {
-            if (instr->opcode() == Opcode::Phi) {
+        for (auto instruction_index : block->instructions()) {
+            auto& instruction = *function.instruction_by_index(instruction_index);
+            if (instruction.opcode() == Opcode::Phi) {
                 // For phi instructions, each operand must be reachable from its corresponding predecessor
                 // The defining block must dominate the predecessor (not the current block)
-                auto const& phi = static_cast<PhiInstruction const&>(*instr);
+                auto const& phi = static_cast<PhiInstruction const&>(instruction);
                 for (size_t i = 0; i < phi.incoming_count(); ++i) {
                     auto* operand = phi.incoming_value(i);
                     auto pred_block_index = phi.incoming_block(i);
@@ -671,8 +676,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             } else {
                 // For non-phi instructions, each operand's definition must dominate this block
-                for (size_t i = 0; i < instr->operand_count(); ++i) {
-                    auto* operand = instr->operand(i);
+                for (size_t i = 0; i < instruction.operand_count(); ++i) {
+                    auto* operand = instruction.operand(i);
                     if (!operand)
                         continue;
 
@@ -692,10 +697,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     // If in same block, check instruction order
                     if (def_block == block.ptr()) {
                         // Same block: definition must come before use
-                        auto* def_instr = operand->defining_instruction();
-                        if (def_instr) {
-                            auto def_pos = instruction_position.get(def_instr);
-                            auto use_pos = instruction_position.get(instr.ptr());
+                        auto* defining_instruction = operand->defining_instruction();
+                        if (defining_instruction) {
+                            auto def_pos = instruction_position.get(defining_instruction);
+                            auto use_pos = instruction_position.get(&instruction);
                             if (def_pos.has_value() && use_pos.has_value() && *def_pos >= *use_pos) {
                                 report_error(ByteString::formatted(
                                     "SSA violation: operand v{} used before definition in block{}",

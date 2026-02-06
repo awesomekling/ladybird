@@ -28,7 +28,7 @@ public:
     Function* parent_function() const { return m_parent_function; }
     void set_parent_function(Function* function) { m_parent_function = function; }
 
-    ReadonlySpan<NonnullOwnPtr<Instruction>> instructions() const { return m_instructions.span(); }
+    ReadonlySpan<InstructionIndex> instructions() const { return m_instructions.span(); }
 
     // Iterate over phi instructions at the start of this block.
     // Phis are always first; iteration stops at the first non-phi.
@@ -47,15 +47,21 @@ public:
     // Remove the terminator instruction, cleaning up its operand uses.
     void remove_terminator();
 
-    // Extract ownership of instruction at index (for moving between blocks).
+    // Extract instruction index at position (for moving between blocks).
     // Clears parent_block but does NOT clear operand uses.
-    [[nodiscard]] NonnullOwnPtr<Instruction> take_instruction(size_t index);
+    [[nodiscard]] InstructionIndex take_instruction(size_t index);
 
-    // Extract all instructions, returning ownership. Clears parent_block on each.
-    [[nodiscard]] Vector<NonnullOwnPtr<Instruction>> take_all_instructions();
+    // Extract all instruction indices. Clears parent_block on each.
+    [[nodiscard]] Vector<InstructionIndex> take_all_instructions();
 
     // Insert a non-terminator instruction before the terminator.
     void insert_before_terminator(NonnullOwnPtr<Instruction> instruction);
+
+    // Insert an already-registered instruction before the terminator (for moving).
+    void insert_before_terminator(InstructionIndex index);
+
+    // Append an already-registered instruction (for moving between blocks).
+    void append_instruction(InstructionIndex index);
 
     // Remove all matching instructions, cleaning up their operand uses.
     void remove_instructions_if(AK::Function<bool(Instruction const&)> predicate);
@@ -95,7 +101,7 @@ private:
     BlockIndex m_index;
     String m_name;
     Function* m_parent_function { nullptr };
-    Vector<NonnullOwnPtr<Instruction>> m_instructions;
+    Vector<InstructionIndex> m_instructions;
     Vector<BlockIndex> m_predecessors;
 
     Optional<BlockIndex> m_exception_handler;
@@ -104,7 +110,8 @@ private:
 
 }
 
-// Template implementations (requires full Instruction definition).
+// Template implementations (requires full Instruction and Function definitions).
+#include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 
 namespace JS::IR {
@@ -112,20 +119,22 @@ namespace JS::IR {
 template<typename Callback>
 void BasicBlock::for_each_phi(Callback callback)
 {
-    for (auto& instr : m_instructions) {
-        if (instr->opcode() != Opcode::Phi)
+    for (auto instruction_index : m_instructions) {
+        auto* instruction = m_parent_function->instruction_by_index(instruction_index);
+        if (instruction->opcode() != Opcode::Phi)
             break;
-        callback(static_cast<PhiInstruction&>(*instr));
+        callback(static_cast<PhiInstruction&>(*instruction));
     }
 }
 
 template<typename Callback>
 void BasicBlock::for_each_phi(Callback callback) const
 {
-    for (auto const& instr : m_instructions) {
-        if (instr->opcode() != Opcode::Phi)
+    for (auto instruction_index : m_instructions) {
+        auto* instruction = m_parent_function->instruction_by_index(instruction_index);
+        if (instruction->opcode() != Opcode::Phi)
             break;
-        callback(static_cast<PhiInstruction const&>(*instr));
+        callback(static_cast<PhiInstruction const&>(*instruction));
     }
 }
 

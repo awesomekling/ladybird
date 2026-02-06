@@ -253,13 +253,14 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
         });
 
         // Rewrite operand uses in non-phi instructions and push new definitions
-        for (auto& instruction : block.instructions()) {
-            if (instruction->opcode() == Opcode::Phi)
+        for (auto instruction_index : block.instructions()) {
+            auto& instruction = *m_function.instruction_by_index(instruction_index);
+            if (instruction.opcode() == Opcode::Phi)
                 continue;
 
             // Rewrite operand uses to current stack top
-            for (size_t i = 0; i < instruction->operand_count(); ++i) {
-                auto* operand_value = instruction->operand(i);
+            for (size_t i = 0; i < instruction.operand_count(); ++i) {
+                auto* operand_value = instruction.operand(i);
                 if (!operand_value)
                     continue;
 
@@ -272,23 +273,23 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 if (stack_opt.has_value() && !stack_opt->is_empty()) {
                     auto* current = stack_opt->last();
                     if (current != operand_value)
-                        instruction->set_operand(i, current);
+                        instruction.set_operand(i, current);
                 } else {
                     // No reaching definition: variable was never written on this path.
                     // Locals use the empty value (TDZ marker), registers use undefined.
                     auto decoded = m_executable.original_operand_from_raw(raw);
                     auto& default_value = m_function.create_constant(
                         decoded.is_local() ? js_special_empty_value() : js_undefined());
-                    instruction->set_operand(i, &default_value);
+                    instruction.set_operand(i, &default_value);
                 }
             }
 
             // If instruction defines a value, push it onto the stack
-            if (instruction->result()) {
-                auto vi = to_index(instruction->result()->index());
+            if (instruction.result()) {
+                auto vi = to_index(instruction.result()->index());
                 if (vi < m_value_to_operand_raw.size() && m_value_to_operand_raw[vi].has_value()) {
                     auto raw = *m_value_to_operand_raw[vi];
-                    stacks.ensure(raw).append(instruction->result());
+                    stacks.ensure(raw).append(instruction.result());
                     if (!entry_sizes.contains(raw))
                         entry_sizes.set(raw, 0);
                 }

@@ -26,21 +26,23 @@ void BasicBlock::append(NonnullOwnPtr<Instruction> instruction)
     VERIFY(!is_terminated());
     instruction->set_parent_block(this);
     instruction->set_parent_function(m_parent_function);
-    m_instructions.append(move(instruction));
+    auto instruction_index = m_parent_function->register_instruction(move(instruction));
+    m_instructions.append(instruction_index);
 }
 
 void BasicBlock::prepend(NonnullOwnPtr<Instruction> instruction)
 {
     instruction->set_parent_block(this);
     instruction->set_parent_function(m_parent_function);
-    m_instructions.prepend(move(instruction));
+    auto instruction_index = m_parent_function->register_instruction(move(instruction));
+    m_instructions.prepend(instruction_index);
 }
 
 Instruction* BasicBlock::last_instruction() const
 {
     if (m_instructions.is_empty())
         return nullptr;
-    return m_instructions.last().ptr();
+    return m_parent_function->instruction_by_index(m_instructions.last());
 }
 
 TerminatorInstruction* BasicBlock::terminator() const
@@ -54,31 +56,32 @@ TerminatorInstruction* BasicBlock::terminator() const
 void BasicBlock::remove_instruction(size_t index)
 {
     VERIFY(index < m_instructions.size());
-    m_instructions[index]->clear_operand_uses();
+    m_parent_function->instruction_by_index(m_instructions[index])->clear_operand_uses();
     m_instructions.remove(index);
 }
 
 void BasicBlock::remove_terminator()
 {
     VERIFY(is_terminated());
-    m_instructions.last()->clear_operand_uses();
+    m_parent_function->instruction_by_index(m_instructions.last())->clear_operand_uses();
     m_instructions.remove(m_instructions.size() - 1);
 }
 
-NonnullOwnPtr<Instruction> BasicBlock::take_instruction(size_t index)
+InstructionIndex BasicBlock::take_instruction(size_t index)
 {
     VERIFY(index < m_instructions.size());
-    auto instruction = m_instructions.take(index);
+    auto instruction_index = m_instructions[index];
+    m_instructions.remove(index);
+    auto* instruction = m_parent_function->instruction_by_index(instruction_index);
     instruction->set_parent_block(nullptr);
-    instruction->set_parent_function(nullptr);
-    return instruction;
+    return instruction_index;
 }
 
-Vector<NonnullOwnPtr<Instruction>> BasicBlock::take_all_instructions()
+Vector<InstructionIndex> BasicBlock::take_all_instructions()
 {
-    for (auto& instruction : m_instructions) {
+    for (auto instruction_index : m_instructions) {
+        auto* instruction = m_parent_function->instruction_by_index(instruction_index);
         instruction->set_parent_block(nullptr);
-        instruction->set_parent_function(nullptr);
     }
     return move(m_instructions);
 }
@@ -89,12 +92,30 @@ void BasicBlock::insert_before_terminator(NonnullOwnPtr<Instruction> instruction
     VERIFY(!instruction->is_terminator());
     instruction->set_parent_block(this);
     instruction->set_parent_function(m_parent_function);
-    m_instructions.insert(m_instructions.size() - 1, move(instruction));
+    auto instruction_index = m_parent_function->register_instruction(move(instruction));
+    m_instructions.insert(m_instructions.size() - 1, instruction_index);
+}
+
+void BasicBlock::insert_before_terminator(InstructionIndex index)
+{
+    VERIFY(is_terminated());
+    auto* instruction = m_parent_function->instruction_by_index(index);
+    VERIFY(!instruction->is_terminator());
+    instruction->set_parent_block(this);
+    m_instructions.insert(m_instructions.size() - 1, index);
+}
+
+void BasicBlock::append_instruction(InstructionIndex index)
+{
+    auto* instruction = m_parent_function->instruction_by_index(index);
+    instruction->set_parent_block(this);
+    m_instructions.append(index);
 }
 
 void BasicBlock::remove_instructions_if(AK::Function<bool(Instruction const&)> predicate)
 {
-    m_instructions.remove_all_matching([&](auto const& instruction) {
+    m_instructions.remove_all_matching([&](auto instruction_index) {
+        auto* instruction = m_parent_function->instruction_by_index(instruction_index);
         if (predicate(*instruction)) {
             instruction->clear_operand_uses();
             return true;
@@ -105,8 +126,8 @@ void BasicBlock::remove_instructions_if(AK::Function<bool(Instruction const&)> p
 
 void BasicBlock::clear_instructions()
 {
-    for (auto& instruction : m_instructions)
-        instruction->clear_operand_uses();
+    for (auto instruction_index : m_instructions)
+        m_parent_function->instruction_by_index(instruction_index)->clear_operand_uses();
     m_instructions.clear();
 }
 

@@ -54,6 +54,9 @@ public:
     Vector<NonnullOwnPtr<Value>> const& values() const { return m_values; }
     Vector<Value*> const& parameters() const { return m_parameters; }
 
+    InstructionIndex register_instruction(NonnullOwnPtr<Instruction>);
+    Instruction* instruction_by_index(InstructionIndex index) const;
+
     IRStage stage() const { return m_stage; }
     void set_stage(IRStage stage) { m_stage = stage; }
 
@@ -87,8 +90,10 @@ private:
     Vector<Value*> m_parameters;
     Value* m_this_value { nullptr };
     BasicBlock* m_entry_block { nullptr };
+    Vector<NonnullOwnPtr<Instruction>> m_all_instructions;
     ValueIndex m_next_value_index { 0 };
     BlockIndex m_next_block_index { 0 };
+    InstructionIndex m_next_instruction_index { 0 };
 };
 
 }

@@ -239,6 +239,9 @@ public:
     // This is the only safe way to mutate an opcode in-place.
     bool try_invert_comparison();
 
+    InstructionIndex index() const { return m_index; }
+    void set_index(InstructionIndex index) { m_index = index; }
+
     BasicBlock* parent_block() const { return m_parent_block; }
     void set_parent_block(BasicBlock* block) { m_parent_block = block; }
 
@@ -375,6 +378,7 @@ protected:
 
 private:
     Opcode m_opcode;
+    InstructionIndex m_index { 0 };
     BasicBlock* m_parent_block { nullptr };
     Function* m_function { nullptr };
     Optional<ValueIndex> m_result;

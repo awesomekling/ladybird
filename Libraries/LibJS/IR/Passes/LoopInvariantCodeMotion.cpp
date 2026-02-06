@@ -47,23 +47,24 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
             if (&loop_block == header)
                 return; // Don't hoist from header (has phi nodes)
 
-            Vector<Instruction*> to_hoist;
+            Vector<InstructionIndex> to_hoist;
 
-            for (auto const& instruction : loop_block.instructions()) {
-                if (!instruction->result())
+            for (auto instruction_index : loop_block.instructions()) {
+                auto& instruction = *function.instruction_by_index(instruction_index);
+                if (!instruction.result())
                     continue;
 
                 // Never hoist Phi nodes — they are tied to their block's predecessors.
-                if (instruction->opcode() == Opcode::Phi)
+                if (instruction.opcode() == Opcode::Phi)
                     continue;
 
-                if (!instruction->is_hoistable())
+                if (!instruction.is_hoistable())
                     continue;
 
                 // Check if all operands are defined outside the loop
                 bool all_operands_invariant = true;
-                for (size_t j = 0; j < instruction->operand_count(); ++j) {
-                    auto* op = instruction->operand(j);
+                for (size_t j = 0; j < instruction.operand_count(); ++j) {
+                    auto* op = instruction.operand(j);
                     if (!op)
                         continue;
 
@@ -78,21 +79,21 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
                 }
 
                 if (all_operands_invariant)
-                    to_hoist.append(instruction.ptr());
+                    to_hoist.append(instruction_index);
             }
 
             // Move instructions to preheader (insert before the jump)
-            for (auto* instruction : to_hoist) {
-                NonnullOwnPtr<Instruction> owned_instr = [&]() -> NonnullOwnPtr<Instruction> {
+            for (auto hoist_index : to_hoist) {
+                InstructionIndex taken_index = [&]() -> InstructionIndex {
                     for (size_t i = 0; i < loop_block.instructions().size(); ++i) {
-                        if (loop_block.instructions()[i].ptr() == instruction) {
+                        if (loop_block.instructions()[i] == hoist_index) {
                             return loop_block.take_instruction(i);
                         }
                     }
                     VERIFY_NOT_REACHED();
                 }();
 
-                preheader->insert_before_terminator(move(owned_instr));
+                preheader->insert_before_terminator(taken_index);
 
                 changed = true;
             }

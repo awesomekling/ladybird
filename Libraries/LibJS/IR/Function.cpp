@@ -99,4 +99,18 @@ Value& Function::create_value_for_instruction()
     return ref;
 }
 
+InstructionIndex Function::register_instruction(NonnullOwnPtr<Instruction> instruction)
+{
+    auto index = m_next_instruction_index++;
+    instruction->set_index(index);
+    instruction->set_parent_function(this);
+    m_all_instructions.append(move(instruction));
+    return index;
+}
+
+Instruction* Function::instruction_by_index(InstructionIndex index) const
+{
+    return m_all_instructions[static_cast<u32>(index)].ptr();
+}
+
 }
