@@ -6,8 +6,7 @@
 
 #pragma once
 
-#include <AK/HashMap.h>
-#include <AK/HashTable.h>
+#include <AK/Bitmap.h>
 #include <AK/Vector.h>
 #include <LibJS/IR/Forward.h>
 
@@ -28,14 +27,16 @@ public:
     // Returns true if a dominates b (a == b or a strictly dominates b)
     bool dominates(BasicBlock const* a, BasicBlock const* b) const;
 
-    // Returns the dominance frontier of a block
-    HashTable<BasicBlock*> const& dominance_frontier(BasicBlock const* block) const;
+    // Iterate over each block in the dominance frontier of the given block.
+    template<typename Callback>
+    void for_each_frontier_block(BasicBlock const* block, Callback callback) const;
+
+    // Iterate over each child in the dominator tree of the given block.
+    template<typename Callback>
+    void for_each_dominator_child(BasicBlock const* block, Callback callback) const;
 
     // Returns all blocks in the function in reverse postorder (useful for dataflow)
-    Vector<BasicBlock*> const& reverse_postorder() const { return m_reverse_postorder; }
-
-    // Returns the children of a block in the dominator tree
-    Vector<BasicBlock*> const& dominator_children(BasicBlock const* block) const;
+    Vector<BasicBlock*> const& reverse_postorder() const { return m_reverse_postorder_blocks; }
 
 private:
     void compute_reverse_postorder();
@@ -44,12 +45,47 @@ private:
     void ensure_dominator_children() const;
 
     Function const& m_function;
-    HashMap<BasicBlock const*, BasicBlock*> m_immediate_dominator;
-    mutable HashMap<BasicBlock const*, HashTable<BasicBlock*>> m_dominance_frontier;
-    mutable HashMap<BasicBlock const*, Vector<BasicBlock*>> m_dominator_children;
-    Vector<BasicBlock*> m_reverse_postorder;
+    size_t m_block_index_capacity { 0 };
+    Vector<BasicBlock*> m_block_table;
+    Vector<Optional<BlockIndex>> m_immediate_dominator;
+    mutable Vector<AK::Bitmap> m_dominance_frontier;
+    mutable Vector<Vector<BlockIndex>> m_dominator_children;
+    Vector<BlockIndex> m_reverse_postorder;
+    Vector<BasicBlock*> m_reverse_postorder_blocks;
     mutable bool m_dominance_frontiers_computed { false };
     mutable bool m_dominator_children_computed { false };
 };
+
+}
+
+// Template implementations (requires full BasicBlock definition).
+#include <LibJS/IR/BasicBlock.h>
+
+namespace JS::IR {
+
+template<typename Callback>
+void DominatorTree::for_each_frontier_block(BasicBlock const* block, Callback callback) const
+{
+    ensure_dominance_frontiers();
+    auto idx = static_cast<u32>(block->index());
+    if (idx >= m_dominance_frontier.size())
+        return;
+    auto const& bitmap = m_dominance_frontier[idx];
+    for (size_t i = 0; i < bitmap.size(); ++i) {
+        if (bitmap.get(i))
+            callback(*m_block_table[i]);
+    }
+}
+
+template<typename Callback>
+void DominatorTree::for_each_dominator_child(BasicBlock const* block, Callback callback) const
+{
+    ensure_dominator_children();
+    auto idx = static_cast<u32>(block->index());
+    if (idx >= m_dominator_children.size())
+        return;
+    for (auto child_index : m_dominator_children[idx])
+        callback(*m_block_table[static_cast<u32>(child_index)]);
+}
 
 }

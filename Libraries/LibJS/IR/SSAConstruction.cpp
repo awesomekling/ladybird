@@ -66,15 +66,15 @@ void SSAConstruction::place_phi_nodes()
 
         while (!worklist.is_empty()) {
             auto* block = worklist.take_last();
-            for (auto* frontier_block : m_dominators.dominance_frontier(block)) {
-                if (!phi_blocks.contains(frontier_block)) {
-                    phi_blocks.set(frontier_block);
+            m_dominators.for_each_frontier_block(block, [&](BasicBlock& frontier_block) {
+                if (!phi_blocks.contains(&frontier_block)) {
+                    phi_blocks.set(&frontier_block);
                     // If this block doesn't already define the variable, add to worklist
                     // (the phi itself is a definition that extends the frontier)
-                    if (!def_blocks.contains(frontier_block))
-                        worklist.append(frontier_block);
+                    if (!def_blocks.contains(&frontier_block))
+                        worklist.append(&frontier_block);
                 }
-            }
+            });
         }
 
         // Place phis at the computed locations.
@@ -313,7 +313,10 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
         work_stack.empend(&block, true, move(entry_sizes));
 
         // Push dominated children in reverse order so first child is processed first
-        auto const& children = m_dominators.dominator_children(&block);
+        Vector<BasicBlock*> children;
+        m_dominators.for_each_dominator_child(&block, [&](BasicBlock& child) {
+            children.append(&child);
+        });
         for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i) {
             work_stack.empend(children[i], false, HashMap<u32, size_t> {});
         }

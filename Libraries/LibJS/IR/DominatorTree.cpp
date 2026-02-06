@@ -12,9 +12,31 @@
 
 namespace JS::IR {
 
+static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
+
+static size_t block_index_capacity(Function const& function)
+{
+    size_t max_index = 0;
+    for (auto const& block : function.basic_blocks())
+        max_index = max(max_index, to_index(block->index()) + 1);
+    return max_index;
+}
+
+static Vector<BasicBlock*> build_block_index_table(Function const& function, size_t capacity)
+{
+    Vector<BasicBlock*> table;
+    table.resize_with_default_value(capacity, nullptr);
+    for (auto const& block : function.basic_blocks())
+        table[to_index(block->index())] = block.ptr();
+    return table;
+}
+
 DominatorTree::DominatorTree(Function const& function)
     : m_function(function)
+    , m_block_index_capacity(block_index_capacity(function))
+    , m_block_table(build_block_index_table(function, m_block_index_capacity))
 {
+    m_immediate_dominator.resize(m_block_index_capacity);
     compute_reverse_postorder();
     compute_dominators();
 }
@@ -27,16 +49,17 @@ void DominatorTree::compute_reverse_postorder()
         return;
 
     struct Frame {
-        BasicBlock* block;
+        BlockIndex block;
         bool children_pushed { false };
     };
 
-    HashTable<BasicBlock*> visited;
-    Vector<BasicBlock*> postorder;
+    auto visited = MUST(AK::Bitmap::create(m_block_index_capacity, false));
+    Vector<BlockIndex> postorder;
     Vector<Frame> stack;
 
-    visited.set(m_function.entry_block());
-    stack.append({ m_function.entry_block() });
+    auto entry_index = m_function.entry_block()->index();
+    visited.set(to_index(entry_index), true);
+    stack.append({ entry_index });
 
     while (!stack.is_empty()) {
         auto& frame = stack.last();
@@ -49,24 +72,29 @@ void DominatorTree::compute_reverse_postorder()
 
         frame.children_pushed = true;
 
-        // NB: Save the block pointer before pushing children, since appending
+        // NB: Save the block index before pushing children, since appending
         // to the stack may reallocate and invalidate the frame reference.
-        auto* block = frame.block;
+        auto block_idx = frame.block;
+        auto* block = m_block_table[to_index(block_idx)];
 
         // Push successors (will be processed before we return to this block)
         // Include both control flow successors and exception edges
         CFG::for_each_successor(*block, [&](BasicBlock& target) {
-            if (!visited.contains(&target)) {
-                visited.set(&target);
-                stack.append({ &target });
+            auto target_idx = to_index(target.index());
+            if (!visited.get(target_idx)) {
+                visited.set(target_idx, true);
+                stack.append({ target.index() });
             }
         });
     }
 
     // Reverse to get reverse postorder
     m_reverse_postorder.ensure_capacity(postorder.size());
-    for (size_t i = postorder.size(); i > 0; --i)
+    m_reverse_postorder_blocks.ensure_capacity(postorder.size());
+    for (size_t i = postorder.size(); i > 0; --i) {
         m_reverse_postorder.append(postorder[i - 1]);
+        m_reverse_postorder_blocks.append(m_block_table[to_index(postorder[i - 1])]);
+    }
 }
 
 void DominatorTree::compute_dominators()
@@ -77,32 +105,33 @@ void DominatorTree::compute_dominators()
     if (m_reverse_postorder.is_empty())
         return;
 
-    auto* entry = m_function.entry_block();
+    auto entry_idx = m_function.entry_block()->index();
 
     // Map blocks to their reverse postorder index
-    HashMap<BasicBlock*, size_t> rpo_index;
+    Vector<Optional<size_t>> rpo_index;
+    rpo_index.resize(m_block_index_capacity);
     for (size_t i = 0; i < m_reverse_postorder.size(); ++i)
-        rpo_index.set(m_reverse_postorder[i], i);
+        rpo_index[to_index(m_reverse_postorder[i])] = i;
 
     // Initialize: entry dominates itself, others undefined
-    m_immediate_dominator.set(entry, entry);
+    m_immediate_dominator[to_index(entry_idx)] = entry_idx;
 
     // Intersect helper: find common dominator of two blocks
-    auto intersect = [&](BasicBlock* b1, BasicBlock* b2) -> BasicBlock* {
-        auto* finger1 = b1;
-        auto* finger2 = b2;
+    auto intersect = [&](BlockIndex b1, BlockIndex b2) -> Optional<BlockIndex> {
+        auto finger1 = b1;
+        auto finger2 = b2;
 
         while (finger1 != finger2) {
-            while (rpo_index.get(finger1).value_or(SIZE_MAX) > rpo_index.get(finger2).value_or(SIZE_MAX)) {
-                auto idom = m_immediate_dominator.get(finger1);
+            while (rpo_index[to_index(finger1)].value_or(SIZE_MAX) > rpo_index[to_index(finger2)].value_or(SIZE_MAX)) {
+                auto const& idom = m_immediate_dominator[to_index(finger1)];
                 if (!idom.has_value())
-                    return nullptr;
+                    return {};
                 finger1 = *idom;
             }
-            while (rpo_index.get(finger2).value_or(SIZE_MAX) > rpo_index.get(finger1).value_or(SIZE_MAX)) {
-                auto idom = m_immediate_dominator.get(finger2);
+            while (rpo_index[to_index(finger2)].value_or(SIZE_MAX) > rpo_index[to_index(finger1)].value_or(SIZE_MAX)) {
+                auto const& idom = m_immediate_dominator[to_index(finger2)];
                 if (!idom.has_value())
-                    return nullptr;
+                    return {};
                 finger2 = *idom;
             }
         }
@@ -117,26 +146,27 @@ void DominatorTree::compute_dominators()
 
         // Process all blocks except entry in reverse postorder
         for (size_t i = 1; i < m_reverse_postorder.size(); ++i) {
-            auto* block = m_reverse_postorder[i];
+            auto block_idx = m_reverse_postorder[i];
+            auto* block = m_block_table[to_index(block_idx)];
 
             // Find first processed predecessor
-            BasicBlock* new_idom = nullptr;
+            Optional<BlockIndex> new_idom;
             for (auto* pred : block->predecessors()) {
-                if (m_immediate_dominator.contains(pred)) {
-                    if (!new_idom) {
-                        new_idom = pred;
+                if (m_immediate_dominator[to_index(pred->index())].has_value()) {
+                    if (!new_idom.has_value()) {
+                        new_idom = pred->index();
                     } else {
-                        new_idom = intersect(new_idom, pred);
-                        if (!new_idom)
+                        new_idom = intersect(*new_idom, pred->index());
+                        if (!new_idom.has_value())
                             break;
                     }
                 }
             }
 
-            if (new_idom) {
-                auto existing = m_immediate_dominator.get(block);
-                if (!existing.has_value() || *existing != new_idom) {
-                    m_immediate_dominator.set(block, new_idom);
+            if (new_idom.has_value()) {
+                auto const& existing = m_immediate_dominator[to_index(block_idx)];
+                if (!existing.has_value() || *existing != *new_idom) {
+                    m_immediate_dominator[to_index(block_idx)] = *new_idom;
                     changed = true;
                 }
             }
@@ -153,23 +183,28 @@ void DominatorTree::ensure_dominance_frontiers() const
     // Dominance frontier algorithm from Cytron et al.
     // DF(n) = { y | exists pred p of y such that n dominates p but n does not strictly dominate y }
 
-    for (auto* block : m_reverse_postorder) {
-        m_dominance_frontier.set(block, {});
-    }
+    m_dominance_frontier.resize(m_block_index_capacity);
+    for (auto& bitmap : m_dominance_frontier)
+        bitmap = MUST(AK::Bitmap::create(m_block_index_capacity, false));
 
-    for (auto* block : m_reverse_postorder) {
+    for (auto block_idx : m_reverse_postorder) {
+        auto* block = m_block_table[to_index(block_idx)];
         auto const& preds = block->predecessors();
         if (preds.size() < 2)
             continue; // Only join points have non-empty dominance frontiers contributed here
 
         for (auto* pred : preds) {
-            auto* runner = pred;
-            while (runner && runner != m_immediate_dominator.get(block).value_or(nullptr)) {
-                auto it = m_dominance_frontier.find(runner);
-                if (it == m_dominance_frontier.end())
-                    break; // Predecessor not reachable from entry
-                it->value.set(block);
-                runner = m_immediate_dominator.get(runner).value_or(nullptr);
+            auto runner_idx = pred->index();
+            auto const& block_idom = m_immediate_dominator[to_index(block_idx)];
+            while (m_block_table[to_index(runner_idx)] && (!block_idom.has_value() || runner_idx != *block_idom)) {
+                auto runner_i = to_index(runner_idx);
+                if (runner_i >= m_block_index_capacity)
+                    break; // Not reachable from entry
+                m_dominance_frontier[runner_i].set(to_index(block_idx), true);
+                auto const& idom = m_immediate_dominator[runner_i];
+                if (!idom.has_value())
+                    break;
+                runner_idx = *idom;
             }
         }
     }
@@ -177,13 +212,16 @@ void DominatorTree::ensure_dominance_frontiers() const
 
 BasicBlock* DominatorTree::immediate_dominator(BasicBlock const* block) const
 {
-    auto it = m_immediate_dominator.find(block);
-    if (it == m_immediate_dominator.end())
+    auto idx = to_index(block->index());
+    if (idx >= m_immediate_dominator.size())
+        return nullptr;
+    auto const& idom = m_immediate_dominator[idx];
+    if (!idom.has_value())
         return nullptr;
     // Entry block's idom is itself, but we return nullptr for external interface
-    if (it->value == block)
+    if (*idom == block->index())
         return nullptr;
-    return it->value;
+    return m_block_table[to_index(*idom)];
 }
 
 bool DominatorTree::strictly_dominates(BasicBlock const* a, BasicBlock const* b) const
@@ -199,27 +237,19 @@ bool DominatorTree::dominates(BasicBlock const* a, BasicBlock const* b) const
         return true;
 
     // Walk up the dominator tree from b looking for a
-    auto* runner = m_immediate_dominator.get(b).value_or(nullptr);
-    while (runner && runner != b) { // runner != b guards against entry (idom = itself)
-        if (runner == a)
+    auto a_idx = a->index();
+    auto runner_idx_opt = m_immediate_dominator[to_index(b->index())];
+    while (runner_idx_opt.has_value()) {
+        auto runner_idx = *runner_idx_opt;
+        if (runner_idx == a_idx)
             return true;
-        auto* next = m_immediate_dominator.get(runner).value_or(nullptr);
-        if (next == runner)
+        auto const& next = m_immediate_dominator[to_index(runner_idx)];
+        if (!next.has_value() || *next == runner_idx)
             break; // Entry block
-        runner = next;
+        runner_idx_opt = next;
     }
 
     return false;
-}
-
-HashTable<BasicBlock*> const& DominatorTree::dominance_frontier(BasicBlock const* block) const
-{
-    ensure_dominance_frontiers();
-    static HashTable<BasicBlock*> empty;
-    auto it = m_dominance_frontier.find(block);
-    if (it == m_dominance_frontier.end())
-        return empty;
-    return it->value;
 }
 
 void DominatorTree::ensure_dominator_children() const
@@ -229,25 +259,14 @@ void DominatorTree::ensure_dominator_children() const
     m_dominator_children_computed = true;
 
     // Build the dominator tree children by grouping blocks by their immediate dominator
-    for (auto* block : m_reverse_postorder) {
-        m_dominator_children.set(block, {});
-    }
+    m_dominator_children.resize(m_block_index_capacity);
 
-    for (auto* block : m_reverse_postorder) {
+    for (auto block_idx : m_reverse_postorder) {
+        auto* block = m_block_table[to_index(block_idx)];
         auto* idom = immediate_dominator(block);
         if (idom)
-            m_dominator_children.find(idom)->value.append(block);
+            m_dominator_children[to_index(idom->index())].append(block_idx);
     }
-}
-
-Vector<BasicBlock*> const& DominatorTree::dominator_children(BasicBlock const* block) const
-{
-    ensure_dominator_children();
-    static Vector<BasicBlock*> empty;
-    auto it = m_dominator_children.find(block);
-    if (it == m_dominator_children.end())
-        return empty;
-    return it->value;
 }
 
 }

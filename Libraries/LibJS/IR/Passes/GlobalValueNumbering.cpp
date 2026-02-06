@@ -96,8 +96,9 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
         }
 
         // Recurse into dominator tree children
-        for (auto* child : dominators.dominator_children(block))
-            self(self, child);
+        dominators.for_each_dominator_child(block, [&](BasicBlock& child) {
+            self(self, &child);
+        });
 
         // Remove expressions added by this block
         for (auto const& key : added_keys)
