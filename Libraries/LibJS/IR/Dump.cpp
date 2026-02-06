@@ -22,6 +22,7 @@
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/PassManager.h>
+#include <LibJS/IR/Passes/SplitCriticalEdges.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/Value.h>
 
@@ -297,6 +298,16 @@ void optimize(Function& function)
     pass_manager.add_pass(make<BlockMerging>());
 
     pass_manager.run(function);
+
+    // Lowering Preparation (runs once, after the fixed-point loop).
+    // Split critical edges so phi moves have a clean block to land in
+    // during SSA deconstruction. This must not participate in the
+    // fixed-point loop because subsequent CFG cleanup would fold the
+    // split blocks back, recreating the critical edges.
+    SplitCriticalEdges split_pass;
+    auto preserved = split_pass.run(function, pass_manager);
+    if (!preserved.is_all() && g_dump_ir_between_passes)
+        dbgln("=== After {} ===\n{}", split_pass.name(), dump(function));
 }
 
 }

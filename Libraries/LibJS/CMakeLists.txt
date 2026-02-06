@@ -39,6 +39,7 @@ set(SOURCES
     IR/Passes/JumpThreading.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/PassManager.cpp
+    IR/Passes/SplitCriticalEdges.cpp
     IR/Passes/Verifier.cpp
     IR/Value.cpp
     Console.cpp

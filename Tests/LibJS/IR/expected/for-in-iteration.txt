@@ -393,6 +393,7 @@ block5:
     v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
     Jump block2
 
+=== After SplitCriticalEdges ===
 function():
 block0:
     v0:object = NewObject
@@ -405,7 +406,7 @@ block0:
     InitializeBinding keys v4:array
     v5:unknown = GetGlobal obj
     v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
+    Branch v27:boolean, block22, block4
 block1:
     v6:unknown = GetGlobal keys
     v7:unknown = GetById v6:unknown.sort
@@ -417,7 +418,7 @@ block2:
     v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
     v13:unknown = ExtractValue v12:unknown, 0
     v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block1, block5
+    Branch v14:unknown, block23, block5
 block4:
     v15:unknown = GetObjectPropertyIterator v5:unknown
     v16:unknown = ExtractValue v15:unknown, 0
@@ -430,3 +431,49 @@ block5:
     ThrowIfTDZ v13:unknown
     v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
     Jump block2
+split_block0_block1:
+    Jump block1
+split_block2_block1:
+    Jump block1
+
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    InitObjectLiteralProperty v0:object, 3
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    v4:array = NewArray
+    InitializeBinding keys v4:array
+    v5:unknown = GetGlobal obj
+    v27:boolean = IsNullish v5:unknown
+    Branch v27:boolean, block22, block4
+block1:
+    v6:unknown = GetGlobal keys
+    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = GetById v8:unknown.join
+    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    End v11:unknown
+block2:
+    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    Branch v14:unknown, block23, block5
+block4:
+    v15:unknown = GetObjectPropertyIterator v5:unknown
+    v16:unknown = ExtractValue v15:unknown, 0
+    v17:unknown = ExtractValue v15:unknown, 1
+    v18:unknown = ExtractValue v15:unknown, 2
+    Jump block2
+block5:
+    v22:unknown = GetGlobal keys
+    v23:unknown = GetById v22:unknown.push
+    ThrowIfTDZ v13:unknown
+    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    Jump block2
+split_block0_block1:
+    Jump block1
+split_block2_block1:
+    Jump block1

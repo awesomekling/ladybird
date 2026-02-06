@@ -268,6 +268,7 @@ block8: [finalizer: block5]
 block10:
     Return v16:number
 
+=== After SplitCriticalEdges ===
 function():
 block0:
     Jump block3
@@ -289,8 +290,39 @@ block5:
     ContinuePendingUnwind block2
 block7:
     v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block5
+    Branch v13:boolean, block8, block12
 block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
     Return v16:number
+split_block7_block5:
+    Jump block5
+
+function():
+block0:
+    Jump block3
+block1:
+    EnterUnwindContext block7
+block2:
+    v7:number = Increment v15:number
+    Jump block3
+block3:
+    v16:number = Phi [block0:v3:int32, block2:v9:number]
+    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v12:boolean = LessThan v15:number, 3
+    Branch v12:boolean, block1, block4
+block4:
+    Return v16:number
+block5:
+    LeaveUnwindContext
+    v9:number = Add v16:number, 1
+    ContinuePendingUnwind block2
+block7:
+    v13:boolean = StrictlyEquals v15:number, 1
+    Branch v13:boolean, block8, block12
+block8: [finalizer: block5]
+    ScheduleJump finalizer: block5, target: block10
+block10:
+    Return v16:number
+split_block7_block5:
+    Jump block5

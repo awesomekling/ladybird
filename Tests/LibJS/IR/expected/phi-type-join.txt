@@ -121,12 +121,27 @@ block3:
     v9:number = Add v11:number, 3
     Return v9:number
 
+=== After SplitCriticalEdges ===
 function(v10:unknown):
 block0:
-    Branch v10:unknown, block3, block2
+    Branch v10:unknown, block5, block2
 block2:
     Jump block3
 block3:
-    v11:number = Phi [block2:v2:number, block0:v0:int32]
+    v11:number = Phi [block2:v2:number, block5:v0:int32]
     v9:number = Add v11:number, 3
     Return v9:number
+split_block0_block3:
+    Jump block3
+
+function(v10:unknown):
+block0:
+    Branch v10:unknown, block5, block2
+block2:
+    Jump block3
+block3:
+    v11:number = Phi [block2:v2:number, block5:v0:int32]
+    v9:number = Add v11:number, 3
+    Return v9:number
+split_block0_block3:
+    Jump block3

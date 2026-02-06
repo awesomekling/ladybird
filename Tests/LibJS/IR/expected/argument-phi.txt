@@ -67,12 +67,27 @@ block2:
     v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
     Return v5:unknown
 
+=== After SplitCriticalEdges ===
 function(v2:unknown):
 block0:
     v4:boolean = StrictlyEquals v2:unknown, undefined
-    Branch v4:boolean, block1, block2
+    Branch v4:boolean, block1, block3
 block1:
     Jump block2
 block2:
-    v5:unknown = Phi [block0:v2:unknown, block1:v0:int32]
+    v5:unknown = Phi [block1:v0:int32, block3:v2:unknown]
     Return v5:unknown
+split_block0_block2:
+    Jump block2
+
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block3
+block1:
+    Jump block2
+block2:
+    v5:unknown = Phi [block1:v0:int32, block3:v2:unknown]
+    Return v5:unknown
+split_block0_block2:
+    Jump block2

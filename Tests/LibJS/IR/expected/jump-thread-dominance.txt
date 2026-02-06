@@ -350,6 +350,7 @@ block9:
     v39:unknown = Phi [block6:v38:unknown, block8:v20:unknown]
     Jump block5
 
+=== After SplitCriticalEdges ===
 function(v14:unknown):
 block0:
     Jump block3
@@ -357,17 +358,17 @@ block3:
     v40:number = Phi [block0:v5:int32, block7:v16:unknown]
     v34:number = Phi [block0:v5:int32, block7:v12:number]
     v24:boolean = LessThan v34:number, 3
-    Branch v24:boolean, block5, block4
+    Branch v24:boolean, block14, block4
 block4:
     Return v40:number
 block5:
-    v38:unknown = Phi [block9:v39:unknown, block3:v5:int32]
-    v36:int32 = Phi [block9:v5:int32, block3:v8:int32]
+    v38:unknown = Phi [block9:v39:unknown, block14:v5:int32]
+    v36:int32 = Phi [block9:v5:int32, block14:v8:int32]
     Branch v36:int32, block6, block7
 block6:
     v15:unknown = GetByValue v14:unknown, v34:number
     v25:boolean = GreaterThan v15:unknown, 0
-    Branch v25:boolean, block8, block9
+    Branch v25:boolean, block8, block15
 block7:
     v16:unknown = Add v40:number, v38:unknown
     v12:number = Increment v34:number
@@ -377,5 +378,43 @@ block8:
     v20:unknown = Add v38:unknown, v19:unknown
     Jump block9
 block9:
-    v39:unknown = Phi [block6:v38:unknown, block8:v20:unknown]
+    v39:unknown = Phi [block8:v20:unknown, block15:v38:unknown]
     Jump block5
+split_block3_block5:
+    Jump block5
+split_block6_block9:
+    Jump block9
+
+function(v14:unknown):
+block0:
+    Jump block3
+block3:
+    v40:number = Phi [block0:v5:int32, block7:v16:unknown]
+    v34:number = Phi [block0:v5:int32, block7:v12:number]
+    v24:boolean = LessThan v34:number, 3
+    Branch v24:boolean, block14, block4
+block4:
+    Return v40:number
+block5:
+    v38:unknown = Phi [block9:v39:unknown, block14:v5:int32]
+    v36:int32 = Phi [block9:v5:int32, block14:v8:int32]
+    Branch v36:int32, block6, block7
+block6:
+    v15:unknown = GetByValue v14:unknown, v34:number
+    v25:boolean = GreaterThan v15:unknown, 0
+    Branch v25:boolean, block8, block15
+block7:
+    v16:unknown = Add v40:number, v38:unknown
+    v12:number = Increment v34:number
+    Jump block3
+block8:
+    v19:unknown = GetByValue v14:unknown, v34:number
+    v20:unknown = Add v38:unknown, v19:unknown
+    Jump block9
+block9:
+    v39:unknown = Phi [block8:v20:unknown, block15:v38:unknown]
+    Jump block5
+split_block3_block5:
+    Jump block5
+split_block6_block9:
+    Jump block9

@@ -31,10 +31,23 @@ block1:
 entry:
     Jump block0
 
+=== After SplitCriticalEdges ===
 function(v1:unknown):
 block0:
-    Branch v1:unknown, block0, block1
+    Branch v1:unknown, block3, block1
 block1:
     End undefined
 entry:
+    Jump block0
+split_block0_block0:
+    Jump block0
+
+function(v1:unknown):
+block0:
+    Branch v1:unknown, block3, block1
+block1:
+    End undefined
+entry:
+    Jump block0
+split_block0_block0:
     Jump block0
