@@ -13,11 +13,14 @@
 
 namespace JS::IR {
 
+static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
 SSAConstruction::SSAConstruction(Function& function, DominatorTree const& dominators, Bytecode::Executable const& executable,
     HashTable<u32> const& written_operands,
-    HashMap<BasicBlock*, HashTable<u32>> const& block_actual_definitions,
-    HashMap<BasicBlock*, HashMap<u32, Value*>>& block_definitions,
-    HashMap<Value*, u32>& value_to_operand_raw)
+    Vector<HashTable<u32>> const& block_actual_definitions,
+    Vector<HashMap<u32, Value*>>& block_definitions,
+    Vector<Optional<u32>>& value_to_operand_raw)
     : m_function(function)
     , m_dominators(dominators)
     , m_executable(executable)
@@ -53,9 +56,10 @@ void SSAConstruction::place_phi_nodes()
     for (auto raw : sorted_operands) {
         // Find all blocks that actually define this operand
         HashTable<BasicBlock*> def_blocks;
-        for (auto& [block, defs] : m_block_actual_definitions) {
-            if (defs.contains(raw))
-                def_blocks.set(block);
+        for (auto const& block : m_function.basic_blocks()) {
+            auto bi = to_index(block->index());
+            if (bi < m_block_actual_definitions.size() && m_block_actual_definitions[bi].contains(raw))
+                def_blocks.set(block.ptr());
         }
 
         // Compute iterated dominance frontier (where phis are needed)
@@ -101,14 +105,21 @@ void SSAConstruction::place_phi_nodes()
 
             m_builder.set_insertion_block(block);
             auto& phi = m_builder.build_phi(empty_values, empty_blocks);
-            m_value_to_operand_raw.set(&phi, raw);
+
+            auto vi = to_index(phi.index());
+            if (vi >= m_value_to_operand_raw.size())
+                m_value_to_operand_raw.resize(vi + 1);
+            m_value_to_operand_raw[vi] = raw;
 
             // Update m_block_definitions to include the phi value, UNLESS the block
             // has an actual definition that would override it. This ensures successors
             // inherit the correct value.
-            auto actual_defs = m_block_actual_definitions.get(block);
-            if (!actual_defs.has_value() || !actual_defs->contains(raw)) {
-                m_block_definitions.ensure(block).set(raw, &phi);
+            auto bi = to_index(block->index());
+            bool has_actual_def = bi < m_block_actual_definitions.size() && m_block_actual_definitions[bi].contains(raw);
+            if (!has_actual_def) {
+                if (bi >= m_block_definitions.size())
+                    m_block_definitions.resize(bi + 1);
+                m_block_definitions[bi].set(raw, &phi);
             }
         }
     }
@@ -209,11 +220,12 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
 
         // Process phis first - they define values at block entry
         block.for_each_phi([&](PhiInstruction const& phi) {
-            auto raw_opt = m_value_to_operand_raw.get(phi.result());
-            if (raw_opt.has_value()) {
-                stacks.ensure(*raw_opt).append(phi.result());
-                if (!entry_sizes.contains(*raw_opt))
-                    entry_sizes.set(*raw_opt, 0);
+            auto vi = to_index(phi.result()->index());
+            if (vi < m_value_to_operand_raw.size() && m_value_to_operand_raw[vi].has_value()) {
+                auto raw = *m_value_to_operand_raw[vi];
+                stacks.ensure(raw).append(phi.result());
+                if (!entry_sizes.contains(raw))
+                    entry_sizes.set(raw, 0);
             }
         });
 
@@ -228,11 +240,12 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 if (!operand_value)
                     continue;
 
-                auto raw_opt = m_value_to_operand_raw.get(operand_value);
-                if (!raw_opt.has_value())
+                auto vi = to_index(operand_value->index());
+                if (vi >= m_value_to_operand_raw.size() || !m_value_to_operand_raw[vi].has_value())
                     continue;
+                auto raw = *m_value_to_operand_raw[vi];
 
-                auto stack_opt = stacks.get(*raw_opt);
+                auto stack_opt = stacks.get(raw);
                 if (stack_opt.has_value() && !stack_opt->is_empty()) {
                     auto* current = stack_opt->last();
                     if (current != operand_value)
@@ -240,7 +253,7 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 } else {
                     // No reaching definition: variable was never written on this path.
                     // Locals use the empty value (TDZ marker), registers use undefined.
-                    auto decoded = m_executable.original_operand_from_raw(*raw_opt);
+                    auto decoded = m_executable.original_operand_from_raw(raw);
                     auto& default_value = m_function.create_constant(
                         decoded.is_local() ? js_special_empty_value() : js_undefined());
                     instruction->set_operand(i, &default_value);
@@ -249,11 +262,12 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
 
             // If instruction defines a value, push it onto the stack
             if (instruction->result()) {
-                auto raw_opt = m_value_to_operand_raw.get(instruction->result());
-                if (raw_opt.has_value()) {
-                    stacks.ensure(*raw_opt).append(instruction->result());
-                    if (!entry_sizes.contains(*raw_opt))
-                        entry_sizes.set(*raw_opt, 0);
+                auto vi = to_index(instruction->result()->index());
+                if (vi < m_value_to_operand_raw.size() && m_value_to_operand_raw[vi].has_value()) {
+                    auto raw = *m_value_to_operand_raw[vi];
+                    stacks.ensure(raw).append(instruction->result());
+                    if (!entry_sizes.contains(raw))
+                        entry_sizes.set(raw, 0);
                 }
             }
         }
@@ -277,19 +291,20 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
 
             // Fill phi operands for this predecessor
             succ->for_each_phi([&](PhiInstruction& phi) {
-                auto raw_opt = m_value_to_operand_raw.get(phi.result());
-                if (!raw_opt.has_value())
+                auto vi = to_index(phi.result()->index());
+                if (vi >= m_value_to_operand_raw.size() || !m_value_to_operand_raw[vi].has_value())
                     return;
+                auto raw = *m_value_to_operand_raw[vi];
 
                 // Get current value from stack
-                auto stack_opt = stacks.get(*raw_opt);
+                auto stack_opt = stacks.get(raw);
                 Value* reaching = nullptr;
                 if (stack_opt.has_value() && !stack_opt->is_empty()) {
                     reaching = stack_opt->last();
                 } else {
                     // No definition reaches here.
                     // Locals use the empty value (TDZ marker), registers use undefined.
-                    auto decoded = m_executable.original_operand_from_raw(*raw_opt);
+                    auto decoded = m_executable.original_operand_from_raw(raw);
                     reaching = &m_function.create_constant(
                         decoded.is_local() ? js_special_empty_value() : JS::js_undefined());
                 }

@@ -57,12 +57,12 @@ private:
     // Used by connect_control_flow() to add terminators to the correct block
     HashMap<u32, BasicBlock*> m_final_ir_block;
 
-    // Per-block definitions: maps block -> (operand raw -> Value* at end of block)
+    // Per-block definitions: indexed by block index -> (operand raw -> Value* at end of block)
     // NB: This is a cumulative snapshot, not just what's defined in the block
-    HashMap<BasicBlock*, HashMap<u32, Value*>> m_block_definitions;
+    Vector<HashMap<u32, Value*>> m_block_definitions;
 
     // Per-block actual definitions: operands ACTUALLY defined in each block (not inherited)
-    HashMap<BasicBlock*, HashTable<u32>> m_block_actual_definitions;
+    Vector<HashTable<u32>> m_block_actual_definitions;
 
     // Current block's working definitions (during lifting)
     HashMap<u32, Value*> m_current_definitions;
@@ -70,8 +70,8 @@ private:
     // Track which operands are written to (locals that may need phi nodes)
     HashTable<u32> m_written_operands;
 
-    // Reverse mapping: Value -> bytecode operand raw (for fixing references)
-    HashMap<Value*, u32> m_value_to_operand_raw;
+    // Reverse mapping: Value index -> bytecode operand raw (for fixing references)
+    Vector<Optional<u32>> m_value_to_operand_raw;
 
     // Dominator information for proper SSA construction
     OwnPtr<DominatorTree> m_dominators;

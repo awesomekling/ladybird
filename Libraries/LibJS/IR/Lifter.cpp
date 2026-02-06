@@ -17,6 +17,16 @@
 
 namespace JS::IR {
 
+static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
+template<typename T>
+static inline void ensure_index(Vector<T>& vec, size_t idx)
+{
+    if (idx >= vec.size())
+        vec.resize(idx + 1);
+}
+
 Lifter::Lifter(Bytecode::Executable const& executable)
     : m_executable(executable)
     , m_function(Function::create(&executable))
@@ -146,7 +156,9 @@ void Lifter::lift_basic_blocks()
             // This way, values defined after the throw point won't incorrectly flow to handlers.
             if (added_may_throw && !it.at_end()) {
                 // Save current block's definitions (this is the state at the throw point)
-                m_block_definitions.set(current_block, m_current_definitions);
+                auto bi = to_index(current_block->index());
+                ensure_index(m_block_definitions, bi);
+                m_block_definitions[bi] = m_current_definitions;
 
                 // Create continuation block for remaining instructions
                 auto& continuation = m_function->create_block(
@@ -166,7 +178,11 @@ void Lifter::lift_basic_blocks()
         }
 
         // Save final block's definitions (snapshot at end of block)
-        m_block_definitions.set(current_block, m_current_definitions);
+        {
+            auto bi = to_index(current_block->index());
+            ensure_index(m_block_definitions, bi);
+            m_block_definitions[bi] = m_current_definitions;
+        }
 
         // Record the final IR block for this bytecode block (after any EH splits)
         // This is the block that should receive the bytecode block's terminator
@@ -197,7 +213,9 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
         // NB: Also register in m_value_to_operand_raw so that SSA renaming can
         // replace uses with the reaching definition when the argument is reassigned.
         value = &m_function->create_parameter(decoded_operand.index());
-        m_value_to_operand_raw.set(value, raw);
+        auto vi = to_index(value->index());
+        ensure_index(m_value_to_operand_raw, vi);
+        m_value_to_operand_raw[vi] = raw;
     } else if (decoded_operand.is_register() && decoded_operand.index() == Bytecode::Register::this_value().index()) {
         // For the this register, create a special this value
         value = &m_function->create_this();
@@ -207,7 +225,9 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
         value = &m_function->create_register_value();
         // NB: Register values need the operand mapping so SSA renaming can replace
         // them with the proper reaching definition.
-        m_value_to_operand_raw.set(value, raw);
+        auto vi = to_index(value->index());
+        ensure_index(m_value_to_operand_raw, vi);
+        m_value_to_operand_raw[vi] = raw;
     }
 
     m_current_definitions.set(raw, value);
@@ -221,8 +241,12 @@ void Lifter::define_operand(Bytecode::Operand operand, Value& value, BasicBlock&
     auto raw = operand.raw();
     m_current_definitions.set(raw, &value);
     m_written_operands.set(raw);
-    m_block_actual_definitions.ensure(&block).set(raw);
-    m_value_to_operand_raw.set(&value, raw);
+    auto bi = to_index(block.index());
+    ensure_index(m_block_actual_definitions, bi);
+    m_block_actual_definitions[bi].set(raw);
+    auto vi = to_index(value.index());
+    ensure_index(m_value_to_operand_raw, vi);
+    m_value_to_operand_raw[vi] = raw;
 }
 
 template<typename BytecodeOp>
@@ -1340,9 +1364,9 @@ void Lifter::connect_control_flow()
         m_builder.set_insertion_block(&ir_block);
 
         // Restore this block's definitions so get_or_create_value_for_operand works correctly
-        auto block_defs = m_block_definitions.get(&ir_block);
-        if (block_defs.has_value())
-            m_current_definitions = *block_defs;
+        auto bi = to_index(ir_block.index());
+        if (bi < m_block_definitions.size())
+            m_current_definitions = m_block_definitions[bi];
 
         size_t start_offset = m_executable.basic_block_start_offsets[block_index];
         size_t end_offset = (block_index + 1 < m_executable.basic_block_start_offsets.size())
@@ -1539,7 +1563,11 @@ void Lifter::connect_control_flow()
         }
 
         // Save updated definitions (terminators may read operands like parameters)
-        m_block_definitions.set(&ir_block, m_current_definitions);
+        {
+            auto bi2 = to_index(ir_block.index());
+            ensure_index(m_block_definitions, bi2);
+            m_block_definitions[bi2] = m_current_definitions;
+        }
     }
 }
 

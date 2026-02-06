@@ -28,9 +28,9 @@ enum class IRStage : u8 {
 
 struct SsaConstructionData {
     HashTable<u32> written_operands;
-    HashMap<BasicBlock*, HashTable<u32>> block_actual_definitions;
-    HashMap<BasicBlock*, HashMap<u32, Value*>> block_definitions;
-    HashMap<Value*, u32> value_to_operand_raw;
+    Vector<HashTable<u32>> block_actual_definitions;
+    Vector<HashMap<u32, Value*>> block_definitions;
+    Vector<Optional<u32>> value_to_operand_raw;
 };
 
 class JS_API Function {
