@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/HashTable.h>
+#include <AK/Bitmap.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -13,17 +13,20 @@
 
 namespace JS::IR {
 
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
 PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 {
     bool changed = false;
+
+    auto value_capacity = function.values().size();
+    auto live_values = MUST(AK::Bitmap::create(value_capacity, false));
+    Vector<ValueIndex> worklist;
 
     // Step 1: Find all "live roots" - values that must be kept because they:
     // - Are used by instructions with side effects
     // - Are used by terminators
     // - Are results of instructions with side effects
-    HashTable<Value*> live_values;
-    Vector<Value*> worklist;
-
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
             bool is_live_root = instruction->is_terminator() || instruction->has_side_effects();
@@ -31,9 +34,9 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
             if (is_live_root) {
                 // All operands of live instructions are live
                 for (auto* operand : instruction->operands()) {
-                    if (operand && !live_values.contains(operand)) {
-                        live_values.set(operand);
-                        worklist.append(operand);
+                    if (operand && !live_values.get(to_index(operand->index()))) {
+                        live_values.set(to_index(operand->index()), true);
+                        worklist.append(operand->index());
                     }
                 }
             }
@@ -43,14 +46,15 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
     // Step 2: Propagate liveness backwards through operand chains
     // If a value is live, all values it depends on are also live
     while (!worklist.is_empty()) {
-        auto* value = worklist.take_last();
+        auto value_idx = worklist.take_last();
+        auto* value = function.values()[to_index(value_idx)].ptr();
 
         // If this value is defined by an instruction, its operands are also live
         if (auto* defining_instr = value->defining_instruction()) {
             for (auto* operand : defining_instr->operands()) {
-                if (operand && !live_values.contains(operand)) {
-                    live_values.set(operand);
-                    worklist.append(operand);
+                if (operand && !live_values.get(to_index(operand->index()))) {
+                    live_values.set(to_index(operand->index()), true);
+                    worklist.append(operand->index());
                 }
             }
         }
@@ -70,7 +74,7 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
                 continue;
 
             // If the result is not live, remove the instruction
-            if (!live_values.contains(instruction->result())) {
+            if (!live_values.get(to_index(instruction->result()->index()))) {
                 block->remove_instruction(i - 1);
                 changed = true;
             }
