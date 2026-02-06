@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Bytecode/Executable.h>
@@ -14,6 +17,20 @@
 #include <LibJS/IR/Forward.h>
 
 namespace JS::IR {
+
+enum class IRStage : u8 {
+    RawCFG,
+    SSA,
+    OptimizedSSA,
+    Lowered,
+};
+
+struct SsaConstructionData {
+    HashTable<u32> written_operands;
+    HashMap<BasicBlock*, HashTable<u32>> block_actual_definitions;
+    HashMap<BasicBlock*, HashMap<u32, Value*>> block_definitions;
+    HashMap<Value*, u32> value_to_operand_raw;
+};
 
 class JS_API Function {
     AK_MAKE_NONCOPYABLE(Function);
@@ -33,6 +50,13 @@ public:
     Vector<NonnullOwnPtr<Value>> const& values() const { return m_values; }
     Vector<Value*> const& parameters() const { return m_parameters; }
 
+    IRStage stage() const { return m_stage; }
+    void set_stage(IRStage stage) { m_stage = stage; }
+
+    SsaConstructionData* ssa_construction_data() { return m_ssa_construction_data.ptr(); }
+    void set_ssa_construction_data(OwnPtr<SsaConstructionData> data) { m_ssa_construction_data = move(data); }
+    void clear_ssa_construction_data() { m_ssa_construction_data = nullptr; }
+
     BasicBlock* entry_block() const { return m_entry_block; }
     void set_entry_block(BasicBlock* block) { m_entry_block = block; }
 
@@ -50,6 +74,8 @@ private:
     explicit Function(GC::Ptr<Bytecode::Executable const> source_executable);
 
     GC::Ptr<Bytecode::Executable const> m_source_executable;
+    IRStage m_stage { IRStage::RawCFG };
+    OwnPtr<SsaConstructionData> m_ssa_construction_data;
     HashMap<u32, BasicBlock*> m_source_block_map;
     Vector<NonnullOwnPtr<BasicBlock>> m_basic_blocks;
     Vector<NonnullOwnPtr<Value>> m_values;
