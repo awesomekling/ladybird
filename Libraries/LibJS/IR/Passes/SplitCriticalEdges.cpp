@@ -35,9 +35,9 @@ PreservedAnalyses SplitCriticalEdges::run(Function& function, PassManager&)
         if (true_target == false_target)
             continue;
 
-        if (true_target && true_target->predecessors().size() > 1)
+        if (true_target && true_target->predecessor_indices().size() > 1)
             edges.append({ block.ptr(), true_target });
-        if (false_target && false_target->predecessors().size() > 1)
+        if (false_target && false_target->predecessor_indices().size() > 1)
             edges.append({ block.ptr(), false_target });
     }
 

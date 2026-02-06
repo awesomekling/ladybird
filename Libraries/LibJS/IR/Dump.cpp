@@ -96,7 +96,7 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         for (size_t i = 0; i < phi.incoming_count(); ++i) {
             if (i > 0)
                 builder.append(", "sv);
-            builder.appendff("block{}:", phi.incoming_block(i)->index());
+            builder.appendff("block{}:", phi.incoming_block(i));
             if (phi.incoming_value(i))
                 dump(*phi.incoming_value(i), builder);
             else

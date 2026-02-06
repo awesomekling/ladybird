@@ -62,7 +62,7 @@ static void insert_dedicated_block(
             auto& result = function.create_value_for_instruction();
             new_phi->set_result(&result);
             for (size_t i = 0; i < predecessors_to_redirect.size(); ++i)
-                new_phi->add_incoming(predecessors_to_redirect[i], snapshot.values[i]);
+                new_phi->add_incoming(predecessors_to_redirect[i]->index(), snapshot.values[i]);
             new_block.append(move(new_phi));
             forwarded_values.append(&result);
         }
@@ -95,7 +95,8 @@ PreservedAnalyses LoopSimplify::run(Function& function, PassManager& pass_manage
         Vector<BasicBlock*> entry_preds;
         Vector<BasicBlock*> back_preds;
 
-        for (auto* pred : header->predecessors()) {
+        for (auto pred_block_index : header->predecessor_indices()) {
+            auto* pred = function.block_by_index(pred_block_index);
             auto* term = pred->terminator();
             if (!term)
                 continue;

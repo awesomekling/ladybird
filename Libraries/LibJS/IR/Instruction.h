@@ -251,9 +251,9 @@ public:
     void clear_operand_uses();
 
     // For Phi nodes
-    Vector<BasicBlock*> const& phi_predecessors() const { return m_phi_predecessors; }
-    void add_phi_operand(BasicBlock* predecessor, Value* value);
-    void set_phi_predecessor(size_t index, BasicBlock* block) { m_phi_predecessors[index] = block; }
+    Vector<BlockIndex> const& phi_predecessors() const { return m_phi_predecessors; }
+    void add_phi_operand(BlockIndex predecessor, Value* value);
+    void set_phi_predecessor(size_t index, BlockIndex block) { m_phi_predecessors[index] = block; }
     void remove_phi_operand(size_t index);
 
     // Instruction-specific indices (reuse bytecode tables)
@@ -374,7 +374,7 @@ private:
     Vector<Value*> m_operands;
 
     // For Phi
-    Vector<BasicBlock*> m_phi_predecessors;
+    Vector<BlockIndex> m_phi_predecessors;
 
     // Instruction-specific indices
     Bytecode::PropertyKeyTableIndex m_property_key_index;
@@ -536,18 +536,20 @@ public:
 
     // Read-only accessors
     size_t incoming_count() const { return phi_predecessors().size(); }
-    BasicBlock* incoming_block(size_t index) const { return phi_predecessors()[index]; }
+    BlockIndex incoming_block(size_t index) const { return phi_predecessors()[index]; }
     Value* incoming_value(size_t index) const { return operands()[index]; }
 
     // Lookup helpers - find the value/index for a given predecessor block
+    Value* incoming_value_for(BlockIndex predecessor) const;
     Value* incoming_value_for(BasicBlock const& predecessor) const;
+    void set_incoming_value_for(BlockIndex predecessor, Value* value);
     void set_incoming_value_for(BasicBlock const& predecessor, Value* value);
 
     // Atomic modification methods - these keep predecessor/value pairs in sync
-    void add_incoming(BasicBlock* predecessor, Value* value);
+    void add_incoming(BlockIndex predecessor, Value* value);
     void remove_incoming(size_t index);
-    void remove_incoming_from(BasicBlock* predecessor);
-    void set_incoming_block(size_t index, BasicBlock* block);
+    void remove_incoming_from(BlockIndex predecessor);
+    void set_incoming_block(size_t index, BlockIndex block);
     void set_incoming_value(size_t index, Value* value);
 
 private:

@@ -982,7 +982,7 @@ Value& Builder::build_new_type_error(Bytecode::StringTableIndex error_string)
 }
 
 // SSA
-Value& Builder::build_phi(Vector<Value*> values, Vector<BasicBlock*> predecessors)
+Value& Builder::build_phi(Vector<Value*> values, Vector<BlockIndex> predecessors)
 {
     VERIFY(values.size() == predecessors.size());
 

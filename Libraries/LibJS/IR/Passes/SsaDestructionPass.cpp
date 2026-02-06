@@ -54,7 +54,7 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
                 return;
 
             for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                auto* pred = phi.incoming_block(i);
+                auto* pred = function.block_by_index(phi.incoming_block(i));
                 auto* value = phi.incoming_value(i);
                 if (!pred || !value)
                     continue;

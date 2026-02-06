@@ -103,15 +103,15 @@ void BasicBlock::clear_instructions()
     m_instructions.clear();
 }
 
-void BasicBlock::add_predecessor(BasicBlock* block)
+void BasicBlock::add_predecessor(BlockIndex block)
 {
     if (!m_predecessors.contains_slow(block))
         m_predecessors.append(block);
 }
 
-void BasicBlock::remove_predecessor(BasicBlock* block)
+void BasicBlock::remove_predecessor(BlockIndex block)
 {
-    m_predecessors.remove_first_matching([block](auto* b) { return b == block; });
+    m_predecessors.remove_first_matching([block](auto b) { return b == block; });
 }
 
 bool BasicBlock::is_terminated() const
@@ -120,14 +120,14 @@ bool BasicBlock::is_terminated() const
     return last && last->is_terminator();
 }
 
-void BasicBlock::remove_phi_operands_for_predecessor(BasicBlock* predecessor)
+void BasicBlock::remove_phi_operands_for_predecessor(BlockIndex predecessor)
 {
     for_each_phi([&](PhiInstruction& phi) {
         phi.remove_incoming_from(predecessor);
     });
 }
 
-void BasicBlock::replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred)
+void BasicBlock::replace_phi_predecessor(BlockIndex old_pred, BlockIndex new_pred)
 {
     for_each_phi([&](PhiInstruction& phi) {
         for (size_t i = 0; i < phi.incoming_count(); ++i) {

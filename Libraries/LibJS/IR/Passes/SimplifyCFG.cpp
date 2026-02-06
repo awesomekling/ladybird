@@ -104,8 +104,10 @@ static bool try_eliminate_empty_blocks(Function& function)
             if (target == block.ptr())
                 continue;
 
-            // Get predecessors of the empty block
-            auto predecessors = block->predecessors();
+            // Get predecessors of the empty block (resolve to pointers for iteration)
+            Vector<BasicBlock*> predecessors;
+            for (auto predecessor_index : block->predecessor_indices())
+                predecessors.append(function.block_by_index(predecessor_index));
 
             // Don't eliminate if any predecessor would end up reaching the target
             // via two different paths with different phi values
@@ -150,8 +152,8 @@ static bool try_eliminate_empty_blocks(Function& function)
                 }
                 // If the target has predecessors other than us, eliminating would
                 // create an entry block with predecessors.
-                for (auto* pred : target->predecessors()) {
-                    if (pred != block.ptr()) {
+                for (auto pred_index : target->predecessor_indices()) {
+                    if (pred_index != block->index()) {
                         can_eliminate = false;
                         break;
                     }
@@ -227,7 +229,7 @@ static bool try_merge_blocks(Function& function)
                 continue;
 
             // B must have exactly one predecessor (A)
-            if (block_b->predecessors().size() != 1)
+            if (block_b->predecessor_indices().size() != 1)
                 continue;
 
             // B shouldn't be the entry block
@@ -323,7 +325,7 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
 
         // For each phi predecessor with a constant value, we can thread
         for (size_t i = 0; i < phi.incoming_count(); ++i) {
-            auto* pred_block = phi.incoming_block(i);
+            auto* pred_block = function.block_by_index(phi.incoming_block(i));
             auto* pred_value = phi.incoming_value(i);
 
             if (!pred_value)

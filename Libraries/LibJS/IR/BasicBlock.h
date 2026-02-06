@@ -67,7 +67,7 @@ public:
     // Use this instead of last_instruction() when you need to access CFG targets.
     TerminatorInstruction* terminator() const;
 
-    Vector<BasicBlock*> const& predecessors() const { return m_predecessors; }
+    Vector<BlockIndex> const& predecessor_indices() const { return m_predecessors; }
     void clear_predecessors() { m_predecessors.clear(); }
 
     // Exception handling (block-level)
@@ -81,10 +81,10 @@ private:
     friend class Lifter;
 
     // CFG/EH mutation methods - only accessible through CFG:: helpers or Lifter
-    void add_predecessor(BasicBlock* block);
-    void remove_predecessor(BasicBlock* block);
-    void remove_phi_operands_for_predecessor(BasicBlock* predecessor);
-    void replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred);
+    void add_predecessor(BlockIndex block);
+    void remove_predecessor(BlockIndex block);
+    void remove_phi_operands_for_predecessor(BlockIndex predecessor);
+    void replace_phi_predecessor(BlockIndex old_pred, BlockIndex new_pred);
     void set_exception_handler(BasicBlock* handler) { m_exception_handler = handler; }
     void set_finalizer(BasicBlock* finalizer) { m_finalizer = finalizer; }
 
@@ -94,7 +94,7 @@ private:
     String m_name;
     Function* m_parent_function { nullptr };
     Vector<NonnullOwnPtr<Instruction>> m_instructions;
-    Vector<BasicBlock*> m_predecessors;
+    Vector<BlockIndex> m_predecessors;
 
     BasicBlock* m_exception_handler { nullptr };
     BasicBlock* m_finalizer { nullptr };

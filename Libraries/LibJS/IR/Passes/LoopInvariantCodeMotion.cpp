@@ -28,7 +28,8 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
         // with an unconditional jump. LoopSimplify guarantees at most one
         // entry-edge predecessor, but we still validate.
         BasicBlock* preheader = nullptr;
-        for (auto* pred : header->predecessors()) {
+        for (auto pred_block_index : header->predecessor_indices()) {
+            auto* pred = function.block_by_index(pred_block_index);
             if (dom_tree.dominates(header, pred))
                 continue; // back-edge
             auto* term = pred->last_instruction();

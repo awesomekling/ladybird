@@ -85,12 +85,12 @@ LoopTree::LoopTree(Function const& function, DominatorTree const& dom_tree)
             while (!worklist.is_empty()) {
                 auto block_idx = worklist.dequeue();
                 auto* block = m_block_table[to_index(block_idx)];
-                for (auto* pred : block->predecessors()) {
-                    auto pi = to_index(pred->index());
+                for (auto predecessor : block->predecessor_indices()) {
+                    auto pi = to_index(predecessor);
                     if (!loop->m_blocks.get(pi)) {
                         loop->m_blocks.set(pi, true);
                         ++loop->m_block_count;
-                        worklist.enqueue(pred->index());
+                        worklist.enqueue(predecessor);
                     }
                 }
             }

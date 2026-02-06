@@ -43,7 +43,7 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.compute_block_predecessors();
 
     // SSA requires the entry block to have no predecessors.
-    if (auto* entry = lifter.m_function->entry_block(); entry && !entry->predecessors().is_empty()) {
+    if (auto* entry = lifter.m_function->entry_block(); entry && !entry->predecessor_indices().is_empty()) {
         auto& new_entry = lifter.m_function->create_block("entry"_string);
         lifter.m_builder.set_insertion_block(&new_entry);
         lifter.m_builder.build_jump(*entry);

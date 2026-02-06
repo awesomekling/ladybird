@@ -15,25 +15,25 @@ namespace JS::IR {
 void CFG::remove_predecessor(BasicBlock& block, BasicBlock& predecessor)
 {
     // Remove phi operands for this predecessor first (uses existing helper)
-    block.remove_phi_operands_for_predecessor(&predecessor);
+    block.remove_phi_operands_for_predecessor(predecessor.index());
 
     // Remove from predecessor list
-    block.remove_predecessor(&predecessor);
+    block.remove_predecessor(predecessor.index());
 }
 
 void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Function<Value*(Instruction&)> value_for_phi)
 {
     // Don't add duplicates
-    if (block.predecessors().contains_slow(&predecessor))
+    if (block.predecessor_indices().contains_slow(predecessor.index()))
         return;
 
     // Add to predecessor list
-    block.add_predecessor(&predecessor);
+    block.add_predecessor(predecessor.index());
 
     // Add corresponding phi operands
     block.for_each_phi([&](PhiInstruction& phi) {
         Value* value = value_for_phi ? value_for_phi(phi) : nullptr;
-        phi.add_incoming(&predecessor, value);
+        phi.add_incoming(predecessor.index(), value);
     });
 }
 
@@ -43,22 +43,22 @@ void CFG::replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBloc
         return;
 
     // Only replace if old_pred is actually a predecessor of this block
-    if (!block.predecessors().contains_slow(&old_pred))
+    if (!block.predecessor_indices().contains_slow(old_pred.index()))
         return;
 
     // If new_pred is already a predecessor, just remove old_pred entirely.
     // Replacing would create duplicate phi entries for new_pred.
-    if (block.predecessors().contains_slow(&new_pred)) {
+    if (block.predecessor_indices().contains_slow(new_pred.index())) {
         remove_predecessor(block, old_pred);
         return;
     }
 
     // Use existing helper which updates both predecessor list and phi predecessors
-    block.replace_phi_predecessor(&old_pred, &new_pred);
+    block.replace_phi_predecessor(old_pred.index(), new_pred.index());
 
     // Also update the predecessor list
-    block.remove_predecessor(&old_pred);
-    block.add_predecessor(&new_pred);
+    block.remove_predecessor(old_pred.index());
+    block.add_predecessor(new_pred.index());
 }
 
 void CFG::redirect_edge(BasicBlock& from_block, BasicBlock& old_target, BasicBlock& new_target, AK::Function<Value*(Instruction&)> value_mapper)

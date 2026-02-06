@@ -115,13 +115,13 @@ void SSAConstruction::place_phi_nodes()
             if (!phi_blocks.get(bi))
                 continue;
             auto* block = block_table[bi];
-            auto const& preds = block->predecessors();
+            auto const& preds = block->predecessor_indices();
             if (preds.is_empty())
                 continue;
 
             // Create an empty phi (we'll fill operands in phase 2)
             Vector<Value*> empty_values;
-            Vector<BasicBlock*> empty_blocks;
+            Vector<BlockIndex> empty_blocks;
             for (size_t i = 0; i < preds.size(); ++i) {
                 empty_values.append(nullptr);
                 empty_blocks.append(preds[i]);
@@ -302,9 +302,9 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
 
             // Find our index in the successor's predecessor list
             size_t pred_index = SIZE_MAX;
-            auto const& phi_preds = succ->predecessors();
+            auto const& phi_preds = succ->predecessor_indices();
             for (size_t i = 0; i < phi_preds.size(); ++i) {
-                if (phi_preds[i] == &block) {
+                if (phi_preds[i] == block.index()) {
                     pred_index = i;
                     break;
                 }

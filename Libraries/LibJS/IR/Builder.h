@@ -217,7 +217,7 @@ public:
     [[nodiscard]] Value& build_new_type_error(Bytecode::StringTableIndex error_string);
 
     // SSA
-    [[nodiscard]] Value& build_phi(Vector<Value*> values, Vector<BasicBlock*> predecessors);
+    [[nodiscard]] Value& build_phi(Vector<Value*> values, Vector<BlockIndex> predecessors);
 
 private:
     BasicBlock& current_block();

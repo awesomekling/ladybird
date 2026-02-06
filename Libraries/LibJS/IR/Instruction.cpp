@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Type.h>
 #include <LibJS/IR/Value.h>
@@ -66,7 +67,7 @@ NonnullOwnPtr<PhiInstruction> PhiInstruction::create()
     return adopt_own(*new PhiInstruction());
 }
 
-void PhiInstruction::add_incoming(BasicBlock* predecessor, Value* value)
+void PhiInstruction::add_incoming(BlockIndex predecessor, Value* value)
 {
     add_phi_operand(predecessor, value);
 }
@@ -76,7 +77,7 @@ void PhiInstruction::remove_incoming(size_t index)
     remove_phi_operand(index);
 }
 
-void PhiInstruction::remove_incoming_from(BasicBlock* predecessor)
+void PhiInstruction::remove_incoming_from(BlockIndex predecessor)
 {
     for (size_t i = phi_predecessors().size(); i > 0; --i) {
         if (phi_predecessors()[i - 1] == predecessor) {
@@ -86,19 +87,24 @@ void PhiInstruction::remove_incoming_from(BasicBlock* predecessor)
     }
 }
 
-Value* PhiInstruction::incoming_value_for(BasicBlock const& predecessor) const
+Value* PhiInstruction::incoming_value_for(BlockIndex predecessor) const
 {
     for (size_t i = 0; i < incoming_count(); ++i) {
-        if (incoming_block(i) == &predecessor)
+        if (incoming_block(i) == predecessor)
             return incoming_value(i);
     }
     return nullptr;
 }
 
-void PhiInstruction::set_incoming_value_for(BasicBlock const& predecessor, Value* value)
+Value* PhiInstruction::incoming_value_for(BasicBlock const& predecessor) const
+{
+    return incoming_value_for(predecessor.index());
+}
+
+void PhiInstruction::set_incoming_value_for(BlockIndex predecessor, Value* value)
 {
     for (size_t i = 0; i < incoming_count(); ++i) {
-        if (incoming_block(i) == &predecessor) {
+        if (incoming_block(i) == predecessor) {
             set_incoming_value(i, value);
             return;
         }
@@ -106,7 +112,12 @@ void PhiInstruction::set_incoming_value_for(BasicBlock const& predecessor, Value
     VERIFY_NOT_REACHED();
 }
 
-void PhiInstruction::set_incoming_block(size_t index, BasicBlock* block)
+void PhiInstruction::set_incoming_value_for(BasicBlock const& predecessor, Value* value)
+{
+    set_incoming_value_for(predecessor.index(), value);
+}
+
+void PhiInstruction::set_incoming_block(size_t index, BlockIndex block)
 {
     set_phi_predecessor(index, block);
 }
@@ -230,7 +241,7 @@ void Instruction::remove_phi_operand(size_t index)
     m_operands.remove(index);
 }
 
-void Instruction::add_phi_operand(BasicBlock* predecessor, Value* value)
+void Instruction::add_phi_operand(BlockIndex predecessor, Value* value)
 {
     VERIFY(m_opcode == Opcode::Phi);
     m_phi_predecessors.append(predecessor);

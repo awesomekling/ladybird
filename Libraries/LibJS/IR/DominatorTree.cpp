@@ -151,12 +151,12 @@ void DominatorTree::compute_dominators()
 
             // Find first processed predecessor
             Optional<BlockIndex> new_idom;
-            for (auto* pred : block->predecessors()) {
-                if (m_immediate_dominator[to_index(pred->index())].has_value()) {
+            for (auto predecessor : block->predecessor_indices()) {
+                if (m_immediate_dominator[to_index(predecessor)].has_value()) {
                     if (!new_idom.has_value()) {
-                        new_idom = pred->index();
+                        new_idom = predecessor;
                     } else {
-                        new_idom = intersect(*new_idom, pred->index());
+                        new_idom = intersect(*new_idom, predecessor);
                         if (!new_idom.has_value())
                             break;
                     }
@@ -189,12 +189,12 @@ void DominatorTree::ensure_dominance_frontiers() const
 
     for (auto block_idx : m_reverse_postorder) {
         auto* block = m_block_table[to_index(block_idx)];
-        auto const& preds = block->predecessors();
+        auto const& preds = block->predecessor_indices();
         if (preds.size() < 2)
             continue; // Only join points have non-empty dominance frontiers contributed here
 
-        for (auto* pred : preds) {
-            auto runner_idx = pred->index();
+        for (auto predecessor : preds) {
+            auto runner_idx = predecessor;
             auto const& block_idom = m_immediate_dominator[to_index(block_idx)];
             while (m_block_table[to_index(runner_idx)] && (!block_idom.has_value() || runner_idx != *block_idom)) {
                 auto runner_i = to_index(runner_idx);

@@ -57,7 +57,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         all_blocks.set(to_index(block->index()), true);
 
     // Check: Entry block has no predecessors
-    if (function.entry_block() && !function.entry_block()->predecessors().is_empty()) {
+    if (function.entry_block() && !function.entry_block()->predecessor_indices().is_empty()) {
         report_error("Entry block has predecessors"sv);
     }
 
@@ -138,19 +138,19 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
         // Check: Predecessor list has no duplicates
         {
-            HashTable<BasicBlock*> seen_preds;
-            for (auto* pred : block->predecessors()) {
+            HashTable<BlockIndex> seen_preds;
+            for (auto pred : block->predecessor_indices()) {
                 if (seen_preds.contains(pred)) {
                     report_error(ByteString::formatted(
                         "Block{} has duplicate predecessor block{}",
-                        block->index(), pred->index()));
+                        block->index(), pred));
                 }
                 seen_preds.set(pred);
             }
         }
 
-        HashTable<BasicBlock*> block_predecessor_set;
-        for (auto* pred : block->predecessors())
+        HashTable<BlockIndex> block_predecessor_set;
+        for (auto pred : block->predecessor_indices())
             block_predecessor_set.set(pred);
 
         // Check: Block structure invariants
@@ -213,16 +213,16 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
                 // Check: Phi predecessors ⊆ block predecessors
                 for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                    auto* phi_pred = phi.incoming_block(i);
+                    auto phi_pred = phi.incoming_block(i);
                     if (!block_predecessor_set.contains(phi_pred)) {
                         report_error(ByteString::formatted(
                             "Phi in block{} has predecessor block{} not in block's predecessor list",
-                            block->index(), phi_pred->index()));
+                            block->index(), phi_pred));
                     }
                 }
 
                 // Check: Block predecessors ⊆ phi predecessors (phi covers all preds)
-                for (auto* pred : block->predecessors()) {
+                for (auto pred : block->predecessor_indices()) {
                     bool found = false;
                     for (size_t i = 0; i < phi.incoming_count(); ++i) {
                         if (phi.incoming_block(i) == pred) {
@@ -233,19 +233,19 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     if (!found) {
                         report_error(ByteString::formatted(
                             "Phi in block{} missing incoming entry for predecessor block{}",
-                            block->index(), pred->index()));
+                            block->index(), pred));
                     }
                 }
 
                 // Check: Phi predecessor uniqueness (no duplicate incoming blocks)
                 {
-                    HashTable<BasicBlock*> seen_phi_preds;
+                    HashTable<BlockIndex> seen_phi_preds;
                     for (size_t i = 0; i < phi.incoming_count(); ++i) {
-                        auto* phi_pred = phi.incoming_block(i);
+                        auto phi_pred = phi.incoming_block(i);
                         if (seen_phi_preds.contains(phi_pred)) {
                             report_error(ByteString::formatted(
                                 "Phi in block{} has duplicate predecessor block{}",
-                                block->index(), phi_pred->index()));
+                                block->index(), phi_pred));
                         }
                         seen_phi_preds.set(phi_pred);
                     }
@@ -452,28 +452,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
 
                 if (auto* true_target = term->true_target()) {
-                    bool found = false;
-                    for (auto* pred : true_target->predecessors()) {
-                        if (pred == block.ptr()) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
+                    if (!true_target->predecessor_indices().contains_slow(block->index())) {
                         report_error(ByteString::formatted(
                             "Block{} has successor block{} but is not in its predecessor list",
                             block->index(), true_target->index()));
                     }
                 }
                 if (auto* false_target = term->false_target()) {
-                    bool found = false;
-                    for (auto* pred : false_target->predecessors()) {
-                        if (pred == block.ptr()) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
+                    if (!false_target->predecessor_indices().contains_slow(block->index())) {
                         report_error(ByteString::formatted(
                             "Block{} has successor block{} but is not in its predecessor list",
                             block->index(), false_target->index()));
@@ -500,26 +486,25 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         for (auto const& block : function.basic_blocks()) {
             if (!reachable.get(to_index(block->index())))
                 continue;
-            auto const& stored_preds = block->predecessors();
+            auto const& stored_preds = block->predecessor_indices();
             auto& expected_preds = computed_preds[to_index(block->index())];
 
             // Check: Every stored predecessor should be a computed predecessor.
             // In InterPass mode, skip unreachable predecessors since they may
             // have stale edges that DeadBlockElimination will clean up.
-            for (auto* pred : stored_preds) {
-                if (!full_mode && !reachable.get(to_index(pred->index())))
+            for (auto pred : stored_preds) {
+                if (!full_mode && !reachable.get(to_index(pred)))
                     continue;
-                if (!expected_preds.contains(pred)) {
+                if (!expected_preds.contains(function.block_by_index(pred))) {
                     report_error(ByteString::formatted(
                         "Block{} has predecessor block{} in stored list but no edge exists",
-                        block->index(), pred->index()));
+                        block->index(), pred));
                 }
             }
 
             // Check: Every computed predecessor should be a stored predecessor
             for (auto* pred : expected_preds) {
-                bool found = stored_preds.contains_slow(pred);
-                if (!found) {
+                if (!stored_preds.contains_slow(pred->index())) {
                     report_error(ByteString::formatted(
                         "Block{} is missing predecessor block{} (has edge but not in list)",
                         block->index(), pred->index()));
@@ -654,13 +639,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 auto const& phi = static_cast<PhiInstruction const&>(*instr);
                 for (size_t i = 0; i < phi.incoming_count(); ++i) {
                     auto* operand = phi.incoming_value(i);
-                    auto* pred = phi.incoming_block(i);
+                    auto pred_block_index = phi.incoming_block(i);
+                    auto* pred = function.block_by_index(pred_block_index);
                     if (!operand)
                         continue;
 
                     // In InterPass mode, skip unreachable predecessors — they may have
                     // stale phi entries that DeadBlockElimination will clean up.
-                    if (!full_mode && !reachable.get(to_index(pred->index())))
+                    if (!full_mode && !reachable.get(to_index(pred_block_index)))
                         continue;
 
                     // Skip constants, parameters, and this values - they dominate everything
