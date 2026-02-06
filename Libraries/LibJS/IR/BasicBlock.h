@@ -30,6 +30,13 @@ public:
 
     ReadonlySpan<NonnullOwnPtr<Instruction>> instructions() const { return m_instructions.span(); }
 
+    // Iterate over phi instructions at the start of this block.
+    // Phis are always first; iteration stops at the first non-phi.
+    template<typename Callback>
+    void for_each_phi(Callback callback);
+    template<typename Callback>
+    void for_each_phi(Callback callback) const;
+
     void append(NonnullOwnPtr<Instruction> instruction);
     void prepend(NonnullOwnPtr<Instruction> instruction);
     Instruction* last_instruction() const;
@@ -92,5 +99,32 @@ private:
     BasicBlock* m_exception_handler { nullptr };
     BasicBlock* m_finalizer { nullptr };
 };
+
+}
+
+// Template implementations (requires full Instruction definition).
+#include <LibJS/IR/Instruction.h>
+
+namespace JS::IR {
+
+template<typename Callback>
+void BasicBlock::for_each_phi(Callback callback)
+{
+    for (auto& instr : m_instructions) {
+        if (instr->opcode() != Opcode::Phi)
+            break;
+        callback(static_cast<PhiInstruction&>(*instr));
+    }
+}
+
+template<typename Callback>
+void BasicBlock::for_each_phi(Callback callback) const
+{
+    for (auto const& instr : m_instructions) {
+        if (instr->opcode() != Opcode::Phi)
+            break;
+        callback(static_cast<PhiInstruction const&>(*instr));
+    }
+}
 
 }

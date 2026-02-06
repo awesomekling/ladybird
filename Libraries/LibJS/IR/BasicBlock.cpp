@@ -122,27 +122,21 @@ bool BasicBlock::is_terminated() const
 
 void BasicBlock::remove_phi_operands_for_predecessor(BasicBlock* predecessor)
 {
-    for (auto& instr : m_instructions) {
-        if (instr->opcode() != Opcode::Phi)
-            break;
-        auto& phi = static_cast<PhiInstruction&>(*instr);
+    for_each_phi([&](PhiInstruction& phi) {
         phi.remove_incoming_from(predecessor);
-    }
+    });
 }
 
 void BasicBlock::replace_phi_predecessor(BasicBlock* old_pred, BasicBlock* new_pred)
 {
-    for (auto& instr : m_instructions) {
-        if (instr->opcode() != Opcode::Phi)
-            break;
-        auto& phi = static_cast<PhiInstruction&>(*instr);
+    for_each_phi([&](PhiInstruction& phi) {
         for (size_t i = 0; i < phi.incoming_count(); ++i) {
             if (phi.incoming_block(i) == old_pred) {
                 phi.set_incoming_block(i, new_pred);
                 break;
             }
         }
-    }
+    });
 }
 
 }

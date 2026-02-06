@@ -141,13 +141,10 @@ void SSAConstruction::fill_phi_operands()
 
     // Compute phi types by joining incoming value types.
     for (auto& block : m_function.basic_blocks()) {
-        for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break;
-
-            auto const& operands = instruction->operands();
+        block->for_each_phi([&](PhiInstruction& phi) {
+            auto const& operands = phi.operands();
             if (operands.is_empty())
-                continue;
+                return;
 
             Type phi_type = Type::Unknown;
             bool first = true;
@@ -165,14 +162,14 @@ void SSAConstruction::fill_phi_operands()
             }
 
             if (phi_type != Type::Unknown)
-                instruction->result()->set_type(phi_type);
+                phi.result()->set_type(phi_type);
 
             // Re-derive result types for users whose types depend on operand
             // types, since the Phi's type may have widened after these
             // instructions were created (e.g. int32 -> number).
-            for (auto* user : instruction->result()->uses())
+            for (auto* user : phi.result()->uses())
                 user->recompute_result_type();
-        }
+        });
     }
 }
 
@@ -211,17 +208,14 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
         }
 
         // Process phis first - they define values at block entry
-        for (auto& instruction : block.instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break;
-
-            auto raw_opt = m_value_to_operand_raw.get(instruction->result());
+        block.for_each_phi([&](PhiInstruction const& phi) {
+            auto raw_opt = m_value_to_operand_raw.get(phi.result());
             if (raw_opt.has_value()) {
-                stacks.ensure(*raw_opt).append(instruction->result());
+                stacks.ensure(*raw_opt).append(phi.result());
                 if (!entry_sizes.contains(*raw_opt))
                     entry_sizes.set(*raw_opt, 0);
             }
-        }
+        });
 
         // Rewrite operand uses in non-phi instructions and push new definitions
         for (auto& instruction : block.instructions()) {
@@ -282,14 +276,10 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 return;
 
             // Fill phi operands for this predecessor
-            for (auto& instruction : succ->instructions()) {
-                if (instruction->opcode() != Opcode::Phi)
-                    break;
-
-                auto& phi = static_cast<PhiInstruction&>(*instruction);
+            succ->for_each_phi([&](PhiInstruction& phi) {
                 auto raw_opt = m_value_to_operand_raw.get(phi.result());
                 if (!raw_opt.has_value())
-                    continue;
+                    return;
 
                 // Get current value from stack
                 auto stack_opt = stacks.get(*raw_opt);
@@ -305,7 +295,7 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 }
 
                 phi.set_incoming_value_for(block, reaching);
-            }
+            });
         };
 
         // Fill phis for all CFG successors

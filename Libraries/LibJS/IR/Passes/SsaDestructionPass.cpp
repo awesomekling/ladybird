@@ -47,15 +47,11 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
     bool has_any_phis = false;
 
     for (auto& block : function.basic_blocks()) {
-        for (auto const& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                break;
-
+        block->for_each_phi([&](PhiInstruction const& phi) {
             has_any_phis = true;
-            auto const& phi = static_cast<PhiInstruction const&>(*instruction);
             auto* phi_result = phi.result();
             if (!phi_result)
-                continue;
+                return;
 
             for (size_t i = 0; i < phi.incoming_count(); ++i) {
                 auto* pred = phi.incoming_block(i);
@@ -85,7 +81,7 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
                     normal_edge_copies.ensure(key).append({ phi_result, value });
                 }
             }
-        }
+        });
     }
 
     if (!has_any_phis)

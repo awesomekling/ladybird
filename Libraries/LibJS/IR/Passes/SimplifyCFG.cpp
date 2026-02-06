@@ -390,16 +390,11 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             // Precompute traced phi values before redirect_edge removes pred_block
             // from the bypassed block's phis (which would break tracing).
             HashMap<Instruction*, Value*> traced_values;
-            for (auto& instr : thread_target->instructions()) {
-                if (instr->opcode() != Opcode::Phi)
-                    break;
-
-                auto& target_phi = static_cast<PhiInstruction&>(*instr);
-
+            thread_target->for_each_phi([&](PhiInstruction& target_phi) {
                 auto* value_from_bypassed = target_phi.incoming_value_for(*block);
 
                 if (!value_from_bypassed)
-                    continue;
+                    return;
 
                 // If value_from_bypassed is a phi in the bypassed block, trace to find
                 // what value pred_block would contribute
@@ -407,11 +402,11 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
                     def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
                     auto& def_phi = static_cast<PhiInstruction&>(*def);
                     if (auto* traced = def_phi.incoming_value_for(*pred_block))
-                        traced_values.set(instr.ptr(), traced);
+                        traced_values.set(&target_phi, traced);
                 } else {
-                    traced_values.set(instr.ptr(), value_from_bypassed);
+                    traced_values.set(&target_phi, value_from_bypassed);
                 }
-            }
+            });
 
             CFG::redirect_edge(*pred_block, *block, *thread_target, [&](Instruction& instr) -> Value* {
                 if (auto it = traced_values.find(&instr); it != traced_values.end())
@@ -463,13 +458,10 @@ static bool try_eliminate_unreachable_blocks(Function& function)
     // the phi result with that operand value
     HashMap<Value*, Value*> dead_phi_replacements;
     for (auto* dead_block : dead_blocks) {
-        for (auto const& instruction : dead_block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                continue;
-
-            auto const& operands = instruction->operands();
+        dead_block->for_each_phi([&](PhiInstruction const& phi) {
+            auto const& operands = phi.operands();
             if (operands.is_empty())
-                continue;
+                return;
 
             // Check if all operands are the same
             Value* replacement = operands[0];
@@ -481,9 +473,9 @@ static bool try_eliminate_unreachable_blocks(Function& function)
                 }
             }
 
-            if (all_same && replacement && instruction->result())
-                dead_phi_replacements.set(instruction->result(), replacement);
-        }
+            if (all_same && replacement && phi.result())
+                dead_phi_replacements.set(phi.result(), replacement);
+        });
     }
 
     // Replace uses of dead phi results in live blocks

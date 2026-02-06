@@ -45,13 +45,10 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     // replace the phi result with that value.
     // Example: v1 = Move v0; v2 = Move v0; v = Phi [v1, v2] → v = v0
     for (auto& block : function.basic_blocks()) {
-        for (auto& instruction : block->instructions()) {
-            if (instruction->opcode() != Opcode::Phi)
-                continue;
-
-            auto const& operands = instruction->operands();
+        block->for_each_phi([&](PhiInstruction& phi) {
+            auto const& operands = phi.operands();
             if (operands.is_empty())
-                continue;
+                return;
 
             // Check if all operands resolve to the same ultimate source
             Value* common_value = nullptr;
@@ -68,11 +65,11 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
                 }
             }
 
-            if (all_same && common_value && instruction->result()) {
-                instruction->result()->replace_all_uses_with(common_value);
+            if (all_same && common_value && phi.result()) {
+                phi.result()->replace_all_uses_with(common_value);
                 changed = true;
             }
-        }
+        });
     }
 
     if (copies.is_empty())

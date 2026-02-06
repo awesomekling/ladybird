@@ -31,14 +31,10 @@ void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Functi
     block.add_predecessor(&predecessor);
 
     // Add corresponding phi operands
-    for (auto& instruction : block.instructions()) {
-        if (instruction->opcode() != Opcode::Phi)
-            break; // Phis are always first
-
-        auto& phi = static_cast<PhiInstruction&>(*instruction);
-        Value* value = value_for_phi ? value_for_phi(*instruction) : nullptr;
+    block.for_each_phi([&](PhiInstruction& phi) {
+        Value* value = value_for_phi ? value_for_phi(phi) : nullptr;
         phi.add_incoming(&predecessor, value);
-    }
+    });
 }
 
 void CFG::replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred)

@@ -35,15 +35,12 @@ static void insert_dedicated_block(
     };
     Vector<PhiSnapshot> snapshots;
 
-    for (auto const& instruction : target.instructions()) {
-        if (instruction->opcode() != Opcode::Phi)
-            break;
-        auto& phi = static_cast<PhiInstruction&>(*instruction);
+    target.for_each_phi([&](PhiInstruction& phi) {
         PhiSnapshot snapshot;
         for (auto* pred : predecessors_to_redirect)
             snapshot.values.append(phi.incoming_value_for(*pred));
         snapshots.append(move(snapshot));
-    }
+    });
 
     // Step 2: Redirect each predecessor from target to new_block.
     // NB: new_block has no phis yet, so redirect_edge won't create any
