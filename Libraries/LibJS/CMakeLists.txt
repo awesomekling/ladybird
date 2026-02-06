@@ -302,6 +302,20 @@ endif()
 
 target_link_libraries(LibJS PUBLIC JSClangPlugin)
 
+if (ENABLE_RUST_PARSER)
+    include(FetchContent)
+    FetchContent_Declare(
+        Corrosion
+        GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+        GIT_TAG v0.5.1
+    )
+    FetchContent_MakeAvailable(Corrosion)
+
+    corrosion_import_crate(MANIFEST_PATH rust_parser/Cargo.toml)
+    target_link_libraries(LibJS PRIVATE libjs_rust_parser)
+    target_compile_definitions(LibJS PRIVATE ENABLE_RUST_PARSER)
+endif()
+
 if (WIN32 AND ENABLE_ADDRESS_SANITIZER)
     # FIXME: Fix address sanitizer stack-overflow error when running test-js.
     # Even tripling the stack size for this target to 24MB didn't fix it, so it is most likely some ASAN related bug/quirk given test-js passes using the 8MB stack without ASAN
