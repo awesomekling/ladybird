@@ -42,13 +42,13 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
             continue;
 
         // Find loop-invariant instructions in loop body blocks (not the header).
-        for (auto* loop_block : loop->blocks()) {
-            if (loop_block == header)
-                continue; // Don't hoist from header (has phi nodes)
+        loop->for_each_block([&](BasicBlock& loop_block) {
+            if (&loop_block == header)
+                return; // Don't hoist from header (has phi nodes)
 
             Vector<Instruction*> to_hoist;
 
-            for (auto const& instruction : loop_block->instructions()) {
+            for (auto const& instruction : loop_block.instructions()) {
                 if (!instruction->result())
                     continue;
 
@@ -82,9 +82,9 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
             // Move instructions to preheader (insert before the jump)
             for (auto* instruction : to_hoist) {
                 NonnullOwnPtr<Instruction> owned_instr = [&]() -> NonnullOwnPtr<Instruction> {
-                    for (size_t i = 0; i < loop_block->instructions().size(); ++i) {
-                        if (loop_block->instructions()[i].ptr() == instruction) {
-                            return loop_block->take_instruction(i);
+                    for (size_t i = 0; i < loop_block.instructions().size(); ++i) {
+                        if (loop_block.instructions()[i].ptr() == instruction) {
+                            return loop_block.take_instruction(i);
                         }
                     }
                     VERIFY_NOT_REACHED();
@@ -94,7 +94,7 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
 
                 changed = true;
             }
-        }
+        });
     }
 
     return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
