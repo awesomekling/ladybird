@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/HashMap.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
@@ -13,30 +12,37 @@
 
 namespace JS::IR {
 
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
 PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
 {
     bool changed = false;
 
+    auto value_capacity = function.values().size();
+
     // Build a map of copy relationships: if v1 = Move v0, then copies[v1] = v0
     // NB: We don't propagate through phi nodes since they represent merge points
-    HashMap<Value*, Value*> copies;
+    Vector<Optional<ValueIndex>> copies;
+    copies.resize(value_capacity);
+    bool has_copies = false;
 
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
             if (instruction->opcode() == Opcode::Move && instruction->result()) {
                 auto* src = instruction->operands()[0];
-                copies.set(instruction->result(), src);
+                copies[to_index(instruction->result()->index())] = src->index();
+                has_copies = true;
             }
         }
     }
 
     // Helper to follow the copy chain to find the ultimate source
-    auto resolve = [&](Value* v) -> Value* {
+    auto resolve = [&](ValueIndex v) -> ValueIndex {
         for (;;) {
-            auto source = copies.get(v);
-            if (!source.has_value())
+            auto vi = to_index(v);
+            if (vi >= copies.size() || !copies[vi].has_value())
                 break;
-            v = *source;
+            v = *copies[vi];
         }
         return v;
     };
@@ -51,28 +57,29 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
                 return;
 
             // Check if all operands resolve to the same ultimate source
-            Value* common_value = nullptr;
+            Optional<ValueIndex> common_idx;
             bool all_same = true;
             for (auto* operand : operands) {
                 if (!operand)
                     continue;
-                auto* resolved = resolve(operand);
-                if (!common_value) {
-                    common_value = resolved;
-                } else if (resolved != common_value) {
+                auto resolved = resolve(operand->index());
+                if (!common_idx.has_value()) {
+                    common_idx = resolved;
+                } else if (resolved != *common_idx) {
                     all_same = false;
                     break;
                 }
             }
 
-            if (all_same && common_value && phi.result()) {
+            if (all_same && common_idx.has_value() && phi.result()) {
+                auto* common_value = function.values()[to_index(*common_idx)].ptr();
                 phi.result()->replace_all_uses_with(common_value);
                 changed = true;
             }
         });
     }
 
-    if (copies.is_empty())
+    if (!has_copies)
         return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();
 
     // Replace uses of copied values with their sources
@@ -80,17 +87,14 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
         for (auto& instruction : block->instructions()) {
             for (size_t i = 0; i < instruction->operands().size(); ++i) {
                 auto* operand = instruction->operands()[i];
+                if (!operand)
+                    continue;
 
                 // Follow the copy chain to find the ultimate source
-                auto* replacement = operand;
-                for (;;) {
-                    auto source = copies.get(replacement);
-                    if (!source.has_value())
-                        break;
-                    replacement = *source;
-                }
+                auto resolved = resolve(operand->index());
 
-                if (replacement != operand) {
+                if (resolved != operand->index()) {
+                    auto* replacement = function.values()[to_index(resolved)].ptr();
                     instruction->set_operand(i, replacement);
                     changed = true;
                 }
