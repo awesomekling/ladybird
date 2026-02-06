@@ -1022,32 +1022,25 @@ impl<'a> Parser<'a> {
 
         self.save_state();
 
-        // Parse parameters
+        let (params, function_length);
+
         if expect_parens {
             if !self.match_token(TokenType::ParenOpen) {
                 self.load_state();
                 return None;
             }
-            self.consume();
-            // Skip parameter parsing for now - just find matching )
-            let mut depth = 1;
-            while depth > 0 && !self.done() {
-                match self.current_token_type() {
-                    TokenType::ParenOpen => depth += 1,
-                    TokenType::ParenClose => depth -= 1,
-                    _ => {}
-                }
-                if depth > 0 {
-                    self.consume();
-                }
-            }
-            if self.match_token(TokenType::ParenClose) {
-                self.consume();
-            }
+            let result = self.parse_formal_parameters();
+            params = result.0;
+            function_length = result.1;
         } else {
             // Single parameter (identifier)
             if self.match_identifier() {
-                self.consume();
+                let param_start = self.position();
+                let tok = self.consume();
+                let value = self.token_value(&tok).to_vec();
+                let binding = self.builder.create_identifier(self.span_from(param_start), &value);
+                params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false]);
+                function_length = 1;
             } else {
                 self.load_state();
                 return None;
@@ -1064,28 +1057,17 @@ impl<'a> Parser<'a> {
         // Discard saved state - we're committed to arrow function
         self.discard_saved_state();
 
-        // Parse arrow function body
-        let params = self.builder.create_function_parameters_empty();
         let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
 
         if self.match_token(TokenType::CurlyOpen) {
-            // Block body
-            let body = self.builder.create_function_body(self.span_from(start));
-            self.consume_token(TokenType::CurlyOpen);
-
-            let in_function_before = self.in_function_context;
-            self.in_function_context = true;
-            self.parse_statement_list(body, false);
-            self.in_function_context = in_function_before;
-
-            self.consume_token(TokenType::CurlyClose);
+            let body = self.parse_function_body(is_async, false);
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
                 start.2, self.position().2 - start.2,
-                body, params, 0, kind,
-                self.strict_mode, true,
+                body.0, params, function_length, kind,
+                self.strict_mode || body.1, true,
                 false, false, false, false,
             ))
         } else {
@@ -1099,7 +1081,7 @@ impl<'a> Parser<'a> {
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
                 start.2, self.position().2 - start.2,
-                body, params, 0, kind,
+                body, params, function_length, kind,
                 self.strict_mode, true,
                 false, false, false, false,
             ))

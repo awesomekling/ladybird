@@ -29,7 +29,11 @@ impl<'a> Parser<'a> {
                 self.register_var_scoped_declaration(decl);
                 decl
             }
-            TokenType::Class => self.parse_class_declaration(),
+            TokenType::Class => {
+                let decl = self.parse_class_declaration();
+                self.register_lexical_declaration(decl);
+                decl
+            }
             TokenType::Let | TokenType::Const => {
                 let decl = self.parse_variable_declaration(false);
                 self.register_lexical_declaration(decl);
@@ -244,6 +248,7 @@ impl<'a> Parser<'a> {
         // Class body
         self.consume_token(TokenType::CurlyOpen);
         let mut elements = Vec::new();
+        let mut constructor_func = NULL_HANDLE;
 
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::Semicolon) {
@@ -251,8 +256,13 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let element = self.parse_class_element();
-            elements.push(element);
+            let (element, maybe_ctor) = self.parse_class_element();
+            if let Some(ctor) = maybe_ctor {
+                constructor_func = ctor;
+                // Constructor is NOT included in elements
+            } else {
+                elements.push(element);
+            }
         }
 
         self.consume_token(TokenType::CurlyClose);
@@ -261,7 +271,7 @@ impl<'a> Parser<'a> {
         self.builder.create_class_expression(
             self.span_from(start), name,
             start.2, self.position().2 - start.2,
-            NULL_HANDLE, super_class,
+            constructor_func, super_class,
             &elements,
         )
     }
@@ -272,7 +282,7 @@ impl<'a> Parser<'a> {
         self.builder.create_class_declaration(self.span_from(start), class_expr)
     }
 
-    fn parse_class_element(&mut self) -> NodeHandle {
+    fn parse_class_element(&mut self) -> (NodeHandle, Option<NodeHandle>) {
         let start = self.position();
         let is_static = if self.match_token(TokenType::Static) {
             self.consume();
@@ -285,7 +295,7 @@ impl<'a> Parser<'a> {
                 self.parse_statement_list(body, false);
                 self.in_function_context = in_function_before;
                 self.consume_token(TokenType::CurlyClose);
-                return self.builder.create_static_initializer(self.span_from(start), body);
+                return (self.builder.create_static_initializer(self.span_from(start), body), None);
             }
             true
         } else {
@@ -318,7 +328,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse key
-        let (key, _key_value) = self.parse_property_key();
+        let (key, key_value) = self.parse_property_key();
 
         // Method
         if self.match_token(TokenType::ParenOpen) {
@@ -330,7 +340,15 @@ impl<'a> Parser<'a> {
             } else {
                 0 // Method
             };
-            return self.builder.create_class_method(self.span_from(start), key, func, method_kind, is_static);
+
+            // Check if this is the constructor
+            let ctor_name = super::utf16_lit("constructor");
+            let is_constructor = !is_static
+                && !is_getter && !is_setter
+                && key_value.as_deref() == Some(ctor_name.as_slice());
+            let constructor = if is_constructor { Some(func) } else { None };
+
+            return (self.builder.create_class_method(self.span_from(start), key, func, method_kind, is_static), constructor);
         }
 
         // Field
@@ -342,7 +360,7 @@ impl<'a> Parser<'a> {
         };
 
         self.consume_or_insert_semicolon();
-        self.builder.create_class_field(self.span_from(start), key, init, is_static)
+        (self.builder.create_class_field(self.span_from(start), key, init, is_static), None)
     }
 
     // === Function body ===
