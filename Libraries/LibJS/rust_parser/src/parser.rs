@@ -148,10 +148,6 @@ struct SavedState {
     in_class_static_init_block: bool,
     function_might_need_arguments_object: bool,
     previous_token_was_period: bool,
-    // Lexer state
-    lexer_position: usize,
-    lexer_line_number: u32,
-    lexer_line_column: u32,
 }
 
 /// The main JavaScript parser.
@@ -325,12 +321,10 @@ impl<'a> Parser<'a> {
 
     /// Peek at the next token without consuming the current one.
     pub(crate) fn next_token(&mut self) -> Token {
-        // Save lexer state, get next token, restore
-        let saved_pos = self.lexer.position();
-        let saved_line = self.lexer.line_number();
-        let saved_col = self.lexer.line_column();
+        // Save full lexer state, get next token, restore
+        self.lexer.save_state();
         let token = self.lexer.next();
-        self.lexer.restore(saved_pos, saved_line, saved_col);
+        self.lexer.load_state();
         token
     }
 
@@ -442,6 +436,7 @@ impl<'a> Parser<'a> {
     // === State save/restore for backtracking ===
 
     pub(crate) fn save_state(&mut self) {
+        self.lexer.save_state();
         self.saved_states.push(SavedState {
             token: self.current_token.clone(),
             errors_len: self.errors.len(),
@@ -460,9 +455,6 @@ impl<'a> Parser<'a> {
             in_class_static_init_block: self.in_class_static_init_block,
             function_might_need_arguments_object: self.function_might_need_arguments_object,
             previous_token_was_period: self.previous_token_was_period,
-            lexer_position: self.lexer.position(),
-            lexer_line_number: self.lexer.line_number(),
-            lexer_line_column: self.lexer.line_column(),
         });
     }
 
@@ -485,11 +477,12 @@ impl<'a> Parser<'a> {
         self.in_class_static_init_block = state.in_class_static_init_block;
         self.function_might_need_arguments_object = state.function_might_need_arguments_object;
         self.previous_token_was_period = state.previous_token_was_period;
-        self.lexer.restore(state.lexer_position, state.lexer_line_number, state.lexer_line_column);
+        self.lexer.load_state();
     }
 
     pub(crate) fn discard_saved_state(&mut self) {
         self.saved_states.pop();
+        self.lexer.saved_states.pop();
     }
 
     // === Token matching helpers ===

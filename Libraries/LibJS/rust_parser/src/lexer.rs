@@ -7,9 +7,21 @@
 use crate::token::{Token, TokenType};
 
 /// State for tracking template literal nesting.
+#[derive(Clone)]
 struct TemplateState {
     in_expr: bool,
     open_bracket_count: u32,
+}
+
+/// Saved lexer state for lookahead and backtracking.
+pub(crate) struct SavedLexerState {
+    position: usize,
+    current_code_unit: u16,
+    eof: bool,
+    line_number: u32,
+    line_column: u32,
+    current_token_type: TokenType,
+    template_states: Vec<TemplateState>,
 }
 
 pub struct Lexer<'a> {
@@ -23,6 +35,7 @@ pub struct Lexer<'a> {
     regex_is_in_character_class: bool,
     allow_html_comments: bool,
     template_states: Vec<TemplateState>,
+    pub(crate) saved_states: Vec<SavedLexerState>,
 }
 
 // Unicode constants
@@ -281,6 +294,7 @@ impl<'a> Lexer<'a> {
             regex_is_in_character_class: false,
             allow_html_comments: true,
             template_states: Vec::new(),
+            saved_states: Vec::new(),
         };
         lexer.consume();
         lexer
@@ -1038,6 +1052,29 @@ impl<'a> Lexer<'a> {
         } else {
             self.current_code_unit = 0;
         }
+    }
+
+    pub fn save_state(&mut self) {
+        self.saved_states.push(SavedLexerState {
+            position: self.position,
+            current_code_unit: self.current_code_unit,
+            eof: self.eof,
+            line_number: self.line_number,
+            line_column: self.line_column,
+            current_token_type: self.current_token_type,
+            template_states: self.template_states.clone(),
+        });
+    }
+
+    pub fn load_state(&mut self) {
+        let state = self.saved_states.pop().expect("No saved lexer state");
+        self.position = state.position;
+        self.current_code_unit = state.current_code_unit;
+        self.eof = state.eof;
+        self.line_number = state.line_number;
+        self.line_column = state.line_column;
+        self.current_token_type = state.current_token_type;
+        self.template_states = state.template_states;
     }
 
     /// Re-lex the current Slash or SlashEquals token as a regex literal.

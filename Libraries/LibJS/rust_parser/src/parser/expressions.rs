@@ -197,11 +197,12 @@ impl<'a> Parser<'a> {
 
         match token.token_type {
             TokenType::ParenOpen => {
-                // Could be arrow function or parenthesized expression
+                // Could be arrow function or parenthesized expression.
+                // Consume '(' first, then try arrow function (which expects '(' already consumed).
+                self.consume_token(TokenType::ParenOpen);
                 if let Some(arrow) = self.try_parse_arrow_function_expression(true, false) {
                     return (arrow, false);
                 }
-                self.consume_token(TokenType::ParenOpen);
                 if self.match_token(TokenType::ParenClose) {
                     self.syntax_error("Unexpected token )");
                     self.consume();
@@ -293,7 +294,7 @@ impl<'a> Parser<'a> {
                     let expr = self.parse_function_expression();
                     return (expr, false);
                 }
-                // async arrow function
+                // async arrow function: arrow parser will consume 'async' and optional '('
                 if let Some(arrow) = self.try_parse_arrow_function_expression(next.token_type == TokenType::ParenOpen, true) {
                     return (arrow, false);
                 }
@@ -902,15 +903,13 @@ impl<'a> Parser<'a> {
         let mut parts = Vec::new();
         loop {
             if self.match_token(TokenType::TemplateLiteralEnd) {
-                // Final string part
-                let tok = self.consume();
-                let value = self.parse_string_value(&tok);
-                parts.push(self.builder.create_string_literal(self.span_from(start), &value));
+                self.consume();
+                parts.push(self.builder.create_string_literal(self.span_from(start), &[]));
                 break;
             }
             if self.match_token(TokenType::TemplateLiteralString) {
                 let tok = self.consume();
-                let value = self.parse_string_value(&tok);
+                let value = self.process_template_string_value(&tok);
                 parts.push(self.builder.create_string_literal(self.span_from(start), &value));
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
@@ -928,6 +927,12 @@ impl<'a> Parser<'a> {
         self.builder.create_template_literal(self.span_from(start), &parts)
     }
 
+    /// Process a template literal string value — no quote stripping, just escape processing.
+    fn process_template_string_value(&self, token: &Token) -> Vec<u16> {
+        let raw = self.token_value(token);
+        self.process_escape_sequences(raw)
+    }
+
     // === String value parsing ===
 
     pub(crate) fn parse_string_value(&self, token: &Token) -> Vec<u16> {
@@ -937,7 +942,10 @@ impl<'a> Parser<'a> {
         }
         // Strip surrounding quotes
         let inner = &raw[1..raw.len() - 1];
-        // Process escape sequences
+        self.process_escape_sequences(inner)
+    }
+
+    fn process_escape_sequences(&self, inner: &[u16]) -> Vec<u16> {
         let mut result = Vec::with_capacity(inner.len());
         let mut i = 0;
         while i < inner.len() {
@@ -1013,6 +1021,10 @@ impl<'a> Parser<'a> {
 
     // === Arrow function ===
 
+    /// Try to parse an arrow function expression.
+    /// When `expect_parens` is true and `is_async` is false, the caller must
+    /// have already consumed '('. For async arrows, this function consumes both
+    /// 'async' and '(' itself.
     pub(crate) fn try_parse_arrow_function_expression(&mut self, expect_parens: bool, is_async: bool) -> Option<NodeHandle> {
         let start = self.position();
 
@@ -1029,16 +1041,35 @@ impl<'a> Parser<'a> {
 
         self.save_state();
 
-        let (params, function_length);
-
-        if expect_parens {
-            if !self.match_token(TokenType::ParenOpen) {
+        if is_async {
+            self.consume(); // consume 'async'
+            if self.current_token.trivia_has_line_terminator {
                 self.load_state();
                 return None;
             }
-            let result = self.parse_formal_parameters();
+            if expect_parens {
+                self.consume_token(TokenType::ParenOpen);
+            }
+        }
+
+        let (params, function_length);
+
+        if expect_parens {
+            // '(' already consumed (by caller or above for async case).
+            let previous_errors = self.errors.len();
+            let result = self.parse_formal_parameters_without_parens();
             params = result.0;
             function_length = result.1;
+            // If there were new syntax errors during parameter parsing, abort.
+            if self.errors.len() > previous_errors {
+                self.load_state();
+                return None;
+            }
+            if !self.match_token(TokenType::ParenClose) {
+                self.load_state();
+                return None;
+            }
+            self.consume(); // consume ')'
         } else {
             // Single parameter (identifier)
             if self.match_identifier() {
@@ -1075,7 +1106,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body.0, params, function_length, kind,
                 self.strict_mode || body.1, true,
-                true, false, false, true,
+                true, false, false, false,
             ))
         } else {
             // Expression body
@@ -1090,7 +1121,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body, params, function_length, kind,
                 self.strict_mode, true,
-                true, false, false, true,
+                true, false, false, false,
             ))
         }
     }

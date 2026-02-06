@@ -415,9 +415,15 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32) {
         self.consume_token(TokenType::ParenOpen);
+        let result = self.parse_formal_parameters_without_parens();
+        self.consume_token(TokenType::ParenClose);
+        result
+    }
 
+    /// Parse formal parameters assuming the opening '(' has already been consumed.
+    /// Does NOT consume the closing ')'.
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32) {
         if self.match_token(TokenType::ParenClose) {
-            self.consume();
             return (self.builder.create_function_parameters_empty(), 0);
         }
 
@@ -473,8 +479,6 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-
-        self.consume_token(TokenType::ParenClose);
 
         let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest);
         (params, function_length)
