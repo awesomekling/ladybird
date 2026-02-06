@@ -52,6 +52,10 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
                 if (!instruction->result())
                     continue;
 
+                // Never hoist Phi nodes — they are tied to their block's predecessors.
+                if (instruction->opcode() == Opcode::Phi)
+                    continue;
+
                 if (!instruction->is_hoistable())
                     continue;
 

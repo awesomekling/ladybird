@@ -1,0 +1,89 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v3:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:unknown = Move v3:unknown
+    v5:unknown = Move v3:unknown
+    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
+    Return v6:boolean
+
+=== Before optimization ===
+function(v3:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:unknown = Move v3:unknown
+    v5:unknown = Move v3:unknown
+    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
+    Return v6:boolean
+
+=== After DeadCodeElimination ===
+function(v3:unknown):
+block0:
+    v4:unknown = Move v3:unknown
+    v5:unknown = Move v3:unknown
+    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
+    Return v6:boolean
+
+=== After CopyPropagation ===
+function(v3:unknown):
+block0:
+    v4:unknown = Move v3:unknown
+    v5:unknown = Move v3:unknown
+    v6:boolean = StrictlyEquals v3:unknown, v3:unknown
+    Return v6:boolean
+
+=== After GlobalValueNumbering ===
+function(v3:unknown):
+block0:
+    v4:unknown = Move v3:unknown
+    v5:unknown = Move v3:unknown
+    v6:boolean = StrictlyEquals v3:unknown, v3:unknown
+    Return v6:boolean
+
+=== After DeadCodeElimination ===
+function(v3:unknown):
+block0:
+    v6:boolean = StrictlyEquals v3:unknown, v3:unknown
+    Return v6:boolean
+
+function(v3:unknown):
+block0:
+    v6:boolean = StrictlyEquals v3:unknown, v3:unknown
+    Return v6:boolean

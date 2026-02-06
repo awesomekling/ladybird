@@ -20,6 +20,7 @@ struct ExpressionKey {
     Opcode opcode;
     Value* operand1 { nullptr };
     Value* operand2 { nullptr };
+    u32 extra { 0 }; // For ExtractValue: extract_index
 
     bool operator==(ExpressionKey const&) const = default;
 };
@@ -31,7 +32,7 @@ struct AK::Traits<JS::IR::ExpressionKey> : public DefaultTraits<JS::IR::Expressi
     static unsigned hash(JS::IR::ExpressionKey const& key)
     {
         return pair_int_hash(
-            static_cast<u8>(key.opcode),
+            pair_int_hash(static_cast<u8>(key.opcode), key.extra),
             pair_int_hash(ptr_hash(key.operand1), ptr_hash(key.operand2)));
     }
 };
@@ -54,8 +55,13 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
     auto process_block = [&](auto& self, BasicBlock* block) -> void {
         Vector<ExpressionKey> added_keys;
 
-        for (auto& instruction : block->instructions()) {
+        for (auto const& instruction : block->instructions()) {
             if (!instruction->result())
+                continue;
+
+            // Never value-number Phi nodes. A Phi's result depends on which
+            // predecessor edge was taken, not just its operand set.
+            if (instruction->opcode() == Opcode::Phi)
                 continue;
 
             if (!instruction->is_pure())
@@ -69,6 +75,9 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
             key.opcode = instruction->opcode();
             key.operand1 = operands.size() > 0 ? operands[0] : nullptr;
             key.operand2 = operands.size() > 1 ? operands[1] : nullptr;
+
+            if (key.opcode == Opcode::ExtractValue)
+                key.extra = instruction->extract_index();
 
             // Normalize operand order for commutative operations
             if (is_commutative_opcode(key.opcode) && key.operand1 && key.operand2) {

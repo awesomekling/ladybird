@@ -274,7 +274,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::ContinuePendingUnwind)]              = { "ContinuePendingUnwind",              true,  E_THROW,    false, false, 0,   Type::Unknown,    false },
 
     // SSA
-    [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, E_READ,     false, true,  255, Type::Unknown,    false },
+    [to_underlying(Opcode::Phi)]                                = { "Phi",                                false, E_NONE,     false, true,  255, Type::Unknown,    false },
     [to_underlying(Opcode::ParallelCopy)]                       = { "ParallelCopy",                       false, E_WRITE,    false, false, 255, Type::Unknown,    false },
 
     // Constants
@@ -435,7 +435,7 @@ static constexpr OpcodeTraits s_opcode_traits[] = {
     [to_underlying(Opcode::Move)]                               = { "Move",                               false, E_NONE,     false, true,  1,   Type::Unknown,    false },
 
     // Tuple extraction
-    [to_underlying(Opcode::ExtractValue)]                       = { "ExtractValue",                       false, E_READ,     false, true,  1,   Type::Unknown,    false },
+    [to_underlying(Opcode::ExtractValue)]                       = { "ExtractValue",                       false, E_NONE,     false, true,  1,   Type::Unknown,    false },
 
     // Arguments
     [to_underlying(Opcode::CreateArguments)]                    = { "CreateArguments",                    false, E_WRITE,    false, true,  0,   Type::Unknown,    false },
