@@ -27,13 +27,12 @@ Lifter::Lifter(Bytecode::Executable const& executable)
 
 NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
 {
+    // IR Pipeline Phase 1: Bytecode → IR (CFG construction)
     Lifter lifter(executable);
     lifter.lift_basic_blocks();
     lifter.connect_control_flow();
     lifter.compute_block_predecessors();
 
-    // If the entry block has predecessors (e.g., from labelled breaks that jump
-    // to the start of the function), insert a new empty entry block.
     // SSA requires the entry block to have no predecessors.
     if (auto* entry = lifter.m_function->entry_block(); entry && !entry->predecessors().is_empty()) {
         auto& new_entry = lifter.m_function->create_block("entry"_string);
@@ -46,9 +45,7 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.compute_dominators();
     lifter.eliminate_unreachable_blocks();
 
-    // SSA construction using dominance-based approach:
-    // Phase 1: Place phis at dominance frontiers of defining blocks
-    // Phase 2: Fill in phi operands by finding reaching definitions
+    // IR Pipeline Phase 2: SSA construction (via DominatorTree + SSAConstruction)
     SSAConstruction ssa(*lifter.m_function, *lifter.m_dominators, lifter.m_executable,
         lifter.m_written_operands, lifter.m_block_actual_definitions,
         lifter.m_block_definitions, lifter.m_value_to_operand_raw);

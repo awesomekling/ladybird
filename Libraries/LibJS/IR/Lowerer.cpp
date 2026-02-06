@@ -1249,6 +1249,11 @@ void Lowerer::lower_blocks()
     }
 }
 
+// IR Pipeline Phase 4: SSA destruction + IR → Bytecode lowering
+// PhiCoalescing (constructed in the Lowerer) performs SSA destruction by
+// mapping phi-related values to shared registers. The Lowerer then emits
+// bytecode, inserting Mov instructions only where coalescing didn't
+// eliminate the phi move.
 GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 {
     Lowerer lowerer(vm, function);

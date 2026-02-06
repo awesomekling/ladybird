@@ -269,31 +269,38 @@ String dump(Function const& function)
     return MUST(builder.to_string());
 }
 
+// IR Pipeline Phase 3: Optimization (operates on SSA-form IR)
+//
+// The full IR pipeline is:
+//   Phase 1: Bytecode → IR (CFG construction)           — Lifter::lift()
+//   Phase 2: SSA construction                            — Lifter::lift() via SSAConstruction
+//   Phase 3: Optimization passes on SSA-form IR          — optimize() (this function)
+//   Phase 4: SSA destruction (phi coalescing) + lowering — Lowerer::lower() via PhiCoalescing
 void optimize(Function& function)
 {
     PassManager pass_manager;
 
-    // Phase 1 — CFG Simplification
+    // CFG Simplification
     pass_manager.add_pass(make<ConstantBranchFolding>());
     pass_manager.add_pass(make<JumpThreading>());
 
-    // Phase 2 — Dead Code Removal
+    // Dead Code Removal
     pass_manager.add_pass(make<DeadCodeElimination>());
     pass_manager.add_pass(make<DeadBlockElimination>());
 
-    // Phase 3 — Local Optimizations
+    // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
     pass_manager.add_pass(make<ConstantFolding>());
     pass_manager.add_pass(make<AlgebraicSimplification>());
     pass_manager.add_pass(make<InstructionCombining>());
 
-    // Phase 4 — Global Optimizations
+    // Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
 
-    // Phase 5 — Loop Optimizations
+    // Loop Optimizations
     pass_manager.add_pass(make<LoopInvariantCodeMotion>());
 
-    // Phase 6 — Final CFG Cleanup
+    // Final CFG Cleanup
     pass_manager.add_pass(make<EmptyBlockElimination>());
     pass_manager.add_pass(make<BlockMerging>());
 
