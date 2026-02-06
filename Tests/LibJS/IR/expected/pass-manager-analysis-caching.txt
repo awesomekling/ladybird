@@ -156,41 +156,16 @@ block3:
 block4:
     Return v22:unknown
 
-=== After LoopInvariantCodeMotion ===
-function(v7:unknown):
-block0:
-    v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:string = Typeof v7:unknown
-    v10:string = Typeof v7:unknown
-    Jump block3
-block1:
-    v9:string = Move v8:string
-    v11:string = Move v8:string
-    v12:boolean = StrictlyEquals v8:string, v8:string
-    v13:boolean = Move v12:boolean
-    Jump block2
-block2:
-    v15:number = Increment v19:number
-    Jump block3
-block3:
-    v22:unknown = Phi [block0:v0:undefined, block2:v12:boolean]
-    v19:number = Phi [block0:v5:int32, block2:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
-block4:
-    Return v22:unknown
-
 === After BlockMerging ===
 function(v7:unknown):
 block0:
     v4:undefined = Move undefined
     v6:int32 = Move 0
-    v8:string = Typeof v7:unknown
-    v10:string = Typeof v7:unknown
     Jump block3
 block1:
+    v8:string = Typeof v7:unknown
     v9:string = Move v8:string
+    v10:string = Typeof v7:unknown
     v11:string = Move v8:string
     v12:boolean = StrictlyEquals v8:string, v8:string
     v13:boolean = Move v12:boolean
@@ -205,6 +180,23 @@ block4:
     Return v22:unknown
 
 === After DeadCodeElimination ===
+function(v7:unknown):
+block0:
+    Jump block3
+block1:
+    v8:string = Typeof v7:unknown
+    v12:boolean = StrictlyEquals v8:string, v8:string
+    v15:number = Increment v19:number
+    Jump block3
+block3:
+    v22:unknown = Phi [block0:v0:undefined, block1:v12:boolean]
+    v19:number = Phi [block0:v5:int32, block1:v15:number]
+    v17:boolean = LessThan v19:number, 10
+    Branch v17:boolean, block1, block4
+block4:
+    Return v22:unknown
+
+=== After LoopInvariantCodeMotion ===
 function(v7:unknown):
 block0:
     v8:string = Typeof v7:unknown

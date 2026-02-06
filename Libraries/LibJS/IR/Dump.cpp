@@ -21,6 +21,7 @@
 #include <LibJS/IR/Passes/InstructionCombining.h>
 #include <LibJS/IR/Passes/JumpThreading.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
+#include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
 #include <LibJS/IR/Value.h>
@@ -297,24 +298,38 @@ void optimize(Function& function)
     // Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
 
-    // Loop Optimizations
-    pass_manager.add_pass(make<LoopInvariantCodeMotion>());
-
     // Final CFG Cleanup
     pass_manager.add_pass(make<EmptyBlockElimination>());
     pass_manager.add_pass(make<BlockMerging>());
 
     pass_manager.run(function);
 
-    // Lowering Preparation (runs once, after the fixed-point loop).
+    // Loop Optimizations (run once, after the fixed-point loop).
+    // LoopSimplify inserts preheader and single-latch blocks that
+    // EmptyBlockElimination / BlockMerging would fold away, so these
+    // must not participate in the fixed-point loop.
+    auto run_once = [&](Pass& pass) {
+        auto preserved = pass.run(function, pass_manager);
+        if (!preserved.is_all()) {
+            pass_manager.invalidate(preserved);
+            if (g_dump_ir_between_passes)
+                dbgln("=== After {} ===\n{}", pass.name(), dump(function));
+        }
+    };
+
+    LoopSimplify loop_simplify_pass;
+    run_once(loop_simplify_pass);
+
+    LoopInvariantCodeMotion licm_pass;
+    run_once(licm_pass);
+
+    // Lowering Preparation (also runs once, after the fixed-point loop).
     // Split critical edges so phi moves have a clean block to land in
     // during SSA deconstruction. This must not participate in the
     // fixed-point loop because subsequent CFG cleanup would fold the
     // split blocks back, recreating the critical edges.
     SplitCriticalEdges split_pass;
-    auto preserved = split_pass.run(function, pass_manager);
-    if (!preserved.is_all() && g_dump_ir_between_passes)
-        dbgln("=== After {} ===\n{}", split_pass.name(), dump(function));
+    run_once(split_pass);
 }
 
 }
