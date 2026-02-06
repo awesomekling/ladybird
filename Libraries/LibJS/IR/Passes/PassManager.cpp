@@ -6,6 +6,7 @@
 
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibJS/IR/Passes/Pass.h>
 #include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Passes/Verifier.h>

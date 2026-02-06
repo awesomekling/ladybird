@@ -18,8 +18,8 @@
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Console.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
-#include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Lifter.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Print.h>
 #include <LibJS/Runtime/ConsoleObject.h>

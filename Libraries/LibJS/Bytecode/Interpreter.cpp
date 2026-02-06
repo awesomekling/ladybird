@@ -25,6 +25,7 @@
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Lifter.h>
 #include <LibJS/IR/Lowerer.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>

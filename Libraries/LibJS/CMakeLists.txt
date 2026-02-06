@@ -25,6 +25,7 @@ set(SOURCES
     IR/Instruction.cpp
     IR/Lifter.cpp
     IR/LoopTree.cpp
+    IR/Optimize.cpp
     IR/Lowerer.cpp
     IR/PhiCoalescing.cpp
     IR/SSAConstruction.cpp

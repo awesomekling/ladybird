@@ -11,7 +11,7 @@
 #include <LibCore/Environment.h>
 #include <LibCore/System.h>
 #include <LibFileSystem/FileSystem.h>
-#include <LibJS/IR/Dump.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibTest/JavaScriptTestRunner.h>
 #include <signal.h>
 #include <stdio.h>

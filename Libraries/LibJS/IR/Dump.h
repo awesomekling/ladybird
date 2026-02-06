@@ -12,13 +12,6 @@
 
 namespace JS::IR {
 
-JS_API extern bool g_dump_ir;
-JS_API extern bool g_optimize_ir;
-JS_API extern bool g_dump_ir_between_passes;
-JS_API extern bool g_lower_ir;
-
-JS_API void optimize(Function&);
-
 JS_API void dump(Function const&, StringBuilder&);
 JS_API void dump(BasicBlock const&, StringBuilder&);
 JS_API void dump(Instruction const&, StringBuilder&);

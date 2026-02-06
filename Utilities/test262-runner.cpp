@@ -16,7 +16,7 @@
 #include <LibCore/System.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/Contrib/Test262/GlobalObject.h>
-#include <LibJS/IR/Dump.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/ValueInlines.h>
