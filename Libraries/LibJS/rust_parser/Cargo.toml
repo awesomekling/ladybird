@@ -5,3 +5,6 @@ edition = "2021"
 
 [lib]
 crate-type = ["staticlib"]
+
+[dependencies]
+unicode-ident = "1.0"
