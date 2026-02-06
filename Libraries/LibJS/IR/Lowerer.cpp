@@ -1111,31 +1111,17 @@ void Lowerer::lower_blocks()
             auto* false_target = terminator->false_target();
 
             if (true_target && false_target && false_target != true_target) {
-                // Both targets exist and are different - check if we need critical edge splitting
-                bool true_needs_moves = needs_phi_moves_for_edge(ir_block, *true_target);
-                bool false_needs_moves = needs_phi_moves_for_edge(ir_block, *false_target);
+                // After SplitCriticalEdges, Branch targets never need phi moves:
+                // - Multi-predecessor targets have their critical edges split, so
+                //   Branch targets split blocks with no phis (the split block's
+                //   Jump handles phi moves).
+                // - Single-predecessor targets have phis with one incoming value,
+                //   which coalescing eliminates.
+                VERIFY(!needs_phi_moves_for_edge(ir_block, *true_target));
+                VERIFY(!needs_phi_moves_for_edge(ir_block, *false_target));
 
-                size_t true_index = 0;
-                size_t false_index = 0;
-
-                if (true_needs_moves && false_needs_moves) {
-                    // Critical edges: both targets need phi moves, so we need trampolines
-                    // to avoid phi move conflicts
-                    true_index = get_or_create_trampoline(ir_block, *true_target);
-                    false_index = get_or_create_trampoline(ir_block, *false_target);
-                } else if (true_needs_moves) {
-                    // Only true target needs phi moves - use trampoline for true
-                    true_index = get_or_create_trampoline(ir_block, *true_target);
-                    false_index = m_ir_block_to_bytecode_index.get(false_target).value();
-                } else if (false_needs_moves) {
-                    // Only false target needs phi moves - use trampoline for false
-                    true_index = m_ir_block_to_bytecode_index.get(true_target).value();
-                    false_index = get_or_create_trampoline(ir_block, *false_target);
-                } else {
-                    // Neither target needs phi moves - jump directly
-                    true_index = m_ir_block_to_bytecode_index.get(true_target).value();
-                    false_index = m_ir_block_to_bytecode_index.get(false_target).value();
-                }
+                auto true_index = m_ir_block_to_bytecode_index.get(true_target).value();
+                auto false_index = m_ir_block_to_bytecode_index.get(false_target).value();
 
                 auto true_label = Bytecode::Label { static_cast<u32>(true_index) };
                 auto false_label = Bytecode::Label { static_cast<u32>(false_index) };
