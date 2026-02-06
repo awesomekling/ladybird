@@ -938,21 +938,9 @@ void Lowerer::lower_blocks()
     // Phase 1: Allocate tuple registers for all tuple-producing instructions
     for (auto const& ir_block : m_function.basic_blocks()) {
         for (auto const& instruction : ir_block->instructions()) {
-            switch (instruction->opcode()) {
-            case Opcode::GetIterator:
-            case Opcode::GetObjectPropertyIterator:
-                if (instruction->result())
-                    allocate_tuple_registers(*instruction->result(), 3);
-                break;
-            case Opcode::IteratorNextUnpack:
-            case Opcode::GetCalleeAndThisFromEnvironment:
-            case Opcode::GetCompletionFields:
-                if (instruction->result())
-                    allocate_tuple_registers(*instruction->result(), 2);
-                break;
-            default:
-                break;
-            }
+            auto arity = opcode_tuple_arity(instruction->opcode());
+            if (arity > 0 && instruction->result())
+                allocate_tuple_registers(*instruction->result(), arity);
         }
     }
 

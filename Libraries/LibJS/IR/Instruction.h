@@ -60,6 +60,7 @@ struct OpcodeTraits {
     u8 operand_arity;            // Expected operand count (VariableArity = variable)
     Type guaranteed_result_type; // Static result type (Type::Unknown = no guarantee)
     bool is_commutative;         // Commutative binary op (operand order doesn't matter)
+    u8 tuple_arity;              // Number of tuple elements produced (0 = not a tuple)
 };
 
 static constexpr u8 VariableArity = 255;
@@ -73,8 +74,8 @@ static constexpr auto E_CALL = Effects::Calls;
 static constexpr auto E_THROW_WRITE = Effects::MayThrow | Effects::WritesState;
 
 // clang-format off
-#define IR_OPCODE_TRAITS(name, is_term, eff, call, result, arity, type, comm) \
-    { #name, is_term, eff, call, result, arity, type, comm },
+#define IR_OPCODE_TRAITS(name, is_term, eff, call, result, arity, type, comm, tuple) \
+    { #name, is_term, eff, call, result, arity, type, comm, tuple },
 static constexpr OpcodeTraits s_opcode_traits[] = {
     IR_OPCODE_LIST(IR_OPCODE_TRAITS)
 };
@@ -139,6 +140,12 @@ constexpr Type opcode_guaranteed_result_type(Opcode opcode)
 constexpr bool is_commutative_opcode(Opcode opcode)
 {
     return opcode_traits(opcode).is_commutative;
+}
+
+// Number of tuple elements produced by this opcode (0 = not a tuple).
+constexpr u8 opcode_tuple_arity(Opcode opcode)
+{
+    return opcode_traits(opcode).tuple_arity;
 }
 
 // Returns the inverted comparison opcode, if the opcode is a comparison.
