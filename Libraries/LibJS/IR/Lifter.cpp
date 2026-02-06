@@ -496,6 +496,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& result = m_builder.build_get_by_id_with_this(base, this_value, op.property());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
@@ -514,6 +515,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_by_id_with_this(base, this_value, op.property(), value);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutNormalByValueWithThis: {
@@ -612,6 +614,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& getter = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_getter_by_id(base, op.property(), getter, op.base_identifier());
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutSetterById: {
@@ -619,6 +622,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& setter = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_setter_by_id(base, op.property(), setter, op.base_identifier());
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutPrototypeById: {
@@ -626,6 +630,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& prototype = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_prototype_by_id(base, op.property(), prototype, op.base_identifier());
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutGetterByIdWithThis: {
@@ -634,6 +639,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& getter = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_getter_by_id_with_this(base, this_value, op.property(), getter);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutSetterByIdWithThis: {
@@ -642,6 +648,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& setter = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_setter_by_id_with_this(base, this_value, op.property(), setter);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutPrototypeByIdWithThis: {
@@ -650,6 +657,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& prototype = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_put_prototype_by_id_with_this(base, this_value, op.property(), prototype);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutGetterByValue: {
@@ -944,6 +952,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::GetLengthWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& result = m_builder.build_get_length(base);
+        result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;
     }
