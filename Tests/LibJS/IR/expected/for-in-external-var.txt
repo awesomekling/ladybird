@@ -124,7 +124,7 @@ block2_split0:
 block4_split1:
     Jump block2
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v1:undefined = Move undefined

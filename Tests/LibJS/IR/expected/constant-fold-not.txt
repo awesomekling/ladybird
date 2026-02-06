@@ -62,7 +62,7 @@ block0:
     v13:boolean = StrictlyInequals v9:boolean, v11:boolean
     Return v13:boolean
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v6:int32 = Move 0
@@ -71,18 +71,6 @@ block0:
     v10:boolean = Move true
     v11:boolean = Not 1
     v12:boolean = Move false
-    v13:boolean = StrictlyInequals true, false
-    Return v13:boolean
-
-=== After DeadCodeElimination ===
-function():
-block0:
-    v13:boolean = StrictlyInequals true, false
-    Return v13:boolean
-
-=== After ConstantFolding ===
-function():
-block0:
     v13:boolean = StrictlyInequals true, false
     Return true
 

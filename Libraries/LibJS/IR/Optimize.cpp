@@ -7,8 +7,6 @@
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Optimize.h>
-#include <LibJS/IR/Passes/AlgebraicSimplification.h>
-#include <LibJS/IR/Passes/ConstantFolding.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/GlobalValueNumbering.h>
@@ -42,8 +40,6 @@ void optimize(Function& function)
 
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
-    pass_manager.add_pass(make<ConstantFolding>());
-    pass_manager.add_pass(make<AlgebraicSimplification>());
     pass_manager.add_pass(make<InstCombine>());
 
     // Global Optimizations

@@ -157,7 +157,7 @@ block10_split0:
     v14:number = Move v13:unknown
     Jump block6
 
-=== After AlgebraicSimplification ===
+=== After InstCombine ===
 function():
 block0:
     v5:int32 = Move 0

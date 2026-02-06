@@ -89,11 +89,11 @@ block0_split0:
     v8:int32 = Move v7:int32
     v9:string = Typeof v7:int32
     v11:boolean = StrictlyEquals v26:string, v10:string
-    v12:boolean = Move v11:boolean
+    v12:boolean = Move true
     v17:string = TypeofBinding
     Jump block2
 block0_split1:
-    Return v11:boolean
+    Return true
 
 === After SimplifyCFG ===
 function(v6:unknown):
@@ -102,23 +102,7 @@ block0:
     v8:int32 = Move v7:int32
     v9:string = Typeof v7:int32
     v11:boolean = StrictlyEquals v26:string, v10:string
-    v12:boolean = Move v11:boolean
-    v17:string = TypeofBinding
-    Return v11:boolean
-
-=== After DeadCodeElimination ===
-function(v6:unknown):
-block0:
-    v7:int32 = ToInt32 v6:unknown
-    v11:boolean = StrictlyEquals v26:string, v10:string
-    v17:string = TypeofBinding
-    Return v11:boolean
-
-=== After ConstantFolding ===
-function(v6:unknown):
-block0:
-    v7:int32 = ToInt32 v6:unknown
-    v11:boolean = StrictlyEquals v26:string, v10:string
+    v12:boolean = Move true
     v17:string = TypeofBinding
     Return true
 

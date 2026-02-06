@@ -105,7 +105,7 @@ block7:
 block8:
     Jump block2
 
-=== After AlgebraicSimplification ===
+=== After InstCombine ===
 function():
 block0:
     v3:int32 = Move 0

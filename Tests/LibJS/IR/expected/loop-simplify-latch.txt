@@ -113,7 +113,7 @@ block6_split0:
     v9:number = Move v8:unknown
     Jump block2
 
-=== After AlgebraicSimplification ===
+=== After InstCombine ===
 function(v10:unknown):
 block0:
     v4:int32 = Move 0

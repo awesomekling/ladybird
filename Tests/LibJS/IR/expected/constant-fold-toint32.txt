@@ -54,7 +54,7 @@ block0_split0:
     v6:int32 = Move v5:int32
     Return v5:int32
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v4:number = Move 100000000000000000000

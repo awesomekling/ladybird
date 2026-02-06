@@ -72,7 +72,7 @@ block0_split1:
 block0_split2:
     Return v9:number
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v4:int32 = Move 5
@@ -86,7 +86,7 @@ block0_split1:
     v9:number = Add 6, 2
     Jump block3
 block0_split2:
-    Return v9:number
+    Return 8
 
 === After SimplifyCFG ===
 function():
@@ -95,18 +95,6 @@ block0:
     v5:number = Increment 5
     v7:int32 = Move 3
     v8:number = Decrement 3
-    v9:number = Add 6, 2
-    Return v9:number
-
-=== After DeadCodeElimination ===
-function():
-block0:
-    v9:number = Add 6, 2
-    Return v9:number
-
-=== After ConstantFolding ===
-function():
-block0:
     v9:number = Add 6, 2
     Return 8
 

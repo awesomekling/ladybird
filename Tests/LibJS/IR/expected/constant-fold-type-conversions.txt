@@ -61,7 +61,7 @@ block0_split0:
     v9:boolean = Move v8:boolean
     Return v8:boolean
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v5:int32 = Move 3
@@ -70,8 +70,8 @@ block0:
 block0_split0:
     v7:int32 = Move 3
     v8:boolean = Not 3
-    v9:boolean = Move v8:boolean
-    Return v8:boolean
+    v9:boolean = Move false
+    Return false
 
 === After SimplifyCFG ===
 function():
@@ -80,21 +80,7 @@ block0:
     v6:int32 = ToInt32 3
     v7:int32 = Move 3
     v8:boolean = Not 3
-    v9:boolean = Move v8:boolean
-    Return v8:boolean
-
-=== After DeadCodeElimination ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    v8:boolean = Not 3
-    Return v8:boolean
-
-=== After ConstantFolding ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    v8:boolean = Not 3
+    v9:boolean = Move false
     Return false
 
 === After DeadCodeElimination ===

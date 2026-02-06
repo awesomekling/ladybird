@@ -58,7 +58,7 @@ block0_split0:
     v9:number = Move v8:number
     Return v8:number
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v5:int32 = Move 2

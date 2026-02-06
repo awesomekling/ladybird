@@ -57,7 +57,7 @@ block0_split0:
     v7:bigint = Move v5:bigint
     Return v5:bigint
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v4:bigint = Move v3:bigint

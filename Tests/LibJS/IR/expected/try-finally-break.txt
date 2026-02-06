@@ -139,7 +139,7 @@ block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
 
-=== After AlgebraicSimplification ===
+=== After InstCombine ===
 function():
 block0:
     v4:int32 = Move 0

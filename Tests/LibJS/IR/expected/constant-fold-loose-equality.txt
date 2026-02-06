@@ -69,7 +69,7 @@ block0_split0:
 block0_split1:
     Return v9:boolean
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v7:null = Move null

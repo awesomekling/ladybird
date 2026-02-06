@@ -140,7 +140,7 @@ block2_split4:
 block2_split5:
     Jump block1
 
-=== After AlgebraicSimplification ===
+=== After InstCombine ===
 function():
 block0:
     v9:array = NewArray 1, 2, 3, 4, 5

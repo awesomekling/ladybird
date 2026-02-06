@@ -72,7 +72,7 @@ block1:
 block2:
     Return v6:boolean
 
-=== After ConstantFolding ===
+=== After InstCombine ===
 function():
 block0:
     v5:undefined = Move undefined
