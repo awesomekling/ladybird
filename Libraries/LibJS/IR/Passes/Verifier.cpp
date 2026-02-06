@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Bitmap.h>
 #include <AK/HashTable.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
@@ -15,6 +16,17 @@
 #include <LibJS/IR/Value.h>
 
 namespace JS::IR {
+
+static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
+static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
+static size_t block_index_capacity(Function const& function)
+{
+    size_t max_index = 0;
+    for (auto const& block : function.basic_blocks())
+        max_index = max(max_index, to_index(block->index()) + 1);
+    return max_index;
+}
 
 PreservedAnalyses Verifier::run(Function& function, PassManager&)
 {
@@ -36,11 +48,13 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     };
 
     bool const full_mode = mode == VerifierMode::Full;
+    auto block_capacity = block_index_capacity(function);
+    auto value_capacity = function.values().size();
 
     // Build set of all blocks for quick lookup
-    HashTable<BasicBlock*> all_blocks;
+    auto all_blocks = MUST(AK::Bitmap::create(block_capacity, false));
     for (auto const& block : function.basic_blocks())
-        all_blocks.set(block.ptr());
+        all_blocks.set(to_index(block->index()), true);
 
     // Check: Entry block has no predecessors
     if (function.entry_block() && !function.entry_block()->predecessors().is_empty()) {
@@ -48,16 +62,17 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     }
 
     // Compute reachable blocks via BFS (including EH/finalizer edges)
-    HashTable<BasicBlock*> reachable;
+    auto reachable = MUST(AK::Bitmap::create(block_capacity, false));
     if (auto* entry = function.entry_block()) {
         Vector<BasicBlock*> worklist;
         worklist.append(entry);
-        reachable.set(entry);
+        reachable.set(to_index(entry->index()), true);
         while (!worklist.is_empty()) {
             auto* current = worklist.take_last();
             CFG::for_each_successor(*current, [&](BasicBlock& target) {
-                if (!reachable.contains(&target)) {
-                    reachable.set(&target);
+                auto ti = to_index(target.index());
+                if (!reachable.get(ti)) {
+                    reachable.set(ti, true);
                     worklist.append(&target);
                 }
             });
@@ -67,7 +82,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Full mode: no unreachable blocks allowed
     if (full_mode) {
         for (auto const& block : function.basic_blocks()) {
-            if (!reachable.contains(block.ptr())) {
+            if (!reachable.get(to_index(block->index()))) {
                 report_error(ByteString::formatted(
                     "Block{} is unreachable from entry block",
                     block->index()));
@@ -89,17 +104,18 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     }
 
     // Build set of all defined values, checking for unique definitions
-    HashTable<Value const*> defined_values;
+    auto defined_values = MUST(AK::Bitmap::create(value_capacity, false));
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instr : block->instructions()) {
             if (instr->result()) {
+                auto vi = to_index(instr->result()->index());
                 // Check: No two instructions share the same result Value*
-                if (defined_values.contains(instr->result())) {
+                if (defined_values.get(vi)) {
                     report_error(ByteString::formatted(
                         "Value v{} is defined by multiple instructions",
                         instr->result()->index()));
                 }
-                defined_values.set(instr->result());
+                defined_values.set(vi, true);
             }
         }
     }
@@ -107,11 +123,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Add parameter, constant, and this values as defined
     for (auto const& value : function.values()) {
         if (value->is_parameter() || value->is_constant() || value->is_this())
-            defined_values.set(value.ptr());
+            defined_values.set(to_index(value->index()), true);
     }
 
     for (auto const& block : function.basic_blocks()) {
-        bool block_is_reachable = reachable.contains(block.ptr());
+        bool block_is_reachable = reachable.get(to_index(block->index()));
 
         // Check: Block parent pointer
         if (block->parent_function() != &function) {
@@ -328,7 +344,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             block->index(), i));
                         continue;
                     }
-                    if (!defined_values.contains(operand)) {
+                    if (!defined_values.get(to_index(operand->index()))) {
                         report_error(ByteString::formatted(
                             "Instruction in block{} uses undefined value v{}",
                             block->index(), operand->index()));
@@ -345,12 +361,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         }
 
         // Check: Exception handler/finalizer targets exist
-        if (block->exception_handler() && !all_blocks.contains(block->exception_handler())) {
+        if (block->exception_handler() && !all_blocks.get(to_index(block->exception_handler()->index()))) {
             report_error(ByteString::formatted(
                 "Block{} has exception_handler not in function",
                 block->index()));
         }
-        if (block->finalizer() && !all_blocks.contains(block->finalizer())) {
+        if (block->finalizer() && !all_blocks.get(to_index(block->finalizer()->index()))) {
             report_error(ByteString::formatted(
                 "Block{} has finalizer not in function",
                 block->index()));
@@ -424,12 +440,12 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (block_is_reachable) {
             if (auto* term = block->terminator()) {
                 // Check: All terminator targets exist in function
-                if (term->true_target() && !all_blocks.contains(term->true_target())) {
+                if (term->true_target() && !all_blocks.get(to_index(term->true_target()->index()))) {
                     report_error(ByteString::formatted(
                         "Terminator in block{} has true_target not in function",
                         block->index()));
                 }
-                if (term->false_target() && !all_blocks.contains(term->false_target())) {
+                if (term->false_target() && !all_blocks.get(to_index(term->false_target()->index()))) {
                     report_error(ByteString::formatted(
                         "Terminator in block{} has false_target not in function",
                         block->index()));
@@ -470,29 +486,28 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Check: Recompute CFG predecessors from successor edges of reachable blocks
     // This catches desync between terminator targets and predecessor lists
     {
-        HashMap<BasicBlock*, HashTable<BasicBlock*>> computed_preds;
-        for (auto const& block : function.basic_blocks())
-            computed_preds.set(block.ptr(), {});
+        Vector<HashTable<BasicBlock*>> computed_preds;
+        computed_preds.resize(block_capacity);
 
         for (auto const& block : function.basic_blocks()) {
-            if (!reachable.contains(block.ptr()))
+            if (!reachable.get(to_index(block->index())))
                 continue;
             CFG::for_each_successor(*block, [&](BasicBlock& target) {
-                computed_preds.get(&target)->set(block.ptr());
+                computed_preds[to_index(target.index())].set(block.ptr());
             });
         }
 
         for (auto const& block : function.basic_blocks()) {
-            if (!reachable.contains(block.ptr()))
+            if (!reachable.get(to_index(block->index())))
                 continue;
             auto const& stored_preds = block->predecessors();
-            auto& expected_preds = *computed_preds.get(block.ptr());
+            auto& expected_preds = computed_preds[to_index(block->index())];
 
             // Check: Every stored predecessor should be a computed predecessor.
             // In InterPass mode, skip unreachable predecessors since they may
             // have stale edges that DeadBlockElimination will clean up.
             for (auto* pred : stored_preds) {
-                if (!full_mode && !reachable.contains(pred))
+                if (!full_mode && !reachable.get(to_index(pred->index())))
                     continue;
                 if (!expected_preds.contains(pred)) {
                     report_error(ByteString::formatted(
@@ -607,12 +622,13 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // reference values that were defined after a throw point (due to incorrect EH
     // splitting), those values won't dominate the handler and we'll report an error.
     //
-    // Build map from Value* to its defining block
-    HashMap<Value const*, BasicBlock*> value_to_block;
+    // Build map from Value index to its defining block
+    Vector<BasicBlock*> value_to_block;
+    value_to_block.resize_with_default_value(value_capacity, nullptr);
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instr : block->instructions()) {
             if (instr->result())
-                value_to_block.set(instr->result(), block.ptr());
+                value_to_block[to_index(instr->result()->index())] = block.ptr();
         }
     }
 
@@ -628,7 +644,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     }
 
     for (auto const& block : function.basic_blocks()) {
-        if (!reachable.contains(block.ptr()))
+        if (!reachable.get(to_index(block->index())))
             continue;
 
         for (auto const& instr : block->instructions()) {
@@ -644,15 +660,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
                     // In InterPass mode, skip unreachable predecessors — they may have
                     // stale phi entries that DeadBlockElimination will clean up.
-                    if (!full_mode && !reachable.contains(pred))
+                    if (!full_mode && !reachable.get(to_index(pred->index())))
                         continue;
 
                     // Skip constants, parameters, and this values - they dominate everything
                     if (operand->is_constant() || operand->is_parameter() || operand->is_this())
                         continue;
 
-                    auto def_block = value_to_block.get(operand);
-                    if (!def_block.has_value()) {
+                    auto* def_block = value_to_block[to_index(operand->index())];
+                    if (!def_block) {
                         report_error(ByteString::formatted(
                             "Phi operand v{} in block{} has no defining block",
                             operand->index(), block->index()));
@@ -661,10 +677,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
                     // The definition must dominate the predecessor block
                     // (the value flows from pred -> current block via the phi)
-                    if (!dominators.dominates(*def_block, pred)) {
+                    if (!dominators.dominates(def_block, pred)) {
                         report_error(ByteString::formatted(
                             "SSA violation: phi operand v{} (defined in block{}) does not dominate predecessor block{} for phi in block{}",
-                            operand->index(), (*def_block)->index(), pred->index(), block->index()));
+                            operand->index(), def_block->index(), pred->index(), block->index()));
                     }
                 }
             } else {
@@ -678,8 +694,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     if (operand->is_constant() || operand->is_parameter() || operand->is_this())
                         continue;
 
-                    auto def_block = value_to_block.get(operand);
-                    if (!def_block.has_value()) {
+                    auto* def_block = value_to_block[to_index(operand->index())];
+                    if (!def_block) {
                         report_error(ByteString::formatted(
                             "Operand v{} in block{} has no defining block",
                             operand->index(), block->index()));
@@ -688,7 +704,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
                     // Check dominance: def_block must dominate use_block
                     // If in same block, check instruction order
-                    if (*def_block == block.ptr()) {
+                    if (def_block == block.ptr()) {
                         // Same block: definition must come before use
                         auto* def_instr = operand->defining_instruction();
                         if (def_instr) {
@@ -700,10 +716,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                                     operand->index(), block->index()));
                             }
                         }
-                    } else if (!dominators.dominates(*def_block, block.ptr())) {
+                    } else if (!dominators.dominates(def_block, block.ptr())) {
                         report_error(ByteString::formatted(
                             "SSA violation: operand v{} (defined in block{}) does not dominate use in block{}",
-                            operand->index(), (*def_block)->index(), block->index()));
+                            operand->index(), def_block->index(), block->index()));
                     }
                 }
             }
