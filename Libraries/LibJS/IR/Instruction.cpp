@@ -218,6 +218,8 @@ void Instruction::clear_operand_uses()
         if (operand)
             operand->remove_use(this);
     }
+    if (m_result)
+        m_result->set_defining_instruction(nullptr);
 }
 
 void Instruction::remove_phi_operand(size_t index)
