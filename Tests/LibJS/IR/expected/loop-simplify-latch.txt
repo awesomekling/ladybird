@@ -253,24 +253,49 @@ block6:
 split_block1_block2:
     Jump block2
 
+=== After SsaDestructionPass ===
 function(v10:unknown):
 block0:
+    ParallelCopy [v17:number <- v3:int32, v16:unknown <- v3:int32]
     Jump block3
 block1:
     Branch v10:unknown, block8, block6
 block2:
-    v15:unknown = Phi [block6:v8:unknown, block8:v16:unknown]
     v7:number = Increment v17:number
+    ParallelCopy [v17:number <- v7:number, v16:unknown <- v15:unknown]
     Jump block3
 block3:
-    v17:number = Phi [block0:v3:int32, block2:v7:number]
-    v16:unknown = Phi [block0:v3:int32, block2:v15:unknown]
     v12:boolean = LessThan v17:number, 10
     Branch v12:boolean, block1, block4
 block4:
     Return v16:unknown
 block6:
     v8:unknown = Add v16:unknown, v17:number
+    ParallelCopy [v15:unknown <- v8:unknown]
     Jump block2
 split_block1_block2:
+    ParallelCopy [v15:unknown <- v16:unknown]
+    Jump block2
+
+function(v10:unknown):
+block0:
+    ParallelCopy [v17:number <- v3:int32, v16:unknown <- v3:int32]
+    Jump block3
+block1:
+    Branch v10:unknown, block8, block6
+block2:
+    v7:number = Increment v17:number
+    ParallelCopy [v17:number <- v7:number, v16:unknown <- v15:unknown]
+    Jump block3
+block3:
+    v12:boolean = LessThan v17:number, 10
+    Branch v12:boolean, block1, block4
+block4:
+    Return v16:unknown
+block6:
+    v8:unknown = Add v16:unknown, v17:number
+    ParallelCopy [v15:unknown <- v8:unknown]
+    Jump block2
+split_block1_block2:
+    ParallelCopy [v15:unknown <- v16:unknown]
     Jump block2

@@ -282,11 +282,13 @@ block4:
     v12:unknown = GetGlobal sum
     End v12:unknown
 
+=== After SsaDestructionPass ===
 function():
 block0:
     InitializeBinding x 10
     InitializeBinding sum 0
     InitializeBinding n 5
+    ParallelCopy [v17:number <- v1:int32]
     Jump block3
 block1:
     v4:unknown = GetGlobal sum
@@ -295,9 +297,33 @@ block1:
     v8:unknown = Add v4:unknown, v7:unknown
     SetGlobal sum v8:unknown
     v10:number = Increment v17:number
+    ParallelCopy [v17:number <- v10:number]
     Jump block3
 block3:
-    v17:number = Phi [block1:v10:number, block0:v1:int32]
+    v11:unknown = GetGlobal n
+    v13:boolean = LessThan v17:number, v11:unknown
+    Branch v13:boolean, block1, block4
+block4:
+    v12:unknown = GetGlobal sum
+    End v12:unknown
+
+function():
+block0:
+    InitializeBinding x 10
+    InitializeBinding sum 0
+    InitializeBinding n 5
+    ParallelCopy [v17:number <- v1:int32]
+    Jump block3
+block1:
+    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal x
+    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Add v4:unknown, v7:unknown
+    SetGlobal sum v8:unknown
+    v10:number = Increment v17:number
+    ParallelCopy [v17:number <- v10:number]
+    Jump block3
+block3:
     v11:unknown = GetGlobal n
     v13:boolean = LessThan v17:number, v11:unknown
     Branch v13:boolean, block1, block4

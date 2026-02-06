@@ -67,11 +67,9 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
                 if (value == phi_result)
                     continue;
 
-                // Determine edge type based on predecessor's terminator
+                // Determine edge type based on predecessor's exception handler
                 auto* term = pred->terminator();
-                bool is_handler_edge = (block->exception_handler() == nullptr)
-                    ? false
-                    : pred->exception_handler() == block.ptr();
+                bool is_handler_edge = pred->exception_handler() == block.ptr();
 
                 // NB: A Yield/Await's continuation edge is a normal edge
                 // in the CFG, but the phi operand might be the resume

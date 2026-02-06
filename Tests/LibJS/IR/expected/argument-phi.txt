@@ -109,14 +109,29 @@ block2:
 split_block0_block2:
     Jump block2
 
+=== After SsaDestructionPass ===
 function(v2:unknown):
 block0:
     v4:boolean = StrictlyEquals v2:unknown, undefined
     Branch v4:boolean, block1, block3
 block1:
+    ParallelCopy [v5:unknown <- v0:int32]
     Jump block2
 block2:
-    v5:unknown = Phi [block1:v0:int32, block3:v2:unknown]
     Return v5:unknown
 split_block0_block2:
+    ParallelCopy [v5:unknown <- v2:unknown]
+    Jump block2
+
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block3
+block1:
+    ParallelCopy [v5:unknown <- v0:int32]
+    Jump block2
+block2:
+    Return v5:unknown
+split_block0_block2:
+    ParallelCopy [v5:unknown <- v2:unknown]
     Jump block2

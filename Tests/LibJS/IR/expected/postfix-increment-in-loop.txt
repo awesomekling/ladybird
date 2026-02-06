@@ -274,13 +274,14 @@ block2:
 block3:
     Return v13:array
 
+=== After SsaDestructionPass ===
 function():
 block0:
     v9:array = NewArray 1, 2, 3, 4, 5
     v13:array = NewArray
+    ParallelCopy [v30:number <- v11:int32]
     Jump block1
 block1:
-    v30:number = Phi [block0:v11:int32, block2:v18:number]
     v23:boolean = LessThan v30:number, 5
     Branch v23:boolean, block2, block3
 block2:
@@ -288,6 +289,26 @@ block2:
     v18:number = Increment v30:number
     v20:unknown = GetByValue v9:array, v30:number
     v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    ParallelCopy [v30:number <- v18:number]
+    Jump block1
+block3:
+    Return v13:array
+
+function():
+block0:
+    v9:array = NewArray 1, 2, 3, 4, 5
+    v13:array = NewArray
+    ParallelCopy [v30:number <- v11:int32]
+    Jump block1
+block1:
+    v23:boolean = LessThan v30:number, 5
+    Branch v23:boolean, block2, block3
+block2:
+    v15:unknown = GetById v13:array.push
+    v18:number = Increment v30:number
+    v20:unknown = GetByValue v9:array, v30:number
+    v21:unknown = Call v15:unknown, v13:array, v20:unknown
+    ParallelCopy [v30:number <- v18:number]
     Jump block1
 block3:
     Return v13:array

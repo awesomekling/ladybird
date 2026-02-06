@@ -17,6 +17,7 @@
 #include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
+#include <LibJS/IR/Passes/SsaDestructionPass.h>
 
 namespace JS::IR {
 
@@ -87,7 +88,12 @@ void optimize(Function& function)
     SplitCriticalEdges split_pass;
     run_once(split_pass);
 
-    function.set_stage(IRStage::OptimizedSSA);
+    // SSA Destruction: replace phi nodes with ParallelCopy instructions.
+    // Must run after SplitCriticalEdges so copies have clean blocks.
+    SsaDestructionPass ssa_destruction_pass;
+    run_once(ssa_destruction_pass);
+
+    function.set_stage(IRStage::PostSSA);
 }
 
 }

@@ -1703,6 +1703,7 @@ split_block43_block3:
 split_block46_block3:
     Jump block3
 
+=== After SsaDestructionPass ===
 function():
 block0:
     v75:unknown = Yield undefined, continuation: block1
@@ -1711,19 +1712,16 @@ block1:
     v3:unknown = GetIterator v2:array
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
+    ParallelCopy [v128:unknown <- v151:undefined, v122:unknown <- v9:undefined, v119:unknown <- v7:int32]
     Jump block2
 block2:
-    v128:unknown = Phi [block1:v151:undefined, block3:v129:unknown]
-    v122:unknown = Phi [block1:v9:undefined, block3:v15:unknown]
-    v119:unknown = Phi [block1:v7:int32, block3:v14:unknown]
     v76:boolean = StrictlyEquals v119:unknown, 1
     Branch v76:boolean, block5, block6
 block3:
-    v129:unknown = Phi [block17:v22:unknown, block32:v42:unknown, block48:v63:unknown, block80:v22:unknown, block81:v22:unknown, block82:v42:unknown, block83:v42:unknown, block84:v63:unknown, block85:v63:unknown]
-    v114:unknown = Phi [block17:v85:unknown, block32:v96:unknown, block48:v109:unknown, block80:v82:unknown, block81:v85:unknown, block82:v93:unknown, block83:v96:unknown, block84:v106:unknown, block85:v109:unknown]
     v13:unknown = GetCompletionFields v114:unknown
     v14:unknown = ExtractValue v13:unknown, 0
     v15:unknown = ExtractValue v13:unknown, 1
+    ParallelCopy [v128:unknown <- v129:unknown, v122:unknown <- v15:unknown, v119:unknown <- v14:unknown]
     Jump block2
 block4:
     v77:unknown = Yield undefined
@@ -1772,6 +1770,7 @@ block16:
     Throw v32:unknown
 block17:
     SetCompletionType v85:unknown
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v85:unknown]
     Jump block3
 block18:
     v33:unknown = GetById v4:unknown.throw
@@ -1827,6 +1826,7 @@ block31:
     Throw v52:unknown
 block32:
     SetCompletionType v96:unknown
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v96:unknown]
     Jump block3
 block33:
     v100:unknown = Await v122:unknown, continuation: block35
@@ -1882,16 +1882,222 @@ block47:
     Throw v73:unknown
 block48:
     SetCompletionType v109:unknown
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v109:unknown]
     Jump block3
 split_block12_block3:
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v82:unknown]
     Jump block3
 split_block15_block3:
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v85:unknown]
     Jump block3
 split_block27_block3:
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v93:unknown]
     Jump block3
 split_block30_block3:
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v96:unknown]
     Jump block3
 split_block43_block3:
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v106:unknown]
     Jump block3
 split_block46_block3:
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v109:unknown]
+    Jump block3
+
+function():
+block0:
+    v75:unknown = Yield undefined, continuation: block1
+block1:
+    v2:array = NewArray 1, 2
+    v3:unknown = GetIterator v2:array
+    v4:unknown = ExtractValue v3:unknown, 0
+    v5:unknown = ExtractValue v3:unknown, 1
+    ParallelCopy [v128:unknown <- v151:undefined, v122:unknown <- v9:undefined, v119:unknown <- v7:int32]
+    Jump block2
+block2:
+    v76:boolean = StrictlyEquals v119:unknown, 1
+    Branch v76:boolean, block5, block6
+block3:
+    v13:unknown = GetCompletionFields v114:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    ParallelCopy [v128:unknown <- v129:unknown, v122:unknown <- v15:unknown, v119:unknown <- v14:unknown]
+    Jump block2
+block4:
+    v77:unknown = Yield undefined
+block5:
+    v16:unknown = Call v5:unknown, v4:unknown, v122:unknown
+    v78:unknown = Await v16:unknown, continuation: block7
+block6:
+    v80:boolean = StrictlyEquals v119:unknown, 5
+    Branch v80:boolean, block18, block19
+block7:
+    v18:unknown = GetCompletionFields v78:unknown
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v81:boolean = StrictlyEquals v19:unknown, 1
+    Branch v81:boolean, block8, block9
+block8:
+    ThrowIfNotObject v20:unknown
+    v22:unknown = GetById v20:unknown.done
+    Branch v22:unknown, block10, block11
+block9:
+    Throw v20:unknown
+block10:
+    v23:unknown = GetById v20:unknown.value
+    Jump block4
+block11:
+    v24:unknown = GetById v20:unknown.value
+    v82:unknown = Yield v24:unknown, continuation: block12
+block12:
+    v26:unknown = GetCompletionFields v82:unknown
+    v27:unknown = ExtractValue v26:unknown, 0
+    v28:unknown = ExtractValue v26:unknown, 1
+    v84:boolean = StrictlyInequals v27:unknown, 4
+    Branch v84:boolean, block80, block13
+block13:
+    v85:unknown = Await v28:unknown, continuation: block14
+block14:
+    v30:unknown = GetCompletionFields v85:unknown
+    v31:unknown = ExtractValue v30:unknown, 0
+    v32:unknown = ExtractValue v30:unknown, 1
+    v86:boolean = StrictlyEquals v31:unknown, 1
+    Branch v86:boolean, block15, block16
+block15:
+    v88:boolean = StrictlyEquals v31:unknown, 5
+    Branch v88:boolean, block81, block17
+block16:
+    Throw v32:unknown
+block17:
+    SetCompletionType v85:unknown
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v85:unknown]
+    Jump block3
+block18:
+    v33:unknown = GetById v4:unknown.throw
+    v89:boolean = IsUndefined v33:unknown
+    Branch v89:boolean, block21, block20
+block19:
+    v34:unknown = GetById v4:unknown.return
+    v90:boolean = IsUndefined v34:unknown
+    Branch v90:boolean, block33, block34
+block20:
+    v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
+    v91:unknown = Await v35:unknown, continuation: block22
+block21:
+    AsyncIteratorClose v4:unknown, v5:unknown, v128:unknown
+    v36:unknown = NewTypeError
+    Throw v36:unknown
+block22:
+    v38:unknown = GetCompletionFields v91:unknown
+    v39:unknown = ExtractValue v38:unknown, 0
+    v40:unknown = ExtractValue v38:unknown, 1
+    v92:boolean = StrictlyEquals v39:unknown, 1
+    Branch v92:boolean, block23, block24
+block23:
+    ThrowIfNotObject v40:unknown
+    v42:unknown = GetById v40:unknown.done
+    Branch v42:unknown, block25, block26
+block24:
+    Throw v40:unknown
+block25:
+    v43:unknown = GetById v40:unknown.value
+    Jump block4
+block26:
+    v44:unknown = GetById v40:unknown.value
+    v93:unknown = Yield v44:unknown, continuation: block27
+block27:
+    v46:unknown = GetCompletionFields v93:unknown
+    v47:unknown = ExtractValue v46:unknown, 0
+    v48:unknown = ExtractValue v46:unknown, 1
+    v95:boolean = StrictlyInequals v47:unknown, 4
+    Branch v95:boolean, block82, block28
+block28:
+    v96:unknown = Await v48:unknown, continuation: block29
+block29:
+    v50:unknown = GetCompletionFields v96:unknown
+    v51:unknown = ExtractValue v50:unknown, 0
+    v52:unknown = ExtractValue v50:unknown, 1
+    v97:boolean = StrictlyEquals v51:unknown, 1
+    Branch v97:boolean, block30, block31
+block30:
+    v99:boolean = StrictlyEquals v51:unknown, 5
+    Branch v99:boolean, block83, block32
+block31:
+    Throw v52:unknown
+block32:
+    SetCompletionType v96:unknown
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v96:unknown]
+    Jump block3
+block33:
+    v100:unknown = Await v122:unknown, continuation: block35
+block34:
+    v53:unknown = Call v34:unknown, v4:unknown, v122:unknown
+    v101:unknown = Await v53:unknown, continuation: block38
+block35:
+    v55:unknown = GetCompletionFields v100:unknown
+    v56:unknown = ExtractValue v55:unknown, 0
+    v57:unknown = ExtractValue v55:unknown, 1
+    v102:boolean = StrictlyEquals v56:unknown, 1
+    Branch v102:boolean, block36, block37
+block36:
+    v103:unknown = Yield v57:unknown
+block37:
+    Throw v57:unknown
+block38:
+    v59:unknown = GetCompletionFields v101:unknown
+    v60:unknown = ExtractValue v59:unknown, 0
+    v61:unknown = ExtractValue v59:unknown, 1
+    v104:boolean = StrictlyEquals v60:unknown, 1
+    Branch v104:boolean, block39, block40
+block39:
+    ThrowIfNotObject v61:unknown
+    v63:unknown = GetById v61:unknown.done
+    Branch v63:unknown, block41, block42
+block40:
+    Throw v61:unknown
+block41:
+    v64:unknown = GetById v61:unknown.value
+    v105:unknown = Yield v64:unknown
+block42:
+    v65:unknown = GetById v61:unknown.value
+    v106:unknown = Yield v65:unknown, continuation: block43
+block43:
+    v67:unknown = GetCompletionFields v106:unknown
+    v68:unknown = ExtractValue v67:unknown, 0
+    v69:unknown = ExtractValue v67:unknown, 1
+    v108:boolean = StrictlyInequals v68:unknown, 4
+    Branch v108:boolean, block84, block44
+block44:
+    v109:unknown = Await v69:unknown, continuation: block45
+block45:
+    v71:unknown = GetCompletionFields v109:unknown
+    v72:unknown = ExtractValue v71:unknown, 0
+    v73:unknown = ExtractValue v71:unknown, 1
+    v110:boolean = StrictlyEquals v72:unknown, 1
+    Branch v110:boolean, block46, block47
+block46:
+    v112:boolean = StrictlyEquals v72:unknown, 5
+    Branch v112:boolean, block85, block48
+block47:
+    Throw v73:unknown
+block48:
+    SetCompletionType v109:unknown
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v109:unknown]
+    Jump block3
+split_block12_block3:
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v82:unknown]
+    Jump block3
+split_block15_block3:
+    ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v85:unknown]
+    Jump block3
+split_block27_block3:
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v93:unknown]
+    Jump block3
+split_block30_block3:
+    ParallelCopy [v129:unknown <- v42:unknown, v114:unknown <- v96:unknown]
+    Jump block3
+split_block43_block3:
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v106:unknown]
+    Jump block3
+split_block46_block3:
+    ParallelCopy [v129:unknown <- v63:unknown, v114:unknown <- v109:unknown]
     Jump block3

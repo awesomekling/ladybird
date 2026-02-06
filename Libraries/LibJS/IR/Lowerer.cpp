@@ -22,7 +22,6 @@ namespace JS::IR {
 Lowerer::Lowerer(VM& vm, Function const& function)
     : m_vm(vm)
     , m_function(function)
-    , m_phi_coalescing(function)
 {
     auto value_count = function.values().size();
     m_value_to_operand.resize(value_count);
@@ -95,10 +94,7 @@ u32 Lowerer::get_or_add_constant(JS::Value constant_value)
 
 Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 {
-    auto const* lookup_value = m_phi_coalescing.representative(value);
-
-    // Check if we already have an operand for this value (or its coalescing representative)
-    auto vi = static_cast<u32>(lookup_value->index());
+    auto vi = static_cast<u32>(value.index());
     if (m_value_to_operand[vi].has_value())
         return m_value_to_operand[vi].value();
 
@@ -179,112 +175,6 @@ void Lowerer::emit_with_extra_operand_slots(size_t extra_operand_slots, Args&&..
         m_current_block->add_source_map_entry(static_cast<u32>(slot_offset), *m_current_source_record);
 }
 
-void Lowerer::emit_phi_moves_for_successor(BasicBlock const& from, BasicBlock const& to)
-{
-    // Collect all (dst, src) moves for phi nodes on this edge.
-    struct PhiMove {
-        Bytecode::Operand dst;
-        Bytecode::Operand src;
-    };
-    Vector<PhiMove> moves;
-
-    for (auto const& instruction : to.instructions()) {
-        if (instruction->opcode() != Opcode::Phi)
-            break;
-
-        auto const& phi = static_cast<PhiInstruction const&>(*instruction);
-
-        auto* incoming = phi.incoming_value_for(from);
-        if (!incoming || !phi.result())
-            continue;
-        auto src = operand_for_value(*incoming);
-        auto dst = operand_for_value(*phi.result());
-        if (src != dst)
-            moves.append({ dst, src });
-    }
-
-    // Check if any source would be clobbered by another move's destination.
-    // If so, save it to a temp register first (parallel move resolution).
-    HashMap<u32, Bytecode::Operand> saved;
-    for (auto const& move : moves) {
-        bool is_clobbered = false;
-        for (auto const& other : moves) {
-            if (&other != &move && other.dst == move.src) {
-                is_clobbered = true;
-                break;
-            }
-        }
-        if (is_clobbered && !saved.contains(move.src.index())) {
-            auto tmp = allocate_register();
-            emit<Bytecode::Op::Mov>(tmp, move.src);
-            saved.set(move.src.index(), tmp);
-        }
-    }
-
-    // Emit moves, substituting saved temps where needed.
-    for (auto const& move : moves) {
-        auto actual_src = move.src;
-        if (auto it = saved.find(move.src.index()); it != saved.end())
-            actual_src = it->value;
-        emit<Bytecode::Op::Mov>(move.dst, actual_src);
-    }
-}
-
-bool Lowerer::target_has_phis(BasicBlock const& target) const
-{
-    if (target.instructions().is_empty())
-        return false;
-    return target.instructions().first()->opcode() == Opcode::Phi;
-}
-
-bool Lowerer::needs_phi_moves_for_edge(BasicBlock const& from, BasicBlock const& to)
-{
-    // Check if any phi in the target block would need a move for this edge
-    for (auto const& instruction : to.instructions()) {
-        if (instruction->opcode() != Opcode::Phi)
-            break;
-
-        auto const& phi = static_cast<PhiInstruction const&>(*instruction);
-
-        auto* incoming = phi.incoming_value_for(from);
-        if (!incoming || !phi.result())
-            continue;
-        auto src = operand_for_value(*incoming);
-        auto dst = operand_for_value(*phi.result());
-        if (src != dst)
-            return true;
-    }
-    return false;
-}
-
-size_t Lowerer::get_or_create_trampoline(BasicBlock const& from, BasicBlock const& to)
-{
-    // Create a unique key for this edge
-    auto from_idx = m_ir_block_to_bytecode_index.get(&from).value();
-    auto to_idx = m_ir_block_to_bytecode_index.get(&to).value();
-    u64 edge_key = (static_cast<u64>(from_idx) << 32) | static_cast<u64>(to_idx);
-
-    // Check if we already have a trampoline for this edge
-    if (auto it = m_edge_to_trampoline.find(edge_key); it != m_edge_to_trampoline.end())
-        return it->value;
-
-    // Create a new trampoline block
-    auto trampoline_idx = m_bytecode_blocks.size();
-    auto trampoline = Bytecode::BasicBlock::create(static_cast<u32>(trampoline_idx),
-        String::formatted("trampoline_{}_{}", from.name(), to.name()).release_value_but_fixme_should_propagate_errors());
-    m_bytecode_blocks.append(move(trampoline));
-    m_edge_to_trampoline.set(edge_key, trampoline_idx);
-
-    // Emit phi moves and jump in the trampoline block
-    auto* saved_block = m_current_block;
-    m_current_block = m_bytecode_blocks[trampoline_idx].ptr();
-    emit_phi_moves_for_successor(from, to);
-    emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(to_idx) });
-    m_current_block = saved_block;
-
-    return trampoline_idx;
-}
-
 void Lowerer::lower_instruction(Instruction const& instruction)
 {
     auto dst = [&]() -> Bytecode::Operand {
@@ -309,13 +199,51 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     switch (instruction.opcode()) {
     case Opcode::Phi:
-        // Phi nodes are handled by emitting moves in predecessors
-        break;
-
-    case Opcode::ParallelCopy:
-        // ParallelCopy is resolved in Commit 3
+        // Phi nodes are removed by SsaDestructionPass before lowering.
         VERIFY_NOT_REACHED();
         break;
+
+    case Opcode::ParallelCopy: {
+        // Resolve parallel copies into an ordered sequence of Mov bytecodes.
+        auto const& pcopy = static_cast<ParallelCopyInstruction const&>(instruction);
+        struct PhiMove {
+            Bytecode::Operand dst;
+            Bytecode::Operand src;
+        };
+        Vector<PhiMove> moves;
+        for (auto const& copy : pcopy.copies()) {
+            auto src_op = operand_for_value(*copy.src);
+            auto dst_op = operand_for_value(*copy.dst);
+            if (src_op != dst_op)
+                moves.append({ dst_op, src_op });
+        }
+
+        // Save clobbered sources to temp registers.
+        HashMap<u32, Bytecode::Operand> saved;
+        for (auto const& move : moves) {
+            bool is_clobbered = false;
+            for (auto const& other : moves) {
+                if (&other != &move && other.dst == move.src) {
+                    is_clobbered = true;
+                    break;
+                }
+            }
+            if (is_clobbered && !saved.contains(move.src.index())) {
+                auto tmp = allocate_register();
+                emit<Bytecode::Op::Mov>(tmp, move.src);
+                saved.set(move.src.index(), tmp);
+            }
+        }
+
+        // Emit moves, substituting saved temps where needed.
+        for (auto const& move : moves) {
+            auto actual_src = move.src;
+            if (auto it = saved.find(move.src.index()); it != saved.end())
+                actual_src = it->value;
+            emit<Bytecode::Op::Mov>(move.dst, actual_src);
+        }
+        break;
+    }
 
     case Opcode::Move: {
         auto d = dst();
@@ -958,11 +886,8 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         // Get the tuple operand and extract the element at the given index
         auto* tuple_value = instruction.operands()[0];
         auto element_reg = operand_for_tuple_element(*tuple_value, instruction.extract_index());
-        // Map the result (and its coalescing representative) to this register
-        if (instruction.result()) {
-            auto const* rep = m_phi_coalescing.representative(*instruction.result());
-            m_value_to_operand[static_cast<u32>(rep->index())] = element_reg;
-        }
+        if (instruction.result())
+            m_value_to_operand[static_cast<u32>(instruction.result()->index())] = element_reg;
         break;
     }
 
@@ -1038,8 +963,7 @@ void Lowerer::lower_blocks()
                 auto* tuple_value = instruction->operands()[0];
                 if (tuple_value && instruction->result()) {
                     auto element_reg = operand_for_tuple_element(*tuple_value, instruction->extract_index());
-                    auto const* rep = m_phi_coalescing.representative(*instruction->result());
-                    m_value_to_operand[static_cast<u32>(rep->index())] = element_reg;
+                    m_value_to_operand[static_cast<u32>(instruction->result()->index())] = element_reg;
                 }
             }
         }
@@ -1049,14 +973,6 @@ void Lowerer::lower_blocks()
     for (size_t i = 0; i < ordered_blocks.size(); ++i) {
         auto const& ir_block = *ordered_blocks[i];
         m_current_block = m_bytecode_blocks[i].ptr();
-
-        // Emit phi moves for exception handler edges.
-        // When any instruction in this block throws, the runtime jumps to the
-        // handler block. Phi nodes in that handler need their registers to
-        // already contain the correct values, so we emit the moves at the
-        // start of every block that can reach the handler via an exception.
-        if (auto* handler = ir_block.exception_handler())
-            emit_phi_moves_for_successor(ir_block, *handler);
 
         // Lower non-terminator instructions
         for (auto const& instruction : ir_block.instructions()) {
@@ -1078,7 +994,6 @@ void Lowerer::lower_blocks()
         case Opcode::Jump: {
             auto* target = terminator->true_target();
             if (target) {
-                emit_phi_moves_for_successor(ir_block, *target);
                 auto target_index = m_ir_block_to_bytecode_index.get(target).value();
                 // Skip jump if target is the immediately following block (fallthrough)
                 if (target_index != i + 1)
@@ -1089,7 +1004,6 @@ void Lowerer::lower_blocks()
         case Opcode::ContinuePendingUnwind: {
             auto* target = terminator->true_target();
             VERIFY(target);
-            emit_phi_moves_for_successor(ir_block, *target);
             auto target_index = m_ir_block_to_bytecode_index.get(target).value();
             emit<Bytecode::Op::ContinuePendingUnwind>(Bytecode::Label { static_cast<u32>(target_index) });
             break;
@@ -1117,15 +1031,6 @@ void Lowerer::lower_blocks()
             auto* false_target = terminator->false_target();
 
             if (true_target && false_target && false_target != true_target) {
-                // After SplitCriticalEdges, Branch targets never need phi moves:
-                // - Multi-predecessor targets have their critical edges split, so
-                //   Branch targets split blocks with no phis (the split block's
-                //   Jump handles phi moves).
-                // - Single-predecessor targets have phis with one incoming value,
-                //   which coalescing eliminates.
-                VERIFY(!needs_phi_moves_for_edge(ir_block, *true_target));
-                VERIFY(!needs_phi_moves_for_edge(ir_block, *false_target));
-
                 auto true_index = m_ir_block_to_bytecode_index.get(true_target).value();
                 auto false_index = m_ir_block_to_bytecode_index.get(false_target).value();
 
@@ -1179,9 +1084,6 @@ void Lowerer::lower_blocks()
                     }
                 }
             } else if (true_target) {
-                // Only one target (unconditional after condition eval, or same target)
-                if (target_has_phis(*true_target))
-                    emit_phi_moves_for_successor(ir_block, *true_target);
                 auto target_index = m_ir_block_to_bytecode_index.get(true_target).value();
                 emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
@@ -1208,19 +1110,13 @@ void Lowerer::lower_blocks()
             auto* continuation = terminator->true_target();
             if (continuation) {
                 // The resume value appears in the accumulator (reg0) at runtime.
-                // Map it BEFORE phi move resolution so trampolines use reg0 as source.
                 if (terminator->result())
                     m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
 
-                // Phi moves must execute AFTER the generator resumes (when reg0
-                // has the resume value). Route through a trampoline if needed.
+                // SsaDestructionPass has already created intermediate blocks
+                // for phi moves, so just emit the Yield with continuation.
                 auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
-                if (needs_phi_moves_for_edge(ir_block, *continuation)) {
-                    auto trampoline_idx = get_or_create_trampoline(ir_block, *continuation);
-                    emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(trampoline_idx) }, value);
-                } else {
-                    emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
-                }
+                emit<Bytecode::Op::Yield>(Bytecode::Label { static_cast<u32>(continuation_index) }, value);
             } else {
                 // Final yield (generator return) - Yield with no continuation label
                 emit<Bytecode::Op::Yield>(Optional<Bytecode::Label> {}, value);
@@ -1234,19 +1130,13 @@ void Lowerer::lower_blocks()
             VERIFY(continuation);
 
             // The resume value (resolved promise) appears in the accumulator (reg0) at runtime.
-            // Map it BEFORE phi move resolution so trampolines use reg0 as source.
             if (terminator->result())
                 m_value_to_operand[static_cast<u32>(terminator->result()->index())] = Bytecode::Operand(Bytecode::Register::accumulator());
 
-            // Phi moves must execute AFTER the await resumes (when reg0
-            // has the resume value). Route through a trampoline if needed.
+            // SsaDestructionPass has already created intermediate blocks
+            // for phi moves, so just emit the Await with continuation.
             auto continuation_index = m_ir_block_to_bytecode_index.get(continuation).value();
-            if (needs_phi_moves_for_edge(ir_block, *continuation)) {
-                auto trampoline_idx = get_or_create_trampoline(ir_block, *continuation);
-                emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(trampoline_idx) }, argument);
-            } else {
-                emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
-            }
+            emit<Bytecode::Op::Await>(Bytecode::Label { static_cast<u32>(continuation_index) }, argument);
             break;
         }
         default:
@@ -1255,14 +1145,12 @@ void Lowerer::lower_blocks()
     }
 }
 
-// IR Pipeline Phase 4: SSA destruction + IR → Bytecode lowering
-// PhiCoalescing (constructed in the Lowerer) performs SSA destruction by
-// mapping phi-related values to shared registers. The Lowerer then emits
-// bytecode, inserting Mov instructions only where coalescing didn't
-// eliminate the phi move.
+// IR Pipeline Phase 4: IR → Bytecode lowering
+// SsaDestructionPass has already replaced phi nodes with ParallelCopy
+// instructions. The lowerer resolves each ParallelCopy into Mov bytecodes.
 GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
 {
-    VERIFY(function.stage() == IRStage::SSA || function.stage() == IRStage::OptimizedSSA);
+    VERIFY(function.stage() == IRStage::PostSSA);
 
     Lowerer lowerer(vm, function);
     if (function.source_executable())

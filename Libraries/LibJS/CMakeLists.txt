@@ -27,7 +27,7 @@ set(SOURCES
     IR/LoopTree.cpp
     IR/Optimize.cpp
     IR/Lowerer.cpp
-    IR/PhiCoalescing.cpp
+
     IR/SSAConstruction.cpp
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp

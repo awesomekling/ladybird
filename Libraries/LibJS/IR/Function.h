@@ -22,6 +22,7 @@ enum class IRStage : u8 {
     RawCFG,
     SSA,
     OptimizedSSA,
+    PostSSA,
     Lowered,
 };
 

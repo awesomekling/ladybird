@@ -262,13 +262,12 @@ block1_split0:
     v19:number = Increment v28:number
     Jump block3
 
+=== After SsaDestructionPass ===
 function(v21:unknown):
 block0:
+    ParallelCopy [v28:number <- v10:int32, v25:int32 <- v8:int32, v24:int32 <- v6:int32]
     Jump block3
 block3:
-    v28:number = Phi [block0:v10:int32, block5:v19:number]
-    v25:int32 = Phi [block0:v8:int32, block5:v24:int32]
-    v24:int32 = Phi [block0:v6:int32, block5:v25:int32]
     v22:boolean = LessThan v28:number, v21:unknown
     Branch v22:boolean, block5, block4
 block4:
@@ -276,4 +275,20 @@ block4:
     Return v20:number
 block1_split0:
     v19:number = Increment v28:number
+    ParallelCopy [v28:number <- v19:number, v25:int32 <- v24:int32, v24:int32 <- v25:int32]
+    Jump block3
+
+function(v21:unknown):
+block0:
+    ParallelCopy [v28:number <- v10:int32, v25:int32 <- v8:int32, v24:int32 <- v6:int32]
+    Jump block3
+block3:
+    v22:boolean = LessThan v28:number, v21:unknown
+    Branch v22:boolean, block5, block4
+block4:
+    v20:number = Add v24:int32, v25:int32
+    Return v20:number
+block1_split0:
+    v19:number = Increment v28:number
+    ParallelCopy [v28:number <- v19:number, v25:int32 <- v24:int32, v24:int32 <- v25:int32]
     Jump block3
