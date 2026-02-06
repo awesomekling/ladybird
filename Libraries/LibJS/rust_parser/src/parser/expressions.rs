@@ -925,11 +925,83 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_string_value(&self, token: &Token) -> Vec<u16> {
         let raw = self.token_value(token);
-        // For string literals, the value includes the quotes - we need to strip them
-        // and process escape sequences.
-        // The lexer should have already given us the unquoted value.
-        // TODO: Process escape sequences properly
-        raw.to_vec()
+        if raw.len() < 2 {
+            return Vec::new();
+        }
+        // Strip surrounding quotes
+        let inner = &raw[1..raw.len() - 1];
+        // Process escape sequences
+        let mut result = Vec::with_capacity(inner.len());
+        let mut i = 0;
+        while i < inner.len() {
+            if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
+                i += 1;
+                match inner[i] {
+                    c if c == b'n' as u16 => result.push(b'\n' as u16),
+                    c if c == b'r' as u16 => result.push(b'\r' as u16),
+                    c if c == b't' as u16 => result.push(b'\t' as u16),
+                    c if c == b'0' as u16 => result.push(0),
+                    c if c == b'b' as u16 => result.push(8),
+                    c if c == b'f' as u16 => result.push(12),
+                    c if c == b'v' as u16 => result.push(11),
+                    c if c == b'x' as u16 => {
+                        // Hex escape: \xHH
+                        if i + 2 < inner.len() {
+                            let hi = hex_digit(inner[i + 1]);
+                            let lo = hex_digit(inner[i + 2]);
+                            if let (Some(h), Some(l)) = (hi, lo) {
+                                result.push(h * 16 + l);
+                                i += 2;
+                            } else {
+                                result.push(inner[i]);
+                            }
+                        } else {
+                            result.push(inner[i]);
+                        }
+                    }
+                    c if c == b'u' as u16 => {
+                        // Unicode escape: \uHHHH or \u{H+}
+                        if i + 1 < inner.len() && inner[i + 1] == b'{' as u16 {
+                            // \u{H+}
+                            i += 2;
+                            let mut code_point: u32 = 0;
+                            while i < inner.len() && inner[i] != b'}' as u16 {
+                                if let Some(d) = hex_digit(inner[i]) {
+                                    code_point = code_point * 16 + d as u32;
+                                }
+                                i += 1;
+                            }
+                            // Encode as UTF-16
+                            if code_point <= 0xFFFF {
+                                result.push(code_point as u16);
+                            } else {
+                                // Surrogate pair
+                                let code_point = code_point - 0x10000;
+                                result.push((0xD800 + (code_point >> 10)) as u16);
+                                result.push((0xDC00 + (code_point & 0x3FF)) as u16);
+                            }
+                        } else if i + 4 < inner.len() {
+                            // \uHHHH
+                            let mut code_point: u16 = 0;
+                            for j in 1..=4 {
+                                if let Some(d) = hex_digit(inner[i + j]) {
+                                    code_point = code_point * 16 + d;
+                                }
+                            }
+                            result.push(code_point);
+                            i += 4;
+                        } else {
+                            result.push(inner[i]);
+                        }
+                    }
+                    c => result.push(c),
+                }
+            } else {
+                result.push(inner[i]);
+            }
+            i += 1;
+        }
+        result
     }
 
     // === Arrow function ===
@@ -1045,44 +1117,31 @@ impl<'a> Parser<'a> {
             (false, false) => FunctionKind::Normal as u8,
         };
 
-        // Parse parameters
-        let params = self.builder.create_function_parameters_empty();
-        self.consume_token(TokenType::ParenOpen);
-        // TODO: Actually parse formal parameters
-        let mut depth = 1;
-        while depth > 0 && !self.done() {
-            match self.current_token_type() {
-                TokenType::ParenOpen => depth += 1,
-                TokenType::ParenClose => depth -= 1,
-                _ => {}
-            }
-            if depth > 0 {
-                self.consume();
-            }
-        }
-        self.consume_token(TokenType::ParenClose);
+        let (params, function_length) = self.parse_formal_parameters();
 
-        // Parse body
-        let body = self.builder.create_function_body(self.span_from(start));
-        self.consume_token(TokenType::CurlyOpen);
-        let in_function_before = self.in_function_context;
-        self.in_function_context = true;
-        self.parse_statement_list(body, false);
-        self.in_function_context = in_function_before;
-        self.consume_token(TokenType::CurlyClose);
+        let body = self.parse_function_body(is_async, is_generator);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, NULL_HANDLE,
             start.2, self.position().2 - start.2,
-            body, params, 0, kind,
-            self.strict_mode, false,
+            body.0, params, function_length, kind,
+            self.strict_mode || body.1, false,
             false, false, false, false,
         )
     }
 }
 
 // === Helpers ===
+
+fn hex_digit(c: u16) -> Option<u16> {
+    match c {
+        0x30..=0x39 => Some(c - 0x30),       // '0'-'9'
+        0x41..=0x46 => Some(c - 0x41 + 10),   // 'A'-'F'
+        0x61..=0x66 => Some(c - 0x61 + 10),   // 'a'-'f'
+        _ => None,
+    }
+}
 
 fn token_to_binary_op(tt: TokenType) -> u8 {
     match tt {

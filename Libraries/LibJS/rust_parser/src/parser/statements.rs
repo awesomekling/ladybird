@@ -21,7 +21,7 @@ impl<'a> Parser<'a> {
             TokenType::Return => self.parse_return_statement(),
             TokenType::Var => {
                 let decl = self.parse_variable_declaration(false);
-                // TODO: Register in scope pusher
+                self.register_var_scoped_declaration(decl);
                 decl
             }
             TokenType::For => self.parse_for_statement(),
@@ -74,6 +74,8 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
         let block = self.builder.create_block_statement(self.span_from(start));
 
+        self.push_scope(block, false);
+
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_declaration() {
                 let decl = self.parse_declaration();
@@ -84,6 +86,8 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.builder.scope_node_shrink_to_fit(block);
+        self.pop_scope();
         self.consume_token(TokenType::CurlyClose);
         block
     }

@@ -17,16 +17,22 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
             if next.token_type == TokenType::Function {
-                return self.parse_function_declaration();
+                let decl = self.parse_function_declaration();
+                self.register_var_scoped_declaration(decl);
+                return decl;
             }
         }
 
         match self.current_token_type() {
-            TokenType::Function => self.parse_function_declaration(),
+            TokenType::Function => {
+                let decl = self.parse_function_declaration();
+                self.register_var_scoped_declaration(decl);
+                decl
+            }
             TokenType::Class => self.parse_class_declaration(),
             TokenType::Let | TokenType::Const => {
                 let decl = self.parse_variable_declaration(false);
-                // TODO: Register in scope
+                self.register_lexical_declaration(decl);
                 decl
             }
             _ => {
@@ -136,53 +142,16 @@ impl<'a> Parser<'a> {
             NULL_HANDLE
         };
 
-        // Parse parameters (simplified - just skip to matching paren)
-        let params = self.builder.create_function_parameters_empty();
-        self.consume_token(TokenType::ParenOpen);
-        let mut depth = 1;
-        while depth > 0 && !self.done() {
-            match self.current_token_type() {
-                TokenType::ParenOpen => depth += 1,
-                TokenType::ParenClose => depth -= 1,
-                _ => {}
-            }
-            if depth > 0 {
-                self.consume();
-            }
-        }
-        self.consume_token(TokenType::ParenClose);
+        let (params, function_length) = self.parse_formal_parameters();
 
-        // Parse body
-        let body = self.builder.create_function_body(self.span_from(start));
-        self.consume_token(TokenType::CurlyOpen);
-
-        let in_function_before = self.in_function_context;
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
-        self.in_function_context = true;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
-
-        // Parse directive prologue
-        let has_use_strict = self.parse_directive(body);
-        if has_use_strict {
-            self.builder.scope_node_set_strict_mode(body);
-        }
-
-        self.parse_statement_list(body, false);
-
-        self.in_function_context = in_function_before;
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
-
-        self.consume_token(TokenType::CurlyClose);
+        let body = self.parse_function_body(is_async, is_generator);
 
         let span = self.span_from(start);
         self.builder.create_function_declaration(
             span, name,
             start.2, self.position().2 - start.2,
-            body, params, 0, kind as u8,
-            self.strict_mode || has_use_strict,
+            body.0, params, function_length, kind as u8,
+            self.strict_mode || body.1,
             false, false, false, false,
         )
     }
@@ -224,52 +193,16 @@ impl<'a> Parser<'a> {
             NULL_HANDLE
         };
 
-        // Parameters (simplified)
-        let params = self.builder.create_function_parameters_empty();
-        self.consume_token(TokenType::ParenOpen);
-        let mut depth = 1;
-        while depth > 0 && !self.done() {
-            match self.current_token_type() {
-                TokenType::ParenOpen => depth += 1,
-                TokenType::ParenClose => depth -= 1,
-                _ => {}
-            }
-            if depth > 0 {
-                self.consume();
-            }
-        }
-        self.consume_token(TokenType::ParenClose);
+        let (params, function_length) = self.parse_formal_parameters();
 
-        // Body
-        let body = self.builder.create_function_body(self.span_from(start));
-        self.consume_token(TokenType::CurlyOpen);
-
-        let in_function_before = self.in_function_context;
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
-        self.in_function_context = true;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
-
-        let has_use_strict = self.parse_directive(body);
-        if has_use_strict {
-            self.builder.scope_node_set_strict_mode(body);
-        }
-
-        self.parse_statement_list(body, false);
-
-        self.in_function_context = in_function_before;
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
-
-        self.consume_token(TokenType::CurlyClose);
+        let body = self.parse_function_body(is_async, is_generator);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, name,
             start.2, self.position().2 - start.2,
-            body, params, 0, kind as u8,
-            self.strict_mode || has_use_strict, false,
+            body.0, params, function_length, kind as u8,
+            self.strict_mode || body.1, false,
             false, false, false, false,
         )
     }
@@ -410,6 +343,109 @@ impl<'a> Parser<'a> {
 
         self.consume_or_insert_semicolon();
         self.builder.create_class_field(self.span_from(start), key, init, is_static)
+    }
+
+    // === Function body ===
+
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool) -> (NodeHandle, bool) {
+        let start = self.position();
+        let body = self.builder.create_function_body(self.span_from(start));
+        self.consume_token(TokenType::CurlyOpen);
+
+        self.push_scope(body, true);
+
+        let in_function_before = self.in_function_context;
+        let in_generator_before = self.in_generator_function_context;
+        let await_before = self.await_expression_is_valid;
+        self.in_function_context = true;
+        self.in_generator_function_context = is_generator;
+        self.await_expression_is_valid = is_async;
+
+        let has_use_strict = self.parse_directive(body);
+        if has_use_strict {
+            self.builder.scope_node_set_strict_mode(body);
+        }
+
+        self.parse_statement_list(body, false);
+
+        self.in_function_context = in_function_before;
+        self.in_generator_function_context = in_generator_before;
+        self.await_expression_is_valid = await_before;
+
+        self.builder.scope_node_shrink_to_fit(body);
+        self.pop_scope();
+        self.consume_token(TokenType::CurlyClose);
+
+        (body, has_use_strict)
+    }
+
+    // === Formal parameters ===
+
+    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32) {
+        self.consume_token(TokenType::ParenOpen);
+
+        if self.match_token(TokenType::ParenClose) {
+            self.consume();
+            return (self.builder.create_function_parameters_empty(), 0);
+        }
+
+        let mut bindings = Vec::new();
+        let mut default_values = Vec::new();
+        let mut is_rest = Vec::new();
+        let mut function_length: i32 = 0;
+        let mut has_seen_default = false;
+
+        loop {
+            let param_start = self.position();
+            let rest = if self.match_token(TokenType::TripleDot) {
+                self.consume();
+                true
+            } else {
+                false
+            };
+
+            let binding = if self.match_identifier() {
+                let tok = self.consume();
+                let value = self.token_value(&tok).to_vec();
+                self.builder.create_identifier(self.span_from(param_start), &value)
+            } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in())
+            } else {
+                self.expected("parameter name");
+                self.consume();
+                self.builder.create_identifier(self.span_from(param_start), &[])
+            };
+
+            let default_value = if !rest && self.match_token(TokenType::Equals) {
+                self.consume();
+                has_seen_default = true;
+                self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in())
+            } else {
+                NULL_HANDLE
+            };
+
+            if !rest && !has_seen_default && default_value == NULL_HANDLE {
+                function_length += 1;
+            }
+
+            bindings.push(binding);
+            default_values.push(default_value);
+            is_rest.push(rest);
+
+            if rest || !self.match_token(TokenType::Comma) {
+                break;
+            }
+            self.consume();
+
+            if self.match_token(TokenType::ParenClose) {
+                break;
+            }
+        }
+
+        self.consume_token(TokenType::ParenClose);
+
+        let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest);
+        (params, function_length)
     }
 
     // === Import statement ===

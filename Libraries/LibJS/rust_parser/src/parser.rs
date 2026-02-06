@@ -122,6 +122,13 @@ pub struct ParserError {
     pub column: u32,
 }
 
+/// A scope in the scope stack. Tracks whether it's function-like (var hoisting target).
+struct ScopeEntry {
+    node: NodeHandle,
+    is_function_like: bool, // true for Program, FunctionBody
+}
+
+
 /// Parser state that can be saved/restored for backtracking.
 struct SavedState {
     token: Token,
@@ -156,6 +163,7 @@ pub struct Parser<'a> {
     saved_states: Vec<SavedState>,
     program_type: ProgramType,
     source: &'a [u16],
+    scope_stack: Vec<ScopeEntry>,
 
     // Parser state flags (mirrors C++ ParserState)
     pub(crate) strict_mode: bool,
@@ -194,6 +202,7 @@ impl<'a> Parser<'a> {
             saved_states: Vec::new(),
             program_type,
             source,
+            scope_stack: Vec::new(),
             strict_mode: false,
             allow_super_property_lookup: false,
             allow_super_constructor_call: false,
@@ -390,6 +399,46 @@ impl<'a> Parser<'a> {
         !self.errors.is_empty()
     }
 
+    // === Scope management ===
+
+    pub(crate) fn push_scope(&mut self, node: NodeHandle, is_function_like: bool) {
+        self.scope_stack.push(ScopeEntry { node, is_function_like });
+    }
+
+    pub(crate) fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+
+    /// Register a var-scoped declaration (var, function declaration).
+    /// Goes to the nearest function-like scope.
+    pub(crate) fn register_var_scoped_declaration(&self, declaration: NodeHandle) {
+        for entry in self.scope_stack.iter().rev() {
+            if entry.is_function_like {
+                self.builder.scope_node_add_var_scoped_declaration(entry.node, declaration);
+                return;
+            }
+        }
+    }
+
+    /// Register a lexical declaration (let, const).
+    /// Goes to the nearest scope (any scope).
+    pub(crate) fn register_lexical_declaration(&self, declaration: NodeHandle) {
+        if let Some(entry) = self.scope_stack.last() {
+            self.builder.scope_node_add_lexical_declaration(entry.node, declaration);
+        }
+    }
+
+    /// Register a hoisted function declaration.
+    /// Goes to the nearest function-like scope.
+    pub(crate) fn register_hoisted_function(&self, declaration: NodeHandle) {
+        for entry in self.scope_stack.iter().rev() {
+            if entry.is_function_like {
+                self.builder.scope_node_add_hoisted_function(entry.node, declaration);
+                return;
+            }
+        }
+    }
+
     // === State save/restore for backtracking ===
 
     pub(crate) fn save_state(&mut self) {
@@ -555,14 +604,16 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let program = self.builder.create_program(self.span_from(start), self.program_type as u8);
 
+        self.push_scope(program, true);
+
         if self.program_type == ProgramType::Script {
             self.parse_script(program, starts_in_strict_mode);
         } else {
             self.parse_module(program);
         }
 
-        // Update the program's end position
-        // (The C++ parser does: program->set_end_offset({}, position().offset))
+        self.builder.scope_node_shrink_to_fit(program);
+        self.pop_scope();
         program
     }
 
