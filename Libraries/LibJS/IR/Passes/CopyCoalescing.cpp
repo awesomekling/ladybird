@@ -87,42 +87,48 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
         });
     }
 
-    // Fixed-point iteration: process blocks in reverse for faster convergence.
+    // Fixed-point iteration: recompute live_out and live_in each round.
+    // Process blocks in reverse for faster convergence.
+    auto scratch_out = MUST(Bitmap::create(value_count, false));
+    auto scratch_in = MUST(Bitmap::create(value_count, false));
     bool changed = true;
     while (changed) {
         changed = false;
         for (size_t i = block_count; i-- > 0;) {
             auto& block = *blocks[i];
-            auto& block_live_out = live_out[i];
-            auto& block_live_in = live_in[i];
 
             // live_out[B] = union of live_in[S] for each successor S.
+            __builtin_memset(scratch_out.data(), 0, scratch_out.size_in_bytes());
             CFG::for_each_successor(block, [&](BasicBlock& successor) {
                 auto it = block_to_dense.find(successor.index());
                 if (it == block_to_dense.end())
                     return;
                 auto successor_dense = it->value;
-                auto& successor_live_in = live_in[successor_dense];
                 for (size_t bit = 0; bit < value_count; ++bit) {
-                    if (successor_live_in.get(bit) && !block_live_out.get(bit)) {
-                        block_live_out.set(bit, true);
-                        changed = true;
-                    }
+                    if (live_in[successor_dense].get(bit))
+                        scratch_out.set(bit, true);
                 }
             });
 
             // live_in[B] = gen[B] | (live_out[B] - kill[B])
+            __builtin_memset(scratch_in.data(), 0, scratch_in.size_in_bytes());
             for (size_t bit = 0; bit < value_count; ++bit) {
-                bool new_live_in = gen[i].get(bit) || (block_live_out.get(bit) && !kill[i].get(bit));
-                if (new_live_in && !block_live_in.get(bit)) {
-                    block_live_in.set(bit, true);
-                    changed = true;
-                }
+                if (gen[i].get(bit) || (scratch_out.get(bit) && !kill[i].get(bit)))
+                    scratch_in.set(bit, true);
+            }
+
+            if (__builtin_memcmp(scratch_out.data(), live_out[i].data(), scratch_out.size_in_bytes()) != 0) {
+                __builtin_memcpy(live_out[i].data(), scratch_out.data(), scratch_out.size_in_bytes());
+                changed = true;
+            }
+            if (__builtin_memcmp(scratch_in.data(), live_in[i].data(), scratch_in.size_in_bytes()) != 0) {
+                __builtin_memcpy(live_in[i].data(), scratch_in.data(), scratch_in.size_in_bytes());
+                changed = true;
             }
         }
     }
 
-    // Phase 2: Collect copy information and determine coalesceable pairs.
+    // Phase 2: Coalesce non-interfering copies using union-find.
     //
     // A copy dst <- src can be coalesced only if ALL copies that define
     // dst use the SAME src. If dst has different sources on different
@@ -153,6 +159,19 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                     non_coalesceable.set(dst, true);
                 }
             }
+        });
+    }
+
+    // Track values with non-ParallelCopy definitions. Once a
+    // representative has such a def, merging it into another value
+    // would leave the instruction writing to a dead value.
+    Bitmap has_non_pcopy_def = MUST(Bitmap::create(value_count, false));
+    for (auto& block : function.basic_blocks()) {
+        block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.opcode() == Opcode::ParallelCopy)
+                return;
+            if (auto result_index = instruction.result_index(); result_index.has_value())
+                has_non_pcopy_def.set(static_cast<u32>(*result_index), true);
         });
     }
 
@@ -212,6 +231,12 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
 
                     // Already coalesced.
                     if (dst_rep == src_rep)
+                        continue;
+
+                    // If dst's representative has a non-ParallelCopy
+                    // definition, merging it into src would leave that
+                    // instruction writing to a dead value.
+                    if (has_non_pcopy_def.get(dst_rep))
                         continue;
 
                     // Safe to coalesce if src is not live after the copy
