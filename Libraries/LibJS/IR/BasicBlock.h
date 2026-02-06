@@ -29,7 +29,6 @@ public:
     void set_parent_function(Function* function) { m_parent_function = function; }
 
     ReadonlySpan<NonnullOwnPtr<Instruction>> instructions() const { return m_instructions.span(); }
-    Span<NonnullOwnPtr<Instruction>> instructions() { return m_instructions.span(); }
 
     void append(NonnullOwnPtr<Instruction> instruction);
     void prepend(NonnullOwnPtr<Instruction> instruction);
