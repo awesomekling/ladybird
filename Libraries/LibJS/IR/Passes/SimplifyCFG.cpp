@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/Queue.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
+#include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Instruction.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
@@ -273,6 +275,157 @@ static bool try_merge_blocks(Function& function)
     return changed;
 }
 
+static bool try_thread_jumps(Function& function, DominatorTree& dominators)
+{
+    bool changed = false;
+
+    // Look for blocks where a Branch condition is a Phi node
+    // and some phi inputs are constants
+    for (auto& block : function.basic_blocks()) {
+        auto* terminator = block->terminator();
+        if (!terminator || terminator->opcode() != Opcode::Branch)
+            continue;
+
+        if (terminator->operands().is_empty())
+            continue;
+
+        auto* condition = terminator->operands()[0];
+        if (!condition->defining_instruction())
+            continue;
+
+        auto* phi_instr = condition->defining_instruction();
+        if (phi_instr->opcode() != Opcode::Phi)
+            continue;
+
+        auto& phi = static_cast<PhiInstruction&>(*phi_instr);
+
+        // The phi must be in this same block
+        if (phi.parent_block() != block.ptr())
+            continue;
+
+        auto* true_target = terminator->true_target();
+        auto* false_target = terminator->false_target();
+
+        if (!true_target || !false_target)
+            continue;
+
+        // For each phi predecessor with a constant value, we can thread
+        for (size_t i = 0; i < phi.incoming_count(); ++i) {
+            auto* pred_block = phi.incoming_block(i);
+            auto* pred_value = phi.incoming_value(i);
+
+            if (!pred_value)
+                continue;
+
+            auto truthiness = pred_value->constant_truthiness();
+            if (!truthiness.has_value())
+                continue;
+
+            bool take_true = *truthiness;
+
+            auto* thread_target = take_true ? true_target : false_target;
+
+            // Check if the bypassed block has side effects that must execute.
+            bool bypassed_block_has_side_effects = false;
+            for (auto& instr : block->instructions()) {
+                if (instr->opcode() == Opcode::Phi)
+                    continue;
+                if (instr->is_terminator())
+                    continue;
+
+                if (instr->has_side_effects()) {
+                    bypassed_block_has_side_effects = true;
+                    break;
+                }
+            }
+
+            if (bypassed_block_has_side_effects)
+                continue;
+
+            // Check if thread_target uses any values defined in the bypassed block
+            // (except through phi nodes in thread_target that we'll update)
+            bool target_uses_bypassed_values = false;
+            for (auto& instr : thread_target->instructions()) {
+                if (instr->opcode() == Opcode::Phi)
+                    continue;
+                for (auto* operand : instr->operands()) {
+                    if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr()) {
+                        target_uses_bypassed_values = true;
+                        break;
+                    }
+                }
+                if (target_uses_bypassed_values)
+                    break;
+            }
+
+            if (target_uses_bypassed_values)
+                continue;
+
+            // Check if the phi result is used outside the bypassed block.
+            bool phi_used_outside_block = false;
+            if (auto* phi_result = phi.result()) {
+                for (auto* use : phi_result->uses()) {
+                    if (use != terminator) {
+                        phi_used_outside_block = true;
+                        break;
+                    }
+                }
+            }
+
+            if (phi_used_outside_block)
+                continue;
+
+            // The bypassed block must dominate pred_block.
+            if (!dominators.dominates(block.ptr(), pred_block))
+                continue;
+
+            if (!pred_block->terminator())
+                continue;
+
+            // Check if pred actually targets this block
+            auto* pred_terminator = pred_block->terminator();
+            if (pred_terminator->true_target() != block.ptr() && pred_terminator->false_target() != block.ptr())
+                continue;
+
+            // Precompute traced phi values before redirect_edge removes pred_block
+            // from the bypassed block's phis (which would break tracing).
+            HashMap<Instruction*, Value*> traced_values;
+            for (auto& instr : thread_target->instructions()) {
+                if (instr->opcode() != Opcode::Phi)
+                    break;
+
+                auto& target_phi = static_cast<PhiInstruction&>(*instr);
+
+                auto* value_from_bypassed = target_phi.incoming_value_for(*block);
+
+                if (!value_from_bypassed)
+                    continue;
+
+                // If value_from_bypassed is a phi in the bypassed block, trace to find
+                // what value pred_block would contribute
+                if (auto* def = value_from_bypassed->defining_instruction();
+                    def && def->opcode() == Opcode::Phi && def->parent_block() == block.ptr()) {
+                    auto& def_phi = static_cast<PhiInstruction&>(*def);
+                    if (auto* traced = def_phi.incoming_value_for(*pred_block))
+                        traced_values.set(instr.ptr(), traced);
+                } else {
+                    traced_values.set(instr.ptr(), value_from_bypassed);
+                }
+            }
+
+            CFG::redirect_edge(*pred_block, *block, *thread_target, [&](Instruction& instr) -> Value* {
+                if (auto it = traced_values.find(&instr); it != traced_values.end())
+                    return it->value;
+                return nullptr;
+            });
+
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 static bool try_eliminate_unreachable_blocks(Function& function)
 {
     // Find all reachable blocks using BFS from entry
@@ -370,6 +523,8 @@ PreservedAnalyses SimplifyCFG::run(Function& function, PassManager&)
     do {
         iteration_changed = false;
         iteration_changed |= try_fold_constant_branches(function);
+        DominatorTree dominators(function);
+        iteration_changed |= try_thread_jumps(function, dominators);
         iteration_changed |= try_eliminate_empty_blocks(function);
         iteration_changed |= try_merge_blocks(function);
         changed |= iteration_changed;

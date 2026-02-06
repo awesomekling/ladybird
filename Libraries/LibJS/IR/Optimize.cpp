@@ -45,9 +45,6 @@ void optimize(Function& function)
     // Dead Code Removal
     pass_manager.add_pass(make<DeadCodeElimination>());
 
-    // CFG Simplification
-    pass_manager.add_pass(make<JumpThreading>());
-
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
     pass_manager.add_pass(make<ConstantFolding>());
