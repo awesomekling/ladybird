@@ -26,8 +26,22 @@ BasicBlock& Function::create_block(String name)
     auto block = BasicBlock::create(m_next_block_index++, move(name));
     block->set_parent_function(this);
     auto& ref = *block;
+    m_block_index_map.set(ref.index(), &ref);
     m_basic_blocks.append(move(block));
     return ref;
+}
+
+BasicBlock* Function::block_by_index(BlockIndex index) const
+{
+    auto it = m_block_index_map.find(index);
+    if (it == m_block_index_map.end())
+        return nullptr;
+    return it->value;
+}
+
+void Function::remove_block_index(BlockIndex index)
+{
+    m_block_index_map.remove(index);
 }
 
 Value& Function::create_parameter(u32 parameter_index)

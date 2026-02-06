@@ -48,6 +48,9 @@ public:
 
     Vector<NonnullOwnPtr<BasicBlock>> const& basic_blocks() const { return m_basic_blocks; }
     Vector<NonnullOwnPtr<BasicBlock>>& basic_blocks() { return m_basic_blocks; }
+
+    BasicBlock* block_by_index(BlockIndex index) const;
+    void remove_block_index(BlockIndex index);
     Vector<NonnullOwnPtr<Value>> const& values() const { return m_values; }
     Vector<Value*> const& parameters() const { return m_parameters; }
 
@@ -79,6 +82,7 @@ private:
     OwnPtr<SsaConstructionData> m_ssa_construction_data;
     HashMap<u32, BasicBlock*> m_source_block_map;
     Vector<NonnullOwnPtr<BasicBlock>> m_basic_blocks;
+    HashMap<BlockIndex, BasicBlock*> m_block_index_map;
     Vector<NonnullOwnPtr<Value>> m_values;
     Vector<Value*> m_parameters;
     Value* m_this_value { nullptr };

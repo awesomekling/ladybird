@@ -99,14 +99,8 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
         auto from_index = BlockIndex(static_cast<u32>(key >> 32));
         auto to_index = BlockIndex(static_cast<u32>(key & 0xFFFFFFFF));
 
-        BasicBlock* from = nullptr;
-        BasicBlock* to = nullptr;
-        for (auto& block : function.basic_blocks()) {
-            if (block->index() == from_index)
-                from = block.ptr();
-            if (block->index() == to_index)
-                to = block.ptr();
-        }
+        auto* from = function.block_by_index(from_index);
+        auto* to = function.block_by_index(to_index);
         VERIFY(from && to);
 
         auto* term = from->terminator();
@@ -141,13 +135,7 @@ PreservedAnalyses SsaDestructionPass::run(Function& function, PassManager&)
     for (auto& [key, copies] : handler_edge_copies) {
         auto from_index = BlockIndex(static_cast<u32>(key >> 32));
 
-        BasicBlock* from = nullptr;
-        for (auto& block : function.basic_blocks()) {
-            if (block->index() == from_index) {
-                from = block.ptr();
-                break;
-            }
-        }
+        auto* from = function.block_by_index(from_index);
         VERIFY(from);
 
         auto pcopy = ParallelCopyInstruction::create();

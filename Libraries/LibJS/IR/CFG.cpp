@@ -182,9 +182,12 @@ void CFG::remove_blocks(Function& function, HashTable<BasicBlock*> const& blocks
             remove_block_reference(*block, *dead_block);
     }
 
-    // Remove dead blocks from the function.
+    // Remove dead blocks from the function (and index map).
     function.basic_blocks().remove_all_matching([&](auto const& block) {
-        return blocks_to_remove.contains(block.ptr());
+        if (!blocks_to_remove.contains(block.ptr()))
+            return false;
+        function.remove_block_index(block->index());
+        return true;
     });
 }
 
