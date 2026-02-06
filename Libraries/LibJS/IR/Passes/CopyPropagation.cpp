@@ -27,14 +27,13 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     bool has_copies = false;
 
     for (auto const& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.opcode() == Opcode::Move && instruction.result()) {
                 auto* src = instruction.operand(0);
                 copies[to_index(instruction.result()->index())] = src->index();
                 has_copies = true;
             }
-        }
+        });
     }
 
     // Helper to follow the copy chain to find the ultimate source
@@ -85,8 +84,7 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
 
     // Replace uses of copied values with their sources
     for (auto& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction& instruction) {
             for (size_t i = 0; i < instruction.operand_count(); ++i) {
                 auto* operand = instruction.operand(i);
                 if (!operand)
@@ -101,7 +99,7 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
                     changed = true;
                 }
             }
-        }
+        });
     }
 
     return changed ? PreservedAnalyses::all_cfg_analyses() : PreservedAnalyses::all();

@@ -879,18 +879,16 @@ void Lowerer::lower_blocks()
 
     // Phase 1: Allocate tuple registers for all tuple-producing instructions
     for (auto const& ir_block : m_function.basic_blocks()) {
-        for (auto instruction_index : ir_block->instructions()) {
-            auto& instruction = *m_function.instruction_by_index(instruction_index);
+        ir_block->for_each_instruction([&](Instruction const& instruction) {
             auto arity = opcode_tuple_arity(instruction.opcode());
             if (arity > 0 && instruction.result())
                 allocate_tuple_registers(*instruction.result(), arity);
-        }
+        });
     }
 
     // Phase 2: Map ExtractValue results to their tuple element registers
     for (auto const& ir_block : m_function.basic_blocks()) {
-        for (auto instruction_index : ir_block->instructions()) {
-            auto& instruction = *m_function.instruction_by_index(instruction_index);
+        ir_block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.opcode() == Opcode::ExtractValue) {
                 auto* tuple_value = instruction.operand(0);
                 if (tuple_value && instruction.result()) {
@@ -898,7 +896,7 @@ void Lowerer::lower_blocks()
                     m_value_to_operand[static_cast<u32>(instruction.result()->index())] = element_reg;
                 }
             }
-        }
+        });
     }
 
     // Main pass: lower each block
@@ -907,13 +905,12 @@ void Lowerer::lower_blocks()
         m_current_block = m_bytecode_blocks[i].ptr();
 
         // Lower non-terminator instructions
-        for (auto instruction_index : ir_block.instructions()) {
-            auto& instruction = *m_function.instruction_by_index(instruction_index);
+        ir_block.for_each_instruction([&](Instruction const& instruction) {
             if (instruction.is_terminator())
-                continue;
+                return;
             m_current_source_record = instruction.source_record();
             lower_instruction(instruction);
-        }
+        });
         m_current_source_record = {};
 
         // Handle terminator

@@ -49,17 +49,16 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
 
             Vector<InstructionIndex> to_hoist;
 
-            for (auto instruction_index : loop_block.instructions()) {
-                auto& instruction = *function.instruction_by_index(instruction_index);
+            loop_block.for_each_instruction([&](Instruction const& instruction) {
                 if (!instruction.result())
-                    continue;
+                    return;
 
                 // Never hoist Phi nodes — they are tied to their block's predecessors.
                 if (instruction.opcode() == Opcode::Phi)
-                    continue;
+                    return;
 
                 if (!instruction.is_hoistable())
-                    continue;
+                    return;
 
                 // Check if all operands are defined outside the loop
                 bool all_operands_invariant = true;
@@ -79,8 +78,8 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
                 }
 
                 if (all_operands_invariant)
-                    to_hoist.append(instruction_index);
-            }
+                    to_hoist.append(instruction.index());
+            });
 
             // Move instructions to preheader (insert before the jump)
             for (auto hoist_index : to_hoist) {

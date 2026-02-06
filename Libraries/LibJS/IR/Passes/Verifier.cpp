@@ -106,8 +106,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // Build set of all defined values, checking for unique definitions
     auto defined_values = MUST(AK::Bitmap::create(value_capacity, false));
     for (auto const& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.result()) {
                 auto vi = to_index(instruction.result()->index());
                 // Check: No two instructions share the same result Value*
@@ -118,7 +117,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
                 defined_values.set(vi, true);
             }
-        }
+        });
     }
 
     // Add parameter, constant, and this values as defined
@@ -158,19 +157,17 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (!block->instructions().is_empty()) {
             // Check: "Phis first" - all phi nodes must come before non-phi instructions
             bool seen_non_phi = false;
-            for (auto instruction_index : block->instructions()) {
-                auto& instruction = *function.instruction_by_index(instruction_index);
+            block->for_each_instruction([&](Instruction const& instruction) {
                 if (instruction.opcode() == Opcode::Phi) {
                     if (seen_non_phi) {
                         report_error(ByteString::formatted(
                             "Block{} has Phi after non-Phi instruction",
                             block->index()));
-                        break;
                     }
                 } else {
                     seen_non_phi = true;
                 }
-            }
+            });
 
             // Check: "Terminator last" - terminator must be last instruction
             for (size_t i = 0; i < block->instructions().size() - 1; ++i) {
@@ -196,8 +193,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 block->index()));
         }
 
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             // Check: Instruction parent pointer
             if (instruction.parent_block() != block.ptr()) {
                 report_error(ByteString::formatted(
@@ -361,7 +357,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     }
                 }
             }
-        }
+        });
 
         // Check: Exception handler/finalizer targets exist
         if (block->exception_handler_index().has_value() && !all_blocks.get(to_index(*block->exception_handler_index()))) {
@@ -520,8 +516,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     // (catches stale references from dead block elimination or other passes)
     HashTable<Instruction const*> all_instructions;
     for (auto const& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions())
-            all_instructions.set(function.instruction_by_index(instruction_index));
+        block->for_each_instruction([&](Instruction const& instruction) {
+            all_instructions.set(&instruction);
+        });
     }
 
     for (auto const& value : function.values()) {
@@ -609,11 +606,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     Vector<BasicBlock*> value_to_block;
     value_to_block.resize_with_default_value(value_capacity, nullptr);
     for (auto const& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto* instruction = function.instruction_by_index(instruction_index);
-            if (instruction->result())
-                value_to_block[to_index(instruction->result()->index())] = block.ptr();
-        }
+        block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.result())
+                value_to_block[to_index(instruction.result()->index())] = block.ptr();
+        });
     }
 
     // Compute dominators for dominance checking
@@ -623,16 +619,16 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     HashMap<Instruction const*, size_t> instruction_position;
     for (auto const& block : function.basic_blocks()) {
         size_t position = 0;
-        for (auto instruction_index : block->instructions())
-            instruction_position.set(function.instruction_by_index(instruction_index), position++);
+        block->for_each_instruction([&](Instruction const& instruction) {
+            instruction_position.set(&instruction, position++);
+        });
     }
 
     for (auto const& block : function.basic_blocks()) {
         if (!reachable.get(to_index(block->index())))
             continue;
 
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.opcode() == Opcode::Phi) {
                 // For phi instructions, each operand must be reachable from its corresponding predecessor
                 // The defining block must dominate the predecessor (not the current block)
@@ -709,7 +705,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     }
                 }
             }
-        }
+        });
     }
 
     return valid;

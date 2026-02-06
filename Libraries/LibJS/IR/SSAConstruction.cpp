@@ -253,10 +253,9 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
         });
 
         // Rewrite operand uses in non-phi instructions and push new definitions
-        for (auto instruction_index : block.instructions()) {
-            auto& instruction = *m_function.instruction_by_index(instruction_index);
+        block.for_each_instruction([&](Instruction& instruction) {
             if (instruction.opcode() == Opcode::Phi)
-                continue;
+                return;
 
             // Rewrite operand uses to current stack top
             for (size_t i = 0; i < instruction.operand_count(); ++i) {
@@ -294,7 +293,7 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                         entry_sizes.set(raw, 0);
                 }
             }
-        }
+        });
 
         // Fill phi operands in CFG successors
         auto fill_phi_for_successor = [&](BasicBlock* succ) {

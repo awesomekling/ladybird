@@ -59,21 +59,20 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
     auto process_block = [&](auto& self, BasicBlock* block) -> void {
         Vector<ExpressionKey> added_keys;
 
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             if (!instruction.result())
-                continue;
+                return;
 
             // Never value-number Phi nodes. A Phi's result depends on which
             // predecessor edge was taken, not just its operand set.
             if (instruction.opcode() == Opcode::Phi)
-                continue;
+                return;
 
             if (!instruction.is_pure())
-                continue;
+                return;
 
             if (instruction.operand_count() == 0)
-                continue;
+                return;
 
             ExpressionKey key;
             key.opcode = instruction.opcode();
@@ -104,7 +103,7 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
                 expressions.set(key, instruction.result()->index());
                 added_keys.append(key);
             }
-        }
+        });
 
         // Recurse into dominator tree children
         dominators.for_each_dominator_child(block, [&](BasicBlock& child) {

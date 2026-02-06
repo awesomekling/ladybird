@@ -28,8 +28,7 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
     // - Are used by terminators
     // - Are results of instructions with side effects
     for (auto const& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction const& instruction) {
             bool is_live_root = instruction.is_terminator() || instruction.has_side_effects();
 
             if (is_live_root) {
@@ -42,7 +41,7 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
                     }
                 }
             }
-        }
+        });
     }
 
     // Step 2: Propagate liveness backwards through operand chains

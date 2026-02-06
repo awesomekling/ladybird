@@ -342,18 +342,14 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
 
             // Check if the bypassed block has side effects that must execute.
             bool bypassed_block_has_side_effects = false;
-            for (auto instruction_index : block->instructions()) {
-                auto& instruction = *function.instruction_by_index(instruction_index);
+            block->for_each_instruction([&](Instruction const& instruction) {
                 if (instruction.opcode() == Opcode::Phi)
-                    continue;
+                    return;
                 if (instruction.is_terminator())
-                    continue;
-
-                if (instruction.has_side_effects()) {
+                    return;
+                if (instruction.has_side_effects())
                     bypassed_block_has_side_effects = true;
-                    break;
-                }
-            }
+            });
 
             if (bypassed_block_has_side_effects)
                 continue;
@@ -361,20 +357,15 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             // Check if thread_target uses any values defined in the bypassed block
             // (except through phi nodes in thread_target that we'll update)
             bool target_uses_bypassed_values = false;
-            for (auto instruction_index : thread_target->instructions()) {
-                auto& instruction = *function.instruction_by_index(instruction_index);
+            thread_target->for_each_instruction([&](Instruction const& instruction) {
                 if (instruction.opcode() == Opcode::Phi)
-                    continue;
+                    return;
                 for (size_t oi = 0; oi < instruction.operand_count(); ++oi) {
                     auto* operand = instruction.operand(oi);
-                    if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr()) {
+                    if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr())
                         target_uses_bypassed_values = true;
-                        break;
-                    }
                 }
-                if (target_uses_bypassed_values)
-                    break;
-            }
+            });
 
             if (target_uses_bypassed_values)
                 continue;
@@ -506,8 +497,7 @@ static bool try_eliminate_unreachable_blocks(Function& function)
         if (!reachable.get(to_index(block->index())))
             continue;
 
-        for (auto instruction_index : block->instructions()) {
-            auto& instruction = *function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction& instruction) {
             for (size_t i = 0; i < instruction.operand_count(); ++i) {
                 auto* operand = instruction.operand(i);
                 if (!operand)
@@ -521,7 +511,7 @@ static bool try_eliminate_unreachable_blocks(Function& function)
                 if (vi != to_index(operand->index()))
                     instruction.set_operand(i, function.values()[vi].ptr());
             }
-        }
+        });
     }
 
     // Remove dead blocks and clean up all references to them.

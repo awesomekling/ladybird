@@ -30,6 +30,11 @@ public:
 
     ReadonlySpan<InstructionIndex> instructions() const { return m_instructions.span(); }
 
+    template<typename Callback>
+    void for_each_instruction(Callback callback);
+    template<typename Callback>
+    void for_each_instruction(Callback callback) const;
+
     // Iterate over phi instructions at the start of this block.
     // Phis are always first; iteration stops at the first non-phi.
     template<typename Callback>
@@ -115,6 +120,20 @@ private:
 #include <LibJS/IR/Instruction.h>
 
 namespace JS::IR {
+
+template<typename Callback>
+void BasicBlock::for_each_instruction(Callback callback)
+{
+    for (auto instruction_index : m_instructions)
+        callback(*m_parent_function->instruction_by_index(instruction_index));
+}
+
+template<typename Callback>
+void BasicBlock::for_each_instruction(Callback callback) const
+{
+    for (auto instruction_index : m_instructions)
+        callback(static_cast<Instruction const&>(*m_parent_function->instruction_by_index(instruction_index)));
+}
 
 template<typename Callback>
 void BasicBlock::for_each_phi(Callback callback)

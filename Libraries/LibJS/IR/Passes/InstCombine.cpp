@@ -905,30 +905,29 @@ PreservedAnalyses InstCombine::run(Function& function, PassManager&)
     HashTable<Instruction*> dead_instructions;
 
     for (auto& block : function.basic_blocks()) {
-        for (auto instruction_index : block->instructions()) {
-            auto* instruction = function.instruction_by_index(instruction_index);
+        block->for_each_instruction([&](Instruction& instruction) {
             // 1. Try constant folding (all operands are constants)
             bool folded = false;
-            try_constant_fold(*instruction, function, folded);
+            try_constant_fold(instruction, function, folded);
             if (folded) {
                 changed = true;
-                continue;
+                return;
             }
 
             // 2. Try algebraic simplification (partial-constant identities)
-            if (auto* replacement = try_algebraic_simplify(*instruction, function)) {
-                if (!instruction->result()->uses().is_empty()) {
-                    instruction->result()->replace_all_uses_with(replacement);
-                    dead_instructions.set(instruction);
+            if (auto* replacement = try_algebraic_simplify(instruction, function)) {
+                if (!instruction.result()->uses().is_empty()) {
+                    instruction.result()->replace_all_uses_with(replacement);
+                    dead_instructions.set(&instruction);
                     changed = true;
-                    continue;
+                    return;
                 }
             }
 
             // 3. Try instruction combining (pattern matching)
-            if (try_instruction_combine(*instruction, function, *block))
+            if (try_instruction_combine(instruction, function, *block))
                 changed = true;
-        }
+        });
     }
 
     // Remove instructions that were simplified away.

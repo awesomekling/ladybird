@@ -1638,8 +1638,9 @@ void Lifter::eliminate_unreachable_blocks()
             continue;
         if (m_dominators->immediate_dominator(block.ptr()))
             continue;
-        for (auto instruction_index : block->instructions())
-            m_function->instruction_by_index(instruction_index)->clear_operand_uses();
+        block->for_each_instruction([](Instruction& instruction) {
+            instruction.clear_operand_uses();
+        });
     }
 
     // Collect unreachable blocks so we can clear stale pointers.

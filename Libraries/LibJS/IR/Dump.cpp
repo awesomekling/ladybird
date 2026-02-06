@@ -206,12 +206,11 @@ static void dump_block(BasicBlock const& block, StringBuilder& builder, Bytecode
 
     builder.append('\n');
 
-    for (auto instruction_index : block.instructions()) {
-        auto* instruction = block.parent_function()->instruction_by_index(instruction_index);
+    block.for_each_instruction([&](Instruction const& instruction) {
         builder.append("    "sv);
-        dump_instruction(*instruction, builder, executable);
+        dump_instruction(instruction, builder, executable);
         builder.append('\n');
-    }
+    });
 }
 
 void dump(BasicBlock const& block, StringBuilder& builder)
