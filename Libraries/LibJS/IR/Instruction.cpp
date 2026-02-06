@@ -355,10 +355,11 @@ bool Instruction::try_invert_comparison()
 // Check if all operands are safe primitive types (no ToPrimitive calls possible)
 static bool all_operands_are_safe_primitives(Instruction const& instruction)
 {
-    for (auto* operand : instruction.operands()) {
-        if (!operand)
+    for (size_t i = 0; i < instruction.operand_count(); ++i) {
+        auto* op = instruction.operand(i);
+        if (!op)
             continue;
-        if (!is_safe_primitive_type(operand->type()))
+        if (!is_safe_primitive_type(op->type()))
             return false;
     }
     return true;

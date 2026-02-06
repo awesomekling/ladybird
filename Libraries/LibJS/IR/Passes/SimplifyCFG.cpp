@@ -56,10 +56,10 @@ static bool try_fold_constant_branches(Function& function)
         }
 
         // Branch has condition as first operand
-        if (term->operands().is_empty())
+        if (term->operand_count() == 0)
             continue;
 
-        auto* condition = term->operands()[0];
+        auto* condition = term->operand(0);
         auto truthiness = condition->constant_truthiness();
         if (!truthiness.has_value())
             continue;
@@ -300,10 +300,10 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
         if (!terminator || terminator->opcode() != Opcode::Branch)
             continue;
 
-        if (terminator->operands().is_empty())
+        if (terminator->operand_count() == 0)
             continue;
 
-        auto* condition = terminator->operands()[0];
+        auto* condition = terminator->operand(0);
         if (!condition->defining_instruction())
             continue;
 
@@ -362,7 +362,8 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             for (auto& instr : thread_target->instructions()) {
                 if (instr->opcode() == Opcode::Phi)
                     continue;
-                for (auto* operand : instr->operands()) {
+                for (size_t oi = 0; oi < instr->operand_count(); ++oi) {
+                    auto* operand = instr->operand(oi);
                     if (operand->defining_instruction() && operand->defining_instruction()->parent_block() == block.ptr()) {
                         target_uses_bypassed_values = true;
                         break;
@@ -479,15 +480,14 @@ static bool try_eliminate_unreachable_blocks(Function& function)
 
     for (auto* dead_block : dead_blocks) {
         dead_block->for_each_phi([&](PhiInstruction const& phi) {
-            auto const& operands = phi.operands();
-            if (operands.is_empty())
+            if (phi.operand_count() == 0)
                 return;
 
             // Check if all operands are the same
-            Value* replacement = operands[0];
+            Value* replacement = phi.operand(0);
             bool all_same = true;
-            for (size_t i = 1; i < operands.size(); ++i) {
-                if (operands[i] != replacement) {
+            for (size_t i = 1; i < phi.operand_count(); ++i) {
+                if (phi.operand(i) != replacement) {
                     all_same = false;
                     break;
                 }
@@ -504,8 +504,8 @@ static bool try_eliminate_unreachable_blocks(Function& function)
             continue;
 
         for (auto& instruction : block->instructions()) {
-            for (size_t i = 0; i < instruction->operands().size(); ++i) {
-                auto* operand = instruction->operands()[i];
+            for (size_t i = 0; i < instruction->operand_count(); ++i) {
+                auto* operand = instruction->operand(i);
                 if (!operand)
                     continue;
 

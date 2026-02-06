@@ -68,11 +68,10 @@ static Optional<Opcode> inverted_comparison_if_safe(Instruction const& cmp_instr
         || cmp_instr.opcode() == Opcode::GreaterThanEquals;
 
     if (is_relational) {
-        auto const& operands = cmp_instr.operands();
-        if (operands.size() < 2)
+        if (cmp_instr.operand_count() < 2)
             return {};
-        bool lhs_safe = operands[0] && type_cannot_be_nan(operands[0]->type());
-        bool rhs_safe = operands[1] && type_cannot_be_nan(operands[1]->type());
+        bool lhs_safe = cmp_instr.operand(0) && type_cannot_be_nan(cmp_instr.operand(0)->type());
+        bool rhs_safe = cmp_instr.operand(1) && type_cannot_be_nan(cmp_instr.operand(1)->type());
         if (!lhs_safe || !rhs_safe)
             return {};
     }
@@ -131,11 +130,11 @@ static Optional<double> numeric_to_double(JS::Value v)
     return {};
 }
 
-static bool both_numeric(Span<Value* const> operands)
+static bool both_numeric(Value* a, Value* b)
 {
-    return operands.size() == 2
-        && (operands[0]->constant_value().is_int32() || operands[0]->constant_value().is_double())
-        && (operands[1]->constant_value().is_int32() || operands[1]->constant_value().is_double());
+    return a && b
+        && (a->constant_value().is_int32() || a->constant_value().is_double())
+        && (b->constant_value().is_int32() || b->constant_value().is_double());
 }
 
 static Optional<i32> constant_to_i32(JS::Value v)
@@ -165,11 +164,9 @@ static Optional<i32> constant_to_i32(JS::Value v)
 // Returns the folded JS::Value and sets can_fold to true on success.
 static JS::Value try_constant_fold(Instruction& instruction, Function& function, bool& can_fold)
 {
-    auto const& operands = instruction.operands();
-
     // Check if all operands are constants
-    for (auto* operand : operands) {
-        if (!operand || !operand->is_constant())
+    for (size_t i = 0; i < instruction.operand_count(); ++i) {
+        if (!instruction.operand(i) || !instruction.operand(i)->is_constant())
             return {};
     }
 
@@ -180,103 +177,107 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
     if (instruction.result()->uses().is_empty())
         return {};
 
+    // Local helpers for concise constant-fold patterns.
+    auto op = [&](size_t i) -> Value* { return instruction.operand(i); };
+    auto nops = instruction.operand_count();
+
     JS::Value result_value;
 
     switch (instruction.opcode()) {
     case Opcode::Add:
-        if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-            i64 lhs = operands[0]->constant_value().as_i32();
-            i64 rhs = operands[1]->constant_value().as_i32();
+        if (nops == 2 && op(0)->constant_value().is_int32() && op(1)->constant_value().is_int32()) {
+            i64 lhs = op(0)->constant_value().as_i32();
+            i64 rhs = op(1)->constant_value().as_i32();
             result_value = make_int_or_double(lhs + rhs);
             can_fold = true;
-        } else if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) + *numeric_to_double(operands[1]->constant_value()));
+        } else if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) + *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::Sub:
-        if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-            i64 lhs = operands[0]->constant_value().as_i32();
-            i64 rhs = operands[1]->constant_value().as_i32();
+        if (nops == 2 && op(0)->constant_value().is_int32() && op(1)->constant_value().is_int32()) {
+            i64 lhs = op(0)->constant_value().as_i32();
+            i64 rhs = op(1)->constant_value().as_i32();
             result_value = make_int_or_double(lhs - rhs);
             can_fold = true;
-        } else if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) - *numeric_to_double(operands[1]->constant_value()));
+        } else if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) - *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::Mul:
-        if (operands.size() == 2 && operands[0]->constant_value().is_int32() && operands[1]->constant_value().is_int32()) {
-            i64 lhs = operands[0]->constant_value().as_i32();
-            i64 rhs = operands[1]->constant_value().as_i32();
+        if (nops == 2 && op(0)->constant_value().is_int32() && op(1)->constant_value().is_int32()) {
+            i64 lhs = op(0)->constant_value().as_i32();
+            i64 rhs = op(1)->constant_value().as_i32();
             result_value = make_int_or_double(lhs * rhs);
             can_fold = true;
-        } else if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) * *numeric_to_double(operands[1]->constant_value()));
+        } else if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) * *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::Div:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) / *numeric_to_double(operands[1]->constant_value()));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) / *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::Mod:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(fmod(*numeric_to_double(operands[0]->constant_value()), *numeric_to_double(operands[1]->constant_value())));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(fmod(*numeric_to_double(op(0)->constant_value()), *numeric_to_double(op(1)->constant_value())));
             can_fold = true;
         }
         break;
 
     case Opcode::Exp:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(pow(*numeric_to_double(operands[0]->constant_value()), *numeric_to_double(operands[1]->constant_value())));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(pow(*numeric_to_double(op(0)->constant_value()), *numeric_to_double(op(1)->constant_value())));
             can_fold = true;
         }
         break;
 
     case Opcode::LessThan:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) < *numeric_to_double(operands[1]->constant_value()));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) < *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::LessThanEquals:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) <= *numeric_to_double(operands[1]->constant_value()));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) <= *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::GreaterThan:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) > *numeric_to_double(operands[1]->constant_value()));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) > *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::GreaterThanEquals:
-        if (both_numeric(operands)) {
-            result_value = JS::Value(*numeric_to_double(operands[0]->constant_value()) >= *numeric_to_double(operands[1]->constant_value()));
+        if (nops == 2 && both_numeric(op(0), op(1))) {
+            result_value = JS::Value(*numeric_to_double(op(0)->constant_value()) >= *numeric_to_double(op(1)->constant_value()));
             can_fold = true;
         }
         break;
 
     case Opcode::StrictlyEquals:
     case Opcode::StrictlyInequals:
-        if (operands.size() == 2) {
-            auto const& lhs = operands[0]->constant_value();
-            auto const& rhs = operands[1]->constant_value();
+        if (nops == 2) {
+            auto const& lhs = op(0)->constant_value();
+            auto const& rhs = op(1)->constant_value();
             bool equals = false;
             bool can_determine = false;
 
-            if (both_numeric(operands)) {
+            if (both_numeric(op(0), op(1))) {
                 double l = *numeric_to_double(lhs);
                 double r = *numeric_to_double(rhs);
                 equals = l == r;
@@ -306,9 +307,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
 
     case Opcode::LooselyEquals:
     case Opcode::LooselyInequals:
-        if (operands.size() == 2) {
-            auto const& lhs = operands[0]->constant_value();
-            auto const& rhs = operands[1]->constant_value();
+        if (nops == 2) {
+            auto const& lhs = op(0)->constant_value();
+            auto const& rhs = op(1)->constant_value();
             bool equals = false;
             bool can_determine = false;
 
@@ -320,7 +321,7 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
             } else if (is_nullish(lhs) || is_nullish(rhs)) {
                 equals = false;
                 can_determine = true;
-            } else if (both_numeric(operands)) {
+            } else if (both_numeric(op(0), op(1))) {
                 equals = *numeric_to_double(lhs) == *numeric_to_double(rhs);
                 can_determine = true;
             } else if (lhs.is_boolean() && rhs.is_boolean()) {
@@ -346,9 +347,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::BitwiseAnd:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 result_value = JS::Value(*lhs & *rhs);
                 can_fold = true;
@@ -357,9 +358,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::BitwiseOr:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 result_value = JS::Value(*lhs | *rhs);
                 can_fold = true;
@@ -368,9 +369,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::BitwiseXor:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 result_value = JS::Value(*lhs ^ *rhs);
                 can_fold = true;
@@ -379,8 +380,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::BitwiseNot:
-        if (operands.size() == 1) {
-            auto val = constant_to_i32(operands[0]->constant_value());
+        if (nops == 1) {
+            auto val = constant_to_i32(op(0)->constant_value());
             if (val.has_value()) {
                 result_value = JS::Value(~*val);
                 can_fold = true;
@@ -389,9 +390,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::LeftShift:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 u32 shift_count = static_cast<u32>(*rhs) & 0x1f;
                 result_value = JS::Value(*lhs << shift_count);
@@ -401,9 +402,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::RightShift:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 u32 shift_count = static_cast<u32>(*rhs) & 0x1f;
                 result_value = JS::Value(*lhs >> shift_count);
@@ -413,9 +414,9 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::UnsignedRightShift:
-        if (operands.size() == 2) {
-            auto lhs = constant_to_i32(operands[0]->constant_value());
-            auto rhs = constant_to_i32(operands[1]->constant_value());
+        if (nops == 2) {
+            auto lhs = constant_to_i32(op(0)->constant_value());
+            auto rhs = constant_to_i32(op(1)->constant_value());
             if (lhs.has_value() && rhs.has_value()) {
                 u32 unsigned_lhs = static_cast<u32>(*lhs);
                 u32 shift_count = static_cast<u32>(*rhs) & 0x1f;
@@ -430,8 +431,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::Negate:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32()) {
                 i32 val = v.as_i32();
                 if (val == 0)
@@ -456,8 +457,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::UnaryPlus:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32() || v.is_double()) {
                 result_value = v;
                 can_fold = true;
@@ -475,8 +476,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::Increment:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32()) {
                 result_value = make_int_or_double(static_cast<i64>(v.as_i32()) + 1);
                 can_fold = true;
@@ -488,8 +489,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::Decrement:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32()) {
                 result_value = make_int_or_double(static_cast<i64>(v.as_i32()) - 1);
                 can_fold = true;
@@ -501,8 +502,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::ToInt32:
-        if (operands.size() == 1) {
-            auto val = constant_to_i32(operands[0]->constant_value());
+        if (nops == 1) {
+            auto val = constant_to_i32(op(0)->constant_value());
             if (val.has_value()) {
                 result_value = JS::Value(*val);
                 can_fold = true;
@@ -511,8 +512,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::ToNumber:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32() || v.is_double()) {
                 result_value = v;
                 can_fold = true;
@@ -530,8 +531,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::ToNumeric:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             if (v.is_int32() || v.is_double() || v.is_bigint()) {
                 result_value = v;
                 can_fold = true;
@@ -549,8 +550,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::ToBoolean:
-        if (operands.size() == 1) {
-            if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
+        if (nops == 1) {
+            if (auto truthiness = op(0)->constant_truthiness(); truthiness.has_value()) {
                 result_value = JS::Value(*truthiness);
                 can_fold = true;
             }
@@ -558,8 +559,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::Not:
-        if (operands.size() == 1) {
-            if (auto truthiness = operands[0]->constant_truthiness(); truthiness.has_value()) {
+        if (nops == 1) {
+            if (auto truthiness = op(0)->constant_truthiness(); truthiness.has_value()) {
                 result_value = JS::Value(!*truthiness);
                 can_fold = true;
             }
@@ -567,15 +568,15 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         break;
 
     case Opcode::IsUndefined:
-        if (operands.size() == 1) {
-            result_value = JS::Value(operands[0]->constant_value().is_undefined());
+        if (nops == 1) {
+            result_value = JS::Value(op(0)->constant_value().is_undefined());
             can_fold = true;
         }
         break;
 
     case Opcode::IsNullish:
-        if (operands.size() == 1) {
-            auto const& v = operands[0]->constant_value();
+        if (nops == 1) {
+            auto const& v = op(0)->constant_value();
             result_value = JS::Value(v.is_null() || v.is_undefined());
             can_fold = true;
         }
@@ -583,8 +584,8 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
 
     case Opcode::Move:
         // Move of a constant is just the constant
-        if (operands.size() == 1) {
-            instruction.result()->replace_all_uses_with(operands[0]);
+        if (nops == 1) {
+            instruction.result()->replace_all_uses_with(op(0));
             can_fold = true;
         }
         return {};
@@ -608,85 +609,86 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
     if (!instruction.result())
         return nullptr;
 
-    auto const& operands = instruction.operands();
+    auto op = [&](size_t i) -> Value* { return instruction.operand(i); };
+    auto nops = instruction.operand_count();
 
     switch (instruction.opcode()) {
     case Opcode::Add:
         // x + 0 -> x, 0 + x -> x (only for numeric types, since string + 0 = "0")
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[1]) && is_numeric_type(operands[0]->type()))
-                return operands[0];
-            if (is_constant_zero(operands[0]) && is_numeric_type(operands[1]->type()))
-                return operands[1];
+        if (nops == 2) {
+            if (is_constant_zero(op(1)) && is_numeric_type(op(0)->type()))
+                return op(0);
+            if (is_constant_zero(op(0)) && is_numeric_type(op(1)->type()))
+                return op(1);
         }
         break;
 
     case Opcode::Sub:
         // x - 0 -> x (only for numeric types, since "5" - 0 = 5)
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[1]) && is_numeric_type(operands[0]->type()))
-                return operands[0];
+        if (nops == 2) {
+            if (is_constant_zero(op(1)) && is_numeric_type(op(0)->type()))
+                return op(0);
             // x - x -> 0 (only safe for Int32, since NaN - NaN = NaN)
-            if (operands[0] == operands[1] && operands[0]->type() == Type::Int32)
+            if (op(0) == op(1) && op(0)->type() == Type::Int32)
                 return &function.create_constant(JS::Value(0));
         }
         break;
 
     case Opcode::Mul:
         // x * 0 -> 0, 0 * x -> 0 (only safe for Int32, since NaN * 0 = NaN)
-        if (operands.size() == 2) {
-            if ((is_constant_zero(operands[0]) && operands[1]->type() == Type::Int32)
-                || (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32))
+        if (nops == 2) {
+            if ((is_constant_zero(op(0)) && op(1)->type() == Type::Int32)
+                || (is_constant_zero(op(1)) && op(0)->type() == Type::Int32))
                 return &function.create_constant(JS::Value(0));
             // x * 1 -> x, 1 * x -> x (only for numeric types, since "5" * 1 = 5)
-            if (is_constant_one(operands[1]) && is_numeric_type(operands[0]->type()))
-                return operands[0];
-            if (is_constant_one(operands[0]) && is_numeric_type(operands[1]->type()))
-                return operands[1];
+            if (is_constant_one(op(1)) && is_numeric_type(op(0)->type()))
+                return op(0);
+            if (is_constant_one(op(0)) && is_numeric_type(op(1)->type()))
+                return op(1);
         }
         break;
 
     case Opcode::Div:
         // x / 1 -> x (only for numeric types, since "5" / 1 = 5)
-        if (operands.size() == 2) {
-            if (is_constant_one(operands[1]) && is_numeric_type(operands[0]->type()))
-                return operands[0];
+        if (nops == 2) {
+            if (is_constant_one(op(1)) && is_numeric_type(op(0)->type()))
+                return op(0);
         }
         break;
 
     case Opcode::BitwiseAnd:
         // x & 0 -> 0 (always safe, result is always 0)
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[0]) || is_constant_zero(operands[1]))
+        if (nops == 2) {
+            if (is_constant_zero(op(0)) || is_constant_zero(op(1)))
                 return &function.create_constant(JS::Value(0));
             // x & x -> x (only if x is already Int32, since bitwise ops coerce to Int32)
-            if (operands[0] == operands[1] && operands[0]->type() == Type::Int32)
-                return operands[0];
+            if (op(0) == op(1) && op(0)->type() == Type::Int32)
+                return op(0);
         }
         break;
 
     case Opcode::BitwiseOr:
         // x | 0 -> x, 0 | x -> x (only if x is already Int32)
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32)
-                return operands[0];
-            if (is_constant_zero(operands[0]) && operands[1]->type() == Type::Int32)
-                return operands[1];
+        if (nops == 2) {
+            if (is_constant_zero(op(1)) && op(0)->type() == Type::Int32)
+                return op(0);
+            if (is_constant_zero(op(0)) && op(1)->type() == Type::Int32)
+                return op(1);
             // x | x -> x (only if x is already Int32)
-            if (operands[0] == operands[1] && operands[0]->type() == Type::Int32)
-                return operands[0];
+            if (op(0) == op(1) && op(0)->type() == Type::Int32)
+                return op(0);
         }
         break;
 
     case Opcode::BitwiseXor:
         // x ^ 0 -> x, 0 ^ x -> x (only if x is already Int32)
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32)
-                return operands[0];
-            if (is_constant_zero(operands[0]) && operands[1]->type() == Type::Int32)
-                return operands[1];
+        if (nops == 2) {
+            if (is_constant_zero(op(1)) && op(0)->type() == Type::Int32)
+                return op(0);
+            if (is_constant_zero(op(0)) && op(1)->type() == Type::Int32)
+                return op(1);
             // x ^ x -> 0 (always safe, result is always 0)
-            if (operands[0] == operands[1])
+            if (op(0) == op(1))
                 return &function.create_constant(JS::Value(0));
         }
         break;
@@ -694,9 +696,9 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
     case Opcode::LeftShift:
     case Opcode::RightShift:
         // x << 0 -> x, x >> 0 -> x (only if x is already Int32)
-        if (operands.size() == 2) {
-            if (is_constant_zero(operands[1]) && operands[0]->type() == Type::Int32)
-                return operands[0];
+        if (nops == 2) {
+            if (is_constant_zero(op(1)) && op(0)->type() == Type::Int32)
+                return op(0);
         }
         break;
 
@@ -707,32 +709,32 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
 
     // +x -> x when x is already numeric
     case Opcode::UnaryPlus:
-        if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
-            return operands[0];
+        if (nops == 1 && is_numeric_type(op(0)->type()))
+            return op(0);
         break;
 
     // ToNumber(x) -> x when x is already numeric
     case Opcode::ToNumber:
-        if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
-            return operands[0];
+        if (nops == 1 && is_numeric_type(op(0)->type()))
+            return op(0);
         break;
 
     // ToNumeric(x) -> x when x is already numeric
     case Opcode::ToNumeric:
-        if (operands.size() == 1 && is_numeric_type(operands[0]->type()))
-            return operands[0];
+        if (nops == 1 && is_numeric_type(op(0)->type()))
+            return op(0);
         break;
 
     // ToInt32(x) -> x when x is already Int32
     case Opcode::ToInt32:
-        if (operands.size() == 1 && operands[0]->type() == Type::Int32)
-            return operands[0];
+        if (nops == 1 && op(0)->type() == Type::Int32)
+            return op(0);
         break;
 
     // ToBoolean(x) -> x when x is already Boolean
     case Opcode::ToBoolean:
-        if (operands.size() == 1 && operands[0]->type() == Type::Boolean)
-            return operands[0];
+        if (nops == 1 && op(0)->type() == Type::Boolean)
+            return op(0);
         break;
 
     default:
@@ -747,21 +749,20 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
 static bool try_instruction_combine(Instruction& instruction, Function& function, BasicBlock& block)
 {
     auto* result = instruction.result();
-    auto const& operands = instruction.operands();
 
     switch (instruction.opcode()) {
 
     // Not (Not x) -> x
     case Opcode::Not: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (!inner)
             break;
 
         if (inner->opcode() == Opcode::Not) {
-            if (auto* inner_operand = inner->operands()[0]) {
+            if (auto* inner_operand = inner->operand(0)) {
                 result->replace_all_uses_with(inner_operand);
                 return true;
             }
@@ -771,12 +772,12 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // BitwiseNot (BitwiseNot x) -> x (only if x is already Int32)
     case Opcode::BitwiseNot: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (inner && inner->opcode() == Opcode::BitwiseNot) {
-            if (auto* inner_operand = inner->operands()[0];
+            if (auto* inner_operand = inner->operand(0);
                 inner_operand && inner_operand->type() == Type::Int32) {
                 result->replace_all_uses_with(inner_operand);
                 return true;
@@ -787,12 +788,12 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // Negate (Negate x) -> x (only if x is Int32)
     case Opcode::Negate: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (inner && inner->opcode() == Opcode::Negate) {
-            if (auto* inner_operand = inner->operands()[0];
+            if (auto* inner_operand = inner->operand(0);
                 inner_operand && inner_operand->type() == Type::Int32) {
                 result->replace_all_uses_with(inner_operand);
                 return true;
@@ -804,15 +805,15 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
     // ToBoolean (ToBoolean x) -> ToBoolean x
     // ToBoolean (Not x) -> Not x (Not already returns boolean)
     case Opcode::ToBoolean: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (!inner)
             break;
 
         if (inner->opcode() == Opcode::ToBoolean || inner->opcode() == Opcode::Not) {
-            result->replace_all_uses_with(operands[0]);
+            result->replace_all_uses_with(instruction.operand(0));
             return true;
         }
         break;
@@ -820,12 +821,12 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // ToNumber (ToNumber x) -> ToNumber x
     case Opcode::ToNumber: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (inner && inner->opcode() == Opcode::ToNumber) {
-            result->replace_all_uses_with(operands[0]);
+            result->replace_all_uses_with(instruction.operand(0));
             return true;
         }
         break;
@@ -833,12 +834,12 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // ToNumeric (ToNumeric x) -> ToNumeric x
     case Opcode::ToNumeric: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* inner = operands[0]->defining_instruction();
+        auto* inner = instruction.operand(0)->defining_instruction();
         if (inner && inner->opcode() == Opcode::ToNumeric) {
-            result->replace_all_uses_with(operands[0]);
+            result->replace_all_uses_with(instruction.operand(0));
             return true;
         }
         break;
@@ -846,10 +847,10 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // Typeof x -> constant string when x has a known type
     case Opcode::Typeof: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto typeof_string = typeof_result_for_type(operands[0]->type());
+        auto typeof_string = typeof_result_for_type(instruction.operand(0)->type());
         if (!typeof_string)
             break;
 
@@ -860,10 +861,10 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
 
     // Branch (Not x), T, F -> Branch x, F, T
     case Opcode::Branch: {
-        if (operands.is_empty() || !operands[0])
+        if (instruction.operand_count() == 0 || !instruction.operand(0))
             break;
 
-        auto* condition = operands[0];
+        auto* condition = instruction.operand(0);
         auto* not_instr = condition->defining_instruction();
         if (!not_instr || not_instr->opcode() != Opcode::Not)
             break;
@@ -871,7 +872,7 @@ static bool try_instruction_combine(Instruction& instruction, Function& function
         if (condition->uses().size() != 1)
             break;
 
-        auto* not_input = not_instr->operands()[0];
+        auto* not_input = not_instr->operand(0);
         if (!not_input)
             break;
 

@@ -59,7 +59,7 @@ static bool should_fuse_comparison_with_branch(Instruction const& instruction)
         return false;
 
     // The Branch must use this comparison as its condition (operand 0)
-    if (use->operands().is_empty() || use->operands()[0] != result)
+    if (use->operand_count() == 0 || use->operand(0) != result)
         return false;
 
     return true;
@@ -184,15 +184,15 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     };
 
     auto operand = [&](size_t index) -> Bytecode::Operand {
-        if (index < instruction.operands().size() && instruction.operands()[index])
-            return operand_for_value(*instruction.operands()[index]);
+        if (index < instruction.operand_count() && instruction.operand(index))
+            return operand_for_value(*instruction.operand(index));
         return Bytecode::Operand(Bytecode::Register(0)); // Dummy
     };
 
     // Helper to collect variable-length operands starting from a given index
     auto collect_varargs = [&](size_t start_index) -> Vector<Bytecode::Operand> {
         Vector<Bytecode::Operand> args;
-        for (size_t i = start_index; i < instruction.operands().size(); ++i)
+        for (size_t i = start_index; i < instruction.operand_count(); ++i)
             args.append(operand(i));
         return args;
     };
@@ -697,12 +697,12 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::NewClass: {
         // Operands: [super_class (may be null), element_key0, element_key1, ...]
         Optional<Bytecode::Operand> super_class;
-        if (instruction.operands()[0])
+        if (instruction.operand(0))
             super_class = operand(0);
-        size_t element_keys_count = instruction.operands().size() - 1;
+        size_t element_keys_count = instruction.operand_count() - 1;
         Vector<Optional<Bytecode::Operand>> element_keys;
         for (size_t i = 0; i < element_keys_count; ++i) {
-            if (instruction.operands()[i + 1])
+            if (instruction.operand(i + 1))
                 element_keys.append(operand(i + 1));
             else
                 element_keys.append(OptionalNone {});
@@ -714,7 +714,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     // NewFunction
     case Opcode::NewFunction: {
         Optional<Bytecode::Operand> home_object;
-        if (!instruction.operands().is_empty())
+        if (instruction.operand_count() > 0)
             home_object = operand(0);
         emit<Bytecode::Op::NewFunction>(dst(), *instruction.function_node(), instruction.lhs_name(), home_object);
         break;
@@ -826,7 +826,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     // Tuple extraction
     case Opcode::ExtractValue: {
         // Get the tuple operand and extract the element at the given index
-        auto* tuple_value = instruction.operands()[0];
+        auto* tuple_value = instruction.operand(0);
         auto element_reg = operand_for_tuple_element(*tuple_value, instruction.extract_index());
         if (instruction.result())
             m_value_to_operand[static_cast<u32>(instruction.result()->index())] = element_reg;
@@ -890,7 +890,7 @@ void Lowerer::lower_blocks()
     for (auto const& ir_block : m_function.basic_blocks()) {
         for (auto const& instruction : ir_block->instructions()) {
             if (instruction->opcode() == Opcode::ExtractValue) {
-                auto* tuple_value = instruction->operands()[0];
+                auto* tuple_value = instruction->operand(0);
                 if (tuple_value && instruction->result()) {
                     auto element_reg = operand_for_tuple_element(*tuple_value, instruction->extract_index());
                     m_value_to_operand[static_cast<u32>(instruction->result()->index())] = element_reg;
@@ -956,7 +956,7 @@ void Lowerer::lower_blocks()
             break;
         }
         case Opcode::Branch: {
-            auto* condition_value = terminator->operands()[0];
+            auto* condition_value = terminator->operand(0);
             auto* true_target = terminator->true_target();
             auto* false_target = terminator->false_target();
 
@@ -970,8 +970,8 @@ void Lowerer::lower_blocks()
                 // Check if condition comes from a fusible comparison
                 auto* cmp_instr = condition_value->defining_instruction();
                 if (cmp_instr && should_fuse_comparison_with_branch(*cmp_instr)) {
-                    auto lhs = operand_for_value(*cmp_instr->operands()[0]);
-                    auto rhs = operand_for_value(*cmp_instr->operands()[1]);
+                    auto lhs = operand_for_value(*cmp_instr->operand(0));
+                    auto rhs = operand_for_value(*cmp_instr->operand(1));
                     switch (cmp_instr->opcode()) {
                     case Opcode::LessThan:
                         emit<Bytecode::Op::JumpLessThan>(lhs, rhs, true_label, false_label);
@@ -1020,23 +1020,23 @@ void Lowerer::lower_blocks()
             break;
         }
         case Opcode::Return: {
-            auto value = operand_for_value(*terminator->operands()[0]);
+            auto value = operand_for_value(*terminator->operand(0));
             emit<Bytecode::Op::Return>(value);
             break;
         }
         case Opcode::End: {
-            auto value = operand_for_value(*terminator->operands()[0]);
+            auto value = operand_for_value(*terminator->operand(0));
             emit<Bytecode::Op::End>(value);
             break;
         }
         case Opcode::Throw: {
-            auto value = operand_for_value(*terminator->operands()[0]);
+            auto value = operand_for_value(*terminator->operand(0));
             emit<Bytecode::Op::Throw>(value);
             break;
         }
         case Opcode::Yield: {
             // Yield: operand[0] is the value to yield, true_target is continuation (or null for final yield)
-            auto value = operand_for_value(*terminator->operands()[0]);
+            auto value = operand_for_value(*terminator->operand(0));
             auto* continuation = terminator->true_target();
             if (continuation) {
                 // The resume value appears in the accumulator (reg0) at runtime.
@@ -1055,7 +1055,7 @@ void Lowerer::lower_blocks()
         }
         case Opcode::Await: {
             // Await: operand[0] is the promise/value to await, true_target is continuation
-            auto argument = operand_for_value(*terminator->operands()[0]);
+            auto argument = operand_for_value(*terminator->operand(0));
             auto* continuation = terminator->true_target();
             VERIFY(continuation);
 

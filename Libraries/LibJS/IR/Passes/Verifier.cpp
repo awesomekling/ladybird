@@ -205,10 +205,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // Check: Phi operand count == phi predecessor count
             if (instr->opcode() == Opcode::Phi) {
                 auto const& phi = static_cast<PhiInstruction const&>(*instr);
-                if (phi.operands().size() != phi.incoming_count()) {
+                if (phi.operand_count() != phi.incoming_count()) {
                     report_error(ByteString::formatted(
                         "Phi in block{} has {} operands but {} predecessors",
-                        block->index(), phi.operands().size(), phi.incoming_count()));
+                        block->index(), phi.operand_count(), phi.incoming_count()));
                 }
 
                 // Check: Phi predecessors ⊆ block predecessors
@@ -255,11 +255,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // Check: Opcode operand-arity
             {
                 auto arity = opcode_operand_arity(instr->opcode());
-                if (arity != VariableArity && instr->operands().size() != arity) {
+                if (arity != VariableArity && instr->operand_count() != arity) {
                     report_error(ByteString::formatted(
                         "{} in block{} has {} operands (expected {})",
                         opcode_to_string(instr->opcode()), block->index(),
-                        instr->operands().size(), arity));
+                        instr->operand_count(), arity));
                 }
             }
 
@@ -295,7 +295,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // Check: ExtractValue source must be a tuple-producing instruction
             // and the index must be within bounds
             if (instr->opcode() == Opcode::ExtractValue && block_is_reachable) {
-                auto* source = instr->operands().is_empty() ? nullptr : instr->operands()[0];
+                auto* source = instr->operand_count() == 0 ? nullptr : instr->operand(0);
                 if (source && source->is_instruction() && source->defining_instruction()) {
                     auto source_opcode = source->defining_instruction()->opcode();
                     Optional<u32> tuple_size;
@@ -334,9 +334,9 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 // Check: All operands are non-null and reference defined values
                 // NB: NewClass allows null operands (no superclass, optional element keys).
                 bool allows_null_operands = instr->opcode() == Opcode::NewClass;
-                for (size_t i = 0; i < instr->operands().size(); ++i) {
-                    auto* operand = instr->operands()[i];
-                    if (!operand) {
+                for (size_t i = 0; i < instr->operand_count(); ++i) {
+                    auto* op = instr->operand(i);
+                    if (!op) {
                         if (allows_null_operands)
                             continue;
                         report_error(ByteString::formatted(
@@ -344,17 +344,17 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             block->index(), i));
                         continue;
                     }
-                    if (!defined_values.get(to_index(operand->index()))) {
+                    if (!defined_values.get(to_index(op->index()))) {
                         report_error(ByteString::formatted(
                             "Instruction in block{} uses undefined value v{}",
-                            block->index(), operand->index()));
+                            block->index(), op->index()));
                     }
                     // Check: Instruction-kind values must have a defining instruction
                     // This catches placeholder register values that weren't properly renamed
-                    if (operand->is_instruction() && !operand->defining_instruction()) {
+                    if (op->is_instruction() && !op->defining_instruction()) {
                         report_error(ByteString::formatted(
                             "Instruction in block{} uses v{} which has no defining instruction (likely SSA renaming failure)",
-                            block->index(), operand->index()));
+                            block->index(), op->index()));
                     }
                 }
             }
@@ -584,8 +584,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             // Check: Reverse validation - the using instruction must actually
             // have this value in its operand list
             bool found_in_operands = false;
-            for (auto* operand : use->operands()) {
-                if (operand == value.ptr()) {
+            for (size_t i = 0; i < use->operand_count(); ++i) {
+                if (use->operand(i) == value.ptr()) {
                     found_in_operands = true;
                     break;
                 }
@@ -671,8 +671,8 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             } else {
                 // For non-phi instructions, each operand's definition must dominate this block
-                for (size_t i = 0; i < instr->operands().size(); ++i) {
-                    auto* operand = instr->operands()[i];
+                for (size_t i = 0; i < instr->operand_count(); ++i) {
+                    auto* operand = instr->operand(i);
                     if (!operand)
                         continue;
 

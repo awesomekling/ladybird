@@ -81,8 +81,8 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
 
     case Opcode::Branch: {
         auto const& branch = static_cast<TerminatorInstruction const&>(instruction);
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         if (auto target = branch.true_target_index(); target.has_value())
             builder.appendff(", block{}", *target);
         if (auto target = branch.false_target_index(); target.has_value())
@@ -136,8 +136,8 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
             auto name = executable->identifier_table->get(instruction.identifier_index());
             builder.appendff(" {}", name);
         }
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         if (instruction.opcode() == Opcode::InitializeBinding || instruction.opcode() == Opcode::SetBinding) {
             if (instruction.environment_mode() == Bytecode::Op::EnvironmentMode::Var)
                 builder.append(" (var)"sv);
@@ -149,8 +149,8 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
     case Opcode::PutByIdWithThis:
     case Opcode::DeleteById:
     case Opcode::DeleteByIdWithThis:
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         if (executable && instruction.property_key_index().is_valid()) {
             auto name = executable->property_key_table->get(instruction.property_key_index());
             builder.appendff(".{}", name);
@@ -158,16 +158,16 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
 
     case Opcode::ExtractValue:
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         builder.appendff(", {}", instruction.extract_index());
         break;
 
     case Opcode::Yield:
     case Opcode::Await: {
         auto const& term = static_cast<TerminatorInstruction const&>(instruction);
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         if (auto target = term.true_target_index(); target.has_value())
             builder.appendff(", continuation: block{}", *target);
         break;
@@ -182,14 +182,14 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
 
     case Opcode::ArrayAppend:
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         builder.appendff(", is_spread:{}", instruction.is_spread());
         break;
 
     default:
-        for (auto* operand : instruction.operands())
-            append_operand(operand);
+        for (size_t i = 0; i < instruction.operand_count(); ++i)
+            append_operand(instruction.operand(i));
         break;
     }
 }

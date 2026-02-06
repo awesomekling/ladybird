@@ -29,7 +29,7 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     for (auto const& block : function.basic_blocks()) {
         for (auto const& instruction : block->instructions()) {
             if (instruction->opcode() == Opcode::Move && instruction->result()) {
-                auto* src = instruction->operands()[0];
+                auto* src = instruction->operand(0);
                 copies[to_index(instruction->result()->index())] = src->index();
                 has_copies = true;
             }
@@ -52,14 +52,14 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     // Example: v1 = Move v0; v2 = Move v0; v = Phi [v1, v2] → v = v0
     for (auto& block : function.basic_blocks()) {
         block->for_each_phi([&](PhiInstruction& phi) {
-            auto const& operands = phi.operands();
-            if (operands.is_empty())
+            if (phi.operand_count() == 0)
                 return;
 
             // Check if all operands resolve to the same ultimate source
             Optional<ValueIndex> common_idx;
             bool all_same = true;
-            for (auto* operand : operands) {
+            for (size_t i = 0; i < phi.operand_count(); ++i) {
+                auto* operand = phi.operand(i);
                 if (!operand)
                     continue;
                 auto resolved = resolve(operand->index());
@@ -85,8 +85,8 @@ PreservedAnalyses CopyPropagation::run(Function& function, PassManager&)
     // Replace uses of copied values with their sources
     for (auto& block : function.basic_blocks()) {
         for (auto& instruction : block->instructions()) {
-            for (size_t i = 0; i < instruction->operands().size(); ++i) {
-                auto* operand = instruction->operands()[i];
+            for (size_t i = 0; i < instruction->operand_count(); ++i) {
+                auto* operand = instruction->operand(i);
                 if (!operand)
                     continue;
 

@@ -30,8 +30,8 @@ void Value::replace_all_uses_with(Value* replacement)
     // Make a copy since we're modifying the use list as we iterate
     auto uses_copy = m_uses;
     for (auto* instruction : uses_copy) {
-        for (size_t i = 0; i < instruction->operands().size(); ++i) {
-            if (instruction->operands()[i] == this)
+        for (size_t i = 0; i < instruction->operand_count(); ++i) {
+            if (instruction->operand(i) == this)
                 instruction->set_operand(i, replacement);
         }
     }

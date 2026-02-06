@@ -245,6 +245,8 @@ public:
     Value* result() const { return m_result; }
     void set_result(Value* value);
 
+    size_t operand_count() const { return m_operands.size(); }
+    Value* operand(size_t index) const { return m_operands[index]; }
     Vector<Value*> const& operands() const { return m_operands; }
     void add_operand(Value* value);
     void set_operand(size_t index, Value* value);
@@ -506,8 +508,8 @@ public:
 
     Value* condition() const
     {
-        VERIFY(!operands().is_empty());
-        return operands()[0];
+        VERIFY(operand_count() > 0);
+        return operand(0);
     }
 
     BasicBlock& true_branch() const
@@ -541,7 +543,7 @@ public:
     // Read-only accessors
     size_t incoming_count() const { return phi_predecessors().size(); }
     BlockIndex incoming_block(size_t index) const { return phi_predecessors()[index]; }
-    Value* incoming_value(size_t index) const { return operands()[index]; }
+    Value* incoming_value(size_t index) const { return operand(index); }
 
     // Lookup helpers - find the value/index for a given predecessor block
     Value* incoming_value_for(BlockIndex predecessor) const;
@@ -608,25 +610,25 @@ public:
 
     Value* callee() const
     {
-        VERIFY(operands().size() >= 2);
-        return operands()[0];
+        VERIFY(operand_count() >= 2);
+        return operand(0);
     }
 
     Value* this_value() const
     {
-        VERIFY(operands().size() >= 2);
-        return operands()[1];
+        VERIFY(operand_count() >= 2);
+        return operand(1);
     }
 
     size_t argument_count() const
     {
-        return operands().size() > 2 ? operands().size() - 2 : 0;
+        return operand_count() > 2 ? operand_count() - 2 : 0;
     }
 
     Value* argument(size_t index) const
     {
-        VERIFY(index + 2 < operands().size());
-        return operands()[index + 2];
+        VERIFY(index + 2 < operand_count());
+        return operand(index + 2);
     }
 
 private:
@@ -643,8 +645,8 @@ public:
 
     Value* base() const
     {
-        VERIFY(!operands().is_empty());
-        return operands()[0];
+        VERIFY(operand_count() > 0);
+        return operand(0);
     }
 
     Bytecode::PropertyKeyTableIndex property() const
@@ -665,14 +667,14 @@ public:
 
     Value* lhs() const
     {
-        VERIFY(operands().size() == 2);
-        return operands()[0];
+        VERIFY(operand_count() == 2);
+        return operand(0);
     }
 
     Value* rhs() const
     {
-        VERIFY(operands().size() == 2);
-        return operands()[1];
+        VERIFY(operand_count() == 2);
+        return operand(1);
     }
 
 private:
@@ -686,10 +688,10 @@ class JS_API UnaryOpInstruction final : public Instruction {
 public:
     [[nodiscard]] static NonnullOwnPtr<UnaryOpInstruction> create(Opcode opcode, Value* operand);
 
-    Value* operand() const
+    Value* unary_operand() const
     {
-        VERIFY(operands().size() == 1);
-        return operands()[0];
+        VERIFY(operand_count() == 1);
+        return operand(0);
     }
 
 private:

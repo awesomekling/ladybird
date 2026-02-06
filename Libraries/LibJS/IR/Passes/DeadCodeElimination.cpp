@@ -33,10 +33,11 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 
             if (is_live_root) {
                 // All operands of live instructions are live
-                for (auto* operand : instruction->operands()) {
-                    if (operand && !live_values.get(to_index(operand->index()))) {
-                        live_values.set(to_index(operand->index()), true);
-                        worklist.append(operand->index());
+                for (size_t j = 0; j < instruction->operand_count(); ++j) {
+                    auto* op = instruction->operand(j);
+                    if (op && !live_values.get(to_index(op->index()))) {
+                        live_values.set(to_index(op->index()), true);
+                        worklist.append(op->index());
                     }
                 }
             }
@@ -51,10 +52,11 @@ PreservedAnalyses DeadCodeElimination::run(Function& function, PassManager&)
 
         // If this value is defined by an instruction, its operands are also live
         if (auto* defining_instr = value->defining_instruction()) {
-            for (auto* operand : defining_instr->operands()) {
-                if (operand && !live_values.get(to_index(operand->index()))) {
-                    live_values.set(to_index(operand->index()), true);
-                    worklist.append(operand->index());
+            for (size_t j = 0; j < defining_instr->operand_count(); ++j) {
+                auto* op = defining_instr->operand(j);
+                if (op && !live_values.get(to_index(op->index()))) {
+                    live_values.set(to_index(op->index()), true);
+                    worklist.append(op->index());
                 }
             }
         }

@@ -71,18 +71,17 @@ PreservedAnalyses GlobalValueNumbering::run(Function& function, PassManager& pas
             if (!instruction->is_pure())
                 continue;
 
-            auto const& operands = instruction->operands();
-            if (operands.is_empty())
+            if (instruction->operand_count() == 0)
                 continue;
 
             ExpressionKey key;
             key.opcode = instruction->opcode();
-            if (operands.size() > 0 && operands[0]) {
-                key.operand1 = operands[0]->index();
+            if (instruction->operand_count() > 0 && instruction->operand(0)) {
+                key.operand1 = instruction->operand(0)->index();
                 key.has_operand1 = true;
             }
-            if (operands.size() > 1 && operands[1]) {
-                key.operand2 = operands[1]->index();
+            if (instruction->operand_count() > 1 && instruction->operand(1)) {
+                key.operand2 = instruction->operand(1)->index();
                 key.has_operand2 = true;
             }
 

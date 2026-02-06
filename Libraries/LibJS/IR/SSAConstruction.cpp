@@ -176,22 +176,22 @@ void SSAConstruction::fill_phi_operands()
     // Compute phi types by joining incoming value types.
     for (auto& block : m_function.basic_blocks()) {
         block->for_each_phi([&](PhiInstruction& phi) {
-            auto const& operands = phi.operands();
-            if (operands.is_empty())
+            if (phi.operand_count() == 0)
                 return;
 
             Type phi_type = Type::Unknown;
             bool first = true;
 
-            for (auto* operand : operands) {
-                if (!operand)
+            for (size_t i = 0; i < phi.operand_count(); ++i) {
+                auto* op = phi.operand(i);
+                if (!op)
                     continue;
 
                 if (first) {
-                    phi_type = operand->type();
+                    phi_type = op->type();
                     first = false;
                 } else {
-                    phi_type = join_types(phi_type, operand->type());
+                    phi_type = join_types(phi_type, op->type());
                 }
             }
 
@@ -258,8 +258,8 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                 continue;
 
             // Rewrite operand uses to current stack top
-            for (size_t i = 0; i < instruction->operands().size(); ++i) {
-                auto* operand_value = instruction->operands()[i];
+            for (size_t i = 0; i < instruction->operand_count(); ++i) {
+                auto* operand_value = instruction->operand(i);
                 if (!operand_value)
                     continue;
 

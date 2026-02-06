@@ -62,14 +62,15 @@ PreservedAnalyses LoopInvariantCodeMotion::run(Function& function, PassManager& 
 
                 // Check if all operands are defined outside the loop
                 bool all_operands_invariant = true;
-                for (auto* operand : instruction->operands()) {
-                    if (!operand)
+                for (size_t j = 0; j < instruction->operand_count(); ++j) {
+                    auto* op = instruction->operand(j);
+                    if (!op)
                         continue;
 
-                    if (operand->is_constant())
+                    if (op->is_constant())
                         continue;
 
-                    auto* def_instr = operand->defining_instruction();
+                    auto* def_instr = op->defining_instruction();
                     if (def_instr && loop->contains(def_instr->parent_block())) {
                         all_operands_invariant = false;
                         break;
