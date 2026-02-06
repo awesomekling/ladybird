@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Bitmap.h>
 #include <AK/QuickSort.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/Function.h>
@@ -15,6 +16,23 @@ namespace JS::IR {
 
 static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
 static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
+
+static size_t block_index_capacity(Function const& function)
+{
+    size_t max_index = 0;
+    for (auto const& block : function.basic_blocks())
+        max_index = max(max_index, to_index(block->index()) + 1);
+    return max_index;
+}
+
+static Vector<BasicBlock*> build_block_index_table(Function const& function, size_t capacity)
+{
+    Vector<BasicBlock*> table;
+    table.resize_with_default_value(capacity, nullptr);
+    for (auto const& block : function.basic_blocks())
+        table[to_index(block->index())] = block.ptr();
+    return table;
+}
 
 SSAConstruction::SSAConstruction(Function& function, DominatorTree const& dominators, Bytecode::Executable const& executable,
     HashTable<u32> const& written_operands,
@@ -52,45 +70,51 @@ void SSAConstruction::place_phi_nodes()
         sorted_operands.append(raw);
     quick_sort(sorted_operands);
 
+    auto capacity = block_index_capacity(m_function);
+    auto block_table = build_block_index_table(m_function, capacity);
+
     // For each written operand, compute where phis are needed
     for (auto raw : sorted_operands) {
         // Find all blocks that actually define this operand
-        HashTable<BasicBlock*> def_blocks;
+        auto def_blocks = MUST(AK::Bitmap::create(capacity, false));
         for (auto const& block : m_function.basic_blocks()) {
             auto bi = to_index(block->index());
             if (bi < m_block_actual_definitions.size() && m_block_actual_definitions[bi].contains(raw))
-                def_blocks.set(block.ptr());
+                def_blocks.set(bi, true);
         }
 
         // Compute iterated dominance frontier (where phis are needed)
-        HashTable<BasicBlock*> phi_blocks;
-        Vector<BasicBlock*> worklist;
-        for (auto* block : def_blocks)
-            worklist.append(block);
+        auto phi_blocks = MUST(AK::Bitmap::create(capacity, false));
+        Vector<BlockIndex> worklist;
+        for (size_t i = 0; i < capacity; ++i) {
+            if (def_blocks.get(i))
+                worklist.append(static_cast<BlockIndex>(i));
+        }
 
         while (!worklist.is_empty()) {
-            auto* block = worklist.take_last();
+            auto block_idx = worklist.take_last();
+            auto* block = block_table[to_index(block_idx)];
+            if (!block)
+                continue;
             m_dominators.for_each_frontier_block(block, [&](BasicBlock& frontier_block) {
-                if (!phi_blocks.contains(&frontier_block)) {
-                    phi_blocks.set(&frontier_block);
+                auto fi = to_index(frontier_block.index());
+                if (!phi_blocks.get(fi)) {
+                    phi_blocks.set(fi, true);
                     // If this block doesn't already define the variable, add to worklist
                     // (the phi itself is a definition that extends the frontier)
-                    if (!def_blocks.contains(&frontier_block))
-                        worklist.append(&frontier_block);
+                    if (!def_blocks.get(fi))
+                        worklist.append(frontier_block.index());
                 }
             });
         }
 
         // Place phis at the computed locations.
-        // NB: Sort by block index for deterministic phi ordering across runs,
-        //     since phi_blocks is a HashTable with pointer-based ordering.
-        Vector<BasicBlock*> sorted_phi_blocks;
-        sorted_phi_blocks.ensure_capacity(phi_blocks.size());
-        for (auto* block : phi_blocks)
-            sorted_phi_blocks.append(block);
-        quick_sort(sorted_phi_blocks, [](auto* a, auto* b) { return a->index() < b->index(); });
-
-        for (auto* block : sorted_phi_blocks) {
+        // NB: Bitmap iteration is inherently ordered by index, ensuring
+        //     deterministic phi ordering across runs.
+        for (size_t bi = 0; bi < capacity; ++bi) {
+            if (!phi_blocks.get(bi))
+                continue;
+            auto* block = block_table[bi];
             auto const& preds = block->predecessors();
             if (preds.is_empty())
                 continue;
@@ -114,7 +138,6 @@ void SSAConstruction::place_phi_nodes()
             // Update m_block_definitions to include the phi value, UNLESS the block
             // has an actual definition that would override it. This ensures successors
             // inherit the correct value.
-            auto bi = to_index(block->index());
             bool has_actual_def = bi < m_block_actual_definitions.size() && m_block_actual_definitions[bi].contains(raw);
             if (!has_actual_def) {
                 if (bi >= m_block_definitions.size())
