@@ -5,6 +5,7 @@
  */
 
 #include <AK/HashTable.h>
+#include <AK/Queue.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
 #include <LibJS/IR/Function.h>
@@ -22,6 +23,44 @@ static void remove_dead_blocks(Function& function)
             blocks_to_remove.set(block.ptr());
     }
     CFG::remove_blocks(function, blocks_to_remove);
+}
+
+static bool try_fold_constant_branches(Function& function)
+{
+    bool changed = false;
+
+    for (auto& block : function.basic_blocks()) {
+        auto* term = block->terminator();
+        if (!term || term->opcode() != Opcode::Branch)
+            continue;
+
+        // If both targets are the same, convert to unconditional jump
+        if (term->true_target() == term->false_target() && term->true_target() != nullptr) {
+            CFG::replace_branch_with_jump(*block, *term->true_target(), nullptr);
+            changed = true;
+            continue;
+        }
+
+        // Branch has condition as first operand
+        if (term->operands().is_empty())
+            continue;
+
+        auto* condition = term->operands()[0];
+        auto truthiness = condition->constant_truthiness();
+        if (!truthiness.has_value())
+            continue;
+
+        bool take_true_branch = *truthiness;
+
+        auto* target = take_true_branch ? term->true_target() : term->false_target();
+        auto* not_taken = take_true_branch ? term->false_target() : term->true_target();
+
+        // Replace Branch with Jump
+        CFG::replace_branch_with_jump(*block, *target, not_taken);
+        changed = true;
+    }
+
+    return changed;
 }
 
 static bool try_eliminate_empty_blocks(Function& function)
@@ -234,6 +273,95 @@ static bool try_merge_blocks(Function& function)
     return changed;
 }
 
+static bool try_eliminate_unreachable_blocks(Function& function)
+{
+    // Find all reachable blocks using BFS from entry
+    HashTable<BasicBlock*> reachable;
+    Queue<BasicBlock*> worklist;
+
+    if (auto* entry = function.entry_block()) {
+        worklist.enqueue(entry);
+        reachable.set(entry);
+    }
+
+    while (!worklist.is_empty()) {
+        auto* block = worklist.dequeue();
+
+        CFG::for_each_successor(*block, [&](BasicBlock& target) {
+            if (!reachable.contains(&target)) {
+                reachable.set(&target);
+                worklist.enqueue(&target);
+            }
+        });
+    }
+
+    // Collect dead blocks
+    Vector<BasicBlock*> dead_blocks;
+    for (auto& block : function.basic_blocks()) {
+        if (!reachable.contains(block.ptr()))
+            dead_blocks.append(block.ptr());
+    }
+
+    if (dead_blocks.is_empty())
+        return false;
+
+    // Build a map of phi results from dead blocks to their replacement values
+    // If a phi in a dead block has all identical operands, we can replace uses of
+    // the phi result with that operand value
+    HashMap<Value*, Value*> dead_phi_replacements;
+    for (auto* dead_block : dead_blocks) {
+        for (auto const& instruction : dead_block->instructions()) {
+            if (instruction->opcode() != Opcode::Phi)
+                continue;
+
+            auto const& operands = instruction->operands();
+            if (operands.is_empty())
+                continue;
+
+            // Check if all operands are the same
+            Value* replacement = operands[0];
+            bool all_same = true;
+            for (size_t i = 1; i < operands.size(); ++i) {
+                if (operands[i] != replacement) {
+                    all_same = false;
+                    break;
+                }
+            }
+
+            if (all_same && replacement && instruction->result())
+                dead_phi_replacements.set(instruction->result(), replacement);
+        }
+    }
+
+    // Replace uses of dead phi results in live blocks
+    for (auto& block : function.basic_blocks()) {
+        if (!reachable.contains(block.ptr()))
+            continue;
+
+        for (auto& instruction : block->instructions()) {
+            for (size_t i = 0; i < instruction->operands().size(); ++i) {
+                auto* operand = instruction->operands()[i];
+                // Follow the replacement chain
+                auto replacement = dead_phi_replacements.get(operand);
+                while (replacement.has_value()) {
+                    operand = *replacement;
+                    replacement = dead_phi_replacements.get(operand);
+                }
+                if (operand != instruction->operands()[i])
+                    instruction->set_operand(i, operand);
+            }
+        }
+    }
+
+    // Remove dead blocks and clean up all references to them.
+    HashTable<BasicBlock*> dead_set;
+    for (auto* block : dead_blocks)
+        dead_set.set(block);
+    CFG::remove_blocks(function, dead_set);
+
+    return true;
+}
+
 PreservedAnalyses SimplifyCFG::run(Function& function, PassManager&)
 {
     bool changed = false;
@@ -241,10 +369,14 @@ PreservedAnalyses SimplifyCFG::run(Function& function, PassManager&)
     bool iteration_changed;
     do {
         iteration_changed = false;
+        iteration_changed |= try_fold_constant_branches(function);
         iteration_changed |= try_eliminate_empty_blocks(function);
         iteration_changed |= try_merge_blocks(function);
         changed |= iteration_changed;
     } while (iteration_changed);
+
+    // BFS reachability prune runs once after the fixpoint
+    changed |= try_eliminate_unreachable_blocks(function);
 
     remove_dead_blocks(function);
 

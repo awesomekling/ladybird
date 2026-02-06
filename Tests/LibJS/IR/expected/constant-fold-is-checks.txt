@@ -94,18 +94,6 @@ block0:
     v7:boolean = Move true
     v9:null = Move null
     v14:boolean = IsNullish null
-    Branch true, block2, block2
-block2:
-    Return true
-
-=== After ConstantBranchFolding ===
-function():
-block0:
-    v5:undefined = Move undefined
-    v6:boolean = StrictlyEquals undefined, undefined
-    v7:boolean = Move true
-    v9:null = Move null
-    v14:boolean = IsNullish null
     Jump block2
 block2:
     Return true

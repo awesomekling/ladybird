@@ -42,13 +42,11 @@ void optimize(Function& function)
 {
     PassManager pass_manager;
 
-    // CFG Simplification
-    pass_manager.add_pass(make<ConstantBranchFolding>());
-    pass_manager.add_pass(make<JumpThreading>());
-
     // Dead Code Removal
     pass_manager.add_pass(make<DeadCodeElimination>());
-    pass_manager.add_pass(make<DeadBlockElimination>());
+
+    // CFG Simplification
+    pass_manager.add_pass(make<JumpThreading>());
 
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
@@ -66,8 +64,8 @@ void optimize(Function& function)
 
     // Loop Optimizations (run once, after the fixed-point loop).
     // LoopSimplify inserts preheader and single-latch blocks that
-    // EmptyBlockElimination / BlockMerging would fold away, so these
-    // must not participate in the fixed-point loop.
+    // SimplifyCFG would fold away, so these must not participate
+    // in the fixed-point loop.
     auto run_once = [&](Pass& pass) {
         auto preserved = pass.run(function, pass_manager);
         if (!preserved.is_all()) {
