@@ -114,9 +114,9 @@
     OP(CallBuiltin,                     false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(CallDirectEval,                  false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(CallWithArgumentArray,           false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
-    OP(Construct,                       false, E_CALL,       false, true,  255, Type::Unknown,   false, 0, R_NONE) \
-    OP(ConstructWithArgumentArray,      false, E_CALL,       false, true,  255, Type::Unknown,   false, 0, R_NONE) \
-    OP(SuperCallWithArgumentArray,      false, E_CALL,       false, true,  255, Type::Unknown,   false, 0, R_NONE) \
+    OP(Construct,                       false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \
+    OP(ConstructWithArgumentArray,      false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \
+    OP(SuperCallWithArgumentArray,      false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \
     OP(ImportCall,                      false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_NONE) \
     /* Environment */                                                                                                                        \
     OP(GetCalleeAndThisFromEnvironment, false, E_CALL,       false, true,  0,   Type::Unknown,   false, 2, R_NONE) \
@@ -149,7 +149,7 @@
     OP(GetTemplateObject,               false, E_WRITE,      false, true,  255, Type::Array,     false, 0, R_NONE) \
     OP(InitObjectLiteralProperty,       false, E_WRITE,      false, false, 2,   Type::Unknown,   false, 0, R_NONE) \
     OP(CacheObjectShape,                false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
-    OP(CopyObjectExcludingProperties,   false, E_CALL,       false, true,  255, Type::Unknown,   false, 0, R_NONE) \
+    OP(CopyObjectExcludingProperties,   false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \
     /* Special */                                                                                                                            \
     OP(In,                              false, E_CALL,       false, true,  2,   Type::Boolean,   false, 0, R_NONE) \
     OP(InstanceOf,                      false, E_CALL,       false, true,  2,   Type::Boolean,   false, 0, R_NONE) \

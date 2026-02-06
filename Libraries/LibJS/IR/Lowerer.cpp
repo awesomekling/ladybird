@@ -409,42 +409,41 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::PutPrivateById:
         emit<Bytecode::Op::PutPrivateById>(operand(0), instruction.identifier_index(), operand(1));
         break;
-    case Opcode::PutGetterById:
-        emit<Bytecode::Op::PutGetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+#define LOWER_PUT_ACCESSOR_BY_ID(Name)                                                                                                                        \
+    case Opcode::Name:                                                                                                                                        \
+        emit<Bytecode::Op::Name>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier()); \
         break;
-    case Opcode::PutSetterById:
-        emit<Bytecode::Op::PutSetterById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+        LOWER_PUT_ACCESSOR_BY_ID(PutGetterById)
+        LOWER_PUT_ACCESSOR_BY_ID(PutSetterById)
+        LOWER_PUT_ACCESSOR_BY_ID(PutPrototypeById)
+#undef LOWER_PUT_ACCESSOR_BY_ID
+
+#define LOWER_PUT_ACCESSOR_BY_ID_WITH_THIS(Name)                                                                                           \
+    case Opcode::Name:                                                                                                                     \
+        emit<Bytecode::Op::Name>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value()); \
         break;
-    case Opcode::PutPrototypeById:
-        emit<Bytecode::Op::PutPrototypeById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+        LOWER_PUT_ACCESSOR_BY_ID_WITH_THIS(PutGetterByIdWithThis)
+        LOWER_PUT_ACCESSOR_BY_ID_WITH_THIS(PutSetterByIdWithThis)
+        LOWER_PUT_ACCESSOR_BY_ID_WITH_THIS(PutPrototypeByIdWithThis)
+#undef LOWER_PUT_ACCESSOR_BY_ID_WITH_THIS
+
+#define LOWER_PUT_ACCESSOR_BY_VALUE(Name)                                                            \
+    case Opcode::Name:                                                                               \
+        emit<Bytecode::Op::Name>(operand(0), operand(1), operand(2), instruction.base_identifier()); \
         break;
-    case Opcode::PutGetterByIdWithThis:
-        emit<Bytecode::Op::PutGetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
+        LOWER_PUT_ACCESSOR_BY_VALUE(PutGetterByValue)
+        LOWER_PUT_ACCESSOR_BY_VALUE(PutSetterByValue)
+        LOWER_PUT_ACCESSOR_BY_VALUE(PutPrototypeByValue)
+#undef LOWER_PUT_ACCESSOR_BY_VALUE
+
+#define LOWER_PUT_ACCESSOR_BY_VALUE_WITH_THIS(Name)                               \
+    case Opcode::Name:                                                            \
+        emit<Bytecode::Op::Name>(operand(0), operand(1), operand(2), operand(3)); \
         break;
-    case Opcode::PutSetterByIdWithThis:
-        emit<Bytecode::Op::PutSetterByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
-        break;
-    case Opcode::PutPrototypeByIdWithThis:
-        emit<Bytecode::Op::PutPrototypeByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
-        break;
-    case Opcode::PutGetterByValue:
-        emit<Bytecode::Op::PutGetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
-        break;
-    case Opcode::PutSetterByValue:
-        emit<Bytecode::Op::PutSetterByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
-        break;
-    case Opcode::PutPrototypeByValue:
-        emit<Bytecode::Op::PutPrototypeByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
-        break;
-    case Opcode::PutGetterByValueWithThis:
-        emit<Bytecode::Op::PutGetterByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
-        break;
-    case Opcode::PutSetterByValueWithThis:
-        emit<Bytecode::Op::PutSetterByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
-        break;
-    case Opcode::PutPrototypeByValueWithThis:
-        emit<Bytecode::Op::PutPrototypeByValueWithThis>(operand(0), operand(1), operand(2), operand(3));
-        break;
+        LOWER_PUT_ACCESSOR_BY_VALUE_WITH_THIS(PutGetterByValueWithThis)
+        LOWER_PUT_ACCESSOR_BY_VALUE_WITH_THIS(PutSetterByValueWithThis)
+        LOWER_PUT_ACCESSOR_BY_VALUE_WITH_THIS(PutPrototypeByValueWithThis)
+#undef LOWER_PUT_ACCESSOR_BY_VALUE_WITH_THIS
     case Opcode::PutBySpread:
         emit<Bytecode::Op::PutBySpread>(operand(0), operand(1));
         break;

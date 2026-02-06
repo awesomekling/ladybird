@@ -258,6 +258,7 @@ void Instruction::recompute_result_type()
     // Operand-dependent cases that OpcodeTraits can't express statically.
     switch (m_opcode) {
     case Opcode::Move:
+    case Opcode::LoadConstant:
         m_result->set_type(operand_type(0));
         break;
 

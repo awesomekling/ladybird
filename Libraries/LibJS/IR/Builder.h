@@ -225,6 +225,10 @@ private:
     Value& build_binary_op(Opcode opcode, Value& lhs, Value& rhs);
     Value& build_unary_op(Opcode opcode, Value& operand);
 
+    // Common helper: creates a result value, attaches it to the instruction,
+    // recomputes the result type from opcode metadata, appends, and returns.
+    Value& emit_with_result(NonnullOwnPtr<Instruction> instruction);
+
     Function& m_function;
     BasicBlock* m_insertion_block { nullptr };
 };
