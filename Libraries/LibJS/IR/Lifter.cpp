@@ -258,108 +258,57 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     using enum Bytecode::Instruction::Type;
 
     switch (instruction.type()) {
-    // Arithmetic binary ops
-    case Add:
-        lift_binary_op<Bytecode::Op::Add>(instruction, block, &Builder::build_add);
+        // Binary ops: bytecode (dst, lhs, rhs) -> IR binary instruction
+#define LIFT_BINARY(BcName, BuildFn)                                                 \
+    case BcName:                                                                     \
+        lift_binary_op<Bytecode::Op::BcName>(instruction, block, &Builder::BuildFn); \
         break;
-    case Sub:
-        lift_binary_op<Bytecode::Op::Sub>(instruction, block, &Builder::build_sub);
-        break;
-    case Mul:
-        lift_binary_op<Bytecode::Op::Mul>(instruction, block, &Builder::build_mul);
-        break;
-    case Div:
-        lift_binary_op<Bytecode::Op::Div>(instruction, block, &Builder::build_div);
-        break;
-    case Mod:
-        lift_binary_op<Bytecode::Op::Mod>(instruction, block, &Builder::build_mod);
-        break;
-    case Exp:
-        lift_binary_op<Bytecode::Op::Exp>(instruction, block, &Builder::build_exp);
-        break;
+        LIFT_BINARY(Add, build_add)
+        LIFT_BINARY(Sub, build_sub)
+        LIFT_BINARY(Mul, build_mul)
+        LIFT_BINARY(Div, build_div)
+        LIFT_BINARY(Mod, build_mod)
+        LIFT_BINARY(Exp, build_exp)
+        LIFT_BINARY(BitwiseAnd, build_bitwise_and)
+        LIFT_BINARY(BitwiseOr, build_bitwise_or)
+        LIFT_BINARY(BitwiseXor, build_bitwise_xor)
+        LIFT_BINARY(LeftShift, build_left_shift)
+        LIFT_BINARY(RightShift, build_right_shift)
+        LIFT_BINARY(UnsignedRightShift, build_unsigned_right_shift)
+        LIFT_BINARY(LessThan, build_less_than)
+        LIFT_BINARY(LessThanEquals, build_less_than_equals)
+        LIFT_BINARY(GreaterThan, build_greater_than)
+        LIFT_BINARY(GreaterThanEquals, build_greater_than_equals)
+        LIFT_BINARY(LooselyEquals, build_loosely_equals)
+        LIFT_BINARY(StrictlyEquals, build_strictly_equals)
+        LIFT_BINARY(LooselyInequals, build_loosely_inequals)
+        LIFT_BINARY(StrictlyInequals, build_strictly_inequals)
+#undef LIFT_BINARY
 
-    // Bitwise binary ops
-    case BitwiseAnd:
-        lift_binary_op<Bytecode::Op::BitwiseAnd>(instruction, block, &Builder::build_bitwise_and);
+        // Unary ops with src() accessor
+#define LIFT_UNARY_SRC(BcName, BuildFn)                                                 \
+    case BcName:                                                                        \
+        lift_unary_op_src<Bytecode::Op::BcName>(instruction, block, &Builder::BuildFn); \
         break;
-    case BitwiseOr:
-        lift_binary_op<Bytecode::Op::BitwiseOr>(instruction, block, &Builder::build_bitwise_or);
-        break;
-    case BitwiseXor:
-        lift_binary_op<Bytecode::Op::BitwiseXor>(instruction, block, &Builder::build_bitwise_xor);
-        break;
-    case LeftShift:
-        lift_binary_op<Bytecode::Op::LeftShift>(instruction, block, &Builder::build_left_shift);
-        break;
-    case RightShift:
-        lift_binary_op<Bytecode::Op::RightShift>(instruction, block, &Builder::build_right_shift);
-        break;
-    case UnsignedRightShift:
-        lift_binary_op<Bytecode::Op::UnsignedRightShift>(instruction, block, &Builder::build_unsigned_right_shift);
-        break;
+        LIFT_UNARY_SRC(BitwiseNot, build_bitwise_not)
+        LIFT_UNARY_SRC(UnaryMinus, build_negate)
+        LIFT_UNARY_SRC(UnaryPlus, build_unary_plus)
+        LIFT_UNARY_SRC(Not, build_not)
+        LIFT_UNARY_SRC(Typeof, build_typeof)
+#undef LIFT_UNARY_SRC
 
-    // Comparison ops
-    case LessThan:
-        lift_binary_op<Bytecode::Op::LessThan>(instruction, block, &Builder::build_less_than);
+        // Unary ops with value() accessor
+#define LIFT_UNARY_VALUE(BcName, BuildFn)                                                 \
+    case BcName:                                                                          \
+        lift_unary_op_value<Bytecode::Op::BcName>(instruction, block, &Builder::BuildFn); \
         break;
-    case LessThanEquals:
-        lift_binary_op<Bytecode::Op::LessThanEquals>(instruction, block, &Builder::build_less_than_equals);
-        break;
-    case GreaterThan:
-        lift_binary_op<Bytecode::Op::GreaterThan>(instruction, block, &Builder::build_greater_than);
-        break;
-    case GreaterThanEquals:
-        lift_binary_op<Bytecode::Op::GreaterThanEquals>(instruction, block, &Builder::build_greater_than_equals);
-        break;
-    case LooselyEquals:
-        lift_binary_op<Bytecode::Op::LooselyEquals>(instruction, block, &Builder::build_loosely_equals);
-        break;
-    case StrictlyEquals:
-        lift_binary_op<Bytecode::Op::StrictlyEquals>(instruction, block, &Builder::build_strictly_equals);
-        break;
-    case LooselyInequals:
-        lift_binary_op<Bytecode::Op::LooselyInequals>(instruction, block, &Builder::build_loosely_inequals);
-        break;
-    case StrictlyInequals:
-        lift_binary_op<Bytecode::Op::StrictlyInequals>(instruction, block, &Builder::build_strictly_inequals);
-        break;
-
-    // Unary ops with src()
-    case BitwiseNot:
-        lift_unary_op_src<Bytecode::Op::BitwiseNot>(instruction, block, &Builder::build_bitwise_not);
-        break;
-    case UnaryMinus:
-        lift_unary_op_src<Bytecode::Op::UnaryMinus>(instruction, block, &Builder::build_negate);
-        break;
-    case UnaryPlus:
-        lift_unary_op_src<Bytecode::Op::UnaryPlus>(instruction, block, &Builder::build_unary_plus);
-        break;
-    case Not:
-        lift_unary_op_src<Bytecode::Op::Not>(instruction, block, &Builder::build_not);
-        break;
-    case Typeof:
-        lift_unary_op_src<Bytecode::Op::Typeof>(instruction, block, &Builder::build_typeof);
-        break;
-
-    // Unary ops with value()
-    case ToBoolean:
-        lift_unary_op_value<Bytecode::Op::ToBoolean>(instruction, block, &Builder::build_to_boolean);
-        break;
-    case ToObject:
-        lift_unary_op_value<Bytecode::Op::ToObject>(instruction, block, &Builder::build_to_object);
-        break;
-    case ToString:
-        lift_unary_op_value<Bytecode::Op::ToString>(instruction, block, &Builder::build_to_string);
-        break;
-    case ToInt32:
-        lift_unary_op_value<Bytecode::Op::ToInt32>(instruction, block, &Builder::build_to_int32);
-        break;
-    case ToLength:
-        lift_unary_op_value<Bytecode::Op::ToLength>(instruction, block, &Builder::build_to_length);
-        break;
-    case ToNumeric:
-        lift_unary_op_value<Bytecode::Op::ToNumeric>(instruction, block, &Builder::build_to_numeric);
-        break;
+        LIFT_UNARY_VALUE(ToBoolean, build_to_boolean)
+        LIFT_UNARY_VALUE(ToObject, build_to_object)
+        LIFT_UNARY_VALUE(ToString, build_to_string)
+        LIFT_UNARY_VALUE(ToInt32, build_to_int32)
+        LIFT_UNARY_VALUE(ToLength, build_to_length)
+        LIFT_UNARY_VALUE(ToNumeric, build_to_numeric)
+#undef LIFT_UNARY_VALUE
     case TypeofBinding: {
         auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
         auto& result = m_builder.build_typeof_binding(op.identifier());

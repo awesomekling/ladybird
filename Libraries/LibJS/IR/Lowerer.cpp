@@ -253,94 +253,67 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
-    // Arithmetic
-    case Opcode::Add:
-        emit<Bytecode::Op::Add>(dst(), operand(0), operand(1));
+    // Simple binary ops: emit<BcOp>(dst, lhs, rhs)
+#define LOWER_SIMPLE_BINARY(Name)                                \
+    case Opcode::Name:                                           \
+        emit<Bytecode::Op::Name>(dst(), operand(0), operand(1)); \
         break;
-    case Opcode::Sub:
-        emit<Bytecode::Op::Sub>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::Mul:
-        emit<Bytecode::Op::Mul>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::Div:
-        emit<Bytecode::Op::Div>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::Mod:
-        emit<Bytecode::Op::Mod>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::Exp:
-        emit<Bytecode::Op::Exp>(dst(), operand(0), operand(1));
-        break;
+        LOWER_SIMPLE_BINARY(Add)
+        LOWER_SIMPLE_BINARY(Sub)
+        LOWER_SIMPLE_BINARY(Mul)
+        LOWER_SIMPLE_BINARY(Div)
+        LOWER_SIMPLE_BINARY(Mod)
+        LOWER_SIMPLE_BINARY(Exp)
+        LOWER_SIMPLE_BINARY(BitwiseAnd)
+        LOWER_SIMPLE_BINARY(BitwiseOr)
+        LOWER_SIMPLE_BINARY(BitwiseXor)
+        LOWER_SIMPLE_BINARY(LeftShift)
+        LOWER_SIMPLE_BINARY(RightShift)
+        LOWER_SIMPLE_BINARY(UnsignedRightShift)
+#undef LOWER_SIMPLE_BINARY
 
-    // Bitwise
-    case Opcode::BitwiseAnd:
-        emit<Bytecode::Op::BitwiseAnd>(dst(), operand(0), operand(1));
+        // Comparison ops: may be skipped if fused with a subsequent Branch
+#define LOWER_COMPARISON(Name)                                       \
+    case Opcode::Name:                                               \
+        if (!should_fuse_comparison_with_branch(instruction))        \
+            emit<Bytecode::Op::Name>(dst(), operand(0), operand(1)); \
         break;
-    case Opcode::BitwiseOr:
-        emit<Bytecode::Op::BitwiseOr>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::BitwiseXor:
-        emit<Bytecode::Op::BitwiseXor>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::BitwiseNot:
-        emit<Bytecode::Op::BitwiseNot>(dst(), operand(0));
-        break;
-    case Opcode::LeftShift:
-        emit<Bytecode::Op::LeftShift>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::RightShift:
-        emit<Bytecode::Op::RightShift>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::UnsignedRightShift:
-        emit<Bytecode::Op::UnsignedRightShift>(dst(), operand(0), operand(1));
-        break;
+        LOWER_COMPARISON(LessThan)
+        LOWER_COMPARISON(LessThanEquals)
+        LOWER_COMPARISON(GreaterThan)
+        LOWER_COMPARISON(GreaterThanEquals)
+        LOWER_COMPARISON(LooselyEquals)
+        LOWER_COMPARISON(StrictlyEquals)
+        LOWER_COMPARISON(LooselyInequals)
+        LOWER_COMPARISON(StrictlyInequals)
+#undef LOWER_COMPARISON
 
-    // Comparison
-    // NOTE: These may be skipped if they will be fused with a Branch instruction
-    case Opcode::LessThan:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::LessThan>(dst(), operand(0), operand(1));
+        // Simple unary ops: emit<BcOp>(dst, src)
+#define LOWER_SIMPLE_UNARY(Name)                     \
+    case Opcode::Name:                               \
+        emit<Bytecode::Op::Name>(dst(), operand(0)); \
         break;
-    case Opcode::LessThanEquals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::LessThanEquals>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::GreaterThan:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::GreaterThan>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::GreaterThanEquals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::GreaterThanEquals>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::LooselyEquals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::StrictlyEquals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::StrictlyEquals>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::LooselyInequals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::LooselyInequals>(dst(), operand(0), operand(1));
-        break;
-    case Opcode::StrictlyInequals:
-        if (!should_fuse_comparison_with_branch(instruction))
-            emit<Bytecode::Op::StrictlyInequals>(dst(), operand(0), operand(1));
-        break;
+        LOWER_SIMPLE_UNARY(UnaryPlus)
+        LOWER_SIMPLE_UNARY(Not)
+        LOWER_SIMPLE_UNARY(BitwiseNot)
+        LOWER_SIMPLE_UNARY(Typeof)
+        LOWER_SIMPLE_UNARY(ToBoolean)
+        LOWER_SIMPLE_UNARY(ToNumeric)
+        LOWER_SIMPLE_UNARY(ToString)
+        LOWER_SIMPLE_UNARY(ToObject)
+        LOWER_SIMPLE_UNARY(ToInt32)
+        LOWER_SIMPLE_UNARY(ToLength)
+#undef LOWER_SIMPLE_UNARY
 
-    // Unary
+    // Unary ops with bytecode name mismatch
     case Opcode::Negate:
         emit<Bytecode::Op::UnaryMinus>(dst(), operand(0));
         break;
-    case Opcode::UnaryPlus:
+    case Opcode::ToNumber:
         emit<Bytecode::Op::UnaryPlus>(dst(), operand(0));
         break;
-    case Opcode::Not:
-        emit<Bytecode::Op::Not>(dst(), operand(0));
-        break;
+
+    // Synthetic lowerings
     case Opcode::IsUndefined: {
         auto undef_index = get_or_add_constant(js_undefined());
         auto undef_operand = Bytecode::Operand(Bytecode::Operand::Type::Constant, undef_index);
@@ -348,41 +321,11 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
     case Opcode::IsNullish: {
-        // Nullish means undefined or null
-        // We emit: (value === undefined) || (value === null)
-        // For simplicity, emit a series: temp = (value === undefined), result = temp || (value === null)
-        // Actually, let's just emit a LooselyEquals with null, which is true for both null and undefined
         auto null_index = get_or_add_constant(js_null());
         auto null_operand = Bytecode::Operand(Bytecode::Operand::Type::Constant, null_index);
         emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), null_operand);
         break;
     }
-    case Opcode::Typeof:
-        emit<Bytecode::Op::Typeof>(dst(), operand(0));
-        break;
-
-    // Type conversions
-    case Opcode::ToBoolean:
-        emit<Bytecode::Op::ToBoolean>(dst(), operand(0));
-        break;
-    case Opcode::ToNumber:
-        emit<Bytecode::Op::UnaryPlus>(dst(), operand(0)); // ToNumber is essentially unary plus
-        break;
-    case Opcode::ToNumeric:
-        emit<Bytecode::Op::ToNumeric>(dst(), operand(0));
-        break;
-    case Opcode::ToString:
-        emit<Bytecode::Op::ToString>(dst(), operand(0));
-        break;
-    case Opcode::ToObject:
-        emit<Bytecode::Op::ToObject>(dst(), operand(0));
-        break;
-    case Opcode::ToInt32:
-        emit<Bytecode::Op::ToInt32>(dst(), operand(0));
-        break;
-    case Opcode::ToLength:
-        emit<Bytecode::Op::ToLength>(dst(), operand(0));
-        break;
 
     // Increment/Decrement
     case Opcode::Increment:
