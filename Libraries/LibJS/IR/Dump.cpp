@@ -112,16 +112,9 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         for (size_t i = 0; i < pcopy.copies().size(); ++i) {
             if (i > 0)
                 builder.append(", "sv);
-            auto const& copy = pcopy.copies()[i];
-            if (copy.dst)
-                dump(*copy.dst, builder);
-            else
-                builder.append("null"sv);
+            dump(*pcopy.copy_dst(i), builder);
             builder.append(" <- "sv);
-            if (copy.src)
-                dump(*copy.src, builder);
-            else
-                builder.append("null"sv);
+            dump(*pcopy.copy_src(i), builder);
         }
         builder.append(']');
         break;

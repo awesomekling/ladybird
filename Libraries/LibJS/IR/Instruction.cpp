@@ -179,8 +179,18 @@ NonnullOwnPtr<ParallelCopyInstruction> ParallelCopyInstruction::create()
 
 void ParallelCopyInstruction::add_copy(Value* dst, Value* src)
 {
-    m_copies.append({ dst, src });
+    m_copies.append({ dst->index(), src->index() });
     add_operand(src);
+}
+
+Value* ParallelCopyInstruction::copy_dst(size_t index) const
+{
+    return parent_function()->values()[static_cast<u32>(m_copies[index].dst)].ptr();
+}
+
+Value* ParallelCopyInstruction::copy_src(size_t index) const
+{
+    return parent_function()->values()[static_cast<u32>(m_copies[index].src)].ptr();
 }
 
 CallInstruction::CallInstruction(Opcode opcode, Value* callee, Value* this_value)

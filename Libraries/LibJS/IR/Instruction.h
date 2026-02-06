@@ -590,14 +590,16 @@ private:
 class JS_API ParallelCopyInstruction final : public Instruction {
 public:
     struct Copy {
-        Value* dst;
-        Value* src;
+        ValueIndex dst;
+        ValueIndex src;
     };
 
     [[nodiscard]] static NonnullOwnPtr<ParallelCopyInstruction> create();
 
     Vector<Copy> const& copies() const { return m_copies; }
     void add_copy(Value* dst, Value* src);
+    Value* copy_dst(size_t index) const;
+    Value* copy_src(size_t index) const;
 
 private:
     ParallelCopyInstruction();

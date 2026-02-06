@@ -211,9 +211,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
             Bytecode::Operand src;
         };
         Vector<PhiMove> moves;
-        for (auto const& copy : pcopy.copies()) {
-            auto src_op = operand_for_value(*copy.src);
-            auto dst_op = operand_for_value(*copy.dst);
+        for (size_t ci = 0; ci < pcopy.copies().size(); ++ci) {
+            auto src_op = operand_for_value(*pcopy.copy_src(ci));
+            auto dst_op = operand_for_value(*pcopy.copy_dst(ci));
             if (src_op != dst_op)
                 moves.append({ dst_op, src_op });
         }
