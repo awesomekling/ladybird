@@ -161,7 +161,7 @@ public:
     [[nodiscard]] Value& build_copy_object_excluding_properties(Value& from_object, Span<Value*> excluded_names);
 
     // Arguments
-    [[nodiscard]] Value& build_create_arguments(Bytecode::Op::ArgumentsKind kind, bool is_immutable);
+    [[nodiscard]] Value& build_create_arguments(Bytecode::Op::ArgumentsKind kind, bool is_immutable, bool needs_dst);
     [[nodiscard]] Value& build_create_rest_params(u32 rest_index);
     [[nodiscard]] Value& build_get_new_target();
 

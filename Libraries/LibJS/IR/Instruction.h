@@ -683,6 +683,8 @@ public:
     // For CreateArguments
     Bytecode::Op::ArgumentsKind arguments_kind() const { return m_arguments_kind; }
     void set_arguments_kind(Bytecode::Op::ArgumentsKind kind) { m_arguments_kind = kind; }
+    bool create_arguments_needs_dst() const { return m_create_arguments_needs_dst; }
+    void set_create_arguments_needs_dst(bool value) { m_create_arguments_needs_dst = value; }
 
     // For CreateRestParams
     u32 rest_index() const { return m_rest_index; }
@@ -766,6 +768,7 @@ private:
 
     // For CreateArguments
     Bytecode::Op::ArgumentsKind m_arguments_kind { Bytecode::Op::ArgumentsKind::Mapped };
+    bool m_create_arguments_needs_dst { true };
 
     // For CreateRestParams
     u32 m_rest_index { 0 };

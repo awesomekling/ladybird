@@ -936,11 +936,12 @@ Value& Builder::build_in(Value& lhs, Value& rhs) { return build_binary_op(Opcode
 Value& Builder::build_instance_of(Value& lhs, Value& rhs) { return build_binary_op(Opcode::InstanceOf, lhs, rhs); }
 
 // Arguments
-Value& Builder::build_create_arguments(Bytecode::Op::ArgumentsKind kind, bool is_immutable)
+Value& Builder::build_create_arguments(Bytecode::Op::ArgumentsKind kind, bool is_immutable, bool needs_dst)
 {
     auto instruction = Instruction::create<Opcode::CreateArguments>();
     instruction->set_arguments_kind(kind);
     instruction->set_is_immutable(is_immutable);
+    instruction->set_create_arguments_needs_dst(needs_dst);
     auto& result = m_function.create_value_for_instruction();
     instruction->set_result(&result);
     current_block().append(move(instruction));

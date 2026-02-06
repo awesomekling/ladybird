@@ -1193,7 +1193,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Arguments and rest params
     case CreateArguments: {
         auto const& op = static_cast<Bytecode::Op::CreateArguments const&>(instruction);
-        auto& result = m_builder.build_create_arguments(op.kind(), op.is_immutable());
+        auto& result = m_builder.build_create_arguments(op.kind(), op.is_immutable(), op.dst().has_value());
         if (op.dst().has_value())
             define_operand(op.dst().value(), result, block);
         break;
