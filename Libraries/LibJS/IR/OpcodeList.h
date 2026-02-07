@@ -33,7 +33,7 @@
     OP(LoadUndefined,                   false, E_NONE,       false, true,  0,   Type::Undefined, false, 0, R_NONE) \
     OP(LoadNull,                        false, E_NONE,       false, true,  0,   Type::Null,      false, 0, R_NONE) \
     /* Arithmetic (may call ToPrimitive on objects) */                                                                                       \
-    OP(Add,                             false, E_CALL,       false, true,  2,   Type::Unknown,   true,  0, R_PRIM) \
+    OP(Add,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
     OP(Sub,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
     OP(Mul,                             false, E_CALL,       false, true,  2,   Type::Unknown,   true,  0, R_PRIM) \
     OP(Div,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
