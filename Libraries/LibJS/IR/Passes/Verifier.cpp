@@ -186,6 +186,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
             defined_values.set(to_index(value->index()), true);
     }
 
+    // Check: Parameter count matches formal parameter count from source executable
+    if (auto executable = function.source_executable()) {
+        if (function.parameters().size() != executable->formal_parameter_count) {
+            report_error(ByteString::formatted(
+                "Function has {} parameters but executable has {} formal parameters",
+                function.parameters().size(), executable->formal_parameter_count));
+        }
+    }
+
     for (auto const& block : function.basic_blocks()) {
         bool block_is_reachable = reachable.get(to_index(block->index()));
 
