@@ -431,10 +431,6 @@ PreservedAnalyses TypeRefinement::run(Function& function, PassManager& pass_mana
                                     scoped_facts.take_last();
                                 }
                             });
-
-                            // Restore scoped facts.
-                            for (auto it = scoped_facts.rbegin(); it != scoped_facts.rend(); ++it)
-                                type_facts.set(it->value, it->previous_mask);
                             return;
                         }
                     }
