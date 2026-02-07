@@ -153,6 +153,11 @@ ASTNodeHandle ast_create_super_call(ASTArenaHandle arena, SourceCodeHandle sourc
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     ASTNodeHandle const* argument_values, bool const* argument_is_spread, size_t argument_count);
 
+ASTNodeHandle ast_create_synthetic_constructor_super_call(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle argument_identifier);
+
 ASTNodeHandle ast_create_new_expression(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,

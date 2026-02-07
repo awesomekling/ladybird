@@ -275,15 +275,34 @@ impl<'a> Parser<'a> {
         // Create synthetic constructor if none was declared
         if constructor_func == NULL_HANDLE {
             let ctor_body = self.builder.create_function_body(self.span_from(start));
-            // TODO: For classes with super_class, generate `constructor(...args) { return super(...args); }`
-            let ctor_params = self.builder.create_function_parameters_empty();
-            constructor_func = self.builder.create_function_expression(
-                self.span_from(start), name,
-                start.2, self.position().2 - start.2,
-                ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
-                true, false,
-                true, true, false, false,
-            );
+            if super_class != NULL_HANDLE {
+                // Generate: constructor(...args) { return super(...args); }
+                let args_name: Vec<u16> = "args".encode_utf16().collect();
+                let args_ident = self.builder.create_identifier(self.span_from(start), &args_name);
+                let super_call = self.builder.create_synthetic_constructor_super_call(self.span_from(start), args_ident);
+                let return_stmt = self.builder.create_return_statement(self.span_from(start), super_call);
+                self.builder.scope_node_append(ctor_body, return_stmt);
+                let args_binding = self.builder.create_identifier(self.span_from(start), &args_name);
+                let ctor_params = self.builder.create_function_parameters(
+                    &[args_binding], &[NULL_HANDLE], &[true], &[false],
+                );
+                constructor_func = self.builder.create_function_expression(
+                    self.span_from(start), name,
+                    start.2, self.position().2 - start.2,
+                    ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
+                    true, false,
+                    true, true, false, false,
+                );
+            } else {
+                let ctor_params = self.builder.create_function_parameters_empty();
+                constructor_func = self.builder.create_function_expression(
+                    self.span_from(start), name,
+                    start.2, self.position().2 - start.2,
+                    ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
+                    true, false,
+                    true, true, false, false,
+                );
+            }
         }
 
         self.builder.create_class_expression(

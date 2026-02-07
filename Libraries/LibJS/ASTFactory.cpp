@@ -374,6 +374,17 @@ ASTNodeHandle ast_create_super_call(ASTArenaHandle arena_handle, SourceCodeHandl
     return arena_add(arena, create_ast_node<SuperCall>(range, move(args)));
 }
 
+ASTNodeHandle ast_create_synthetic_constructor_super_call(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle argument_identifier)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    return arena_add(arena, create_ast_node<SuperCall>(range, SuperCall::IsPartOfSyntheticConstructor::Yes,
+        CallExpression::Argument { as_ref<Expression>(argument_identifier), true }));
+}
+
 ASTNodeHandle ast_create_new_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
     u32 start_line, u32 start_column, u32 start_offset,
     u32 end_line, u32 end_column, u32 end_offset,
