@@ -160,46 +160,50 @@ Value& Builder::build_get_length(Value& base, Optional<Bytecode::IdentifierTable
     return result;
 }
 
-void Builder::build_put_by_id(Value& base, Bytecode::PropertyKeyTableIndex property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+void Builder::build_put_by_id(Value& base, Bytecode::PropertyKeyTableIndex property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier, Bytecode::PutKind put_kind)
 {
     auto instruction = Instruction::create<Opcode::PutById>();
     instruction->add_operand(&base);
     instruction->add_operand(&value);
     instruction->set_property_key_index(property);
     instruction->set_base_identifier(base_identifier);
+    instruction->set_put_kind(put_kind);
 
     current_block().append(move(instruction));
 }
 
-void Builder::build_put_by_id_with_this(Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& value)
+void Builder::build_put_by_id_with_this(Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& value, Bytecode::PutKind put_kind)
 {
     auto instruction = Instruction::create<Opcode::PutByIdWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&value);
     instruction->set_property_key_index(property);
+    instruction->set_put_kind(put_kind);
 
     current_block().append(move(instruction));
 }
 
-void Builder::build_put_by_value(Value& base, Value& property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier)
+void Builder::build_put_by_value(Value& base, Value& property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier, Bytecode::PutKind put_kind)
 {
     auto instruction = Instruction::create<Opcode::PutByValue>();
     instruction->add_operand(&base);
     instruction->add_operand(&property);
     instruction->add_operand(&value);
     instruction->set_base_identifier(base_identifier);
+    instruction->set_put_kind(put_kind);
 
     current_block().append(move(instruction));
 }
 
-void Builder::build_put_by_value_with_this(Value& base, Value& this_value, Value& property, Value& value)
+void Builder::build_put_by_value_with_this(Value& base, Value& this_value, Value& property, Value& value, Bytecode::PutKind put_kind)
 {
     auto instruction = Instruction::create<Opcode::PutByValueWithThis>();
     instruction->add_operand(&base);
     instruction->add_operand(&this_value);
     instruction->add_operand(&property);
     instruction->add_operand(&value);
+    instruction->set_put_kind(put_kind);
 
     current_block().append(move(instruction));
 }

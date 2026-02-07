@@ -13,6 +13,7 @@
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
+#include <LibJS/Bytecode/PutKind.h>
 #include <LibJS/Bytecode/RegexTable.h>
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/Export.h>
@@ -345,6 +346,10 @@ public:
     bool is_synthetic() const { return m_is_synthetic; }
     void set_is_synthetic(bool value) { m_is_synthetic = value; }
 
+    // For PutById / PutByValue
+    Bytecode::PutKind put_kind() const { return m_put_kind; }
+    void set_put_kind(Bytecode::PutKind kind) { m_put_kind = kind; }
+
     // For ArrayAppend
     bool is_spread() const { return m_is_spread; }
     void set_is_spread(bool value) { m_is_spread = value; }
@@ -431,6 +436,9 @@ private:
 
     // For SuperCallWithArgumentArray
     bool m_is_synthetic { false };
+
+    // For PutById / PutByValue
+    Bytecode::PutKind m_put_kind { Bytecode::PutKind::Normal };
 
     // For ArrayAppend
     bool m_is_spread { false };

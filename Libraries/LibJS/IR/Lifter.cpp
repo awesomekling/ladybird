@@ -566,14 +566,17 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::PutOwnById const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_builder.build_put_by_id(base, op.property(), value);
+        m_builder.build_put_by_id(base, op.property(), value, op.base_identifier(), Bytecode::PutKind::Own);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutOwnByIdWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutOwnByIdWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_builder.build_put_by_id(base, op.property(), value);
+        m_builder.build_put_by_id_with_this(base, this_value, op.property(), value, Bytecode::PutKind::Own);
+        m_function->instruction_by_index(block.instructions().last())->set_cache_index(CacheIndex { op.cache_index() });
         break;
     }
     case PutOwnByValue: {
@@ -581,15 +584,16 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.base(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_builder.build_put_by_value(base, property, value);
+        m_builder.build_put_by_value(base, property, value, op.base_identifier(), Bytecode::PutKind::Own);
         break;
     }
     case PutOwnByValueWithThis: {
         auto const& op = static_cast<Bytecode::Op::PutOwnByValueWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& value = get_or_create_value_for_operand(op.src(), block);
-        m_builder.build_put_by_value(base, property, value);
+        m_builder.build_put_by_value_with_this(base, this_value, property, value, Bytecode::PutKind::Own);
         break;
     }
     case InitObjectLiteralProperty: {
@@ -604,7 +608,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& base = get_or_create_value_for_operand(op.object(), block);
         auto& property = get_or_create_value_for_operand(op.property(), block);
         auto& value = get_or_create_value_for_operand(op.value(), block);
-        m_builder.build_put_by_value(base, property, value);
+        m_builder.build_put_by_value(base, property, value, {}, Bytecode::PutKind::Own);
         break;
     }
 

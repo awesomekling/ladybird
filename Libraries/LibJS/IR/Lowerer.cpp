@@ -369,18 +369,54 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::GetByValueWithThis>(dst(), operand(0), operand(2), operand(1));
         break;
     case Opcode::PutById:
-        emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+        switch (instruction.put_kind()) {
+        case Bytecode::PutKind::Normal:
+            emit<Bytecode::Op::PutNormalById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+            break;
+        case Bytecode::PutKind::Own:
+            emit<Bytecode::Op::PutOwnById>(operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value(), instruction.base_identifier());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         break;
     case Opcode::PutByIdWithThis:
         // operands: base (0), this_value (1), value (2)
-        emit<Bytecode::Op::PutNormalByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
+        switch (instruction.put_kind()) {
+        case Bytecode::PutKind::Normal:
+            emit<Bytecode::Op::PutNormalByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
+            break;
+        case Bytecode::PutKind::Own:
+            emit<Bytecode::Op::PutOwnByIdWithThis>(operand(0), operand(1), instruction.property_key_index(), operand(2), instruction.cache_index().value());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         break;
     case Opcode::PutByValue:
-        emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+        switch (instruction.put_kind()) {
+        case Bytecode::PutKind::Normal:
+            emit<Bytecode::Op::PutNormalByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+            break;
+        case Bytecode::PutKind::Own:
+            emit<Bytecode::Op::PutOwnByValue>(operand(0), operand(1), operand(2), instruction.base_identifier());
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         break;
     case Opcode::PutByValueWithThis:
         // operands: base (0), this_value (1), property (2), value (3)
-        emit<Bytecode::Op::PutNormalByValueWithThis>(operand(0), operand(2), operand(1), operand(3));
+        switch (instruction.put_kind()) {
+        case Bytecode::PutKind::Normal:
+            emit<Bytecode::Op::PutNormalByValueWithThis>(operand(0), operand(2), operand(1), operand(3));
+            break;
+        case Bytecode::PutKind::Own:
+            emit<Bytecode::Op::PutOwnByValueWithThis>(operand(0), operand(2), operand(1), operand(3));
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
         break;
     case Opcode::DeleteById:
         emit<Bytecode::Op::DeleteById>(dst(), operand(0), instruction.property_key_index());
