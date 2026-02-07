@@ -178,12 +178,10 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
         // Check: No phi nodes in blocks with zero predecessors
         if (block->predecessor_indices().is_empty()) {
-            block->for_each_instruction([&](Instruction const& instruction) {
-                if (instruction.opcode() == Opcode::Phi) {
-                    report_error(ByteString::formatted(
-                        "Block{} has no predecessors but contains a Phi",
-                        block->index()));
-                }
+            block->for_each_phi([&](PhiInstruction const&) {
+                report_error(ByteString::formatted(
+                    "Block{} has no predecessors but contains a Phi",
+                    block->index()));
             });
         }
 
