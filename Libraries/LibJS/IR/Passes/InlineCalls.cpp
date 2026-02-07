@@ -549,11 +549,11 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             };
 
             // Profile gates
-            if (profile.total_count < 64) {
+            if (!g_force_inline && profile.total_count < 64) {
                 log_skip("too few calls");
                 return;
             }
-            if (hit_rate < 90) {
+            if (!g_force_inline && hit_rate < 90) {
                 log_skip("polymorphic");
                 return;
             }
@@ -566,6 +566,14 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             auto* ecma_callee = dynamic_cast<ECMAScriptFunctionObject*>(static_cast<FunctionObject*>(callee_ptr));
             if (!ecma_callee) {
                 log_skip("not an ECMAScript function");
+                return;
+            }
+
+            // Arrow functions capture 'this' lexically from their enclosing
+            // scope. We can't substitute their 'this' with the call site's
+            // this_value operand.
+            if (ecma_callee->is_arrow_function()) {
+                log_skip("arrow function");
                 return;
             }
 
@@ -602,7 +610,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             callee_pass_manager.invalidate(preserved);
 
             // Callee body gates
-            static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 64;
+            static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 40;
             auto instruction_count = count_instructions(*callee_function);
             if (instruction_count > MAX_CALLEE_INSTRUCTIONS_FOR_INLINING) {
                 log_skip(ByteString::formatted("callee too large: {}, max {}", instruction_count, MAX_CALLEE_INSTRUCTIONS_FOR_INLINING).characters());
@@ -615,6 +623,23 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             if (count_return_terminators(*callee_function) != 1) {
                 log_skip("multiple returns");
                 return;
+            }
+
+            // Non-strict functions that use 'this' can't be inlined because
+            // [[Call]] coerces 'this' (undefined/null -> globalThis, primitives
+            // get boxed) and we bypass that when inlining.
+            if (!static_cast<FunctionObject*>(ecma_callee)->is_strict_mode()) {
+                bool uses_this = false;
+                for (auto& value : callee_function->values()) {
+                    if (value->is_this()) {
+                        uses_this = true;
+                        break;
+                    }
+                }
+                if (uses_this) {
+                    log_skip("non-strict function uses 'this'");
+                    return;
+                }
             }
 
             candidates.append({
