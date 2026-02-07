@@ -1,0 +1,687 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v39:unknown = Phi [block3:v41:unknown, block10:v40:unknown]
+    v37:unknown = Phi [block3:v42:undefined, block10:v38:unknown]
+    v35:unknown = Phi [block3:v43:undefined, block10:v36:unknown]
+    v33:unknown = Phi [block3:v44:undefined, block10:v34:unknown]
+    v31:unknown = Phi [block3:v45:undefined, block10:v10:unknown]
+    v29:unknown = Phi [block3:v46:undefined, block10:v9:unknown]
+    v28:unknown = Phi [block3:v47:undefined, block10:v14:unknown]
+    v27:unknown = Phi [block3:v48:undefined, block10:v13:unknown]
+    v26:unknown = Phi [block3:v49:undefined, block10:v12:unknown]
+    v24:unknown = Phi [block3:v4:unknown, block10:v25:unknown]
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v40:unknown = Phi [block11:v50:unknown, block19:v17:unknown]
+    v38:unknown = Phi [block11:v51:undefined, block19:v21:unknown]
+    v36:unknown = Phi [block11:v52:undefined, block19:v19:unknown]
+    v34:unknown = Phi [block11:v53:undefined, block19:v20:unknown]
+    v32:unknown = Phi [block11:v54:undefined, block19:v10:unknown]
+    v30:unknown = Phi [block11:v55:undefined, block19:v9:unknown]
+    v25:unknown = Phi [block11:v16:undefined, block19:v22:unknown]
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    v16:undefined = Move undefined
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v17:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v17:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    ThrowIfTDZ v17:unknown
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v17:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    v22:unknown = Move v21:unknown
+    Jump block2
+
+=== After SCCP ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v39:unknown = Phi [block3:v41:unknown, block10:v40:unknown]
+    v37:unknown = Phi [block3:v42:undefined, block10:v38:unknown]
+    v35:unknown = Phi [block3:v43:undefined, block10:v36:unknown]
+    v33:unknown = Phi [block3:v44:undefined, block10:v34:unknown]
+    v31:unknown = Phi [block3:v45:undefined, block10:v10:unknown]
+    v29:unknown = Phi [block3:v46:undefined, block10:v9:unknown]
+    v28:unknown = Phi [block3:v47:undefined, block10:v14:unknown]
+    v27:unknown = Phi [block3:v48:undefined, block10:v13:unknown]
+    v26:unknown = Phi [block3:v49:undefined, block10:v12:unknown]
+    v24:unknown = Phi [block3:v4:unknown, block10:v25:unknown]
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v40:unknown = Phi [block11:v50:unknown, block19:v17:unknown]
+    v38:unknown = Phi [block11:v51:undefined, block19:v21:unknown]
+    v36:unknown = Phi [block11:v52:undefined, block19:v19:unknown]
+    v34:unknown = Phi [block11:v53:undefined, block19:v20:unknown]
+    v32:unknown = Phi [block11:v54:undefined, block19:v10:unknown]
+    v30:unknown = Phi [block11:v55:undefined, block19:v9:unknown]
+    v25:unknown = Phi [block11:v56:undefined, block19:v22:unknown]
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    v16:undefined = Move undefined
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v17:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v17:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    ThrowIfTDZ v17:unknown
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v17:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    v22:unknown = Move v21:unknown
+    Jump block2
+
+=== Before optimization ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v39:unknown = Phi [block3:v41:unknown, block10:v40:unknown]
+    v37:unknown = Phi [block3:v42:undefined, block10:v38:unknown]
+    v35:unknown = Phi [block3:v43:undefined, block10:v36:unknown]
+    v33:unknown = Phi [block3:v44:undefined, block10:v34:unknown]
+    v31:unknown = Phi [block3:v45:undefined, block10:v10:unknown]
+    v29:unknown = Phi [block3:v46:undefined, block10:v9:unknown]
+    v28:unknown = Phi [block3:v47:undefined, block10:v14:unknown]
+    v27:unknown = Phi [block3:v48:undefined, block10:v13:unknown]
+    v26:unknown = Phi [block3:v49:undefined, block10:v12:unknown]
+    v24:unknown = Phi [block3:v4:unknown, block10:v25:unknown]
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v40:unknown = Phi [block11:v50:unknown, block19:v17:unknown]
+    v38:unknown = Phi [block11:v51:undefined, block19:v21:unknown]
+    v36:unknown = Phi [block11:v52:undefined, block19:v19:unknown]
+    v34:unknown = Phi [block11:v53:undefined, block19:v20:unknown]
+    v32:unknown = Phi [block11:v54:undefined, block19:v10:unknown]
+    v30:unknown = Phi [block11:v55:undefined, block19:v9:unknown]
+    v25:unknown = Phi [block11:v56:undefined, block19:v22:unknown]
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    v16:undefined = Move undefined
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v17:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v17:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    ThrowIfTDZ v17:unknown
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v17:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    v22:unknown = Move v21:unknown
+    Jump block2
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v17:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v17:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    ThrowIfTDZ v17:unknown
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v17:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    Jump block2
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v9:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v9:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    ThrowIfTDZ v9:unknown
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v9:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    Jump block2
+
+=== After RedundantCheckElimination ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block6
+block1:
+    v5:unknown = GetGlobal r
+    Jump block9
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block3:
+    Jump block1
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block11
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    Jump block12
+block0_split0:
+    InitializeBinding r v3:string
+    Jump block7
+block0_split1:
+    v4:unknown = GetGlobal obj
+    Jump block8
+block0_split2:
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block3, block4
+block1_split3:
+    End v5:unknown
+block2_split4:
+    Branch v10:unknown, block1, block5
+block4_split5:
+    Jump block2
+block5_split6:
+    ThrowIfTDZ v9:unknown
+    Jump block13
+block5_split7:
+    v19:unknown = Add v18:unknown, v9:unknown
+    Jump block14
+block5_split8:
+    SetGlobal r v19:unknown
+    Jump block15
+block5_split9:
+    v20:unknown = GetGlobal r
+    Jump block16
+block5_split10:
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v9:unknown
+    Jump block18
+block5_split12:
+    SetGlobal r v21:unknown
+    Jump block19
+block5_split13:
+    Jump block2
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block1, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block1, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v17:unknown = Move v9:unknown
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block1, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block1, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    Jump block17
+block5_split11:
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block1, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block1, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
+
+=== After SplitCriticalEdges ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block20, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block21, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
+split_block0_block1:
+    Jump block1
+split_block2_block1:
+    Jump block1
+
+=== After PostSSACleanup ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block1, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block1, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
+
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    InitializeBinding r v3:string
+    v4:unknown = GetGlobal obj
+    v23:boolean = IsNullish v4:unknown
+    Branch v23:boolean, block1, block4
+block1:
+    v5:unknown = GetGlobal r
+    End v5:unknown
+block2:
+    v8:unknown = IteratorNextUnpack v12:unknown, v13:unknown, v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Branch v10:unknown, block1, block5
+block4:
+    v11:unknown = GetObjectPropertyIterator v4:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    v14:unknown = ExtractValue v11:unknown, 2
+    Jump block2
+block5:
+    v18:unknown = GetGlobal r
+    ThrowIfTDZ v9:unknown
+    v19:unknown = Add v18:unknown, v9:unknown
+    SetGlobal r v19:unknown
+    v20:unknown = GetGlobal r
+    v21:unknown = Add v20:unknown, v9:unknown
+    SetGlobal r v21:unknown
+    Jump block2
