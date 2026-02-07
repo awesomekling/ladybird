@@ -121,13 +121,18 @@ block0:
     v12:boolean = Move v11:boolean
     Return v11:boolean
 
+=== After InstCombine ===
+function():
+block0:
+    v11:boolean = Not v19:string
+    v12:boolean = Move true
+    Return true
+
 === After DeadCodeElimination ===
 function():
 block0:
-    v11:boolean = Not v19:string
-    Return v11:boolean
+    Return true
 
 function():
 block0:
-    v11:boolean = Not v19:string
-    Return v11:boolean
+    Return true

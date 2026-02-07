@@ -12,6 +12,7 @@
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 #include <LibJS/IR/Type.h>
+#include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/Value.h>
 
 namespace JS::IR {
@@ -72,6 +73,8 @@ public:
             return false;
         if (cv.is_double())
             return !cv.is_nan() && cv.as_double() != 0;
+        if (cv.is_string())
+            return !cv.as_string().utf8_string_view().is_empty();
         return {};
     }
 
