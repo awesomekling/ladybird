@@ -154,5 +154,3 @@ block0:
 function():
 block0:
     Return true
-
-Tiered up function 'go' (472 -> 8) 🚀 -464

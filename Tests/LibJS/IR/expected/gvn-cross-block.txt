@@ -146,5 +146,3 @@ block1:
     Return v4:string
 block2:
     Return v4:string
-
-Tiered up function 'go' (128 -> 48) 🚀 -80

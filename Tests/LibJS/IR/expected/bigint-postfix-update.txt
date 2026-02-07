@@ -133,5 +133,3 @@ block0:
     v5:bigint = ToNumeric v8:bigint
     v6:number = Increment v9:bigint
     Return v9:bigint
-
-Tiered up function 'foo' (88 -> 48) 🚀 -40

@@ -101,5 +101,3 @@ block0_split0:
 function():
 block0_split0:
     Return 1024
-
-Tiered up function 'go' (120 -> 8) 🚀 -112

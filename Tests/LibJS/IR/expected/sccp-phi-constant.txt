@@ -89,5 +89,3 @@ block0_split0:
 function():
 block0_split0:
     Return 15
-
-Tiered up function 'go' (56 -> 8) 🚀 -48

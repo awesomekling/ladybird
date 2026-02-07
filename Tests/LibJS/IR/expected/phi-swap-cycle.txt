@@ -379,5 +379,3 @@ block1_split0:
     v19:number = Increment v28:number
     ParallelCopy [v25:int32 <- v24:int32, v24:int32 <- v25:int32]
     Jump block3
-
-Tiered up function 'cycle' (296 -> 176) 🚀 -120

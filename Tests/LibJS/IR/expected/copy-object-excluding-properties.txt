@@ -570,5 +570,3 @@ block7:
     Return v20:string
 block8:
     Return v21:string
-
-Tiered up function 'test' (504 -> 400) 🚀 -104

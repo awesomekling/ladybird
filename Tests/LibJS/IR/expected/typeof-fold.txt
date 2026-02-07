@@ -211,5 +211,3 @@ block0:
     v7:int32 = ToInt32 v6:unknown
     v17:string = TypeofBinding
     Return true
-
-Tiered up function 'go' (320 -> 48) 🚀 -272

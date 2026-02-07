@@ -124,5 +124,3 @@ block1:
     Return v6:string
 block2:
     Return v3:string
-
-Tiered up function 'go' (72 -> 56) 🚀 -16

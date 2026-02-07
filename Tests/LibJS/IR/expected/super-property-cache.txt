@@ -301,7 +301,6 @@ block0:
     v12:unknown = Call v11:unknown, v10:object
     Return v12:unknown
 
-Tiered up function 'test' (296 -> 248) 🚀 -48
 === After SSAConstruction ===
 function():
 block0:
@@ -585,7 +584,6 @@ block0:
     v13:unknown = Add v12:unknown, v8:unknown
     Return v13:unknown
 
-Tiered up function 'doTest' (192 -> 128) 🚀 -64
 === After SSAConstruction ===
 function():
 block0:

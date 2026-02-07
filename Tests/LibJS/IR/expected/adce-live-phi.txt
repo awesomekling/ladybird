@@ -119,5 +119,3 @@ block1:
     Return 1
 block3:
     Return 2
-
-Tiered up function 'go' (88 -> 40) 🚀 -48

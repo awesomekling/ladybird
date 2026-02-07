@@ -491,5 +491,3 @@ block9:
     v33:unknown = Yield v19:unknown
 block10:
     Throw v19:unknown
-
-Tiered up function 'fetchAll' (368 -> 240) 🚀 -128

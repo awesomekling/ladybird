@@ -567,7 +567,6 @@ block5_split11:
     LeaveUnwindContext
     Return v25:string
 
-Tiered up function 'test' (512 -> 368) 🚀 -144
 === After SSAConstruction ===
 function():
 block0:

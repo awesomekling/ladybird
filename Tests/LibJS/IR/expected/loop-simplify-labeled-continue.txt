@@ -513,5 +513,3 @@ block10:
 split_block3_block7:
     ParallelCopy [v27:number <- v32:int32]
     Jump block7
-
-Tiered up function 'go' (280 -> 184) 🚀 -96

@@ -122,5 +122,3 @@ block0:
     v5:boolean = StrictlyEquals v3:unknown, v4:unknown
     v9:boolean = StrictlyEquals v5:boolean, v5:boolean
     Return v9:boolean
-
-Tiered up function 'go' (120 -> 40) 🚀 -80

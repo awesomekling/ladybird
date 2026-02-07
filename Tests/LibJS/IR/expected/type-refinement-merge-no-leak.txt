@@ -538,5 +538,3 @@ block5:
 split_block0_block3:
     ParallelCopy [v13:string <- v14:string]
     Jump block3
-
-Tiered up function 'go' (152 -> 136) 🚀 -16

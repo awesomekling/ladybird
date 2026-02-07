@@ -235,5 +235,3 @@ block0:
     v12:number = Mul v10:int32, v11:int32
     v14:boolean = LessThan v8:number, v12:number
     Return v14:boolean
-
-Tiered up function 'go' (216 -> 120) 🚀 -96
