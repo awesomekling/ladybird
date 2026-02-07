@@ -328,7 +328,7 @@ ASTNodeHandle ast_create_tagged_template_literal(ASTArenaHandle arena, SourceCod
 ASTNodeHandle ast_create_function_parameters_empty();
 ASTNodeHandle ast_create_function_parameters(ASTArenaHandle arena,
     ASTNodeHandle const* bindings, ASTNodeHandle const* default_values,
-    bool const* is_rest, size_t count);
+    bool const* is_rest, bool const* is_pattern, size_t count);
 
 ASTNodeHandle ast_create_function_expression(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,
@@ -390,6 +390,44 @@ void ast_scope_node_shrink_to_fit(ASTNodeHandle scope_node);
 
 // === SwitchCase ===
 void ast_switch_case_append(ASTNodeHandle switch_case, ASTNodeHandle statement);
+
+// === BindingPattern ===
+// BindingPattern is NOT an ASTNode -- its handle is a BindingPattern* cast to void*.
+// kind: 0 = Array, 1 = Object
+ASTNodeHandle ast_create_binding_pattern(ASTArenaHandle arena, uint8_t kind);
+
+// name_type: 0=Empty, 1=Identifier, 2=Expression
+// alias_type: 0=Empty, 1=Identifier, 2=BindingPattern, 3=MemberExpression
+void ast_binding_pattern_append_entry(
+    ASTNodeHandle pattern,
+    ASTNodeHandle name, uint8_t name_type,
+    ASTNodeHandle alias, uint8_t alias_type,
+    ASTNodeHandle initializer, bool is_rest);
+
+ASTNodeHandle ast_create_variable_declarator_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle init);
+
+ASTNodeHandle ast_create_catch_clause_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle body);
+
+ASTNodeHandle ast_create_for_in_statement_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body);
+
+ASTNodeHandle ast_create_for_of_statement_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body);
+
+ASTNodeHandle ast_create_for_await_of_statement_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body);
 
 #ifdef __cplusplus
 }

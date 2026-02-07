@@ -68,17 +68,16 @@ impl<'a> Parser<'a> {
         loop {
             let decl_start = self.position();
             // Parse target (identifier or binding pattern)
-            let target = if self.match_identifier() {
+            let (target, is_pattern) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                self.builder.create_identifier(self.span_from(decl_start), &value)
+                (self.builder.create_identifier(self.span_from(decl_start), &value), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
-                // TODO: Parse binding pattern
-                self.parse_expression(2, Associativity::Right, ForbiddenTokens::none())
+                (self.parse_binding_pattern(), true)
             } else {
                 self.expected("variable name");
                 self.consume();
-                self.builder.create_identifier(self.span_from(decl_start), &[])
+                (self.builder.create_identifier(self.span_from(decl_start), &[]), false)
             };
 
             // Parse optional initializer
@@ -94,7 +93,12 @@ impl<'a> Parser<'a> {
                 NULL_HANDLE
             };
 
-            declarators.push(self.builder.create_variable_declarator(self.span_from(decl_start), target, init));
+            let declarator = if is_pattern {
+                self.builder.create_variable_declarator_with_pattern(self.span_from(decl_start), target, init)
+            } else {
+                self.builder.create_variable_declarator(self.span_from(decl_start), target, init)
+            };
+            declarators.push(declarator);
 
             if !self.match_token(TokenType::Comma) {
                 break;
@@ -430,6 +434,7 @@ impl<'a> Parser<'a> {
         let mut bindings = Vec::new();
         let mut default_values = Vec::new();
         let mut is_rest = Vec::new();
+        let mut is_pattern = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
 
@@ -442,16 +447,16 @@ impl<'a> Parser<'a> {
                 false
             };
 
-            let binding = if self.match_identifier() {
+            let (binding, is_pat) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                self.builder.create_identifier(self.span_from(param_start), &value)
+                (self.builder.create_identifier(self.span_from(param_start), &value), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
-                self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in())
+                (self.parse_binding_pattern(), true)
             } else {
                 self.expected("parameter name");
                 self.consume();
-                self.builder.create_identifier(self.span_from(param_start), &[])
+                (self.builder.create_identifier(self.span_from(param_start), &[]), false)
             };
 
             let default_value = if !rest && self.match_token(TokenType::Equals) {
@@ -469,6 +474,7 @@ impl<'a> Parser<'a> {
             bindings.push(binding);
             default_values.push(default_value);
             is_rest.push(rest);
+            is_pattern.push(is_pat);
 
             if rest || !self.match_token(TokenType::Comma) {
                 break;
@@ -480,8 +486,153 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest);
+        let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest, &is_pattern);
         (params, function_length)
+    }
+
+    // === Binding pattern ===
+
+    pub(crate) fn parse_binding_pattern(&mut self) -> NodeHandle {
+        let is_object = self.match_token(TokenType::CurlyOpen);
+        let is_array = self.match_token(TokenType::BracketOpen);
+        if !is_object && !is_array {
+            return NULL_HANDLE;
+        }
+        self.consume();
+
+        let kind: u8 = if is_object { 1 } else { 0 };
+        let pattern = self.builder.create_binding_pattern(kind);
+        let closing_token = if is_object { TokenType::CurlyClose } else { TokenType::BracketClose };
+
+        while !self.match_token(closing_token) && !self.done() {
+            // Array elision: bare comma
+            if !is_object && self.match_token(TokenType::Comma) {
+                self.consume();
+                self.builder.binding_pattern_append_entry(pattern, NULL_HANDLE, 0, NULL_HANDLE, 0, NULL_HANDLE, false);
+                continue;
+            }
+
+            let is_rest = if self.match_token(TokenType::TripleDot) {
+                self.consume();
+                true
+            } else {
+                false
+            };
+
+            let mut name = NULL_HANDLE;
+            let mut name_type: u8 = 0; // Empty
+            let mut alias = NULL_HANDLE;
+            let mut alias_type: u8 = 0; // Empty
+
+            if is_object {
+                // Object binding pattern entry
+                let mut needs_alias = false;
+
+                if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
+                    let entry_start = self.position();
+
+                    if self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) {
+                        needs_alias = true;
+                    }
+
+                    if self.match_token(TokenType::StringLiteral) {
+                        let tok = self.consume();
+                        let value = self.parse_string_value(&tok);
+                        name = self.builder.create_identifier(self.span_from(entry_start), &value);
+                        name_type = 1;
+                    } else if self.match_token(TokenType::BigIntLiteral) {
+                        let tok = self.consume();
+                        let value = self.token_value(&tok).to_vec();
+                        // Strip trailing 'n' for the identifier name
+                        let name_value = if value.last() == Some(&(b'n' as u16)) {
+                            &value[..value.len() - 1]
+                        } else {
+                            &value
+                        };
+                        name = self.builder.create_identifier(self.span_from(entry_start), name_value);
+                        name_type = 1;
+                    } else {
+                        // Identifier name or numeric literal
+                        let tok = self.consume();
+                        let value = self.token_value(&tok).to_vec();
+                        name = self.builder.create_identifier(self.span_from(entry_start), &value);
+                        name_type = 1;
+                    }
+                } else if self.match_token(TokenType::BracketOpen) {
+                    // Computed property name [expr]
+                    self.consume();
+                    name = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
+                    name_type = 2; // Expression
+                    self.consume_token(TokenType::BracketClose);
+                } else {
+                    self.expected("identifier or computed property name");
+                    break;
+                }
+
+                // Check for alias after ':'
+                if !is_rest && self.match_token(TokenType::Colon) {
+                    self.consume();
+                    if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                        // Nested binding pattern
+                        alias = self.parse_binding_pattern();
+                        alias_type = 2; // BindingPattern
+                    } else if self.match_identifier_name() {
+                        let alias_start = self.position();
+                        let tok = self.consume();
+                        let value = self.token_value(&tok).to_vec();
+                        alias = self.builder.create_identifier(self.span_from(alias_start), &value);
+                        alias_type = 1; // Identifier
+                    } else {
+                        self.expected("identifier or binding pattern");
+                        break;
+                    }
+                } else if needs_alias {
+                    self.expected("alias for string or numeric literal name");
+                    break;
+                }
+            } else {
+                // Array binding pattern entry (name is always Empty)
+                if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                    alias = self.parse_binding_pattern();
+                    alias_type = 2; // BindingPattern
+                } else if self.match_identifier_name() {
+                    let alias_start = self.position();
+                    let tok = self.consume();
+                    let value = self.token_value(&tok).to_vec();
+                    alias = self.builder.create_identifier(self.span_from(alias_start), &value);
+                    alias_type = 1; // Identifier
+                } else {
+                    self.expected("identifier or binding pattern");
+                    break;
+                }
+            }
+
+            // Optional initializer
+            let initializer = if self.match_token(TokenType::Equals) {
+                self.consume();
+                self.parse_expression(2, Associativity::Right, ForbiddenTokens::none())
+            } else {
+                NULL_HANDLE
+            };
+
+            self.builder.binding_pattern_append_entry(pattern, name, name_type, alias, alias_type, initializer, is_rest);
+
+            if self.match_token(TokenType::Comma) {
+                self.consume();
+            } else if is_object && !self.match_token(closing_token) {
+                self.consume_token(TokenType::Comma);
+            }
+        }
+
+        // Consume trailing commas for arrays
+        if !is_object {
+            while self.match_token(TokenType::Comma) {
+                self.consume();
+            }
+        }
+
+        self.consume_token(closing_token);
+        pattern
     }
 
     // === Import statement ===

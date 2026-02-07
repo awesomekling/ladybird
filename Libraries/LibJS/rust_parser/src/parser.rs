@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn match_statement(&self) -> bool {
+    pub(crate) fn match_statement(&mut self) -> bool {
         matches!(
             self.current_token_type(),
             TokenType::CurlyOpen
@@ -722,16 +722,12 @@ impl<'a> Parser<'a> {
         ) || self.match_expression()
     }
 
-    pub(crate) fn match_declaration(&self) -> bool {
+    pub(crate) fn match_declaration(&mut self) -> bool {
         match self.current_token_type() {
             TokenType::Function | TokenType::Class | TokenType::Const | TokenType::Let => true,
             TokenType::Async => {
                 // async function
-                let next = unsafe {
-                    // Peek without mutating - we know lexer state won't change
-                    let ptr = self as *const Self as *mut Self;
-                    (*ptr).next_token()
-                };
+                let next = self.next_token();
                 next.token_type == TokenType::Function
             }
             TokenType::Identifier => {
@@ -743,16 +739,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn match_export_or_import(&self) -> bool {
+    pub(crate) fn match_export_or_import(&mut self) -> bool {
         if self.match_token(TokenType::Export) {
             return true;
         }
         if self.match_token(TokenType::Import) {
             // `import(` and `import.` are expressions, not import declarations
-            let next = unsafe {
-                let ptr = self as *const Self as *mut Self;
-                (*ptr).next_token()
-            };
+            let next = self.next_token();
             return next.token_type != TokenType::ParenOpen
                 && next.token_type != TokenType::Period;
         }

@@ -14,7 +14,7 @@ use crate::token::{Token, TokenType};
 impl<'a> Parser<'a> {
     // === Expression matching ===
 
-    pub(crate) fn match_expression(&self) -> bool {
+    pub(crate) fn match_expression(&mut self) -> bool {
         match self.current_token_type() {
             TokenType::BoolLiteral
             | TokenType::NumericLiteral
@@ -40,10 +40,7 @@ impl<'a> Parser<'a> {
 
             TokenType::Import => {
                 // import( and import. are expressions
-                let next = unsafe {
-                    let ptr = self as *const Self as *mut Self;
-                    (*ptr).next_token()
-                };
+                let next = self.next_token();
                 next.token_type == TokenType::ParenOpen || next.token_type == TokenType::Period
             }
 
@@ -733,7 +730,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 let span = self.span_from(spread_start);
-                properties.push(self.builder.create_object_property(span, NULL_HANDLE, expr, 3, false)); // Spread = 3
+                properties.push(self.builder.create_object_property(span, expr, NULL_HANDLE, 3, false)); // Spread = 3
             } else {
                 let prop = self.parse_object_property();
                 properties.push(prop);
@@ -846,6 +843,11 @@ impl<'a> Parser<'a> {
                 let value_str = self.token_value(&tok);
                 let value = parse_numeric_value(value_str);
                 (self.builder.create_numeric_literal(self.span_from(start), value), None)
+            }
+            TokenType::PrivateIdentifier => {
+                let tok = self.consume();
+                let value = self.token_value(&tok).to_vec();
+                (self.builder.create_private_identifier(self.span_from(start), &value), Some(value))
             }
             _ => {
                 if self.match_identifier_name() {
@@ -1077,7 +1079,7 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 let binding = self.builder.create_identifier(self.span_from(param_start), &value);
-                params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false]);
+                params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false], &[false]);
                 function_length = 1;
             } else {
                 self.load_state();

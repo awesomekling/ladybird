@@ -27,6 +27,7 @@ static Utf16View make_utf16_view(u16 const* data, size_t length)
 struct ASTArena {
     Vector<NonnullRefPtr<ASTNode const>> nodes;
     Vector<NonnullRefPtr<FunctionParameters const>> parameters;
+    Vector<NonnullRefPtr<BindingPattern const>> binding_patterns;
 };
 
 static SourceRange make_range(SourceCodeHandle source_code,
@@ -802,19 +803,18 @@ ASTNodeHandle ast_create_function_parameters_empty()
 
 ASTNodeHandle ast_create_function_parameters(ASTArenaHandle arena_handle,
     ASTNodeHandle const* bindings, ASTNodeHandle const* default_values,
-    bool const* is_rest_flags, size_t count)
+    bool const* is_rest_flags, bool const* is_pattern_flags, size_t count)
 {
     auto& arena = *static_cast<ASTArena*>(arena_handle);
     Vector<FunctionParameter> params;
     params.ensure_capacity(count);
     for (size_t i = 0; i < count; ++i) {
-        auto* binding = static_cast<ASTNode*>(bindings[i]);
         RefPtr<Expression const> default_value;
         if (default_values[i])
             default_value = as_ref<Expression>(default_values[i]);
-        if (is<BindingPattern>(*binding)) {
+        if (is_pattern_flags && is_pattern_flags[i]) {
             params.empend(
-                Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> { as_ref<BindingPattern>(bindings[i]) },
+                Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> { NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(bindings[i])) },
                 move(default_value),
                 is_rest_flags[i]);
         } else {
@@ -999,6 +999,122 @@ void ast_scope_node_shrink_to_fit(ASTNodeHandle scope_node)
 void ast_switch_case_append(ASTNodeHandle switch_case, ASTNodeHandle statement)
 {
     as_node<SwitchCase>(switch_case).append(as_ref<Statement>(statement));
+}
+
+// === BindingPattern ===
+
+ASTNodeHandle ast_create_binding_pattern(ASTArenaHandle arena_handle, u8 kind)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto pattern = adopt_ref(*new BindingPattern);
+    pattern->kind = kind == 0 ? BindingPattern::Kind::Array : BindingPattern::Kind::Object;
+    auto* raw = pattern.ptr();
+    arena.binding_patterns.append(move(pattern));
+    return static_cast<ASTNodeHandle>(raw);
+}
+
+void ast_binding_pattern_append_entry(
+    ASTNodeHandle pattern_handle,
+    ASTNodeHandle name, u8 name_type,
+    ASTNodeHandle alias, u8 alias_type,
+    ASTNodeHandle initializer, bool is_rest)
+{
+    auto& pattern = *static_cast<BindingPattern*>(pattern_handle);
+
+    Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<Expression const>, Empty> name_variant;
+    switch (name_type) {
+    case 1:
+        name_variant = as_ref<Identifier>(name);
+        break;
+    case 2:
+        name_variant = as_ref<Expression>(name);
+        break;
+    default:
+        name_variant = Empty {};
+        break;
+    }
+
+    Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>, NonnullRefPtr<MemberExpression const>, Empty> alias_variant;
+    switch (alias_type) {
+    case 1:
+        alias_variant = as_ref<Identifier>(alias);
+        break;
+    case 2:
+        alias_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(alias));
+        break;
+    case 3:
+        alias_variant = as_ref<MemberExpression>(alias);
+        break;
+    default:
+        alias_variant = Empty {};
+        break;
+    }
+
+    RefPtr<Expression const> init;
+    if (initializer)
+        init = as_ref<Expression>(initializer);
+
+    pattern.entries.append(BindingPattern::BindingEntry { move(name_variant), move(alias_variant), move(init), is_rest });
+}
+
+ASTNodeHandle ast_create_variable_declarator_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle init)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> target_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern));
+    return arena_add(arena, create_ast_node<VariableDeclarator>(range,
+        move(target_variant), as_nullable_ref<Expression>(init)));
+}
+
+ASTNodeHandle ast_create_catch_clause_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle body)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    return arena_add(arena, create_ast_node<CatchClause>(range,
+        NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern)),
+        as_ref<BlockStatement>(body)));
+}
+
+ASTNodeHandle ast_create_for_in_statement_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern));
+    return arena_add(arena, create_ast_node<ForInStatement>(range,
+        move(lhs_variant), as_ref<Expression>(rhs), as_ref<Statement>(body)));
+}
+
+ASTNodeHandle ast_create_for_of_statement_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern));
+    return arena_add(arena, create_ast_node<ForOfStatement>(range,
+        move(lhs_variant), as_ref<Expression>(rhs), as_ref<Statement>(body)));
+}
+
+ASTNodeHandle ast_create_for_await_of_statement_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern));
+    return arena_add(arena, create_ast_node<ForAwaitOfStatement>(range,
+        move(lhs_variant), as_ref<Expression>(rhs), as_ref<Statement>(body)));
 }
 
 } // extern "C"

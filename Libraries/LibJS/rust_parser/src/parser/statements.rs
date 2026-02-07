@@ -488,25 +488,29 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Catch);
 
-        let parameter = if self.match_token(TokenType::ParenOpen) {
+        if self.match_token(TokenType::ParenOpen) {
             self.consume();
+            if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                let pattern = self.parse_binding_pattern();
+                self.consume_token(TokenType::ParenClose);
+                let body = self.parse_block_statement();
+                return self.builder.create_catch_clause_with_pattern(self.span_from(start), pattern, body);
+            }
             let param = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 self.builder.create_identifier(self.span_from(start), &value)
             } else {
-                // TODO: Binding pattern
                 self.expected("catch parameter");
                 NULL_HANDLE
             };
             self.consume_token(TokenType::ParenClose);
-            param
+            let body = self.parse_block_statement();
+            self.builder.create_catch_clause(self.span_from(start), param, body)
         } else {
-            NULL_HANDLE
-        };
-
-        let body = self.parse_block_statement();
-        self.builder.create_catch_clause(self.span_from(start), parameter, body)
+            let body = self.parse_block_statement();
+            self.builder.create_catch_clause(self.span_from(start), NULL_HANDLE, body)
+        }
     }
 
     // === Labelled statement ===

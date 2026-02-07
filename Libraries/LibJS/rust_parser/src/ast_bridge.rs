@@ -387,7 +387,7 @@ extern "C" {
     pub fn ast_create_function_parameters(
         arena: ArenaHandle,
         bindings: *const NodeHandle, default_values: *const NodeHandle,
-        is_rest: *const bool, count: usize,
+        is_rest: *const bool, is_pattern: *const bool, count: usize,
     ) -> NodeHandle;
     pub fn ast_create_function_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
@@ -457,6 +457,45 @@ extern "C" {
 
     // SwitchCase
     pub fn ast_switch_case_append(switch_case: NodeHandle, statement: NodeHandle);
+
+    // BindingPattern
+    pub fn ast_create_binding_pattern(arena: ArenaHandle, kind: u8) -> NodeHandle;
+    pub fn ast_binding_pattern_append_entry(
+        pattern: NodeHandle,
+        name: NodeHandle, name_type: u8,
+        alias: NodeHandle, alias_type: u8,
+        initializer: NodeHandle, is_rest: bool,
+    );
+    pub fn ast_create_variable_declarator_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: NodeHandle, init: NodeHandle,
+    ) -> NodeHandle;
+    pub fn ast_create_catch_clause_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: NodeHandle, body: NodeHandle,
+    ) -> NodeHandle;
+    pub fn ast_create_for_in_statement_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
+    ) -> NodeHandle;
+    pub fn ast_create_for_of_statement_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
+    ) -> NodeHandle;
+    pub fn ast_create_for_await_of_statement_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
+    ) -> NodeHandle;
 }
 
 /// Builder wrapping the C++ AST factory with a simpler interface.
@@ -806,16 +845,17 @@ impl AstBuilder {
         unsafe { ast_create_function_parameters_empty() }
     }
 
-    pub fn create_function_parameters(&self, bindings: &[NodeHandle], default_values: &[NodeHandle], is_rest: &[bool]) -> NodeHandle {
+    pub fn create_function_parameters(&self, bindings: &[NodeHandle], default_values: &[NodeHandle], is_rest: &[bool], is_pattern: &[bool]) -> NodeHandle {
         assert_eq!(bindings.len(), default_values.len());
         assert_eq!(bindings.len(), is_rest.len());
+        assert_eq!(bindings.len(), is_pattern.len());
         if bindings.is_empty() {
             return self.create_function_parameters_empty();
         }
         unsafe {
             ast_create_function_parameters(
                 self.arena, bindings.as_ptr(), default_values.as_ptr(),
-                is_rest.as_ptr(), bindings.len(),
+                is_rest.as_ptr(), is_pattern.as_ptr(), bindings.len(),
             )
         }
     }
@@ -925,6 +965,46 @@ impl AstBuilder {
 
     pub fn switch_case_append(&self, switch_case: NodeHandle, statement: NodeHandle) {
         unsafe { ast_switch_case_append(switch_case, statement) }
+    }
+
+    // === BindingPattern ===
+
+    pub fn create_binding_pattern(&self, kind: u8) -> NodeHandle {
+        unsafe { ast_create_binding_pattern(self.arena, kind) }
+    }
+
+    pub fn binding_pattern_append_entry(
+        &self, pattern: NodeHandle,
+        name: NodeHandle, name_type: u8,
+        alias: NodeHandle, alias_type: u8,
+        initializer: NodeHandle, is_rest: bool,
+    ) {
+        unsafe { ast_binding_pattern_append_entry(pattern, name, name_type, alias, alias_type, initializer, is_rest) }
+    }
+
+    pub fn create_variable_declarator_with_pattern(&self, span: Span, pattern: NodeHandle, init: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_variable_declarator_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, init) }
+    }
+
+    pub fn create_catch_clause_with_pattern(&self, span: Span, pattern: NodeHandle, body: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_catch_clause_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, body) }
+    }
+
+    pub fn create_for_in_statement_with_pattern(&self, span: Span, pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_for_in_statement_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, rhs, body) }
+    }
+
+    pub fn create_for_of_statement_with_pattern(&self, span: Span, pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_for_of_statement_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, rhs, body) }
+    }
+
+    pub fn create_for_await_of_statement_with_pattern(&self, span: Span, pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_for_await_of_statement_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, rhs, body) }
     }
 }
 
