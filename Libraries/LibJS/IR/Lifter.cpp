@@ -21,10 +21,12 @@ static inline size_t to_index(BlockIndex b) { return static_cast<u32>(b); }
 static inline size_t to_index(ValueIndex v) { return static_cast<u32>(v); }
 
 template<typename T>
-static inline void ensure_index(Vector<T>& vec, size_t idx)
+static inline void ensure_index(Vector<T>& vec, size_t index)
 {
-    if (idx >= vec.size())
-        vec.resize(idx + 1);
+    if (index >= vec.size()) {
+        vec.ensure_capacity(max(index + 1, vec.size() * 2));
+        vec.resize(index + 1);
+    }
 }
 
 Lifter::Lifter(Bytecode::Executable const& executable)
