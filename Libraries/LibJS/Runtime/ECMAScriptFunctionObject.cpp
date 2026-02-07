@@ -279,8 +279,8 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
             data.m_tiered_up = true;
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
-            auto ir_function = IR::Lifter::lift(*executable);
-            IR::optimize(*ir_function);
+            auto [ir_function, ssa_data] = IR::Lifter::lift(*executable);
+            IR::optimize(*ir_function, move(ssa_data));
             if (IR::g_dump_ir)
                 dbgln("{}", IR::dump(*ir_function));
             executable = IR::Lowerer::lower(vm(), *ir_function);

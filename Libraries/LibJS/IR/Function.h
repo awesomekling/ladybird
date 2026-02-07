@@ -9,7 +9,6 @@
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/NonnullOwnPtr.h>
-#include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Bytecode/Executable.h>
@@ -60,10 +59,6 @@ public:
     IRStage stage() const { return m_stage; }
     void set_stage(IRStage stage) { m_stage = stage; }
 
-    SsaConstructionData* ssa_construction_data() { return m_ssa_construction_data.ptr(); }
-    void set_ssa_construction_data(OwnPtr<SsaConstructionData> data) { m_ssa_construction_data = move(data); }
-    void clear_ssa_construction_data() { m_ssa_construction_data = nullptr; }
-
     BasicBlock* entry_block() const { return m_entry_block; }
     void set_entry_block(BasicBlock* block) { m_entry_block = block; }
 
@@ -91,7 +86,6 @@ private:
 
     GC::Ptr<Bytecode::Executable const> m_source_executable;
     IRStage m_stage { IRStage::RawCFG };
-    OwnPtr<SsaConstructionData> m_ssa_construction_data;
     HashMap<u32, BasicBlock*> m_source_block_map;
     Vector<NonnullOwnPtr<BasicBlock>> m_basic_blocks;
     HashMap<BlockIndex, BasicBlock*> m_block_index_map;

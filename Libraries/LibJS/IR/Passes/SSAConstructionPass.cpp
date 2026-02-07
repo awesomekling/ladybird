@@ -16,15 +16,11 @@ PreservedAnalyses SSAConstructionPass::run(Function& function, PassManager& pass
 
     auto const& dominator_tree = pass_manager.dominator_tree(function);
 
-    auto* data = function.ssa_construction_data();
-    VERIFY(data);
-
     SSAConstruction ssa(function, dominator_tree, *function.source_executable(),
-        data->written_operands, data->block_actual_definitions,
-        data->block_definitions, data->value_to_operand_raw);
+        m_ssa_construction_data.written_operands, m_ssa_construction_data.block_actual_definitions,
+        m_ssa_construction_data.block_definitions, m_ssa_construction_data.value_to_operand_raw);
     ssa.run();
 
-    function.clear_ssa_construction_data();
     function.set_stage(IRStage::SSA);
 
     return PreservedAnalyses::none();

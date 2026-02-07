@@ -36,7 +36,7 @@ Lifter::Lifter(Bytecode::Executable const& executable)
 {
 }
 
-NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
+LiftResult Lifter::lift(Bytecode::Executable const& executable)
 {
     // IR Pipeline Phase 1: Bytecode → IR (CFG construction)
     Lifter lifter(executable);
@@ -57,17 +57,16 @@ NonnullOwnPtr<Function> Lifter::lift(Bytecode::Executable const& executable)
     lifter.eliminate_unreachable_blocks();
 
     // Package up SSA side tables for the SSAConstructionPass to consume later.
-    auto ssa_data = make<SsaConstructionData>();
-    ssa_data->written_operands = move(lifter.m_written_operands);
-    ssa_data->block_actual_definitions = move(lifter.m_block_actual_definitions);
-    ssa_data->block_definitions = move(lifter.m_block_definitions);
-    ssa_data->value_to_operand_raw = move(lifter.m_value_to_operand_raw);
-    lifter.m_function->set_ssa_construction_data(move(ssa_data));
+    SsaConstructionData ssa_data;
+    ssa_data.written_operands = move(lifter.m_written_operands);
+    ssa_data.block_actual_definitions = move(lifter.m_block_actual_definitions);
+    ssa_data.block_definitions = move(lifter.m_block_definitions);
+    ssa_data.value_to_operand_raw = move(lifter.m_value_to_operand_raw);
 
     // Store the source block map for exception handler remapping in the lowerer
     lifter.m_function->set_source_block_map(move(lifter.m_block_map));
 
-    return move(lifter.m_function);
+    return { move(lifter.m_function), move(ssa_data) };
 }
 
 void Lifter::lift_basic_blocks()

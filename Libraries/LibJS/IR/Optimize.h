@@ -8,6 +8,7 @@
 
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/Function.h>
 
 namespace JS::IR {
 
@@ -16,6 +17,6 @@ JS_API extern bool g_optimize_ir;
 JS_API extern bool g_dump_ir_between_passes;
 JS_API extern bool g_lower_ir;
 
-JS_API void optimize(Function&);
+JS_API void optimize(Function&, SsaConstructionData);
 
 }

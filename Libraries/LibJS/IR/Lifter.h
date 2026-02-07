@@ -15,12 +15,18 @@
 #include <LibJS/IR/Builder.h>
 #include <LibJS/IR/DominatorTree.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/Function.h>
 
 namespace JS::IR {
 
+struct LiftResult {
+    NonnullOwnPtr<Function> function;
+    SsaConstructionData ssa_construction_data;
+};
+
 class JS_API Lifter {
 public:
-    static NonnullOwnPtr<Function> lift(Bytecode::Executable const&);
+    static LiftResult lift(Bytecode::Executable const&);
 
 private:
     explicit Lifter(Bytecode::Executable const&);

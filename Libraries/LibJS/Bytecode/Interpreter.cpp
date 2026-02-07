@@ -152,9 +152,9 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
                 executable->dump();
 
             if (IR::g_dump_ir || IR::g_lower_ir) {
-                auto ir_function = IR::Lifter::lift(*executable);
+                auto [ir_function, ssa_data] = IR::Lifter::lift(*executable);
                 if (IR::g_optimize_ir || IR::g_lower_ir)
-                    IR::optimize(*ir_function);
+                    IR::optimize(*ir_function, move(ssa_data));
                 if (IR::g_dump_ir)
                     dbgln("{}", IR::dump(*ir_function));
                 if (IR::g_lower_ir) {
