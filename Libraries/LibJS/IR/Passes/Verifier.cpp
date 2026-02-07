@@ -6,6 +6,7 @@
 
 #include <AK/Bitmap.h>
 #include <AK/HashTable.h>
+#include <LibJS/Bytecode/Executable.h>
 #include <LibJS/IR/BasicBlock.h>
 #include <LibJS/IR/CFG.h>
 #include <LibJS/IR/DominatorTree.h>
@@ -49,6 +50,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
 
     bool const full_mode = mode == VerifierMode::Full;
     bool const post_ssa = function.stage() == IRStage::PostSSA;
+    auto executable = function.source_executable();
     auto block_capacity = block_index_capacity(function);
     auto value_capacity = function.values().size();
 
@@ -187,7 +189,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     }
 
     // Check: Parameter count matches formal parameter count from source executable
-    if (auto executable = function.source_executable()) {
+    if (executable) {
         if (function.parameters().size() != executable->formal_parameter_count) {
             report_error(ByteString::formatted(
                 "Function has {} parameters but executable has {} formal parameters",
@@ -461,6 +463,185 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 report_error(ByteString::formatted(
                     "NewClass in block{} has no class_expression",
                     block->index()));
+            }
+
+            // Full mode metadata range checks: validate that instruction metadata
+            // indices are within bounds of the source executable's tables.
+            if (full_mode && executable) {
+                auto opcode = instruction.opcode();
+
+                // Check: Property key index range
+                auto uses_property_key_index = opcode == Opcode::GetById
+                    || opcode == Opcode::GetMethod
+                    || opcode == Opcode::GetByIdWithThis
+                    || opcode == Opcode::PutById
+                    || opcode == Opcode::PutByIdWithThis
+                    || opcode == Opcode::PutGetterById
+                    || opcode == Opcode::PutSetterById
+                    || opcode == Opcode::PutPrototypeById
+                    || opcode == Opcode::PutGetterByIdWithThis
+                    || opcode == Opcode::PutSetterByIdWithThis
+                    || opcode == Opcode::PutPrototypeByIdWithThis
+                    || opcode == Opcode::DeleteById
+                    || opcode == Opcode::DeleteByIdWithThis
+                    || opcode == Opcode::InitObjectLiteralProperty;
+                if (uses_property_key_index) {
+                    auto index = instruction.property_key_index();
+                    if (index.value >= executable->property_key_table->property_keys().size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has property_key_index {} but table size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            index.value, executable->property_key_table->property_keys().size()));
+                    }
+                }
+
+                // Check: Identifier index range
+                auto uses_identifier_index = opcode == Opcode::HasPrivateId
+                    || opcode == Opcode::GetPrivateById
+                    || opcode == Opcode::PutPrivateById
+                    || opcode == Opcode::AddPrivateName
+                    || opcode == Opcode::CreateVariable
+                    || opcode == Opcode::CreateMutableBinding
+                    || opcode == Opcode::CreateImmutableBinding
+                    || opcode == Opcode::GetBinding
+                    || opcode == Opcode::InitializeBinding
+                    || opcode == Opcode::SetBinding
+                    || opcode == Opcode::GetGlobal
+                    || opcode == Opcode::SetGlobal
+                    || opcode == Opcode::DeleteVariable
+                    || opcode == Opcode::TypeofBinding
+                    || opcode == Opcode::GetCalleeAndThisFromEnvironment;
+                if (uses_identifier_index) {
+                    auto index = instruction.identifier_index();
+                    if (index.value >= executable->identifier_table->identifiers().size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has identifier_index {} but table size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            index.value, executable->identifier_table->identifiers().size()));
+                    }
+                }
+
+                // Check: Cache index range by cache kind
+                // NB: Cache index of NumericLimits<u32>::max() is a sentinel for "no cache".
+                auto cache_index_value = instruction.cache_index().value();
+                bool has_cache_index = cache_index_value != NumericLimits<u32>::max();
+
+                auto uses_property_lookup_cache = opcode == Opcode::GetById
+                    || opcode == Opcode::GetByIdWithThis
+                    || opcode == Opcode::GetLength
+                    || opcode == Opcode::GetLengthWithThis
+                    || opcode == Opcode::PutById
+                    || opcode == Opcode::PutByIdWithThis
+                    || opcode == Opcode::PutGetterById
+                    || opcode == Opcode::PutSetterById
+                    || opcode == Opcode::PutPrototypeById
+                    || opcode == Opcode::PutGetterByIdWithThis
+                    || opcode == Opcode::PutSetterByIdWithThis
+                    || opcode == Opcode::PutPrototypeByIdWithThis;
+                if (uses_property_lookup_cache && has_cache_index) {
+                    if (cache_index_value >= executable->property_lookup_caches.size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has cache_index {} but property_lookup_caches size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            cache_index_value, executable->property_lookup_caches.size()));
+                    }
+                }
+
+                auto uses_global_variable_cache = opcode == Opcode::GetGlobal
+                    || opcode == Opcode::SetGlobal;
+                if (uses_global_variable_cache && has_cache_index) {
+                    if (cache_index_value >= executable->global_variable_caches.size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has cache_index {} but global_variable_caches size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            cache_index_value, executable->global_variable_caches.size()));
+                    }
+                }
+
+                if (opcode == Opcode::GetTemplateObject && has_cache_index) {
+                    if (cache_index_value >= executable->template_object_caches.size()) {
+                        report_error(ByteString::formatted(
+                            "GetTemplateObject in block{} has cache_index {} but template_object_caches size is {}",
+                            block->index(), cache_index_value, executable->template_object_caches.size()));
+                    }
+                }
+
+                auto uses_object_shape_cache = opcode == Opcode::NewObject
+                    || opcode == Opcode::CacheObjectShape
+                    || opcode == Opcode::InitObjectLiteralProperty;
+                if (uses_object_shape_cache && has_cache_index) {
+                    if (cache_index_value >= executable->object_shape_caches.size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has cache_index {} but object_shape_caches size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            cache_index_value, executable->object_shape_caches.size()));
+                    }
+                }
+
+                // Check: String table index range for NewTypeError
+                if (opcode == Opcode::NewTypeError) {
+                    auto index = instruction.string_table_index();
+                    if (index.value >= executable->string_table->strings().size()) {
+                        report_error(ByteString::formatted(
+                            "NewTypeError in block{} has string_table_index {} but string table size is {}",
+                            block->index(), index.value, executable->string_table->strings().size()));
+                    }
+                }
+
+                // Check: Regex metadata range for NewRegExp
+                if (opcode == Opcode::NewRegExp) {
+                    auto source_index = instruction.regex_source_index();
+                    if (source_index.value >= executable->string_table->strings().size()) {
+                        report_error(ByteString::formatted(
+                            "NewRegExp in block{} has regex_source_index {} but string table size is {}",
+                            block->index(), source_index.value, executable->string_table->strings().size()));
+                    }
+                    auto flags_index = instruction.regex_flags_index();
+                    if (flags_index.value >= executable->string_table->strings().size()) {
+                        report_error(ByteString::formatted(
+                            "NewRegExp in block{} has regex_flags_index {} but string table size is {}",
+                            block->index(), flags_index.value, executable->string_table->strings().size()));
+                    }
+                    auto regex_index = instruction.regex_index();
+                    if (regex_index.value() >= executable->regex_table->regexes().size()) {
+                        report_error(ByteString::formatted(
+                            "NewRegExp in block{} has regex_index {} but regex table size is {}",
+                            block->index(), regex_index.value(), executable->regex_table->regexes().size()));
+                    }
+                }
+
+                // Check: Expression string range (for call instructions)
+                if (instruction.expression_string().has_value()) {
+                    auto index = instruction.expression_string().value();
+                    if (index.value >= executable->string_table->strings().size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has expression_string {} but string table size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            index.value, executable->string_table->strings().size()));
+                    }
+                }
+
+                // Check: lhs_name identifier range (for NewFunction/NewClass)
+                if (instruction.lhs_name().has_value()) {
+                    auto index = instruction.lhs_name().value();
+                    if (index.value >= executable->identifier_table->identifiers().size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has lhs_name {} but identifier table size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            index.value, executable->identifier_table->identifiers().size()));
+                    }
+                }
+
+                // Check: base_identifier range
+                if (instruction.base_identifier().has_value()) {
+                    auto index = instruction.base_identifier().value();
+                    if (index.value >= executable->identifier_table->identifiers().size()) {
+                        report_error(ByteString::formatted(
+                            "{} in block{} has base_identifier {} but identifier table size is {}",
+                            opcode_to_string(opcode), block->index(),
+                            index.value, executable->identifier_table->identifiers().size()));
+                    }
+                }
             }
 
             // Check: ExtractValue source must be a tuple-producing instruction
