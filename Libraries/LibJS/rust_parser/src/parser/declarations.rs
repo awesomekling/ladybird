@@ -17,16 +17,16 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
             if next.token_type == TokenType::Function {
-                let decl = self.parse_function_declaration();
-                self.register_var_scoped_declaration(decl);
+                let (decl, name) = self.parse_function_declaration_with_name();
+                self.register_function_declaration(decl, &name, true);
                 return decl;
             }
         }
 
         match self.current_token_type() {
             TokenType::Function => {
-                let decl = self.parse_function_declaration();
-                self.register_var_scoped_declaration(decl);
+                let (decl, name) = self.parse_function_declaration_with_name();
+                self.register_function_declaration(decl, &name, false);
                 decl
             }
             TokenType::Class => {
@@ -35,14 +35,46 @@ impl<'a> Parser<'a> {
                 decl
             }
             TokenType::Let | TokenType::Const => {
+                let names_before = self.declared_names.len();
                 let decl = self.parse_variable_declaration(false);
                 self.register_lexical_declaration(decl);
+                // Track declared names as lexical names for Annex B checks
+                let new_names: Vec<Vec<u16>> = self.declared_names.drain(names_before..).collect();
+                for name in &new_names {
+                    self.add_lexical_name(name);
+                }
                 decl
             }
             _ => {
                 self.expected("declaration");
                 self.consume();
                 self.builder.create_empty_statement(self.span_from(self.position()))
+            }
+        }
+    }
+
+    /// Parse a function declaration, returning both the node and the function name.
+    fn parse_function_declaration_with_name(&mut self) -> (NodeHandle, Vec<u16>) {
+        let decl = self.parse_function_declaration();
+        // Extract the name from the last_function_name set during parsing
+        let name = std::mem::take(&mut self.last_function_name);
+        (decl, name)
+    }
+
+    /// Register a function declaration with the appropriate scope.
+    fn register_function_declaration(&mut self, decl: NodeHandle, name: &[u16], is_async_or_generator: bool) {
+        if self.current_scope_is_function_like() {
+            // At function/program top level: register as var-scoped
+            self.register_var_scoped_declaration(decl);
+        } else {
+            // In a block scope: register as lexical on the block
+            self.register_lexical_declaration(decl);
+            self.add_function_name(name);
+
+            // Annex B: In non-strict mode, normal function declarations
+            // in blocks are hoisted to the enclosing function scope.
+            if !self.strict_mode && !is_async_or_generator {
+                self.register_hoisted_function(decl, name);
             }
         }
     }
@@ -71,6 +103,9 @@ impl<'a> Parser<'a> {
             let (target, is_pattern) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                if kind != DeclarationKind::Var {
+                    self.declared_names.push(value.clone());
+                }
                 (self.builder.create_identifier(self.span_from(decl_start), &value), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 (self.parse_binding_pattern(), true)
@@ -145,8 +180,10 @@ impl<'a> Parser<'a> {
         let name = if self.match_identifier() {
             let tok = self.consume();
             let value = self.token_value(&tok).to_vec();
+            self.last_function_name = value.clone();
             self.builder.create_identifier(self.span_from(start), &value)
         } else {
+            self.last_function_name.clear();
             NULL_HANDLE
         };
 

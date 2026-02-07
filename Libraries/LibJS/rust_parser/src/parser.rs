@@ -128,6 +128,8 @@ pub struct ParserError {
 struct ScopeEntry {
     node: NodeHandle,
     is_function_like: bool, // true for Program, FunctionBody
+    lexical_names: std::collections::HashSet<Vec<u16>>,
+    function_names: std::collections::HashSet<Vec<u16>>,
 }
 
 
@@ -189,6 +191,13 @@ pub struct Parser<'a> {
     /// Set by try_parse_labelled_statement to propagate iteration-ness
     /// through nested labels (e.g., `a: b: for(...)`).
     last_inner_label_is_iteration: bool,
+
+    /// Temporary storage for declared names collected during variable
+    /// declaration parsing, used by parse_declaration to track lexical names.
+    declared_names: Vec<Vec<u16>>,
+
+    /// Last function declaration name, set by parse_function_declaration.
+    last_function_name: Vec<u16>,
 }
 
 impl<'a> Parser<'a> {
@@ -228,6 +237,8 @@ impl<'a> Parser<'a> {
             previous_token_was_period: false,
             labels_in_scope: HashMap::new(),
             last_inner_label_is_iteration: false,
+            declared_names: Vec::new(),
+            last_function_name: Vec::new(),
         }
     }
 
@@ -408,7 +419,12 @@ impl<'a> Parser<'a> {
     // === Scope management ===
 
     pub(crate) fn push_scope(&mut self, node: NodeHandle, is_function_like: bool) {
-        self.scope_stack.push(ScopeEntry { node, is_function_like });
+        self.scope_stack.push(ScopeEntry {
+            node,
+            is_function_like,
+            lexical_names: std::collections::HashSet::new(),
+            function_names: std::collections::HashSet::new(),
+        });
     }
 
     pub(crate) fn pop_scope(&mut self) {
@@ -434,10 +450,42 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Register a hoisted function declaration.
-    /// Goes to the nearest function-like scope.
-    pub(crate) fn register_hoisted_function(&self, declaration: NodeHandle) {
+    /// Check if the current scope is function-like (program/function body).
+    pub(crate) fn current_scope_is_function_like(&self) -> bool {
+        self.scope_stack.last().is_some_and(|e| e.is_function_like)
+    }
+
+    /// Add a name to the current scope's lexical names set.
+    pub(crate) fn add_lexical_name(&mut self, name: &[u16]) {
+        if let Some(entry) = self.scope_stack.last_mut() {
+            entry.lexical_names.insert(name.to_vec());
+        }
+    }
+
+    /// Add a name to the current scope's function names set.
+    pub(crate) fn add_function_name(&mut self, name: &[u16]) {
+        if let Some(entry) = self.scope_stack.last_mut() {
+            entry.function_names.insert(name.to_vec());
+        }
+    }
+
+    /// Register a hoisted function declaration (Annex B).
+    /// Bubbles through scopes toward the nearest function-like scope,
+    /// stopping if any intermediate scope has a conflicting lexical or
+    /// function name (mirroring the C++ ScopePusher destructor logic).
+    pub(crate) fn register_hoisted_function(&self, declaration: NodeHandle, name: &[u16]) {
+        let name_vec = name.to_vec();
+        let mut first = true;
         for entry in self.scope_stack.iter().rev() {
+            if entry.lexical_names.contains(&name_vec) {
+                return;
+            }
+            // Check function_names at intermediate scopes (not the declaring scope,
+            // since that scope's function_names includes the function being hoisted).
+            if !first && entry.function_names.contains(&name_vec) {
+                return;
+            }
+            first = false;
             if entry.is_function_like {
                 self.builder.scope_node_add_hoisted_function(entry.node, declaration);
                 return;
