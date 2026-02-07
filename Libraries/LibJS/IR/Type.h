@@ -114,4 +114,58 @@ constexpr bool is_safe_numeric_type(Type type)
     }
 }
 
+// Bitset representing a set of concrete types (excluding Unknown).
+// One bit per Type value (Undefined=0, Null=1, ..., Array=10).
+struct TypeMask {
+    u16 bits { 0 };
+
+    static constexpr u16 type_bit(Type type)
+    {
+        VERIFY(type != Type::Unknown);
+        return static_cast<u16>(1 << (static_cast<u8>(type) - 1));
+    }
+
+    static constexpr TypeMask for_type(Type type)
+    {
+        if (type == Type::Unknown)
+            return all();
+        return { type_bit(type) };
+    }
+
+    static constexpr TypeMask all() { return { 0x7FF }; }
+    static constexpr TypeMask none() { return { 0 }; }
+    static constexpr TypeMask nullish() { return { static_cast<u16>(type_bit(Type::Null) | type_bit(Type::Undefined)) }; }
+
+    constexpr bool is_empty() const { return bits == 0; }
+    constexpr bool is_single_type() const { return bits != 0 && (bits & (bits - 1)) == 0; }
+
+    constexpr Type as_type() const
+    {
+        if (!is_single_type())
+            return Type::Unknown;
+        // Find which bit is set (1-based index maps to Type enum)
+        for (u8 i = 1; i <= 11; ++i) {
+            if (bits == (1 << (i - 1)))
+                return static_cast<Type>(i);
+        }
+        VERIFY_NOT_REACHED();
+    }
+
+    constexpr bool contains(Type type) const
+    {
+        if (type == Type::Unknown)
+            return true;
+        return (bits & type_bit(type)) != 0;
+    }
+
+    constexpr bool excludes_nullish() const { return (*this & nullish()).is_empty(); }
+
+    constexpr TypeMask exclude(TypeMask other) const { return *this & ~other; }
+
+    constexpr TypeMask operator|(TypeMask other) const { return { static_cast<u16>(bits | other.bits) }; }
+    constexpr TypeMask operator&(TypeMask other) const { return { static_cast<u16>(bits & other.bits) }; }
+    constexpr TypeMask operator~() const { return { static_cast<u16>(~bits & all().bits) }; }
+    constexpr bool operator==(TypeMask other) const { return bits == other.bits; }
+};
+
 }
