@@ -243,6 +243,14 @@ static void clone_instruction(
         return instruction;
     }();
 
+    // GetLength/GetLengthWithThis use executable.length_identifier at runtime.
+    // If the caller's executable doesn't have one yet, copy it from the callee.
+    if ((opcode == Opcode::GetLength || opcode == Opcode::GetLengthWithThis)
+        && !caller_executable.length_identifier.has_value()
+        && callee_executable.length_identifier.has_value()) {
+        caller_executable.length_identifier = remap_property_key(*callee_executable.length_identifier);
+    }
+
     // Copy metadata fields, remapping table indices from callee to caller.
     new_instruction->set_property_key_index(remap_property_key(source.property_key_index()));
     new_instruction->set_identifier_index(remap_identifier(source.identifier_index()));
