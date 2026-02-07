@@ -720,19 +720,36 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     value->index()));
                 continue;
             }
+            // Check: Use-list slot bounds
+            if (use.operand_slot >= using_instruction->operand_count()) {
+                report_error(ByteString::formatted(
+                    "Value v{} has use with slot {} but instruction only has {} operands",
+                    value->index(), use.operand_slot, using_instruction->operand_count()));
+                continue;
+            }
             // Check: Reverse validation - the using instruction must actually
             // have this value in its operand list at the specified slot
-            if (use.operand_slot >= using_instruction->operand_count()
-                || using_instruction->operand(use.operand_slot) != value.ptr()) {
+            if (using_instruction->operand(use.operand_slot) != value.ptr()) {
                 report_error(ByteString::formatted(
                     "Value v{} has use at slot {} but instruction does not reference it there",
                     value->index(), use.operand_slot));
             }
         }
 
-        // NB: Use-list entries are NOT unique per instruction. An instruction that
-        // uses the same value in multiple operand positions (e.g., Add v0, v0) will
-        // appear multiple times in the use list — once per operand reference.
+        // Check: Use-list uniqueness
+        // Each (instruction, slot) pair must appear at most once. An instruction
+        // that uses the same value in multiple slots (e.g., Add v0, v0) will have
+        // separate entries with different operand_slot values.
+        for (size_t i = 0; i < value->uses().size(); ++i) {
+            for (size_t j = i + 1; j < value->uses().size(); ++j) {
+                if (value->uses()[i] == value->uses()[j]) {
+                    report_error(ByteString::formatted(
+                        "Value v{} has duplicate use-list entry (instruction {}, slot {})",
+                        value->index(), value->uses()[i].instruction, value->uses()[i].operand_slot));
+                    break;
+                }
+            }
+        }
 
         // Check: Tuple values must only be used by ExtractValue
         if (value->is_instruction() && value->defining_instruction()) {
