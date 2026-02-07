@@ -39,6 +39,7 @@ enum class Effects : u8 {
     ReadsState = 1 << 1,  // Reads mutable state (heap, environment)
     WritesState = 1 << 2, // Writes mutable state
     Calls = 1 << 3,       // May invoke arbitrary user code (subsumes all others)
+    Allocates = 1 << 4,   // Allocates a new heap object (not pure, but removable if unused)
 };
 AK_ENUM_BITWISE_OPERATORS(Effects)
 
@@ -78,6 +79,7 @@ static constexpr auto E_THROW = Effects::MayThrow;
 static constexpr auto E_READ = Effects::ReadsState;
 static constexpr auto E_WRITE = Effects::WritesState;
 static constexpr auto E_CALL = Effects::Calls;
+static constexpr auto E_ALLOC = Effects::Allocates;
 static constexpr auto E_THROW_WRITE = Effects::MayThrow | Effects::WritesState;
 
 // Shorthand aliases for EffectRefinement used in the opcode list.
