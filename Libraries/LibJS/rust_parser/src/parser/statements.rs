@@ -322,8 +322,13 @@ impl<'a> Parser<'a> {
         }
 
         // Parse init
-        let init = if self.match_token(TokenType::Var) || self.match_token(TokenType::Let) || self.match_token(TokenType::Const) {
-            self.parse_variable_declaration(true)
+        let is_var_init = self.match_token(TokenType::Var);
+        let init = if is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const) {
+            let decl = self.parse_variable_declaration(true);
+            if is_var_init {
+                self.register_var_scoped_declaration(decl);
+            }
+            decl
         } else {
             let forbidden = ForbiddenTokens::with_in();
             self.parse_expression(0, Associativity::Right, forbidden)
