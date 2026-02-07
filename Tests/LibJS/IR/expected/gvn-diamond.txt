@@ -167,13 +167,29 @@ block2:
     v12:boolean = StrictlyEquals v5:string, v5:string
     Return v12:boolean
 
+=== After InstCombine ===
 function(v4:unknown, v13:unknown):
 block0:
     v5:string = Typeof v4:unknown
     Branch v13:unknown, block1, block2
 block1:
-    v9:boolean = StrictlyEquals v5:string, v5:string
-    Return v9:boolean
+    Return true
 block2:
-    v12:boolean = StrictlyEquals v5:string, v5:string
-    Return v12:boolean
+    Return true
+
+=== After DeadCodeElimination ===
+function(v4:unknown, v13:unknown):
+block0:
+    Branch v13:unknown, block1, block2
+block1:
+    Return true
+block2:
+    Return true
+
+function(v4:unknown, v13:unknown):
+block0:
+    Branch v13:unknown, block1, block2
+block1:
+    Return true
+block2:
+    Return true

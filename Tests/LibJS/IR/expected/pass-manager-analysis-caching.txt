@@ -272,17 +272,31 @@ block3:
 block4:
     Return v22:unknown
 
-=== After LoopInvariantCodeMotion ===
+=== After InstCombine ===
 function(v7:unknown):
 block0:
-    v8:string = Typeof v7:unknown
     Jump block3
 block1:
-    v12:boolean = StrictlyEquals v8:string, v8:string
+    v8:string = Typeof v7:unknown
     v15:number = Increment v19:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block1:v12:boolean]
+    v22:unknown = Phi [block0:v26:undefined, block1:v28:boolean]
+    v19:number = Phi [block0:v27:int32, block1:v15:number]
+    v17:boolean = LessThan v19:number, 10
+    Branch v17:boolean, block1, block4
+block4:
+    Return v22:unknown
+
+=== After DeadCodeElimination ===
+function(v7:unknown):
+block0:
+    Jump block3
+block1:
+    v15:number = Increment v19:number
+    Jump block3
+block3:
+    v22:unknown = Phi [block0:v26:undefined, block1:v28:boolean]
     v19:number = Phi [block0:v27:int32, block1:v15:number]
     v17:boolean = LessThan v19:number, 10
     Branch v17:boolean, block1, block4
@@ -292,13 +306,11 @@ block4:
 === After SsaDestructionPass ===
 function(v7:unknown):
 block0:
-    v8:string = Typeof v7:unknown
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3
 block1:
-    v12:boolean = StrictlyEquals v8:string, v8:string
     v15:number = Increment v19:number
-    ParallelCopy [v22:unknown <- v12:boolean, v19:number <- v15:number]
+    ParallelCopy [v22:unknown <- v28:boolean, v19:number <- v15:number]
     Jump block3
 block3:
     v17:boolean = LessThan v19:number, 10
@@ -309,12 +321,11 @@ block4:
 === After CopyCoalescing ===
 function(v7:unknown):
 block0:
-    v8:string = Typeof v7:unknown
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3
 block1:
-    v12:boolean = StrictlyEquals v8:string, v8:string
     v15:number = Increment v19:number
+    ParallelCopy [v22:unknown <- v28:boolean]
     Jump block3
 block3:
     v17:boolean = LessThan v19:number, 10
@@ -324,12 +335,11 @@ block4:
 
 function(v7:unknown):
 block0:
-    v8:string = Typeof v7:unknown
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3
 block1:
-    v12:boolean = StrictlyEquals v8:string, v8:string
     v15:number = Increment v19:number
+    ParallelCopy [v22:unknown <- v28:boolean]
     Jump block3
 block3:
     v17:boolean = LessThan v19:number, 10

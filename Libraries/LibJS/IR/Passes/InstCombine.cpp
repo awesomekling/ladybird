@@ -49,10 +49,18 @@ static GC::Ptr<PrimitiveString> typeof_result_for_type(Type type)
     }
 }
 
-// Check if a type is guaranteed to never be NaN when used in numeric comparisons.
+// Check if a type is guaranteed to never be NaN when used in relational comparisons.
 static bool type_cannot_be_nan(Type type)
 {
-    return type == Type::Int32 || type == Type::Boolean;
+    return type == Type::Int32 || type == Type::Boolean || type == Type::String;
+}
+
+// Check if a type is safe for self strict-equality folding (x === x → true).
+// Null and Undefined are safe here since null === null and undefined === undefined are true.
+static bool type_safe_for_self_strict_equality(Type type)
+{
+    return type == Type::Int32 || type == Type::Boolean || type == Type::String
+        || type == Type::Null || type == Type::Undefined;
 }
 
 // Returns the inverted comparison opcode if safe to invert.
@@ -735,6 +743,29 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
     case Opcode::ToBoolean:
         if (nops == 1 && op(0)->type() == Type::Boolean)
             return op(0);
+        break;
+
+    // x === x -> true, x !== x -> false when type cannot be NaN
+    case Opcode::StrictlyEquals:
+    case Opcode::StrictlyInequals:
+        if (nops == 2 && op(0) == op(1) && type_safe_for_self_strict_equality(op(0)->type())) {
+            bool result = instruction.opcode() == Opcode::StrictlyEquals;
+            return &function.create_constant(JS::Value(result));
+        }
+        break;
+
+    // x < x -> false, x > x -> false when type cannot be NaN
+    case Opcode::LessThan:
+    case Opcode::GreaterThan:
+        if (nops == 2 && op(0) == op(1) && type_cannot_be_nan(op(0)->type()))
+            return &function.create_constant(JS::Value(false));
+        break;
+
+    // x <= x -> true, x >= x -> true when type cannot be NaN
+    case Opcode::LessThanEquals:
+    case Opcode::GreaterThanEquals:
+        if (nops == 2 && op(0) == op(1) && type_cannot_be_nan(op(0)->type()))
+            return &function.create_constant(JS::Value(true));
         break;
 
     default:

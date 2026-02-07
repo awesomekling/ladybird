@@ -117,8 +117,17 @@ block0:
     v9:boolean = StrictlyEquals v5:boolean, v5:boolean
     Return v9:boolean
 
+=== After InstCombine ===
 function(v3:unknown, v4:unknown):
 block0:
     v5:boolean = StrictlyEquals v3:unknown, v4:unknown
-    v9:boolean = StrictlyEquals v5:boolean, v5:boolean
-    Return v9:boolean
+    Return true
+
+=== After DeadCodeElimination ===
+function(v3:unknown, v4:unknown):
+block0:
+    Return true
+
+function(v3:unknown, v4:unknown):
+block0:
+    Return true
