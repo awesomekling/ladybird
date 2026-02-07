@@ -4,10 +4,10 @@ block0:
     v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v0:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
@@ -15,10 +15,10 @@ block0:
     v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v0:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
@@ -26,72 +26,69 @@ block0:
     v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v0:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
 
 function():
 block0:
     v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
 
 === After SSAConstruction ===
-function():
+function(v2:unknown):
 block0:
     v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:number = Move 100000000000000000000
-    v5:int32 = ToInt32 v4:number
+    v4:boolean = StrictlyEquals v2:unknown, 1
+    v5:boolean = Move v4:boolean
+    v6:string = ToString v5:boolean
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    Return v6:int32
+    Return v2:unknown
 
 === After SCCP ===
-function():
+function(v2:unknown):
 block0:
     v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:number = Move 100000000000000000000
-    v5:int32 = ToInt32 100000000000000000000
+    v4:boolean = StrictlyEquals v2:unknown, 1
+    v5:boolean = Move v4:boolean
+    v6:string = ToString v5:boolean
     Jump block1
 block0_split0:
-    v6:int32 = Move 1661992960
-    Return 1661992960
+    Return v2:unknown
 
 === Before optimization ===
-function():
+function(v2:unknown):
 block0:
     v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:number = Move 100000000000000000000
-    v5:int32 = ToInt32 100000000000000000000
+    v4:boolean = StrictlyEquals v2:unknown, 1
+    v5:boolean = Move v4:boolean
+    v6:string = ToString v5:boolean
     Jump block1
 block0_split0:
-    v6:int32 = Move 1661992960
-    Return 1661992960
+    Return v2:unknown
 
 === After DeadCodeElimination ===
-function():
+function(v2:unknown):
 block0:
     Jump block1
 block0_split0:
-    Return 1661992960
+    Return v2:unknown
 
 === After SimplifyCFG ===
-function():
+function(v2:unknown):
 block0_split0:
-    Return 1661992960
+    Return v2:unknown
 
-function():
+function(v2:unknown):
 block0_split0:
-    Return 1661992960
+    Return v2:unknown

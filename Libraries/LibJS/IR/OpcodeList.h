@@ -62,11 +62,11 @@
     OP(Typeof,                          false, E_NONE,       false, true,  1,   Type::String,    false, 0, R_NONE) \
     OP(TypeofBinding,                   false, E_CALL,       false, true,  0,   Type::String,    false, 0, R_NONE) \
     OP(ToBoolean,                       false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
-    OP(ToNumber,                        false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_NONE) \
+    OP(ToNumber,                        false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
     OP(ToNumeric,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
-    OP(ToString,                        false, E_CALL,       false, true,  1,   Type::String,    false, 0, R_NONE) \
+    OP(ToString,                        false, E_CALL,       false, true,  1,   Type::String,    false, 0, R_PRIM) \
     OP(ToObject,                        false, E_THROW,      false, true,  1,   Type::Object,    false, 0, R_NONE) \
-    OP(ToInt32,                         false, E_CALL,       false, true,  1,   Type::Int32,     false, 0, R_NONE) \
+    OP(ToInt32,                         false, E_CALL,       false, true,  1,   Type::Int32,     false, 0, R_PRIM) \
     OP(ToLength,                        false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(Not,                             false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     OP(IsUndefined,                     false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
@@ -77,7 +77,7 @@
     OP(PostfixIncrement,                false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     OP(PostfixDecrement,                false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     /* String ops */                                                                                                                         \
-    OP(ConcatString,                    false, E_CALL,       false, true,  2,   Type::String,    false, 0, R_NONE) \
+    OP(ConcatString,                    false, E_CALL,       false, true,  2,   Type::String,    false, 0, R_PRIM) \
     /* Property access */                                                                                                                    \
     OP(GetById,                         false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetByIdWithThis,                 false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_NONE) \

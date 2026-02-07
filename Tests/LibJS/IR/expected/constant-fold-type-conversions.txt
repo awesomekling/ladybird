@@ -69,10 +69,10 @@ block0:
     v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
-    v7:int32 = Move v6:int32
-    v8:boolean = Not v7:int32
-    v9:boolean = Move v8:boolean
-    Return v9:boolean
+    v7:int32 = Move 3
+    v8:boolean = Not 3
+    v9:boolean = Move false
+    Return false
 
 === Before optimization ===
 function():
@@ -84,62 +84,19 @@ block0:
     v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
-    v7:int32 = Move v6:int32
-    v8:boolean = Not v7:int32
-    v9:boolean = Move v8:boolean
-    Return v9:boolean
+    v7:int32 = Move 3
+    v8:boolean = Not 3
+    v9:boolean = Move false
+    Return false
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
-    v7:int32 = Move v6:int32
-    v8:boolean = Not v7:int32
-    v9:boolean = Move v8:boolean
-    Return v9:boolean
-
-=== After CopyPropagation ===
-function():
-block0:
-    v6:int32 = ToInt32 3
-    Jump block1
-block0_split0:
-    v7:int32 = Move v6:int32
-    v8:boolean = Not v6:int32
-    v9:boolean = Move v8:boolean
-    Return v8:boolean
-
-=== After RedundantCheckElimination ===
-function():
-block0:
-    Jump block1
-block0_split0:
-    v7:int32 = Move 3
-    v8:boolean = Not 3
-    v9:boolean = Move v8:boolean
-    Return v8:boolean
-
-=== After InstCombine ===
-function():
-block0:
-    Jump block1
-block0_split0:
-    v7:int32 = Move 3
-    v8:boolean = Not 3
-    v9:boolean = Move false
     Return false
 
 === After SimplifyCFG ===
-function():
-block0_split0:
-    v7:int32 = Move 3
-    v8:boolean = Not 3
-    v9:boolean = Move false
-    Return false
-
-=== After DeadCodeElimination ===
 function():
 block0_split0:
     Return false
