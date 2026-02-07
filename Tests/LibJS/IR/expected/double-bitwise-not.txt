@@ -47,45 +47,45 @@ block0:
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v1:int32 = BitwiseNot v0:unknown
+    v1:unknown = BitwiseNot v0:unknown
     Jump block1
 block0_split0:
-    v2:int32 = BitwiseNot v1:int32
+    v2:unknown = BitwiseNot v1:unknown
     Jump block2
 block0_split1:
-    Return v2:int32
+    Return v2:unknown
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v1:int32 = BitwiseNot v0:unknown
+    v1:unknown = BitwiseNot v0:unknown
     Jump block1
 block0_split0:
-    v2:int32 = BitwiseNot v1:int32
+    v2:unknown = BitwiseNot v1:unknown
     Jump block2
 block0_split1:
-    Return v2:int32
+    Return v2:unknown
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v1:int32 = BitwiseNot v0:unknown
+    v1:unknown = BitwiseNot v0:unknown
     Jump block1
 block0_split0:
-    v2:int32 = BitwiseNot v1:int32
+    v2:unknown = BitwiseNot v1:unknown
     Jump block2
 block0_split1:
-    Return v2:int32
+    Return v2:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v1:int32 = BitwiseNot v0:unknown
-    v2:int32 = BitwiseNot v1:int32
-    Return v2:int32
+    v1:unknown = BitwiseNot v0:unknown
+    v2:unknown = BitwiseNot v1:unknown
+    Return v2:unknown
 
 function(v0:unknown):
 block0:
-    v1:int32 = BitwiseNot v0:unknown
-    v2:int32 = BitwiseNot v1:int32
-    Return v2:int32
+    v1:unknown = BitwiseNot v0:unknown
+    v2:unknown = BitwiseNot v1:unknown
+    Return v2:unknown

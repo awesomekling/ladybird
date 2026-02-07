@@ -39,15 +39,15 @@
     OP(Div,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
     OP(Mod,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
     OP(Exp,                             false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
-    OP(Negate,                          false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
+    OP(Negate,                          false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     OP(UnaryPlus,                       false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
     /* Bitwise (may call ToInt32 -> ToPrimitive on objects) */                                                                               \
-    OP(BitwiseAnd,                      false, E_CALL,       false, true,  2,   Type::Int32,     true,  0, R_PRIM) \
-    OP(BitwiseOr,                       false, E_CALL,       false, true,  2,   Type::Int32,     true,  0, R_PRIM) \
-    OP(BitwiseXor,                      false, E_CALL,       false, true,  2,   Type::Int32,     true,  0, R_PRIM) \
-    OP(BitwiseNot,                      false, E_CALL,       false, true,  1,   Type::Int32,     false, 0, R_PRIM) \
-    OP(LeftShift,                       false, E_CALL,       false, true,  2,   Type::Int32,     false, 0, R_PRIM) \
-    OP(RightShift,                      false, E_CALL,       false, true,  2,   Type::Int32,     false, 0, R_PRIM) \
+    OP(BitwiseAnd,                      false, E_CALL,       false, true,  2,   Type::Unknown,   true,  0, R_PRIM) \
+    OP(BitwiseOr,                       false, E_CALL,       false, true,  2,   Type::Unknown,   true,  0, R_PRIM) \
+    OP(BitwiseXor,                      false, E_CALL,       false, true,  2,   Type::Unknown,   true,  0, R_PRIM) \
+    OP(BitwiseNot,                      false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
+    OP(LeftShift,                       false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
+    OP(RightShift,                      false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_PRIM) \
     OP(UnsignedRightShift,              false, E_CALL,       false, true,  2,   Type::Number,    false, 0, R_PRIM) \
     /* Comparison (relational may call ToPrimitive, loose equality too) */                                                                   \
     OP(LessThan,                        false, E_CALL,       false, true,  2,   Type::Boolean,   false, 0, R_PRIM) \
@@ -71,11 +71,11 @@
     OP(Not,                             false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     OP(IsUndefined,                     false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     OP(IsNullish,                       false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
-    /* Increment/Decrement (may call ToNumber -> ToPrimitive) */                                                                             \
-    OP(Increment,                       false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
-    OP(Decrement,                       false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
-    OP(PostfixIncrement,                false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
-    OP(PostfixDecrement,                false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
+    /* Increment/Decrement (may call ToNumeric -> ToPrimitive) */                                                                             \
+    OP(Increment,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
+    OP(Decrement,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
+    OP(PostfixIncrement,                false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
+    OP(PostfixDecrement,                false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     /* String ops */                                                                                                                         \
     OP(ConcatString,                    false, E_CALL,       false, true,  2,   Type::String,    false, 0, R_NONE) \
     /* Property access */                                                                                                                    \

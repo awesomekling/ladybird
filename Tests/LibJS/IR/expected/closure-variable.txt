@@ -118,10 +118,10 @@ block0:
     Jump block1
 block0_split0:
     v1:unknown = ToNumeric v0:unknown
-    v2:number = Increment v1:unknown
+    v2:unknown = Increment v1:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:number
+    SetBinding count v2:unknown
     Jump block3
 block0_split2:
     Return v1:unknown
@@ -133,10 +133,10 @@ block0:
     Jump block1
 block0_split0:
     v1:unknown = ToNumeric v0:unknown
-    v2:number = Increment v1:unknown
+    v2:unknown = Increment v1:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:number
+    SetBinding count v2:unknown
     Jump block3
 block0_split2:
     Return v1:unknown
@@ -148,10 +148,10 @@ block0:
     Jump block1
 block0_split0:
     v1:unknown = ToNumeric v0:unknown
-    v2:number = Increment v1:unknown
+    v2:unknown = Increment v1:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:number
+    SetBinding count v2:unknown
     Jump block3
 block0_split2:
     Return v1:unknown
@@ -161,14 +161,14 @@ function():
 block0:
     v0:unknown = GetBinding count
     v1:unknown = ToNumeric v0:unknown
-    v2:number = Increment v1:unknown
-    SetBinding count v2:number
+    v2:unknown = Increment v1:unknown
+    SetBinding count v2:unknown
     Return v1:unknown
 
 function():
 block0:
     v0:unknown = GetBinding count
     v1:unknown = ToNumeric v0:unknown
-    v2:number = Increment v1:unknown
-    SetBinding count v2:number
+    v2:unknown = Increment v1:unknown
+    SetBinding count v2:unknown
     Return v1:unknown

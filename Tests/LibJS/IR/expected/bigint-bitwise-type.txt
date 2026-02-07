@@ -1,0 +1,94 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal bitwiseNotBigInt
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal bitwiseNotBigInt
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal bitwiseNotBigInt
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal bitwiseNotBigInt
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal bitwiseNotBigInt
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v3:bigint = Move v2:bigint
+    v4:bigint = BitwiseNot v3:bigint
+    Jump block1
+block0_split0:
+    Return v4:bigint
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v3:bigint = Move v2:bigint
+    v4:bigint = BitwiseNot v5:bigint
+    Jump block1
+block0_split0:
+    Return v4:bigint
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v3:bigint = Move v2:bigint
+    v4:bigint = BitwiseNot v5:bigint
+    Jump block1
+block0_split0:
+    Return v4:bigint
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v4:bigint = BitwiseNot v5:bigint
+    Jump block1
+block0_split0:
+    Return v4:bigint
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v4:bigint = BitwiseNot v5:bigint
+    Return v4:bigint
+
+function():
+block0:
+    v4:bigint = BitwiseNot v5:bigint
+    Return v4:bigint

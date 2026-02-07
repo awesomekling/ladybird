@@ -63,7 +63,7 @@ block3:
     v20:number = Phi [block0:v3:int32, block2:v10:number]
     v19:number = Phi [block0:v4:int32, block2:v12:number]
     v18:unknown = Phi [block0:v22:unknown, block2:v6:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v17:unknown = Phi [block0:v23:unknown, block2:v8:unknown]
     v16:unknown = Phi [block0:v24:undefined, block2:v11:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -77,11 +77,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -105,7 +105,7 @@ block3:
     v20:number = Phi [block0:v26:int32, block2:v10:number]
     v19:number = Phi [block0:v27:int32, block2:v12:number]
     v18:unknown = Phi [block0:v22:unknown, block2:v6:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v17:unknown = Phi [block0:v23:unknown, block2:v8:unknown]
     v16:unknown = Phi [block0:v24:undefined, block2:v11:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -119,11 +119,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -147,7 +147,7 @@ block3:
     v20:number = Phi [block0:v26:int32, block2:v10:number]
     v19:number = Phi [block0:v27:int32, block2:v12:number]
     v18:unknown = Phi [block0:v22:unknown, block2:v6:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v17:unknown = Phi [block0:v23:unknown, block2:v8:unknown]
     v16:unknown = Phi [block0:v24:undefined, block2:v11:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -161,11 +161,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -197,11 +197,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -219,7 +219,7 @@ block2:
     Jump block3
 block3:
     v21:number = Phi [block0:v25:int32, block2:v6:number]
-    v20:number = Phi [block0:v26:int32, block2:v8:number]
+    v20:number = Phi [block0:v26:int32, block2:v8:unknown]
     v19:number = Phi [block0:v27:int32, block2:v12:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -233,11 +233,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -254,7 +254,7 @@ block2:
     Jump block3
 block3:
     v21:number = Phi [block0:v25:int32, block2:v6:number]
-    v20:number = Phi [block0:v26:int32, block2:v8:number]
+    v20:number = Phi [block0:v26:int32, block2:v8:unknown]
     v19:number = Phi [block0:v27:int32, block2:v12:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -268,11 +268,11 @@ block1_split1:
     v7:int32 = RightShift v21:number, v19:number
     Jump block7
 block1_split2:
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     Jump block8
 block1_split3:
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     Jump block2
 block4_split4:
     Return v13:number
@@ -285,14 +285,14 @@ block1:
     v5:int32 = RightShift v20:number, v19:number
     v6:number = Sub v21:number, v5:int32
     v7:int32 = RightShift v21:number, v19:number
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     v9:number = Move v6:number
-    v10:number = Move v8:number
+    v10:number = Move v8:unknown
     v12:number = Increment v19:number
     Jump block3
 block3:
     v21:number = Phi [block0:v25:int32, block1:v6:number]
-    v20:number = Phi [block0:v26:int32, block1:v8:number]
+    v20:number = Phi [block0:v26:int32, block1:v8:unknown]
     v19:number = Phi [block0:v27:int32, block1:v12:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -308,12 +308,12 @@ block1:
     v5:int32 = RightShift v20:number, v19:number
     v6:number = Sub v21:number, v5:int32
     v7:int32 = RightShift v21:number, v19:number
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     v12:number = Increment v19:number
     Jump block3
 block3:
     v21:number = Phi [block0:v25:int32, block1:v6:number]
-    v20:number = Phi [block0:v26:int32, block1:v8:number]
+    v20:number = Phi [block0:v26:int32, block1:v8:unknown]
     v19:number = Phi [block0:v27:int32, block1:v12:number]
     v15:boolean = LessThan v19:number, v14:unknown
     Branch v15:boolean, block1, block4
@@ -330,9 +330,9 @@ block1:
     v5:int32 = RightShift v20:number, v19:number
     v6:number = Sub v21:number, v5:int32
     v7:int32 = RightShift v21:number, v19:number
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     v12:number = Increment v19:number
-    ParallelCopy [v21:number <- v6:number, v20:number <- v8:number, v19:number <- v12:number]
+    ParallelCopy [v21:number <- v6:number, v20:number <- v8:unknown, v19:number <- v12:number]
     Jump block3
 block3:
     v15:boolean = LessThan v19:number, v14:unknown
@@ -350,7 +350,7 @@ block1:
     v5:int32 = RightShift v20:number, v19:number
     v6:number = Sub v21:number, v5:int32
     v7:int32 = RightShift v21:number, v19:number
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     v12:number = Increment v19:number
     ParallelCopy [v21:number <- v6:number]
     Jump block3
@@ -369,7 +369,7 @@ block1:
     v5:int32 = RightShift v20:number, v19:number
     v6:number = Sub v21:number, v5:int32
     v7:int32 = RightShift v21:number, v19:number
-    v8:number = Add v7:int32, v20:number
+    v8:unknown = Add v7:int32, v20:number
     v12:number = Increment v19:number
     ParallelCopy [v21:number <- v6:number]
     Jump block3

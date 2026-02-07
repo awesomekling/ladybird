@@ -385,6 +385,41 @@ void Instruction::recompute_result_type()
         break;
     }
 
+    case Opcode::Negate:
+    case Opcode::Increment:
+    case Opcode::Decrement:
+    case Opcode::PostfixIncrement:
+    case Opcode::PostfixDecrement:
+        if (is_safe_numeric_type(operand_type(0)))
+            result_value->set_type(Type::Number);
+        else if (operand_type(0) == Type::BigInt)
+            result_value->set_type(Type::BigInt);
+        else
+            result_value->set_type(Type::Unknown);
+        break;
+
+    case Opcode::BitwiseNot:
+        if (is_safe_numeric_type(operand_type(0)))
+            result_value->set_type(Type::Int32);
+        else if (operand_type(0) == Type::BigInt)
+            result_value->set_type(Type::BigInt);
+        else
+            result_value->set_type(Type::Unknown);
+        break;
+
+    case Opcode::BitwiseAnd:
+    case Opcode::BitwiseOr:
+    case Opcode::BitwiseXor:
+    case Opcode::LeftShift:
+    case Opcode::RightShift:
+        if (is_safe_numeric_type(operand_type(0)) && is_safe_numeric_type(operand_type(1)))
+            result_value->set_type(Type::Int32);
+        else if (operand_type(0) == Type::BigInt && operand_type(1) == Type::BigInt)
+            result_value->set_type(Type::BigInt);
+        else
+            result_value->set_type(Type::Unknown);
+        break;
+
     case Opcode::Add:
     case Opcode::Sub:
     case Opcode::Mul:
