@@ -297,27 +297,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 auto* source = instruction.operand_count() == 0 ? nullptr : instruction.operand(0);
                 if (source && source->is_instruction() && source->defining_instruction()) {
                     auto source_opcode = source->defining_instruction()->opcode();
-                    Optional<u32> tuple_size;
-                    switch (source_opcode) {
-                    case Opcode::GetCalleeAndThisFromEnvironment:
-                    case Opcode::GetCompletionFields:
-                    case Opcode::IteratorNextUnpack:
-                        tuple_size = 2;
-                        break;
-                    case Opcode::GetIterator:
-                    case Opcode::GetObjectPropertyIterator:
-                        tuple_size = 3;
-                        break;
-                    default:
+                    auto tuple_size = opcode_tuple_arity(source_opcode);
+                    if (tuple_size == 0) {
                         report_error(ByteString::formatted(
                             "ExtractValue in block{} extracts from non-tuple {} (v{})",
                             block->index(), opcode_to_string(source_opcode), source->index()));
-                        break;
-                    }
-                    if (tuple_size.has_value() && instruction.extract_index() >= *tuple_size) {
+                    } else if (instruction.extract_index() >= tuple_size) {
                         report_error(ByteString::formatted(
                             "ExtractValue in block{} index {} out of bounds (tuple size {})",
-                            block->index(), instruction.extract_index(), *tuple_size));
+                            block->index(), instruction.extract_index(), tuple_size));
                     }
                 } else if (source && !source->is_instruction()) {
                     report_error(ByteString::formatted(
@@ -595,6 +583,25 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         // NB: Use-list entries are NOT unique per instruction. An instruction that
         // uses the same value in multiple operand positions (e.g., Add v0, v0) will
         // appear multiple times in the use list — once per operand reference.
+
+        // Check: Tuple values must only be used by ExtractValue
+        if (value->is_instruction() && value->defining_instruction()) {
+            auto tuple_arity = opcode_tuple_arity(value->defining_instruction()->opcode());
+            if (tuple_arity > 0) {
+                for (auto const& use : value->uses()) {
+                    auto* using_instruction = function.instruction_by_index(use.instruction);
+                    if (!all_instructions.contains(using_instruction))
+                        continue;
+                    if (using_instruction->opcode() != Opcode::ExtractValue) {
+                        report_error(ByteString::formatted(
+                            "Tuple value v{} (from {}) used by non-ExtractValue instruction {}",
+                            value->index(),
+                            opcode_to_string(value->defining_instruction()->opcode()),
+                            opcode_to_string(using_instruction->opcode())));
+                    }
+                }
+            }
+        }
     }
 
     // SSA dominance verification (only for reachable blocks)
