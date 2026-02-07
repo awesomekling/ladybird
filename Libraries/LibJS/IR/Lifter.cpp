@@ -892,6 +892,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         for (auto operand : op.arguments())
             args.append(&get_or_create_value_for_operand(operand, block));
         auto& result = m_builder.build_call(callee, this_value, args.span(), op.expression_string());
+        result.defining_instruction()->set_cache_index(CacheIndex { op.call_target_profile_index() });
         define_operand(op.dst(), result, block);
         break;
     }

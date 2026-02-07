@@ -1257,6 +1257,8 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, C
         executable->template_object_caches[i] = source_executable->template_object_caches[i];
     for (size_t i = 0; i < source_executable->object_shape_caches.size(); ++i)
         executable->object_shape_caches[i] = source_executable->object_shape_caches[i];
+    for (size_t i = 0; i < source_executable->call_target_profiles.size(); ++i)
+        executable->call_target_profiles[i] = source_executable->call_target_profiles[i];
 
     // Set up register/constant/argument counts
     // NB: No locals in lowered code, so registers_and_locals_count == number_of_registers

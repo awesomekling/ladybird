@@ -620,6 +620,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     }
                 }
 
+                if (opcode == Opcode::Call && has_cache_index) {
+                    if (cache_index_value >= executable->call_target_profiles.size()) {
+                        report_error(ByteString::formatted(
+                            "Call in block{} has cache_index {} but call_target_profiles size is {}",
+                            block->index(), cache_index_value, executable->call_target_profiles.size()));
+                    }
+                }
+
                 // Check: String table index range for NewTypeError
                 if (opcode == Opcode::NewTypeError) {
                     auto index = instruction.string_table_index();
