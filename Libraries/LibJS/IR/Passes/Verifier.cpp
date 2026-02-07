@@ -639,6 +639,20 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             block->index(), false_target->index()));
                     }
                 }
+
+                // Check: No critical edges in PostSSA
+                // A critical edge goes from a multi-successor block to a multi-predecessor block.
+                if (post_ssa && term->true_target_index().has_value() && term->false_target_index().has_value()) {
+                    auto check_critical = [&](BasicBlock* target) {
+                        if (target && target->predecessor_indices().size() > 1) {
+                            report_error(ByteString::formatted(
+                                "Critical edge from block{} to block{} exists after SSA destruction",
+                                block->index(), target->index()));
+                        }
+                    };
+                    check_critical(term->true_target());
+                    check_critical(term->false_target());
+                }
             }
         }
     }
