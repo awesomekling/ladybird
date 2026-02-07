@@ -365,7 +365,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse key
-        let (key, key_value) = self.parse_property_key();
+        let (key, key_value, _is_proto) = self.parse_property_key();
 
         // Method
         if self.match_token(TokenType::ParenOpen) {

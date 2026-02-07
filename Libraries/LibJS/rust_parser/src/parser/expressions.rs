@@ -799,7 +799,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse property key
-        let (key, key_value) = self.parse_property_key();
+        let (key, key_value, is_proto) = self.parse_property_key();
 
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
@@ -819,7 +819,9 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Colon) {
             self.consume();
             let value = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-            return self.builder.create_object_property(self.span_from(start), key, value, 0, false); // KeyValue = 0
+            // ProtoSetter = 4 for __proto__: value
+            let prop_type = if is_proto { 4 } else { 0 };
+            return self.builder.create_object_property(self.span_from(start), key, value, prop_type, false);
         }
 
         // Shorthand property: { x } is equivalent to { x: x }
@@ -844,42 +846,45 @@ impl<'a> Parser<'a> {
         ) || next.token_type.is_identifier_name()
     }
 
-    /// Parse a property key, returning (key_handle, shorthand_identifier_value).
-    pub(crate) fn parse_property_key(&mut self) -> (NodeHandle, Option<Vec<u16>>) {
+    /// Parse a property key, returning (key_handle, shorthand_identifier_value, is_proto).
+    pub(crate) fn parse_property_key(&mut self) -> (NodeHandle, Option<Vec<u16>>, bool) {
+        let proto_name = super::utf16_lit("__proto__");
         let start = self.position();
         match self.current_token_type() {
             TokenType::BracketOpen => {
                 self.consume();
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::BracketClose);
-                (expr, None)
+                (expr, None, false)
             }
             TokenType::StringLiteral => {
                 let tok = self.consume();
                 let value = self.parse_string_value(&tok);
-                (self.builder.create_string_literal(self.span_from(start), &value), None)
+                let is_proto = value == proto_name;
+                (self.builder.create_string_literal(self.span_from(start), &value), None, is_proto)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
                 let value_str = self.token_value(&tok);
                 let value = parse_numeric_value(value_str);
-                (self.builder.create_numeric_literal(self.span_from(start), value), None)
+                (self.builder.create_numeric_literal(self.span_from(start), value), None, false)
             }
             TokenType::PrivateIdentifier => {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                (self.builder.create_private_identifier(self.span_from(start), &value), Some(value))
+                (self.builder.create_private_identifier(self.span_from(start), &value), Some(value), false)
             }
             _ => {
                 if self.match_identifier_name() {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
+                    let is_proto = value == proto_name;
                     let key = self.builder.create_string_literal(self.span_from(start), &value);
-                    (key, Some(value))
+                    (key, Some(value), is_proto)
                 } else {
                     self.expected("property key");
                     self.consume();
-                    (self.builder.create_string_literal(self.span_from(start), &[]), None)
+                    (self.builder.create_string_literal(self.span_from(start), &[]), None, false)
                 }
             }
         }
@@ -978,10 +983,25 @@ impl<'a> Parser<'a> {
                     c if c == b'n' as u16 => result.push(b'\n' as u16),
                     c if c == b'r' as u16 => result.push(b'\r' as u16),
                     c if c == b't' as u16 => result.push(b'\t' as u16),
-                    c if c == b'0' as u16 => result.push(0),
                     c if c == b'b' as u16 => result.push(8),
                     c if c == b'f' as u16 => result.push(12),
                     c if c == b'v' as u16 => result.push(11),
+                    c if c == b'0' as u16 => {
+                        // \0 followed by a digit is an octal escape
+                        if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
+                            let (val, consumed) = parse_octal_escape(inner, i);
+                            result.push(val);
+                            i += consumed;
+                        } else {
+                            result.push(0);
+                        }
+                    }
+                    c if c >= b'1' as u16 && c <= b'7' as u16 => {
+                        // Octal escape: \1 through \377
+                        let (val, consumed) = parse_octal_escape(inner, i);
+                        result.push(val);
+                        i += consumed;
+                    }
                     c if c == b'x' as u16 => {
                         // Hex escape: \xHH
                         if i + 2 < inner.len() {
@@ -1032,6 +1052,15 @@ impl<'a> Parser<'a> {
                             result.push(inner[i]);
                         }
                     }
+                    // Line continuation: \<newline> produces nothing
+                    c if c == b'\n' as u16 => { /* skip */ }
+                    c if c == b'\r' as u16 => {
+                        // \r\n counts as one line continuation
+                        if i + 1 < inner.len() && inner[i + 1] == b'\n' as u16 {
+                            i += 1;
+                        }
+                    }
+                    c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
                     c => result.push(c),
                 }
             } else {
@@ -1186,6 +1215,29 @@ fn hex_digit(c: u16) -> Option<u16> {
     }
 }
 
+fn is_octal_char(c: u16) -> bool {
+    c >= b'0' as u16 && c <= b'7' as u16
+}
+
+/// Parse an octal escape starting at position i (pointing at the first octal digit).
+/// Returns (code_unit_value, extra_characters_consumed).
+fn parse_octal_escape(inner: &[u16], i: usize) -> (u16, usize) {
+    let first = (inner[i] - b'0' as u16) as u32;
+    let mut value = first;
+    let mut consumed = 0;
+
+    if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
+        value = value * 8 + (inner[i + 1] - b'0' as u16) as u32;
+        consumed = 1;
+
+        if i + 2 < inner.len() && is_octal_char(inner[i + 2]) && first <= 3 {
+            value = value * 8 + (inner[i + 2] - b'0' as u16) as u32;
+            consumed = 2;
+        }
+    }
+    (value as u16, consumed)
+}
+
 fn token_to_binary_op(tt: TokenType) -> u8 {
     match tt {
         TokenType::Plus => 0,      // Addition
@@ -1241,12 +1293,31 @@ fn parse_numeric_value(value: &[u16]) -> f64 {
     let s: String = value.iter().filter(|&&c| c != '_' as u16).map(|&c| c as u8 as char).collect();
 
     if s.starts_with("0x") || s.starts_with("0X") {
-        i64::from_str_radix(&s[2..], 16).unwrap_or(0) as f64
+        parse_integer_with_radix(&s[2..], 16)
     } else if s.starts_with("0o") || s.starts_with("0O") {
-        i64::from_str_radix(&s[2..], 8).unwrap_or(0) as f64
+        parse_integer_with_radix(&s[2..], 8)
     } else if s.starts_with("0b") || s.starts_with("0B") {
-        i64::from_str_radix(&s[2..], 2).unwrap_or(0) as f64
+        parse_integer_with_radix(&s[2..], 2)
+    } else if s.starts_with('0') && s.len() > 1 && s.as_bytes()[1].is_ascii_digit() {
+        // Legacy octal: 010 = 8
+        parse_integer_with_radix(&s[1..], 8)
     } else {
         s.parse::<f64>().unwrap_or(f64::NAN)
     }
+}
+
+fn parse_integer_with_radix(digits: &str, radix: u32) -> f64 {
+    // Try u64 first for most values
+    if let Ok(v) = u64::from_str_radix(digits, radix) {
+        return v as f64;
+    }
+    // For values that overflow u64, compute manually as f64
+    let mut result: f64 = 0.0;
+    for ch in digits.chars() {
+        let digit = ch.to_digit(radix);
+        if let Some(d) = digit {
+            result = result * (radix as f64) + (d as f64);
+        }
+    }
+    result
 }
