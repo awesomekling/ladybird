@@ -127,6 +127,10 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     bool force_fontconfig = false;
     bool collect_garbage_on_every_allocation = false;
     bool disable_scrollbar_painting = false;
+    bool dump_bytecode = false;
+    bool dump_ir = false;
+    bool dump_ir_passes = false;
+    u32 tier_up_threshold = 0;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("The Ladybird web browser :^)");
@@ -178,6 +182,10 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     args_parser.add_option(force_fontconfig, "Force using fontconfig for font loading", "force-fontconfig");
     args_parser.add_option(collect_garbage_on_every_allocation, "Collect garbage after every JS heap allocation", "collect-garbage-on-every-allocation", 'g');
     args_parser.add_option(disable_scrollbar_painting, "Don't paint horizontal or vertical scrollbars on the main viewport", "disable-scrollbar-painting");
+    args_parser.add_option(dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
+    args_parser.add_option(dump_ir, "Dump the IR", "dump-ir", 'I');
+    args_parser.add_option(dump_ir_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
+    args_parser.add_option(tier_up_threshold, "Tier up functions after N calls (0 = disabled)", "tier-up-threshold", 'T', "count");
     args_parser.add_option(dns_server_address, "Set the DNS server address", "dns-server", 0, "host|address");
     args_parser.add_option(dns_server_port, "Set the DNS server port", "dns-port", 0, "port (default: 53 or 853 if --dot)");
     args_parser.add_option(use_dns_over_tls, "Use DNS over TLS", "dot");
@@ -290,6 +298,10 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         .collect_garbage_on_every_allocation = collect_garbage_on_every_allocation ? CollectGarbageOnEveryAllocation::Yes : CollectGarbageOnEveryAllocation::No,
         .paint_viewport_scrollbars = disable_scrollbar_painting ? PaintViewportScrollbars::No : PaintViewportScrollbars::Yes,
         .default_time_zone = default_time_zone,
+        .dump_bytecode = dump_bytecode,
+        .dump_ir = dump_ir,
+        .dump_ir_passes = dump_ir_passes,
+        .tier_up_threshold = tier_up_threshold,
     };
 
     create_platform_options(m_browser_options, m_request_server_options, m_web_content_options);

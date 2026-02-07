@@ -135,6 +135,17 @@ static ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_proc
         arguments.append(web_content_options.default_time_zone.value());
     }
 
+    if (web_content_options.dump_bytecode)
+        arguments.append("--dump-bytecode"sv);
+    if (web_content_options.dump_ir)
+        arguments.append("--dump-ir"sv);
+    if (web_content_options.dump_ir_passes)
+        arguments.append("--dump-ir-passes"sv);
+    if (web_content_options.tier_up_threshold > 0) {
+        arguments.append("--tier-up-threshold"sv);
+        arguments.append(ByteString::number(web_content_options.tier_up_threshold));
+    }
+
     if (auto server = mach_server_name(); server.has_value()) {
         arguments.append("--mach-server-name"sv);
         arguments.append(server.value());

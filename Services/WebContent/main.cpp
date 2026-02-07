@@ -17,6 +17,7 @@
 #include <LibGfx/Font/PathFontProvider.h>
 #include <LibIPC/ConnectionFromClient.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/IR/Optimize.h>
 #include <LibMain/Main.h>
 #include <LibRequests/RequestClient.h>
 #include <LibUnicode/TimeZone.h>
@@ -101,6 +102,10 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool collect_garbage_on_every_allocation = false;
     bool is_headless = false;
     bool disable_scrollbar_painting = false;
+    bool dump_bytecode = false;
+    bool dump_ir = false;
+    bool dump_ir_passes = false;
+    u32 tier_up_threshold = 0;
     StringView echo_server_port_string_view {};
     StringView default_time_zone {};
 
@@ -123,6 +128,10 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(force_fontconfig, "Force using fontconfig for font loading", "force-fontconfig");
     args_parser.add_option(collect_garbage_on_every_allocation, "Collect garbage after every JS heap allocation", "collect-garbage-on-every-allocation");
     args_parser.add_option(disable_scrollbar_painting, "Don't paint horizontal or vertical viewport scrollbars", "disable-scrollbar-painting");
+    args_parser.add_option(dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
+    args_parser.add_option(dump_ir, "Dump the IR", "dump-ir", 'I');
+    args_parser.add_option(dump_ir_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
+    args_parser.add_option(tier_up_threshold, "Tier up functions after N calls (0 = disabled)", "tier-up-threshold", 'T', "count");
     args_parser.add_option(echo_server_port_string_view, "Echo server port used in test internals", "echo-server-port", 0, "echo_server_port");
     args_parser.add_option(is_headless, "Report that the browser is running in headless mode", "headless");
     args_parser.add_option(default_time_zone, "Default time zone", "default-time-zone", 0, "time-zone-id");
@@ -208,6 +217,11 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     if (enable_idl_tracing) {
         Web::WebIDL::set_enable_idl_tracing(true);
     }
+
+    JS::Bytecode::g_dump_bytecode = dump_bytecode;
+    JS::IR::g_dump_ir = dump_ir;
+    JS::IR::g_dump_ir_between_passes = dump_ir_passes;
+    Web::Bindings::main_thread_vm().set_tier_up_threshold(tier_up_threshold);
 
     auto maybe_content_filter_error = load_content_filters(config_path);
     if (maybe_content_filter_error.is_error())

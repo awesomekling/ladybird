@@ -174,6 +174,10 @@ struct WebContentOptions {
     Optional<u16> echo_server_port {};
     PaintViewportScrollbars paint_viewport_scrollbars { PaintViewportScrollbars::Yes };
     Optional<StringView> default_time_zone {};
+    bool dump_bytecode { false };
+    bool dump_ir { false };
+    bool dump_ir_passes { false };
+    u32 tier_up_threshold { 0 };
 };
 
 }
