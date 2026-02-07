@@ -572,12 +572,12 @@ impl<'a> Parser<'a> {
             TokenType::ExclamationMark => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 0, expr) // Not = 0
+                self.builder.create_unary_expression(self.span_from(start), 1, expr) // Not = 1
             }
             TokenType::Tilde => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 1, expr) // BitwiseNot = 1
+                self.builder.create_unary_expression(self.span_from(start), 0, expr) // BitwiseNot = 0
             }
             TokenType::Plus => {
                 self.consume();
@@ -1173,10 +1173,10 @@ fn token_to_binary_op(tt: TokenType) -> u8 {
         TokenType::Slash => 3,     // Division
         TokenType::Percent => 4,   // Modulo
         TokenType::DoubleAsterisk => 5, // Exponentiation
-        TokenType::EqualsEquals => 6,   // LooselyEquals
-        TokenType::ExclamationMarkEquals => 7, // LooselyInequals
-        TokenType::EqualsEqualsEquals => 8,    // StrictlyEquals
-        TokenType::ExclamationMarkEqualsEquals => 9, // StrictlyInequals
+        TokenType::EqualsEqualsEquals => 6,    // StrictlyEquals
+        TokenType::ExclamationMarkEqualsEquals => 7, // StrictlyInequals
+        TokenType::EqualsEquals => 8,   // LooselyEquals
+        TokenType::ExclamationMarkEquals => 9, // LooselyInequals
         TokenType::GreaterThan => 10,   // GreaterThan
         TokenType::GreaterThanEquals => 11, // GreaterThanEquals
         TokenType::LessThan => 12,      // LessThan
