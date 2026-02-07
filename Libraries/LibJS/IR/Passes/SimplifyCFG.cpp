@@ -120,12 +120,21 @@ static bool try_eliminate_empty_blocks(Function& function)
                     || pred->exception_handler() == target
                     || pred->finalizer() == target;
                 if (pred_already_reaches_target) {
+                    bool reaches_via_eh = pred->exception_handler() == target || pred->finalizer() == target;
+
                     // This predecessor can reach target both directly and via empty block
                     // Check if any phi in target would have different values for these paths
                     for (auto instruction_index : target->instructions()) {
                         auto* instruction = function.instruction_by_index(instruction_index);
                         if (instruction->opcode() != Opcode::Phi)
                             continue;
+
+                        // A block's terminator cannot target its own finalizer or exception
+                        // handler when the target has phi nodes.
+                        if (reaches_via_eh) {
+                            would_conflict = true;
+                            break;
+                        }
 
                         auto& phi = static_cast<PhiInstruction&>(*instruction);
                         auto* value_from_empty = phi.incoming_value_for(*block);
@@ -399,6 +408,17 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
             auto* pred_terminator = pred_block->terminator();
             if (pred_terminator->true_target() != block.ptr() && pred_terminator->false_target() != block.ptr())
                 continue;
+
+            // A block's terminator cannot target its own finalizer or exception
+            // handler when the target has phi nodes.
+            if (pred_block->exception_handler() == thread_target || pred_block->finalizer() == thread_target) {
+                bool target_has_phis = false;
+                thread_target->for_each_phi([&](PhiInstruction const&) {
+                    target_has_phis = true;
+                });
+                if (target_has_phis)
+                    continue;
+            }
 
             // Precompute traced phi values before redirect_edge removes pred_block
             // from the bypassed block's phis (which would break tracing).
