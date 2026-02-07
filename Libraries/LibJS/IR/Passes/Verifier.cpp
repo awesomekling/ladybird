@@ -355,6 +355,27 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             }
 
+            // Check: Builtin enum validity
+            if (instruction.opcode() == Opcode::CallBuiltin) {
+                if (instruction.builtin() == Bytecode::Builtin::__Count) {
+                    report_error(ByteString::formatted(
+                        "CallBuiltin in block{} has invalid builtin (__Count)",
+                        block->index()));
+                }
+            }
+
+            // Check: AST pointer presence
+            if (instruction.opcode() == Opcode::NewFunction && !instruction.function_node()) {
+                report_error(ByteString::formatted(
+                    "NewFunction in block{} has no function_node",
+                    block->index()));
+            }
+            if (instruction.opcode() == Opcode::NewClass && !instruction.class_expression()) {
+                report_error(ByteString::formatted(
+                    "NewClass in block{} has no class_expression",
+                    block->index()));
+            }
+
             // Check: ExtractValue source must be a tuple-producing instruction
             // and the index must be within bounds
             if (instruction.opcode() == Opcode::ExtractValue && block_is_reachable) {
