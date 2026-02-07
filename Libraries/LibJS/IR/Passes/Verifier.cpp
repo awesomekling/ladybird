@@ -114,6 +114,21 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         }
     }
 
+    // Full mode: entry is the only reachable block with no predecessors
+    if (full_mode) {
+        for (auto const& block : function.basic_blocks()) {
+            if (!reachable.get(to_index(block->index())))
+                continue;
+            if (block.ptr() == function.entry_block())
+                continue;
+            if (block->predecessor_indices().is_empty()) {
+                report_error(ByteString::formatted(
+                    "Block{} is reachable but has no predecessors (only entry block may have none)",
+                    block->index()));
+            }
+        }
+    }
+
     // Full mode: block index uniqueness
     if (full_mode) {
         HashTable<BlockIndex> seen_indices;
@@ -403,7 +418,25 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             }
 
-            // Check: PostSSA - no phi nodes allowed
+            // Check: Stage-specific instruction form rules
+            if (function.stage() == IRStage::RawCFG) {
+                if (instruction.opcode() == Opcode::Phi) {
+                    report_error(ByteString::formatted(
+                        "Phi in block{} exists in RawCFG stage (before SSA construction)",
+                        block->index()));
+                }
+                if (instruction.opcode() == Opcode::ParallelCopy) {
+                    report_error(ByteString::formatted(
+                        "ParallelCopy in block{} exists in RawCFG stage",
+                        block->index()));
+                }
+            }
+            if ((function.stage() == IRStage::SSA || function.stage() == IRStage::OptimizedSSA)
+                && instruction.opcode() == Opcode::ParallelCopy) {
+                report_error(ByteString::formatted(
+                    "ParallelCopy in block{} exists before SSA destruction",
+                    block->index()));
+            }
             if (post_ssa && instruction.opcode() == Opcode::Phi) {
                 report_error(ByteString::formatted(
                     "Phi in block{} exists after SSA destruction (stage >= PostSSA)",
@@ -418,6 +451,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                         "ParallelCopy in block{} has {} copies but {} operands",
                         block->index(), pcopy.copies().size(), pcopy.operand_count()));
                 }
+                HashTable<ValueIndex> pcopy_destinations;
                 for (size_t i = 0; i < pcopy.copies().size() && i < pcopy.operand_count(); ++i) {
                     if (pcopy.copy_src(i) != pcopy.operand(i)) {
                         report_error(ByteString::formatted(
@@ -431,6 +465,14 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             "ParallelCopy in block{} copy_dst({}) v{} is not instruction-kind",
                             block->index(), i, dst->index()));
                     }
+                    // Copy destinations must be unique within a single ParallelCopy
+                    if (dst && pcopy_destinations.contains(dst->index())) {
+                        report_error(ByteString::formatted(
+                            "ParallelCopy in block{} has duplicate destination v{}",
+                            block->index(), dst->index()));
+                    }
+                    if (dst)
+                        pcopy_destinations.set(dst->index());
                 }
             }
 
@@ -752,12 +794,25 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                         "ScheduleJump in block{} missing true_target or false_target",
                         block->index()));
                 }
+                // ScheduleJump requires the block to have a finalizer
+                if (!block->finalizer_index().has_value()) {
+                    report_error(ByteString::formatted(
+                        "ScheduleJump in block{} but block has no finalizer",
+                        block->index()));
+                }
                 // ScheduleJump's true_target must be the block's finalizer
                 if (term->true_target_index().has_value() && block->finalizer_index().has_value()
                     && *term->true_target_index() != *block->finalizer_index()) {
                     report_error(ByteString::formatted(
                         "ScheduleJump in block{} true_target (block{}) does not match finalizer (block{})",
                         block->index(), *term->true_target_index(), *block->finalizer_index()));
+                }
+                // ScheduleJump's false_target (continuation) must differ from true_target (finalizer)
+                if (term->true_target_index().has_value() && term->false_target_index().has_value()
+                    && *term->true_target_index() == *term->false_target_index()) {
+                    report_error(ByteString::formatted(
+                        "ScheduleJump in block{} has same true_target and false_target (block{})",
+                        block->index(), *term->true_target_index()));
                 }
                 break;
             case Opcode::Branch:
