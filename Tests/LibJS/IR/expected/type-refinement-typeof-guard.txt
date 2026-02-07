@@ -1,0 +1,114 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 1
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 1
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    Return v2:string
+block2:
+    Return v3:string
+
+=== After SCCP ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    Return v2:string
+block2:
+    Return v3:string
+
+=== Before optimization ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    Return v2:string
+block2:
+    Return v3:string
+
+=== After GlobalValueNumbering ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    Return v1:string
+block2:
+    Return v3:string
+
+=== After DeadCodeElimination ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    Return v1:string
+block2:
+    Return v3:string
+
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    Return v1:string
+block2:
+    Return v3:string
