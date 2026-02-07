@@ -12,6 +12,7 @@
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
 #include <LibJS/IR/Passes/GlobalValueNumbering.h>
+#include <LibJS/IR/Passes/InlineCalls.h>
 #include <LibJS/IR/Passes/InstCombine.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
@@ -60,6 +61,18 @@ CoalescingMap optimize(Function& function, SsaConstructionData ssa_construction_
 
     if (g_dump_ir_between_passes)
         dbgln("=== After {} ===\n{}", sccp_pass.name(), dump(function));
+
+    // Inlining: run once before the optimization loop so inlined code
+    // benefits from the full fixed-point optimization pipeline.
+    {
+        InlineCalls inline_pass;
+        auto inline_preserved = inline_pass.run(function, pass_manager);
+        if (!inline_preserved.is_all()) {
+            pass_manager.invalidate(inline_preserved);
+            if (g_dump_ir_between_passes)
+                dbgln("=== After {} ===\n{}", inline_pass.name(), dump(function));
+        }
+    }
 
     // Phase 3: Optimization passes
     // Dead Code Removal

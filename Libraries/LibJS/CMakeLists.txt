@@ -35,6 +35,7 @@ set(SOURCES
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp
     IR/Passes/GlobalValueNumbering.cpp
+    IR/Passes/InlineCalls.cpp
     IR/Passes/InstCombine.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
