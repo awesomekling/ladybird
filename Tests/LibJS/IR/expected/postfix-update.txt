@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -34,6 +45,22 @@ block0:
     End v2:unknown
 
 === After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:array = NewArray
+    Jump block1
+block0_split0:
+    v4:array = Move v3:array
+    v5:unknown = ToNumeric v4:array
+    v6:number = Increment v5:unknown
+    Jump block2
+block0_split1:
+    v7:unknown = Move v5:unknown
+    Return v7:unknown
+
+=== After SCCP ===
 function():
 block0:
     v1:undefined = Move undefined

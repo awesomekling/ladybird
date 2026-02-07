@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -51,60 +62,30 @@ block0_split1:
 block0_split2:
     Return v9:number
 
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 5
+    v5:number = Increment 5
+    Jump block1
+block0_split0:
+    v7:int32 = Move 3
+    v8:number = Decrement 3
+    Jump block2
+block0_split1:
+    v9:number = Add 6, 2
+    Jump block3
+block0_split2:
+    Return 8
+
 === Before optimization ===
 function():
 block0:
     v1:undefined = Move undefined
     v2:undefined = Move undefined
     v4:int32 = Move 5
-    v5:number = Increment v4:int32
-    Jump block1
-block0_split0:
-    v7:int32 = Move 3
-    v8:number = Decrement v7:int32
-    Jump block2
-block0_split1:
-    v9:number = Add v5:number, v8:number
-    Jump block3
-block0_split2:
-    Return v9:number
-
-=== After DeadCodeElimination ===
-function():
-block0:
-    v4:int32 = Move 5
-    v5:number = Increment v4:int32
-    Jump block1
-block0_split0:
-    v7:int32 = Move 3
-    v8:number = Decrement v7:int32
-    Jump block2
-block0_split1:
-    v9:number = Add v5:number, v8:number
-    Jump block3
-block0_split2:
-    Return v9:number
-
-=== After CopyPropagation ===
-function():
-block0:
-    v4:int32 = Move 5
-    v5:number = Increment 5
-    Jump block1
-block0_split0:
-    v7:int32 = Move 3
-    v8:number = Decrement 3
-    Jump block2
-block0_split1:
-    v9:number = Add v5:number, v8:number
-    Jump block3
-block0_split2:
-    Return v9:number
-
-=== After InstCombine ===
-function():
-block0:
-    v4:int32 = Move 5
     v5:number = Increment 5
     Jump block1
 block0_split0:
@@ -113,25 +94,26 @@ block0_split0:
     Jump block2
 block0_split1:
     v9:number = Add 6, 2
+    Jump block3
+block0_split2:
+    Return 8
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
     Jump block3
 block0_split2:
     Return 8
 
 === After SimplifyCFG ===
 function():
-block0:
-    v4:int32 = Move 5
-    v5:number = Increment 5
-    v7:int32 = Move 3
-    v8:number = Decrement 3
-    v9:number = Add 6, 2
-    Return 8
-
-=== After DeadCodeElimination ===
-function():
-block0:
+block0_split2:
     Return 8
 
 function():
-block0:
+block0_split2:
     Return 8

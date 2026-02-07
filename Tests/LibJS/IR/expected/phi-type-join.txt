@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -53,6 +64,26 @@ block3:
 block3_split0:
     Return v9:number
 
+=== After SCCP ===
+function(v10:unknown):
+block0:
+    v1:int32 = Move 5
+    v3:number = Move 6.5
+    v5:undefined = Move undefined
+    Branch v10:unknown, block1, block2
+block1:
+    v6:int32 = Move 5
+    Jump block3
+block2:
+    v7:number = Move 6.5
+    Jump block3
+block3:
+    v11:number = Phi [block1:v14:int32, block2:v15:number]
+    v9:number = Add v11:number, 3
+    Jump block4
+block3_split0:
+    Return v9:number
+
 === Before optimization ===
 function(v10:unknown):
 block0:
@@ -61,90 +92,16 @@ block0:
     v5:undefined = Move undefined
     Branch v10:unknown, block1, block2
 block1:
-    v6:int32 = Move v1:int32
-    Jump block3
-block2:
-    v7:number = Move v3:number
-    Jump block3
-block3:
-    v11:number = Phi [block1:v6:int32, block2:v7:number]
-    v9:number = Add v11:number, 3
-    Jump block4
-block3_split0:
-    Return v9:number
-
-=== After DeadCodeElimination ===
-function(v10:unknown):
-block0:
-    v1:int32 = Move 5
-    v3:number = Move 6.5
-    Branch v10:unknown, block1, block2
-block1:
-    v6:int32 = Move v1:int32
-    Jump block3
-block2:
-    v7:number = Move v3:number
-    Jump block3
-block3:
-    v11:number = Phi [block1:v6:int32, block2:v7:number]
-    v9:number = Add v11:number, 3
-    Jump block4
-block3_split0:
-    Return v9:number
-
-=== After CopyPropagation ===
-function(v10:unknown):
-block0:
-    v1:int32 = Move 5
-    v3:number = Move 6.5
-    Branch v10:unknown, block1, block2
-block1:
     v6:int32 = Move 5
     Jump block3
 block2:
     v7:number = Move 6.5
     Jump block3
 block3:
-    v11:number = Phi [block1:v0:int32, block2:v2:number]
+    v11:number = Phi [block1:v14:int32, block2:v15:number]
     v9:number = Add v11:number, 3
     Jump block4
 block3_split0:
-    Return v9:number
-
-=== After GlobalValueNumbering ===
-function(v10:unknown):
-block0:
-    v1:int32 = Move 5
-    v3:number = Move 6.5
-    Branch v10:unknown, block1, block2
-block1:
-    v6:int32 = Move 5
-    Jump block3
-block2:
-    v7:number = Move 6.5
-    Jump block3
-block3:
-    v11:number = Phi [block1:v0:int32, block2:v2:number]
-    v9:number = Add v11:number, 3
-    Jump block4
-block3_split0:
-    Return v9:number
-
-=== After SimplifyCFG ===
-function(v10:unknown):
-block0:
-    v1:int32 = Move 5
-    v3:number = Move 6.5
-    Branch v10:unknown, block1, block2
-block1:
-    v6:int32 = Move 5
-    Jump block3
-block2:
-    v7:number = Move 6.5
-    Jump block3
-block3:
-    v11:number = Phi [block1:v0:int32, block2:v2:number]
-    v9:number = Add v11:number, 3
     Return v9:number
 
 === After DeadCodeElimination ===
@@ -156,8 +113,10 @@ block1:
 block2:
     Jump block3
 block3:
-    v11:number = Phi [block1:v0:int32, block2:v2:number]
+    v11:number = Phi [block1:v14:int32, block2:v15:number]
     v9:number = Add v11:number, 3
+    Jump block4
+block3_split0:
     Return v9:number
 
 === After SimplifyCFG ===
@@ -167,7 +126,7 @@ block0:
 block2:
     Jump block3
 block3:
-    v11:number = Phi [block2:v2:number, block0:v0:int32]
+    v11:number = Phi [block2:v15:number, block0:v14:int32]
     v9:number = Add v11:number, 3
     Return v9:number
 
@@ -178,7 +137,7 @@ block0:
 block2:
     Jump block3
 block3:
-    v11:number = Phi [block2:v2:number, block5:v0:int32]
+    v11:number = Phi [block2:v15:number, block5:v14:int32]
     v9:number = Add v11:number, 3
     Return v9:number
 split_block0_block3:
@@ -189,24 +148,24 @@ function(v10:unknown):
 block0:
     Branch v10:unknown, block5, block2
 block2:
-    ParallelCopy [v11:number <- v2:number]
+    ParallelCopy [v11:number <- v15:number]
     Jump block3
 block3:
     v9:number = Add v11:number, 3
     Return v9:number
 split_block0_block3:
-    ParallelCopy [v11:number <- v0:int32]
+    ParallelCopy [v11:number <- v14:int32]
     Jump block3
 
 function(v10:unknown):
 block0:
     Branch v10:unknown, block5, block2
 block2:
-    ParallelCopy [v11:number <- v2:number]
+    ParallelCopy [v11:number <- v15:number]
     Jump block3
 block3:
     v9:number = Add v11:number, 3
     Return v9:number
 split_block0_block3:
-    ParallelCopy [v11:number <- v0:int32]
+    ParallelCopy [v11:number <- v14:int32]
     Jump block3

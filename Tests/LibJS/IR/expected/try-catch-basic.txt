@@ -8,17 +8,7 @@ block3:
     LeaveUnwindContext
     End v5:int32
 
-=== Before optimization ===
-function():
-block0:
-    EnterUnwindContext block3
-block3:
-    v4:int32 = Move 3
-    v5:int32 = Move v4:int32
-    LeaveUnwindContext
-    End v5:int32
-
-=== After CopyPropagation ===
+=== After SCCP ===
 function():
 block0:
     EnterUnwindContext block3
@@ -28,7 +18,7 @@ block3:
     LeaveUnwindContext
     End 3
 
-=== After GlobalValueNumbering ===
+=== Before optimization ===
 function():
 block0:
     EnterUnwindContext block3

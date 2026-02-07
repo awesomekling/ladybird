@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, true
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -55,6 +66,28 @@ block3:
 block3_split0:
     Return v9:number
 
+=== After SCCP ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    Branch v10:unknown, block1, block2
+block1:
+    v4:int32 = Move 1
+    v6:int32 = Move 2
+    Jump block3
+block2:
+    v7:int32 = Move 2
+    v8:int32 = Move 1
+    Jump block3
+block3:
+    v12:int32 = Phi [block1:v13:int32, block2:v15:int32]
+    v11:int32 = Phi [block1:v14:int32, block2:v16:int32]
+    v9:number = Sub v12:int32, v11:int32
+    Jump block4
+block3_split0:
+    Return v9:number
+
 === Before optimization ===
 function(v10:unknown):
 block0:
@@ -70,8 +103,8 @@ block2:
     v8:int32 = Move 1
     Jump block3
 block3:
-    v12:int32 = Phi [block1:v4:int32, block2:v7:int32]
-    v11:int32 = Phi [block1:v6:int32, block2:v8:int32]
+    v12:int32 = Phi [block1:v13:int32, block2:v15:int32]
+    v11:int32 = Phi [block1:v14:int32, block2:v16:int32]
     v9:number = Sub v12:int32, v11:int32
     Jump block4
 block3_split0:
@@ -82,71 +115,15 @@ function(v10:unknown):
 block0:
     Branch v10:unknown, block1, block2
 block1:
-    v4:int32 = Move 1
-    v6:int32 = Move 2
     Jump block3
 block2:
-    v7:int32 = Move 2
-    v8:int32 = Move 1
     Jump block3
 block3:
-    v12:int32 = Phi [block1:v4:int32, block2:v7:int32]
-    v11:int32 = Phi [block1:v6:int32, block2:v8:int32]
+    v12:int32 = Phi [block1:v13:int32, block2:v15:int32]
+    v11:int32 = Phi [block1:v14:int32, block2:v16:int32]
     v9:number = Sub v12:int32, v11:int32
     Jump block4
 block3_split0:
-    Return v9:number
-
-=== After CopyPropagation ===
-function(v10:unknown):
-block0:
-    Branch v10:unknown, block1, block2
-block1:
-    v4:int32 = Move 1
-    v6:int32 = Move 2
-    Jump block3
-block2:
-    v7:int32 = Move 2
-    v8:int32 = Move 1
-    Jump block3
-block3:
-    v12:int32 = Phi [block1:v3:int32, block2:v5:int32]
-    v11:int32 = Phi [block1:v5:int32, block2:v3:int32]
-    v9:number = Sub v12:int32, v11:int32
-    Jump block4
-block3_split0:
-    Return v9:number
-
-=== After SimplifyCFG ===
-function(v10:unknown):
-block0:
-    Branch v10:unknown, block1, block2
-block1:
-    v4:int32 = Move 1
-    v6:int32 = Move 2
-    Jump block3
-block2:
-    v7:int32 = Move 2
-    v8:int32 = Move 1
-    Jump block3
-block3:
-    v12:int32 = Phi [block1:v3:int32, block2:v5:int32]
-    v11:int32 = Phi [block1:v5:int32, block2:v3:int32]
-    v9:number = Sub v12:int32, v11:int32
-    Return v9:number
-
-=== After DeadCodeElimination ===
-function(v10:unknown):
-block0:
-    Branch v10:unknown, block1, block2
-block1:
-    Jump block3
-block2:
-    Jump block3
-block3:
-    v12:int32 = Phi [block1:v3:int32, block2:v5:int32]
-    v11:int32 = Phi [block1:v5:int32, block2:v3:int32]
-    v9:number = Sub v12:int32, v11:int32
     Return v9:number
 
 === After SimplifyCFG ===
@@ -156,8 +133,8 @@ block0:
 block2:
     Jump block3
 block3:
-    v12:int32 = Phi [block2:v5:int32, block0:v3:int32]
-    v11:int32 = Phi [block2:v3:int32, block0:v5:int32]
+    v12:int32 = Phi [block2:v15:int32, block0:v13:int32]
+    v11:int32 = Phi [block2:v16:int32, block0:v14:int32]
     v9:number = Sub v12:int32, v11:int32
     Return v9:number
 
@@ -168,8 +145,8 @@ block0:
 block2:
     Jump block3
 block3:
-    v12:int32 = Phi [block2:v5:int32, block5:v3:int32]
-    v11:int32 = Phi [block2:v3:int32, block5:v5:int32]
+    v12:int32 = Phi [block2:v15:int32, block5:v13:int32]
+    v11:int32 = Phi [block2:v16:int32, block5:v14:int32]
     v9:number = Sub v12:int32, v11:int32
     Return v9:number
 split_block0_block3:
@@ -180,24 +157,24 @@ function(v10:unknown):
 block0:
     Branch v10:unknown, block5, block2
 block2:
-    ParallelCopy [v12:int32 <- v5:int32, v11:int32 <- v3:int32]
+    ParallelCopy [v12:int32 <- v15:int32, v11:int32 <- v16:int32]
     Jump block3
 block3:
     v9:number = Sub v12:int32, v11:int32
     Return v9:number
 split_block0_block3:
-    ParallelCopy [v12:int32 <- v3:int32, v11:int32 <- v5:int32]
+    ParallelCopy [v12:int32 <- v13:int32, v11:int32 <- v14:int32]
     Jump block3
 
 function(v10:unknown):
 block0:
     Branch v10:unknown, block5, block2
 block2:
-    ParallelCopy [v12:int32 <- v5:int32, v11:int32 <- v3:int32]
+    ParallelCopy [v12:int32 <- v15:int32, v11:int32 <- v16:int32]
     Jump block3
 block3:
     v9:number = Sub v12:int32, v11:int32
     Return v9:number
 split_block0_block3:
-    ParallelCopy [v12:int32 <- v3:int32, v11:int32 <- v5:int32]
+    ParallelCopy [v12:int32 <- v13:int32, v11:int32 <- v14:int32]
     Jump block3

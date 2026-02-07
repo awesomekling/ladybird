@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -74,6 +85,47 @@ block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
 
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    EnterUnwindContext block7
+block2:
+    v6:number = ToNumeric v15:number
+    v7:number = Increment v6:number
+    Jump block3
+block3:
+    v16:number = Phi [block0:v18:int32, block2:v10:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
+    v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
+    v12:boolean = LessThan v15:number, 3
+    Branch v12:boolean, block1, block4
+block4:
+    Return v16:number
+block5:
+    LeaveUnwindContext
+    v9:number = Add v16:number, 1
+    Jump block11
+block6:
+    Jump block2
+block7:
+    v13:boolean = StrictlyEquals v15:number, 1
+    Branch v13:boolean, block8, block9
+block8: [finalizer: block5]
+    ScheduleJump finalizer: block5, target: block10
+block9:
+    Jump block5
+block10:
+    Return v16:number
+block5_split0:
+    v10:number = Move v9:number
+    ContinuePendingUnwind block6
+
 === Before optimization ===
 function():
 block0:
@@ -89,8 +141,8 @@ block2:
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v4:int32, block2:v10:number]
-    v15:number = Phi [block0:v5:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v10:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
@@ -118,8 +170,6 @@ block5_split0:
 === After DeadCodeElimination ===
 function():
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -128,8 +178,8 @@ block2:
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v4:int32, block2:v10:number]
-    v15:number = Phi [block0:v5:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v10:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -156,8 +206,6 @@ block5_split0:
 === After CopyPropagation ===
 function():
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -166,8 +214,8 @@ block2:
     v7:number = Increment v6:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v9:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -194,8 +242,6 @@ block5_split0:
 === After InstCombine ===
 function():
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -203,45 +249,8 @@ block2:
     v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
-block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
-block6:
-    Jump block2
-block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block9:
-    Jump block5
-block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
-
-=== After GlobalValueNumbering ===
-function():
-block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
-    Jump block3
-block1:
-    EnterUnwindContext block7
-block2:
-    v7:number = Increment v15:number
-    Jump block3
-block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v9:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -268,8 +277,6 @@ block5_split0:
 === After SimplifyCFG ===
 function():
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -277,8 +284,8 @@ block2:
     v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v9:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -306,8 +313,8 @@ block2:
     v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v9:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -334,8 +341,8 @@ block2:
     v7:number = Increment v15:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v3:int32, block2:v9:number]
-    v15:number = Phi [block0:v3:int32, block2:v7:number]
+    v16:number = Phi [block0:v18:int32, block2:v9:number]
+    v15:number = Phi [block0:v19:int32, block2:v7:number]
     v12:boolean = LessThan v15:number, 3
     Branch v12:boolean, block1, block4
 block4:
@@ -357,7 +364,7 @@ split_block7_block5:
 === After SsaDestructionPass ===
 function():
 block0:
-    ParallelCopy [v16:number <- v3:int32, v15:number <- v3:int32]
+    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -387,7 +394,7 @@ split_block7_block5:
 === After CopyCoalescing ===
 function():
 block0:
-    ParallelCopy [v16:number <- v3:int32, v15:number <- v3:int32]
+    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -416,7 +423,7 @@ split_block7_block5:
 === After PostSSACleanup ===
 function():
 block0:
-    ParallelCopy [v16:number <- v3:int32, v15:number <- v3:int32]
+    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
     Jump block3
 block1:
     EnterUnwindContext block7
@@ -442,7 +449,7 @@ block10:
 
 function():
 block0:
-    ParallelCopy [v16:number <- v3:int32, v15:number <- v3:int32]
+    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
     Jump block3
 block1:
     EnterUnwindContext block7

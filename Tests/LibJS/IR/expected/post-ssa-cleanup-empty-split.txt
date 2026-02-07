@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal loopWithBranch
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 10
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -66,6 +77,39 @@ block5_split1:
     v9:unknown = Move v8:unknown
     Jump block2
 
+=== After SCCP ===
+function(v7:unknown):
+block0:
+    v1:undefined = Move undefined
+    v3:int32 = Move 0
+    Jump block1
+block1:
+    v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
+    v16:unknown = Phi [block0:v21:int32, block2:v17:unknown]
+    v14:unknown = Phi [block0:v19:undefined, block2:v15:unknown]
+    v13:unknown = Phi [block0:v20:undefined, block2:v8:unknown]
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block2:
+    v12:boolean = GreaterThan v9:unknown, 0
+    Branch v12:boolean, block1, block3
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block6
+block5:
+    v17:unknown = Phi [block1:v16:unknown, block6:v6:number]
+    v15:unknown = Phi [block1:v14:unknown, block6:v5:unknown]
+    v8:unknown = Sub v18:unknown, 1
+    Jump block7
+block4_split0:
+    v6:number = Move v5:unknown
+    Jump block5
+block5_split1:
+    v9:unknown = Move v8:unknown
+    Jump block2
+
 === Before optimization ===
 function(v7:unknown):
 block0:
@@ -74,7 +118,7 @@ block0:
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
-    v16:unknown = Phi [block0:v3:int32, block2:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block2:v17:unknown]
     v14:unknown = Phi [block0:v19:undefined, block2:v15:unknown]
     v13:unknown = Phi [block0:v20:undefined, block2:v8:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
@@ -102,11 +146,10 @@ block5_split1:
 === After DeadCodeElimination ===
 function(v7:unknown):
 block0:
-    v3:int32 = Move 0
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block2:v9:unknown]
-    v16:unknown = Phi [block0:v3:int32, block2:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block2:v17:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
     Branch v11:boolean, block4, block5
 block2:
@@ -131,11 +174,10 @@ block5_split1:
 === After CopyPropagation ===
 function(v7:unknown):
 block0:
-    v3:int32 = Move 0
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block2:v8:unknown]
-    v16:unknown = Phi [block0:v2:int32, block2:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block2:v17:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
     Branch v11:boolean, block4, block5
 block2:
@@ -160,11 +202,10 @@ block5_split1:
 === After SimplifyCFG ===
 function(v7:unknown):
 block0:
-    v3:int32 = Move 0
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block5:v8:unknown]
-    v16:unknown = Phi [block0:v2:int32, block5:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block5:v17:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
     Branch v11:boolean, block4, block5
 block3:
@@ -186,7 +227,7 @@ block0:
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block5:v8:unknown]
-    v16:unknown = Phi [block0:v2:int32, block5:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block5:v17:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
     Branch v11:boolean, block4, block5
 block3:
@@ -206,7 +247,7 @@ block0:
     Jump block1
 block1:
     v18:unknown = Phi [block0:v7:unknown, block9:v8:unknown]
-    v16:unknown = Phi [block0:v2:int32, block9:v17:unknown]
+    v16:unknown = Phi [block0:v21:int32, block9:v17:unknown]
     v11:boolean = GreaterThan v18:unknown, 5
     Branch v11:boolean, block4, block8
 block3:
@@ -227,7 +268,7 @@ split_block5_block1:
 === After SsaDestructionPass ===
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5
@@ -252,7 +293,7 @@ split_block5_block1:
 === After CopyCoalescing ===
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5
@@ -274,7 +315,7 @@ split_block5_block1:
 === After PostSSACleanup ===
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5
@@ -291,7 +332,7 @@ block5:
 
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5

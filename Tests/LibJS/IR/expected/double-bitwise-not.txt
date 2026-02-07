@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3.7
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -34,6 +45,17 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
+function(v0:unknown):
+block0:
+    v1:int32 = BitwiseNot v0:unknown
+    Jump block1
+block0_split0:
+    v2:int32 = BitwiseNot v1:int32
+    Jump block2
+block0_split1:
+    Return v2:int32
+
+=== After SCCP ===
 function(v0:unknown):
 block0:
     v1:int32 = BitwiseNot v0:unknown

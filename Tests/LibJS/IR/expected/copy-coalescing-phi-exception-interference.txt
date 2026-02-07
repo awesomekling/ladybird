@@ -21,6 +21,29 @@ block0_split4:
 block0_split5:
     End undefined
 
+=== After SCCP ===
+function():
+block0:
+    v0:array = NewArray
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal countdown
+    Jump block2
+block0_split1:
+    v7:array = NewArray v2:string, v3:string, v4:string, v5:string, v6:string
+    Jump block3
+block0_split2:
+    v9:unknown = Call v1:unknown, undefined, v7:array
+    Jump block4
+block0_split3:
+    ArrayAppend v0:array, v9:unknown, is_spread:true
+    Jump block5
+block0_split4:
+    SetGlobal result v0:array
+    Jump block6
+block0_split5:
+    End undefined
+
 === Before optimization ===
 function():
 block0:
@@ -113,6 +136,54 @@ block5_split2:
     v18:boolean = StrictlyEquals v12:unknown, 1
     Branch v18:boolean, block6, block7
 
+=== After SCCP ===
+function(v5:unknown):
+block0:
+    v1:undefined = Move undefined
+    v14:unknown = Yield undefined, continuation: block1
+block1:
+    v3:int32 = Move 5
+    Jump block3
+block2:
+    v4:int32 = Move v8:number
+    v6:unknown = GetByValue v5:unknown, v8:number
+    Jump block10
+block3:
+    v27:number = Phi [block1:v33:int32, block6:v8:number]
+    v26:unknown = Phi [block1:v28:undefined, block6:v6:unknown]
+    v25:unknown = Phi [block1:v29:undefined, block6:v4:int32]
+    v24:unknown = Phi [block1:v30:undefined, block6:v13:unknown]
+    v23:unknown = Phi [block1:v31:undefined, block6:v12:unknown]
+    v22:unknown = Phi [block1:v32:undefined, block6:v10:unknown]
+    v21:unknown = Phi [block1:v14:unknown, block6:v15:unknown]
+    v7:number = ToNumeric v27:number
+    v8:number = Decrement v7:number
+    Jump block11
+block4:
+    v16:unknown = Yield undefined
+block5:
+    v10:unknown = Move v15:unknown
+    v11:unknown = GetCompletionFields v10:unknown
+    v12:unknown = ExtractValue v11:unknown, 0
+    v13:unknown = ExtractValue v11:unknown, 1
+    Jump block12
+block6:
+    Jump block3
+block7:
+    v19:boolean = StrictlyEquals v12:unknown, 5
+    Branch v19:boolean, block8, block9
+block8:
+    Throw v13:unknown
+block9:
+    v20:unknown = Yield v13:unknown
+block2_split0:
+    v15:unknown = Yield v6:unknown, continuation: block5
+block3_split1:
+    Branch v7:number, block2, block4
+block5_split2:
+    v18:boolean = StrictlyEquals v12:unknown, 1
+    Branch v18:boolean, block6, block7
+
 === Before optimization ===
 function(v5:unknown):
 block0:
@@ -126,7 +197,7 @@ block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     Jump block10
 block3:
-    v27:number = Phi [block1:v3:int32, block6:v8:number]
+    v27:number = Phi [block1:v33:int32, block6:v8:number]
     v26:unknown = Phi [block1:v28:undefined, block6:v6:unknown]
     v25:unknown = Phi [block1:v29:undefined, block6:v4:int32]
     v24:unknown = Phi [block1:v30:undefined, block6:v13:unknown]
@@ -166,13 +237,12 @@ function(v5:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
     Jump block3
 block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     Jump block10
 block3:
-    v27:number = Phi [block1:v3:int32, block6:v8:number]
+    v27:number = Phi [block1:v33:int32, block6:v8:number]
     v7:number = ToNumeric v27:number
     v8:number = Decrement v7:number
     Jump block11
@@ -206,13 +276,12 @@ function(v5:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
     Jump block3
 block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     Jump block10
 block3:
-    v27:number = Phi [block1:v2:int32, block6:v8:number]
+    v27:number = Phi [block1:v33:int32, block6:v8:number]
     v7:number = ToNumeric v27:number
     v8:number = Decrement v7:number
     Jump block11
@@ -246,13 +315,12 @@ function(v5:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
     Jump block3
 block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     Jump block10
 block3:
-    v27:number = Phi [block1:v2:int32, block6:v8:number]
+    v27:number = Phi [block1:v33:int32, block6:v8:number]
     v8:number = Decrement v27:number
     Jump block11
 block4:
@@ -283,15 +351,12 @@ block5_split2:
 === After SimplifyCFG ===
 function(v5:unknown):
 block0:
-    v14:unknown = Yield undefined, continuation: block1
-block1:
-    v3:int32 = Move 5
-    Jump block3
+    v14:unknown = Yield undefined, continuation: block3
 block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
-    v27:number = Phi [block1:v2:int32, block5:v8:number]
+    v27:number = Phi [block0:v33:int32, block5:v8:number]
     v8:number = Decrement v27:number
     Branch v27:number, block2, block4
 block4:
@@ -314,41 +379,12 @@ block9:
 === After DeadCodeElimination ===
 function(v5:unknown):
 block0:
-    v14:unknown = Yield undefined, continuation: block1
-block1:
-    Jump block3
-block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
-    v15:unknown = Yield v6:unknown, continuation: block5
-block3:
-    v27:number = Phi [block1:v2:int32, block5:v8:number]
-    v8:number = Decrement v27:number
-    Branch v27:number, block2, block4
-block4:
-    v16:unknown = Yield undefined
-block5:
-    v11:unknown = GetCompletionFields v15:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    v18:boolean = StrictlyEquals v12:unknown, 1
-    Branch v18:boolean, block3, block7
-block7:
-    v19:boolean = StrictlyEquals v12:unknown, 5
-    Branch v19:boolean, block8, block9
-block8:
-    Throw v13:unknown
-block9:
-    v20:unknown = Yield v13:unknown
-
-=== After SimplifyCFG ===
-function(v5:unknown):
-block0:
     v14:unknown = Yield undefined, continuation: block3
 block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
-    v27:number = Phi [block5:v8:number, block0:v2:int32]
+    v27:number = Phi [block0:v33:int32, block5:v8:number]
     v8:number = Decrement v27:number
     Branch v27:number, block2, block4
 block4:
@@ -375,7 +411,7 @@ block2:
     v6:unknown = GetByValue v5:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
-    v27:number = Phi [block0:v2:int32, block13:v8:number]
+    v27:number = Phi [block0:v33:int32, block13:v8:number]
     v8:number = Decrement v27:number
     Branch v27:number, block2, block4
 block4:
@@ -425,7 +461,7 @@ split_block5_block3:
     ParallelCopy [v27:number <- v8:number]
     Jump block3
 pcopy_block0_block3:
-    ParallelCopy [v27:number <- v2:int32]
+    ParallelCopy [v27:number <- v33:int32]
     Jump block3
 
 function(v5:unknown):
@@ -456,5 +492,5 @@ split_block5_block3:
     ParallelCopy [v27:number <- v8:number]
     Jump block3
 pcopy_block0_block3:
-    ParallelCopy [v27:number <- v2:int32]
+    ParallelCopy [v27:number <- v33:int32]
     Jump block3

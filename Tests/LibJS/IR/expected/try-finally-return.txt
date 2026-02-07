@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -34,6 +45,22 @@ block0:
     End v2:unknown
 
 === After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    EnterUnwindContext block3
+block1:
+    LeaveUnwindContext
+    v3:int32 = Move 1
+    ContinuePendingUnwind block2
+block2:
+    End undefined
+block3:
+    SetSavedReturnValue 42
+    SetException v5:unknown
+    Jump block1
+
+=== After SCCP ===
 function():
 block0:
     v1:undefined = Move undefined

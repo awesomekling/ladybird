@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v3:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal sumTo
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -60,6 +71,33 @@ block1_split0:
     v7:number = Move v6:number
     Jump block2
 
+=== After SCCP ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:number = Add v13:number, v14:number
+    Jump block5
+block2:
+    v8:number = ToNumeric v14:number
+    v9:number = Increment v8:number
+    Jump block3
+block3:
+    v14:number = Phi [block0:v17:int32, block2:v9:number]
+    v13:number = Phi [block0:v16:int32, block2:v7:number]
+    v12:unknown = Phi [block0:v15:undefined, block2:v8:number]
+    v11:boolean = LessThan v14:number, v10:unknown
+    Branch v11:boolean, block1, block4
+block4:
+    Return v13:number
+block1_split0:
+    v7:number = Move v6:number
+    Jump block2
+
 === Before optimization ===
 function(v10:unknown):
 block0:
@@ -76,8 +114,8 @@ block2:
     v9:number = Increment v8:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v5:int32, block2:v9:number]
-    v13:number = Phi [block0:v4:int32, block2:v7:number]
+    v14:number = Phi [block0:v17:int32, block2:v9:number]
+    v13:number = Phi [block0:v16:int32, block2:v7:number]
     v12:unknown = Phi [block0:v15:undefined, block2:v8:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
@@ -90,8 +128,6 @@ block1_split0:
 === After DeadCodeElimination ===
 function(v10:unknown):
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -101,8 +137,8 @@ block2:
     v9:number = Increment v8:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v5:int32, block2:v9:number]
-    v13:number = Phi [block0:v4:int32, block2:v7:number]
+    v14:number = Phi [block0:v17:int32, block2:v9:number]
+    v13:number = Phi [block0:v16:int32, block2:v7:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
 block4:
@@ -114,8 +150,6 @@ block1_split0:
 === After CopyPropagation ===
 function(v10:unknown):
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -125,8 +159,8 @@ block2:
     v9:number = Increment v8:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:number = Phi [block0:v3:int32, block2:v6:number]
+    v14:number = Phi [block0:v17:int32, block2:v9:number]
+    v13:number = Phi [block0:v16:int32, block2:v6:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
 block4:
@@ -138,8 +172,6 @@ block1_split0:
 === After InstCombine ===
 function(v10:unknown):
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -148,31 +180,8 @@ block2:
     v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:number = Phi [block0:v3:int32, block2:v6:number]
-    v11:boolean = LessThan v14:number, v10:unknown
-    Branch v11:boolean, block1, block4
-block4:
-    Return v13:number
-block1_split0:
-    v7:number = Move v6:number
-    Jump block2
-
-=== After GlobalValueNumbering ===
-function(v10:unknown):
-block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
-    Jump block3
-block1:
-    v6:number = Add v13:number, v14:number
-    Jump block5
-block2:
-    v9:number = Increment v14:number
-    Jump block3
-block3:
-    v14:number = Phi [block0:v3:int32, block2:v9:number]
-    v13:number = Phi [block0:v3:int32, block2:v6:number]
+    v14:number = Phi [block0:v17:int32, block2:v9:number]
+    v13:number = Phi [block0:v16:int32, block2:v6:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
 block4:
@@ -184,8 +193,6 @@ block1_split0:
 === After SimplifyCFG ===
 function(v10:unknown):
 block0:
-    v4:int32 = Move 0
-    v5:int32 = Move 0
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -193,8 +200,8 @@ block1:
     v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block1:v9:number]
-    v13:number = Phi [block0:v3:int32, block1:v6:number]
+    v14:number = Phi [block0:v17:int32, block1:v9:number]
+    v13:number = Phi [block0:v16:int32, block1:v6:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
 block4:
@@ -209,8 +216,8 @@ block1:
     v9:number = Increment v14:number
     Jump block3
 block3:
-    v14:number = Phi [block0:v3:int32, block1:v9:number]
-    v13:number = Phi [block0:v3:int32, block1:v6:number]
+    v14:number = Phi [block0:v17:int32, block1:v9:number]
+    v13:number = Phi [block0:v16:int32, block1:v6:number]
     v11:boolean = LessThan v14:number, v10:unknown
     Branch v11:boolean, block1, block4
 block4:
@@ -219,7 +226,7 @@ block4:
 === After SsaDestructionPass ===
 function(v10:unknown):
 block0:
-    ParallelCopy [v14:number <- v3:int32, v13:number <- v3:int32]
+    ParallelCopy [v14:number <- v17:int32, v13:number <- v16:int32]
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -235,7 +242,7 @@ block4:
 === After CopyCoalescing ===
 function(v10:unknown):
 block0:
-    ParallelCopy [v14:number <- v3:int32, v13:number <- v3:int32]
+    ParallelCopy [v14:number <- v17:int32, v13:number <- v16:int32]
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number
@@ -249,7 +256,7 @@ block4:
 
 function(v10:unknown):
 block0:
-    ParallelCopy [v14:number <- v3:int32, v13:number <- v3:int32]
+    ParallelCopy [v14:number <- v17:int32, v13:number <- v16:int32]
     Jump block3
 block1:
     v6:number = Add v13:number, v14:number

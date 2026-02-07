@@ -94,6 +94,102 @@ block5_split15:
     v26:unknown = Move v25:unknown
     Jump block2
 
+=== After SCCP ===
+function():
+block0:
+    v0:object = NewObject
+    Jump block6
+block1:
+    v45:unknown = Phi [block3:v47:unknown, block16:v46:unknown]
+    v43:unknown = Phi [block3:v48:undefined, block16:v44:unknown]
+    v41:unknown = Phi [block3:v49:undefined, block16:v42:unknown]
+    v39:unknown = Phi [block3:v50:undefined, block16:v40:unknown]
+    v37:unknown = Phi [block3:v51:undefined, block16:v38:unknown]
+    v35:unknown = Phi [block3:v52:undefined, block16:v14:unknown]
+    v33:unknown = Phi [block3:v53:undefined, block16:v13:unknown]
+    v32:unknown = Phi [block3:v54:undefined, block16:v18:unknown]
+    v31:unknown = Phi [block3:v55:undefined, block16:v17:unknown]
+    v30:unknown = Phi [block3:v56:undefined, block16:v16:unknown]
+    v28:unknown = Phi [block3:v5:unknown, block16:v29:unknown]
+    v6:unknown = GetGlobal keys
+    Jump block11
+block2:
+    v46:unknown = Phi [block17:v57:unknown, block21:v21:unknown]
+    v44:unknown = Phi [block17:v58:undefined, block21:v24:unknown]
+    v42:unknown = Phi [block17:v59:undefined, block21:v23:unknown]
+    v40:unknown = Phi [block17:v60:undefined, block21:v22:unknown]
+    v38:unknown = Phi [block17:v61:undefined, block21:v25:unknown]
+    v36:unknown = Phi [block17:v62:undefined, block21:v14:unknown]
+    v34:unknown = Phi [block17:v63:undefined, block21:v13:unknown]
+    v29:unknown = Phi [block17:v64:undefined, block21:v26:unknown]
+    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    Jump block16
+block3:
+    Jump block1
+block4:
+    v15:unknown = GetObjectPropertyIterator v5:unknown
+    v16:unknown = ExtractValue v15:unknown, 0
+    v17:unknown = ExtractValue v15:unknown, 1
+    v18:unknown = ExtractValue v15:unknown, 2
+    Jump block17
+block5:
+    v21:unknown = Move v13:unknown
+    v22:unknown = GetGlobal keys
+    Jump block18
+block0_split0:
+    InitObjectLiteralProperty v0:object, 1
+    InitObjectLiteralProperty v0:object, 2
+    InitObjectLiteralProperty v0:object, 3
+    CacheObjectShape v0:object
+    InitializeBinding obj v0:object
+    Jump block7
+block0_split1:
+    v4:array = NewArray
+    Jump block8
+block0_split2:
+    InitializeBinding keys v4:array
+    Jump block9
+block0_split3:
+    v5:unknown = GetGlobal obj
+    Jump block10
+block0_split4:
+    v27:boolean = IsNullish v5:unknown
+    Branch v27:boolean, block3, block4
+block1_split5:
+    v7:unknown = GetById v6:unknown.sort
+    Jump block12
+block1_split6:
+    v8:unknown = Call v7:unknown, v6:unknown
+    Jump block13
+block1_split7:
+    v9:unknown = GetById v8:unknown.join
+    Jump block14
+block1_split8:
+    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    Jump block15
+block1_split9:
+    End v11:unknown
+block2_split10:
+    Branch v14:unknown, block1, block5
+block4_split11:
+    v20:undefined = Move undefined
+    Jump block2
+block5_split12:
+    v23:unknown = GetById v22:unknown.push
+    Jump block19
+block5_split13:
+    ThrowIfTDZ v21:unknown
+    Jump block20
+block5_split14:
+    v24:unknown = Move v21:unknown
+    v25:unknown = Call v23:unknown, v22:unknown, v24:unknown
+    Jump block21
+block5_split15:
+    v26:unknown = Move v25:unknown
+    Jump block2
+
 === Before optimization ===
 function():
 block0:
@@ -121,7 +217,7 @@ block2:
     v38:unknown = Phi [block17:v61:undefined, block21:v25:unknown]
     v36:unknown = Phi [block17:v62:undefined, block21:v14:unknown]
     v34:unknown = Phi [block17:v63:undefined, block21:v13:unknown]
-    v29:unknown = Phi [block17:v20:undefined, block21:v26:unknown]
+    v29:unknown = Phi [block17:v64:undefined, block21:v26:unknown]
     v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
     v13:unknown = ExtractValue v12:unknown, 0
     v14:unknown = ExtractValue v12:unknown, 1

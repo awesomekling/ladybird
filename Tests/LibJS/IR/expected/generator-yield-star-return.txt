@@ -33,6 +33,41 @@ block0_split8:
 block0_split9:
     End v5:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal outer
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    SetGlobal iter v2:unknown
+    Jump block3
+block0_split2:
+    v3:unknown = GetGlobal iter
+    Jump block4
+block0_split3:
+    v4:unknown = GetById v3:unknown.next
+    Jump block5
+block0_split4:
+    v5:unknown = Call v4:unknown, v3:unknown
+    Jump block6
+block0_split5:
+    v6:unknown = GetGlobal iter
+    Jump block7
+block0_split6:
+    v7:unknown = GetById v6:unknown.return
+    Jump block8
+block0_split7:
+    v9:unknown = Call v7:unknown, v6:unknown, 42
+    Jump block9
+block0_split8:
+    SetGlobal result v9:unknown
+    Jump block10
+block0_split9:
+    End v5:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -242,6 +277,151 @@ block17_split20:
 block18_split21:
     v42:unknown = Yield v29:unknown, continuation: block3
 
+=== After SCCP ===
+function():
+block0:
+    v31:unknown = Yield undefined, continuation: block1
+block1:
+    v0:unknown = GetGlobal inner
+    Jump block19
+block2:
+    v66:unknown = Phi [block21:v68:undefined, block22:v67:unknown]
+    v64:unknown = Phi [block21:v69:undefined, block22:v65:unknown]
+    v62:unknown = Phi [block21:v70:undefined, block22:v63:unknown]
+    v60:unknown = Phi [block21:v71:undefined, block22:v61:unknown]
+    v57:unknown = Phi [block21:v72:undefined, block22:v58:unknown]
+    v55:unknown = Phi [block21:v73:undefined, block22:v56:unknown]
+    v51:unknown = Phi [block21:v74:undefined, block22:v52:unknown]
+    v48:unknown = Phi [block21:v75:undefined, block22:v49:unknown]
+    v47:unknown = Phi [block21:v78:undefined, block22:v14:unknown]
+    v46:unknown = Phi [block21:v77:int32, block22:v13:unknown]
+    v45:unknown = Phi [block21:v76:undefined, block22:v11:unknown]
+    v43:unknown = Phi [block21:v31:unknown, block22:v44:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
+block3:
+    v67:unknown = Phi [block27:v66:unknown, block35:v66:unknown, block40:v29:unknown]
+    v65:unknown = Phi [block27:v64:unknown, block35:v64:unknown, block40:v26:unknown]
+    v63:unknown = Phi [block27:v62:unknown, block35:v62:unknown, block40:v20:unknown]
+    v61:unknown = Phi [block27:v60:unknown, block35:v25:unknown, block40:v60:unknown]
+    v58:unknown = Phi [block27:v57:unknown, block35:v19:unknown, block40:v57:unknown]
+    v56:unknown = Phi [block27:v18:unknown, block35:v55:unknown, block40:v55:unknown]
+    v52:unknown = Phi [block27:v16:unknown, block35:v22:unknown, block40:v27:unknown]
+    v49:unknown = Phi [block27:v15:unknown, block35:v21:unknown, block40:v48:unknown]
+    v44:unknown = Phi [block27:v36:unknown, block35:v39:unknown, block40:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v11:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    Jump block22
+block4:
+    v59:unknown = Phi [block26:v57:unknown, block34:v19:unknown]
+    v54:unknown = Phi [block26:v17:unknown, block34:v24:unknown]
+    v53:unknown = Phi [block26:v16:unknown, block34:v22:unknown]
+    v50:unknown = Phi [block26:v15:unknown, block34:v21:unknown]
+    v33:unknown = Yield undefined
+block5:
+    v15:unknown = Call v5:unknown, v4:unknown, v47:unknown
+    Jump block23
+block6:
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
+block7:
+    v17:unknown = GetById v15:unknown.value
+    Jump block26
+block8:
+    v18:unknown = GetById v15:unknown.value
+    Jump block27
+block9:
+    v19:unknown = GetById v4:unknown.throw
+    Jump block28
+block10:
+    v20:unknown = GetById v4:unknown.return
+    Jump block29
+block11:
+    v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
+    Jump block30
+block12:
+    IteratorClose v4:unknown, v5:unknown, v51:unknown
+    Jump block33
+block13:
+    v24:unknown = GetById v21:unknown.value
+    Jump block34
+block14:
+    v25:unknown = GetById v21:unknown.value
+    Jump block35
+block15:
+    v40:unknown = Yield v47:unknown
+block16:
+    v26:unknown = Call v20:unknown, v4:unknown, v47:unknown
+    Jump block36
+block17:
+    v28:unknown = GetById v26:unknown.value
+    Jump block39
+block18:
+    v29:unknown = GetById v26:unknown.value
+    Jump block40
+block1_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block20
+block1_split1:
+    v3:unknown = GetIterator v2:unknown
+    v4:unknown = ExtractValue v3:unknown, 0
+    v5:unknown = ExtractValue v3:unknown, 1
+    v6:unknown = ExtractValue v3:unknown, 2
+    Jump block21
+block1_split2:
+    v8:int32 = Move 1
+    v9:undefined = Move undefined
+    Jump block2
+block3_split3:
+    Jump block2
+block5_split4:
+    ThrowIfNotObject v15:unknown
+    Jump block24
+block5_split5:
+    v16:unknown = GetById v15:unknown.done
+    Jump block25
+block5_split6:
+    Branch v16:unknown, block7, block8
+block7_split7:
+    Jump block4
+block8_split8:
+    v36:unknown = Yield v18:unknown, continuation: block3
+block9_split9:
+    v37:boolean = IsUndefined v19:unknown
+    Branch v37:boolean, block12, block11
+block10_split10:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
+block11_split11:
+    ThrowIfNotObject v21:unknown
+    Jump block31
+block11_split12:
+    v22:unknown = GetById v21:unknown.done
+    Jump block32
+block11_split13:
+    Branch v22:unknown, block13, block14
+block12_split14:
+    v23:unknown = NewTypeError
+    Throw v23:unknown
+block13_split15:
+    Jump block4
+block14_split16:
+    v39:unknown = Yield v25:unknown, continuation: block3
+block16_split17:
+    ThrowIfNotObject v26:unknown
+    Jump block37
+block16_split18:
+    v27:unknown = GetById v26:unknown.done
+    Jump block38
+block16_split19:
+    Branch v27:unknown, block17, block18
+block17_split20:
+    v41:unknown = Yield v28:unknown
+block18_split21:
+    v42:unknown = Yield v29:unknown, continuation: block3
+
 === Before optimization ===
 function():
 block0:
@@ -258,8 +438,8 @@ block2:
     v55:unknown = Phi [block21:v73:undefined, block22:v56:unknown]
     v51:unknown = Phi [block21:v74:undefined, block22:v52:unknown]
     v48:unknown = Phi [block21:v75:undefined, block22:v49:unknown]
-    v47:unknown = Phi [block21:v9:undefined, block22:v14:unknown]
-    v46:unknown = Phi [block21:v8:int32, block22:v13:unknown]
+    v47:unknown = Phi [block21:v78:undefined, block22:v14:unknown]
+    v46:unknown = Phi [block21:v77:int32, block22:v13:unknown]
     v45:unknown = Phi [block21:v76:undefined, block22:v11:unknown]
     v43:unknown = Phi [block21:v31:unknown, block22:v44:unknown]
     v32:boolean = StrictlyEquals v46:unknown, 1
@@ -396,8 +576,8 @@ block1:
     Jump block19
 block2:
     v51:unknown = Phi [block21:v74:undefined, block22:v52:unknown]
-    v47:unknown = Phi [block21:v9:undefined, block22:v14:unknown]
-    v46:unknown = Phi [block21:v8:int32, block22:v13:unknown]
+    v47:unknown = Phi [block21:v78:undefined, block22:v14:unknown]
+    v46:unknown = Phi [block21:v77:int32, block22:v13:unknown]
     v32:boolean = StrictlyEquals v46:unknown, 1
     Branch v32:boolean, block5, block6
 block3:
@@ -460,8 +640,6 @@ block1_split1:
     v5:unknown = ExtractValue v3:unknown, 1
     Jump block21
 block1_split2:
-    v8:int32 = Move 1
-    v9:undefined = Move undefined
     Jump block2
 block3_split3:
     Jump block2
@@ -520,8 +698,8 @@ block1:
     Jump block19
 block2:
     v51:unknown = Phi [block21:v74:undefined, block22:v52:unknown]
-    v47:unknown = Phi [block21:v1:undefined, block22:v14:unknown]
-    v46:unknown = Phi [block21:v7:int32, block22:v13:unknown]
+    v47:unknown = Phi [block21:v78:undefined, block22:v14:unknown]
+    v46:unknown = Phi [block21:v77:int32, block22:v13:unknown]
     v32:boolean = StrictlyEquals v46:unknown, 1
     Branch v32:boolean, block5, block6
 block3:
@@ -584,8 +762,6 @@ block1_split1:
     v5:unknown = ExtractValue v3:unknown, 1
     Jump block21
 block1_split2:
-    v8:int32 = Move 1
-    v9:undefined = Move undefined
     Jump block2
 block3_split3:
     Jump block2
@@ -645,13 +821,11 @@ block1:
     v3:unknown = GetIterator v2:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
-    v8:int32 = Move 1
-    v9:undefined = Move undefined
     Jump block2
 block2:
     v51:unknown = Phi [block1:v74:undefined, block3:v52:unknown]
-    v47:unknown = Phi [block1:v1:undefined, block3:v14:unknown]
-    v46:unknown = Phi [block1:v7:int32, block3:v13:unknown]
+    v47:unknown = Phi [block1:v78:undefined, block3:v14:unknown]
+    v46:unknown = Phi [block1:v77:int32, block3:v13:unknown]
     v32:boolean = StrictlyEquals v46:unknown, 1
     Branch v32:boolean, block5, block6
 block3:
@@ -728,8 +902,8 @@ block1:
     Jump block2
 block2:
     v51:unknown = Phi [block1:v74:undefined, block3:v52:unknown]
-    v47:unknown = Phi [block1:v1:undefined, block3:v14:unknown]
-    v46:unknown = Phi [block1:v7:int32, block3:v13:unknown]
+    v47:unknown = Phi [block1:v78:undefined, block3:v14:unknown]
+    v46:unknown = Phi [block1:v77:int32, block3:v13:unknown]
     v32:boolean = StrictlyEquals v46:unknown, 1
     Branch v32:boolean, block5, block6
 block3:
@@ -802,7 +976,7 @@ block1:
     v3:unknown = GetIterator v2:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
-    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v1:undefined, v46:unknown <- v7:int32]
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
     v32:boolean = StrictlyEquals v46:unknown, 1
@@ -885,7 +1059,7 @@ block1:
     v3:unknown = GetIterator v2:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
-    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v1:undefined, v46:unknown <- v7:int32]
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
     v32:boolean = StrictlyEquals v46:unknown, 1
@@ -967,7 +1141,7 @@ block1:
     v3:unknown = GetIterator v2:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
-    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v1:undefined, v46:unknown <- v7:int32]
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
     v32:boolean = StrictlyEquals v46:unknown, 1
@@ -1041,6 +1215,49 @@ pcopy_block18_block3:
     Jump block3
 
 === After SSAConstruction ===
+function():
+block0:
+    v10:unknown = Yield undefined, continuation: block1
+block1:
+    v12:unknown = Yield 10, continuation: block2
+block2:
+    v1:unknown = Move v12:unknown
+    v2:unknown = GetCompletionFields v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    Jump block12
+block3:
+    v16:unknown = Yield 20, continuation: block7
+block4:
+    v18:boolean = StrictlyEquals v3:unknown, 5
+    Branch v18:boolean, block5, block6
+block5:
+    Throw v4:unknown
+block6:
+    v19:unknown = Yield v4:unknown
+block7:
+    v5:unknown = Move v16:unknown
+    v6:unknown = GetCompletionFields v5:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Jump block13
+block8:
+    v23:unknown = Yield undefined
+block9:
+    v25:boolean = StrictlyEquals v7:unknown, 5
+    Branch v25:boolean, block10, block11
+block10:
+    Throw v8:unknown
+block11:
+    v26:unknown = Yield v8:unknown
+block2_split0:
+    v14:boolean = StrictlyEquals v3:unknown, 1
+    Branch v14:boolean, block3, block4
+block7_split1:
+    v21:boolean = StrictlyEquals v7:unknown, 1
+    Branch v21:boolean, block8, block9
+
+=== After SCCP ===
 function():
 block0:
     v10:unknown = Yield undefined, continuation: block1

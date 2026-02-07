@@ -30,13 +30,45 @@ block3_split5:
     v6:int32 = Move 1
     Jump block1
 
+=== After SCCP ===
+function():
+block0:
+    SetGlobal result 0
+    Jump block4
+block1:
+    v7:unknown = Phi [block9:v9:int32, block3:v8:undefined]
+    LeaveUnwindContext
+    v1:unknown = GetGlobal result
+    Jump block5
+block2:
+    v4:unknown = GetGlobal result
+    Jump block8
+block3: [finalizer: block1]
+    SetGlobal result 1
+    Jump block9
+block0_split0:
+    EnterUnwindContext block3
+block1_split1:
+    v3:unknown = Add v1:unknown, 10
+    Jump block6
+block1_split2:
+    SetGlobal result v3:unknown
+    Jump block7
+block1_split3:
+    ContinuePendingUnwind block2
+block2_split4:
+    End v4:unknown
+block3_split5:
+    v6:int32 = Move 1
+    Jump block1
+
 === Before optimization ===
 function():
 block0:
     SetGlobal result 0
     Jump block4
 block1:
-    v7:unknown = Phi [block9:v6:int32, block3:v8:undefined]
+    v7:unknown = Phi [block9:v9:int32, block3:v8:undefined]
     LeaveUnwindContext
     v1:unknown = GetGlobal result
     Jump block5

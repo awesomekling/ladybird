@@ -30,6 +30,38 @@ block0_split7:
 block0_split8:
     End v9:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal g
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    SetGlobal iter v2:unknown
+    Jump block3
+block0_split2:
+    v3:unknown = GetGlobal iter
+    Jump block4
+block0_split3:
+    v4:unknown = GetById v3:unknown.next
+    Jump block5
+block0_split4:
+    v5:unknown = Call v4:unknown, v3:unknown
+    Jump block6
+block0_split5:
+    v6:unknown = GetGlobal iter
+    Jump block7
+block0_split6:
+    v7:unknown = GetById v6:unknown.return
+    Jump block8
+block0_split7:
+    v9:unknown = Call v7:unknown, v6:unknown, 42
+    Jump block9
+block0_split8:
+    End v9:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -90,6 +122,55 @@ block0:
     End v9:unknown
 
 === After SSAConstruction ===
+function():
+block0:
+    v12:unknown = Yield undefined, continuation: block1
+block1:
+    EnterUnwindContext block4
+block2:
+    v22:unknown = Phi [block9:v7:unknown, block14:v9:unknown, block4:v23:undefined, block5:v7:unknown, block6:v7:unknown, block8:v7:unknown, block13:v9:unknown]
+    v21:unknown = Phi [block9:v6:unknown, block14:v6:unknown, block4:v24:undefined, block5:v6:unknown, block6:v6:unknown, block8:v6:unknown, block13:v6:unknown]
+    v20:unknown = Phi [block9:v4:unknown, block14:v8:unknown, block4:v25:undefined, block5:v4:unknown, block6:v8:unknown, block8:v4:unknown, block13:v8:unknown]
+    LeaveUnwindContext
+    v0:unknown = GetGlobal cleanup
+    Jump block10
+block3:
+    v13:unknown = Yield undefined
+block4: [finalizer: block2]
+    v15:unknown = Yield 1, continuation: block5
+block5: [finalizer: block2]
+    v4:unknown = Move v15:unknown
+    v5:unknown = GetCompletionFields v4:unknown
+    v6:unknown = ExtractValue v5:unknown, 0
+    v7:unknown = ExtractValue v5:unknown, 1
+    Jump block12
+block6: [finalizer: block2]
+    v8:unknown = GetGlobal unreachable
+    Jump block13
+block7:
+    v19:boolean = StrictlyEquals v6:unknown, 5
+    Branch v19:boolean, block8, block9
+block8: [finalizer: block2]
+    Throw v7:unknown
+block9:
+    PrepareYield v7:unknown
+    SetException v10:unknown
+    Jump block2
+block2_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block11
+block2_split1:
+    ContinuePendingUnwind block3
+block5_split2:
+    v17:boolean = StrictlyEquals v6:unknown, 1
+    Branch v17:boolean, block6, block7
+block6_split3: [finalizer: block2]
+    v9:unknown = Call v8:unknown, undefined
+    Jump block14
+block6_split4:
+    Jump block2
+
+=== After SCCP ===
 function():
 block0:
     v12:unknown = Yield undefined, continuation: block1

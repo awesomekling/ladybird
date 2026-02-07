@@ -23,6 +23,31 @@ block3_split1: [handler: block1]
     LeaveLexicalEnvironment
     Throw v5:string
 
+=== After SCCP ===
+function():
+block0:
+    EnterUnwindContext block3
+block1:
+    v0:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v1:unknown = Move v0:unknown
+    v2:unknown = Move v1:unknown
+    Jump block2
+block2:
+    End v2:unknown
+block3: [handler: block1]
+    v3:object = NewObject
+    Jump block4
+block3_split0: [handler: block1]
+    InitObjectLiteralProperty v3:object, 1
+    CacheObjectShape v3:object
+    EnterObjectEnvironment v3:object
+    Jump block5
+block3_split1: [handler: block1]
+    LeaveLexicalEnvironment
+    Throw v5:string
+
 === Before optimization ===
 function():
 block0:

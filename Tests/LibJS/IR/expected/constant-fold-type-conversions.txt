@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -48,6 +59,21 @@ block0_split0:
     v9:boolean = Move v8:boolean
     Return v9:boolean
 
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 3
+    v6:int32 = ToInt32 3
+    Jump block1
+block0_split0:
+    v7:int32 = Move v6:int32
+    v8:boolean = Not v7:int32
+    v9:boolean = Move v8:boolean
+    Return v9:boolean
+
 === Before optimization ===
 function():
 block0:
@@ -55,7 +81,7 @@ block0:
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v5:int32 = Move 3
-    v6:int32 = ToInt32 v5:int32
+    v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
     v7:int32 = Move v6:int32
@@ -66,8 +92,7 @@ block0_split0:
 === After DeadCodeElimination ===
 function():
 block0:
-    v5:int32 = Move 3
-    v6:int32 = ToInt32 v5:int32
+    v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
     v7:int32 = Move v6:int32
@@ -78,7 +103,6 @@ block0_split0:
 === After CopyPropagation ===
 function():
 block0:
-    v5:int32 = Move 3
     v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
@@ -90,7 +114,6 @@ block0_split0:
 === After InstCombine ===
 function():
 block0:
-    v5:int32 = Move 3
     v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
@@ -102,7 +125,6 @@ block0_split0:
 === After SimplifyCFG ===
 function():
 block0:
-    v5:int32 = Move 3
     v6:int32 = ToInt32 3
     v7:int32 = Move 3
     v8:boolean = Not 3

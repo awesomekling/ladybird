@@ -15,6 +15,23 @@ block0_split2:
 block0_split3:
     End v4:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal test
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal test
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -50,6 +67,43 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
+function():
+block0:
+    v0:unknown = CreateLexicalEnvironment
+    CreateVariable
+    Jump block1
+block0_split0:
+    v3:function = NewClass null, v1:string, v2:string
+    Jump block2
+block0_split1:
+    v4:function = Move v3:function
+    v5:unknown = CreateLexicalEnvironment
+    CreateVariable
+    Jump block3
+block0_split2:
+    ThrowIfTDZ v4:function
+    Jump block4
+block0_split3:
+    v7:function = NewClass v4:function, v6:string
+    Jump block5
+block0_split4:
+    v8:function = Move v7:function
+    ThrowIfTDZ v8:function
+    Jump block6
+block0_split5:
+    v9:function = Move v8:function
+    v10:object = Construct v9:function
+    Jump block7
+block0_split6:
+    v11:unknown = GetById v10:object.doTest
+    Jump block8
+block0_split7:
+    v12:unknown = Call v11:unknown, v10:object
+    Jump block9
+block0_split8:
+    Return v12:unknown
+
+=== After SCCP ===
 function():
 block0:
     v0:unknown = CreateLexicalEnvironment
@@ -265,6 +319,24 @@ block0_split2:
 block0_split3:
     Return v2:object
 
+=== After SCCP ===
+function():
+block0:
+    CreateVariable
+    Jump block1
+block0_split0:
+    v0:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v0:unknown
+    Jump block2
+block0_split1:
+    v1:unknown = GetBinding args
+    Jump block3
+block0_split2:
+    v2:object = SuperCallWithArgumentArray v1:unknown
+    Jump block4
+block0_split3:
+    Return v2:object
+
 === Before optimization ===
 function():
 block0:
@@ -307,6 +379,11 @@ function():
 block0:
     End undefined
 
+=== After SCCP ===
+function():
+block0:
+    End undefined
+
 === Before optimization ===
 function():
 block0:
@@ -317,6 +394,37 @@ block0:
     End undefined
 
 === After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    ResolveThisBinding
+    Jump block1
+block0_split0:
+    v3:unknown = ResolveSuperBase
+    Jump block2
+block0_split1:
+    v5:unknown = GetByIdWithThis v3:unknown, v4:unknown
+    Jump block3
+block0_split2:
+    v6:unknown = Move v5:unknown
+    v7:unknown = ResolveSuperBase
+    Jump block4
+block0_split3:
+    v8:unknown = GetByIdWithThis v7:unknown, v4:unknown
+    Jump block5
+block0_split4:
+    v9:unknown = Move v8:unknown
+    v10:string = Typeof v6:unknown
+    v12:unknown = Add v10:string, v11:string
+    Jump block6
+block0_split5:
+    v13:unknown = Add v12:unknown, v9:unknown
+    Jump block7
+block0_split6:
+    Return v13:unknown
+
+=== After SCCP ===
 function():
 block0:
     v1:undefined = Move undefined
@@ -477,6 +585,11 @@ block0:
     Return v13:unknown
 
 === After SSAConstruction ===
+function():
+block0:
+    Return 2
+
+=== After SCCP ===
 function():
 block0:
     Return 2

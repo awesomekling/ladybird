@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v2:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -55,6 +66,28 @@ block0_split1:
 block0_split2:
     Return v13:number
 
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v6:number = Move 1.7
+    v7:int32 = ToInt32 1.7
+    Jump block1
+block0_split0:
+    v8:int32 = Move v7:int32
+    v10:boolean = Move true
+    v11:int32 = BitwiseNot true
+    Jump block2
+block0_split1:
+    v12:int32 = Move -2
+    v13:number = Add v8:int32, -2
+    Jump block3
+block0_split2:
+    Return v13:number
+
 === Before optimization ===
 function():
 block0:
@@ -63,16 +96,16 @@ block0:
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v6:number = Move 1.7
-    v7:int32 = ToInt32 v6:number
+    v7:int32 = ToInt32 1.7
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
     v10:boolean = Move true
-    v11:int32 = BitwiseNot v10:boolean
+    v11:int32 = BitwiseNot true
     Jump block2
 block0_split1:
-    v12:int32 = Move v11:int32
-    v13:number = Add v8:int32, v12:int32
+    v12:int32 = Move -2
+    v13:number = Add v8:int32, -2
     Jump block3
 block0_split2:
     Return v13:number
@@ -80,17 +113,13 @@ block0_split2:
 === After DeadCodeElimination ===
 function():
 block0:
-    v6:number = Move 1.7
-    v7:int32 = ToInt32 v6:number
+    v7:int32 = ToInt32 1.7
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
-    v10:boolean = Move true
-    v11:int32 = BitwiseNot v10:boolean
     Jump block2
 block0_split1:
-    v12:int32 = Move v11:int32
-    v13:number = Add v8:int32, v12:int32
+    v13:number = Add v8:int32, -2
     Jump block3
 block0_split2:
     Return v13:number
@@ -98,17 +127,13 @@ block0_split2:
 === After CopyPropagation ===
 function():
 block0:
-    v6:number = Move 1.7
     v7:int32 = ToInt32 1.7
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
-    v10:boolean = Move true
-    v11:int32 = BitwiseNot true
     Jump block2
 block0_split1:
-    v12:int32 = Move v11:int32
-    v13:number = Add v7:int32, v11:int32
+    v13:number = Add v7:int32, -2
     Jump block3
 block0_split2:
     Return v13:number
@@ -116,16 +141,12 @@ block0_split2:
 === After InstCombine ===
 function():
 block0:
-    v6:number = Move 1.7
     v7:int32 = ToInt32 1.7
     Jump block1
 block0_split0:
     v8:int32 = Move 1
-    v10:boolean = Move true
-    v11:int32 = BitwiseNot true
     Jump block2
 block0_split1:
-    v12:int32 = Move -2
     v13:number = Add 1, -2
     Jump block3
 block0_split2:
@@ -134,12 +155,8 @@ block0_split2:
 === After SimplifyCFG ===
 function():
 block0:
-    v6:number = Move 1.7
     v7:int32 = ToInt32 1.7
     v8:int32 = Move 1
-    v10:boolean = Move true
-    v11:int32 = BitwiseNot true
-    v12:int32 = Move -2
     v13:number = Add 1, -2
     Return -1
 

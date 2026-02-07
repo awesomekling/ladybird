@@ -9,6 +9,17 @@ block0_split0:
 block0_split1:
     End v4:unknown
 
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v4:unknown = Call v0:unknown, undefined, 1, 2
+    Jump block2
+block0_split1:
+    End v4:unknown
+
 === Before optimization ===
 function():
 block0:
@@ -34,6 +45,18 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
+function(v3:unknown, v4:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v5:boolean = StrictlyEquals v3:unknown, v4:unknown
+    v6:boolean = Move v5:boolean
+    v7:boolean = StrictlyEquals v3:unknown, v4:unknown
+    v8:boolean = Move v7:boolean
+    v9:boolean = StrictlyEquals v6:boolean, v8:boolean
+    Return v9:boolean
+
+=== After SCCP ===
 function(v3:unknown, v4:unknown):
 block0:
     v1:undefined = Move undefined
