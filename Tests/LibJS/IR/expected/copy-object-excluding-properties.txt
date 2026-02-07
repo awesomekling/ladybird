@@ -390,6 +390,68 @@ block6_split9:
     v25:boolean = StrictlyInequals v19:unknown, undefined
     Branch v25:boolean, block7, block8
 
+=== After TypeRefinement ===
+function():
+block0:
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    InitObjectLiteralProperty v4:object, 3
+    CacheObjectShape v4:object
+    v8:object = Move v4:object
+    Jump block9
+block1:
+    Return v14:string
+block2:
+    ThrowIfTDZ v12:object
+    Jump block13
+block3:
+    Return v16:string
+block4:
+    ThrowIfTDZ v12:object
+    Jump block15
+block5:
+    Return v18:string
+block6:
+    ThrowIfTDZ v12:object
+    Jump block17
+block7:
+    Return v20:string
+block8:
+    Return v21:string
+block0_split0:
+    v9:unknown = GetById v4:object.a
+    Jump block10
+block0_split1:
+    v10:unknown = Move v9:unknown
+    v12:object = CopyObjectExcludingProperties v4:object, v11:string
+    Jump block11
+block0_split2:
+    v13:object = Move v12:object
+    ThrowIfTDZ v9:unknown
+    Jump block12
+block0_split3:
+    v22:boolean = StrictlyInequals v9:unknown, 1
+    Branch v22:boolean, block1, block2
+block2_split4:
+    v15:unknown = GetById v12:object.b
+    Jump block14
+block2_split5:
+    v23:boolean = StrictlyInequals v15:unknown, 2
+    Branch v23:boolean, block3, block4
+block4_split6:
+    v17:unknown = GetById v12:object.c
+    Jump block16
+block4_split7:
+    v24:boolean = StrictlyInequals v17:unknown, 3
+    Branch v24:boolean, block5, block6
+block6_split8:
+    v19:unknown = GetById v12:object.a
+    Jump block18
+block6_split9:
+    v25:boolean = StrictlyInequals v19:unknown, undefined
+    Branch v25:boolean, block7, block8
+
 === After SimplifyCFG ===
 function():
 block0:
@@ -399,7 +461,6 @@ block0:
     InitObjectLiteralProperty v4:object, 3
     CacheObjectShape v4:object
     v8:object = Move v4:object
-    ThrowIfNullish v4:object
     v9:unknown = GetById v4:object.a
     v10:unknown = Move v9:unknown
     v12:object = CopyObjectExcludingProperties v4:object, v11:string
@@ -441,7 +502,6 @@ block0:
     InitObjectLiteralProperty v4:object, 2
     InitObjectLiteralProperty v4:object, 3
     CacheObjectShape v4:object
-    ThrowIfNullish v4:object
     v9:unknown = GetById v4:object.a
     v12:object = CopyObjectExcludingProperties v4:object, v11:string
     ThrowIfTDZ v9:unknown
@@ -480,7 +540,6 @@ block0:
     InitObjectLiteralProperty v4:object, 2
     InitObjectLiteralProperty v4:object, 3
     CacheObjectShape v4:object
-    ThrowIfNullish v4:object
     v9:unknown = GetById v4:object.a
     v12:object = CopyObjectExcludingProperties v4:object, v11:string
     ThrowIfTDZ v9:unknown

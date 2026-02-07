@@ -22,6 +22,7 @@
 #include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
 #include <LibJS/IR/Passes/SsaDestructionPass.h>
+#include <LibJS/IR/Passes/TypeRefinement.h>
 
 namespace JS::IR {
 
@@ -64,6 +65,7 @@ void optimize(Function& function)
 
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
+    pass_manager.add_pass(make<TypeRefinement>());
     pass_manager.add_pass(make<InstCombine>());
 
     // Global Optimizations

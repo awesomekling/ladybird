@@ -95,6 +95,40 @@ block3:
 block4:
     Return v5:string
 
+=== After TypeRefinement ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v7:boolean = StrictlyEquals v1:string, v6:string
+    Branch v7:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    v9:boolean = StrictlyEquals v10:string, v8:string
+    Branch v9:boolean, block3, block4
+block2:
+    Return v3:string
+block3:
+    Return v4:string
+block4:
+    Return v5:string
+
+=== After InstCombine ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v7:boolean = StrictlyEquals v1:string, v6:string
+    Branch v7:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    v9:boolean = StrictlyEquals v10:string, v8:string
+    Branch false, block3, block4
+block2:
+    Return v3:string
+block3:
+    Return v4:string
+block4:
+    Return v5:string
+
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
@@ -103,14 +137,27 @@ block0:
     Branch v7:boolean, block1, block2
 block1:
     v2:string = Typeof v0:unknown
-    v9:boolean = StrictlyEquals v1:string, v8:string
-    Branch v9:boolean, block3, block4
+    v9:boolean = StrictlyEquals v10:string, v8:string
+    Branch false, block3, block4
 block2:
     Return v3:string
 block3:
     Return v4:string
 block4:
     Return v5:string
+
+=== After SimplifyCFG ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v7:boolean = StrictlyEquals v1:string, v6:string
+    Branch v7:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    v9:boolean = StrictlyEquals v10:string, v8:string
+    Return v5:string
+block2:
+    Return v3:string
 
 === After DeadCodeElimination ===
 function(v0:unknown):
@@ -119,14 +166,9 @@ block0:
     v7:boolean = StrictlyEquals v1:string, v6:string
     Branch v7:boolean, block1, block2
 block1:
-    v9:boolean = StrictlyEquals v1:string, v8:string
-    Branch v9:boolean, block3, block4
+    Return v5:string
 block2:
     Return v3:string
-block3:
-    Return v4:string
-block4:
-    Return v5:string
 
 function(v0:unknown):
 block0:
@@ -134,11 +176,6 @@ block0:
     v7:boolean = StrictlyEquals v1:string, v6:string
     Branch v7:boolean, block1, block2
 block1:
-    v9:boolean = StrictlyEquals v1:string, v8:string
-    Branch v9:boolean, block3, block4
+    Return v5:string
 block2:
     Return v3:string
-block3:
-    Return v4:string
-block4:
-    Return v5:string

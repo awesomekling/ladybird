@@ -80,6 +80,18 @@ block1:
 block2:
     Return v3:string
 
+=== After TypeRefinement ===
+function(v0:unknown):
+block0:
+    v1:string = Typeof v0:unknown
+    v5:boolean = StrictlyEquals v1:string, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v2:string = Typeof v0:unknown
+    Return v6:string
+block2:
+    Return v3:string
+
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
@@ -88,7 +100,7 @@ block0:
     Branch v5:boolean, block1, block2
 block1:
     v2:string = Typeof v0:unknown
-    Return v1:string
+    Return v6:string
 block2:
     Return v3:string
 
@@ -99,7 +111,7 @@ block0:
     v5:boolean = StrictlyEquals v1:string, v4:string
     Branch v5:boolean, block1, block2
 block1:
-    Return v1:string
+    Return v6:string
 block2:
     Return v3:string
 
@@ -109,6 +121,6 @@ block0:
     v5:boolean = StrictlyEquals v1:string, v4:string
     Branch v5:boolean, block1, block2
 block1:
-    Return v1:string
+    Return v6:string
 block2:
     Return v3:string

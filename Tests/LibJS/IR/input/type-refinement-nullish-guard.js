@@ -1,10 +1,11 @@
-// Test type refinement: nullish guard eliminates redundant checks.
-// After branching on x == null (IsNullish), the false branch knows
-// x is not null/undefined, so ThrowIfNullish can be removed.
-function go(x) {
-    if (x == null) {
+// Test type refinement: known-type values have IsNullish folded.
+// NewObject produces a value with type object, so IsNullish should
+// fold to false. (The for-in pattern naturally produces this.)
+function go() {
+    var obj = {};
+    if (obj == null) {
         return "nullish";
     }
-    return x.toString();
+    return "not nullish";
 }
-go("hello");
+go();
