@@ -771,6 +771,62 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 block->index()));
         }
 
+        // Full mode: catch block structural rules
+        // A block containing a Catch instruction is an exception handler and should
+        // only be entered via exception edges, never via normal control flow.
+        if (full_mode && block_is_reachable) {
+            bool has_catch = false;
+            bool catch_is_first_non_phi = true;
+            bool seen_non_phi_non_catch = false;
+            size_t catch_count = 0;
+            block->for_each_instruction([&](Instruction const& instruction) {
+                if (instruction.opcode() == Opcode::Catch) {
+                    ++catch_count;
+                    has_catch = true;
+                    if (seen_non_phi_non_catch)
+                        catch_is_first_non_phi = false;
+                } else if (instruction.opcode() != Opcode::Phi) {
+                    seen_non_phi_non_catch = true;
+                }
+            });
+            if (catch_count > 1) {
+                report_error(ByteString::formatted(
+                    "Block{} has {} Catch instructions (at most 1 allowed)",
+                    block->index(), catch_count));
+            }
+            if (has_catch && !catch_is_first_non_phi) {
+                report_error(ByteString::formatted(
+                    "Block{} has Catch instruction that is not the first non-phi instruction",
+                    block->index()));
+            }
+            if (has_catch && block.ptr() == function.entry_block()) {
+                report_error(ByteString::formatted(
+                    "Entry block (block{}) contains a Catch instruction",
+                    block->index()));
+            }
+            if (has_catch) {
+                // Every predecessor must reach this block via an exception_handler edge,
+                // not via a normal terminator target.
+                for (auto pred_index : block->predecessor_indices()) {
+                    auto* pred = function.block_by_index(pred_index);
+                    if (!pred)
+                        continue;
+                    if (pred->exception_handler() != block.ptr()) {
+                        report_error(ByteString::formatted(
+                            "Catch block{} has predecessor block{} that does not have it as exception_handler",
+                            block->index(), pred_index));
+                    }
+                    if (auto* term = pred->terminator()) {
+                        if (term->true_target() == block.ptr() || term->false_target() == block.ptr()) {
+                            report_error(ByteString::formatted(
+                                "Catch block{} is a normal terminator target of predecessor block{}",
+                                block->index(), pred_index));
+                        }
+                    }
+                }
+            }
+        }
+
         // Check: Terminator target shape matches opcode
         if (auto* term = block->terminator()) {
             switch (term->opcode()) {
