@@ -125,7 +125,35 @@ PreservedAnalyses AggressiveDeadCodeElimination::run(Function& function, PassMan
         }
     }
 
-    // Step 3: Remove dead code.
+    // Step 3: Safety net — if a dead branch has no post-dominator (and
+    // thus can't be converted to a jump), mark it live so its operands
+    // survive the instruction removal phase.
+    for (auto const& block : function.basic_blocks()) {
+        auto* terminator = block->terminator();
+        if (!terminator || terminator->opcode() != Opcode::Branch)
+            continue;
+        if (live_instructions.get(to_index(terminator->index())))
+            continue;
+        auto* post_dominator = post_dominator_tree.immediate_post_dominator(block.ptr());
+        if (post_dominator)
+            continue;
+        // This branch is dead but can't be converted. Mark it and its
+        // operands live so the branch condition is not removed.
+        live_instructions.set(to_index(terminator->index()), true);
+        for (size_t i = 0; i < terminator->operand_count(); ++i) {
+            auto* operand = terminator->operand(i);
+            if (!operand)
+                continue;
+            auto* defining_instruction = operand->defining_instruction();
+            if (!defining_instruction)
+                continue;
+            auto defining_index = to_index(defining_instruction->index());
+            if (defining_index < max_instruction_index)
+                live_instructions.set(defining_index, true);
+        }
+    }
+
+    // Step 4: Remove dead code.
     bool removed_instructions = false;
     bool converted_branches = false;
 
@@ -146,12 +174,6 @@ PreservedAnalyses AggressiveDeadCodeElimination::run(Function& function, PassMan
             if (live_instructions.get(to_index(instruction.index())))
                 continue;
 
-            // Skip Phi instructions - they don't have results in the normal sense
-            // but are needed for SSA correctness. Dead phis will be cleaned up
-            // by regular DCE.
-            if (instruction.opcode() == Opcode::Phi)
-                continue;
-
             if (!instruction.result())
                 continue;
 
@@ -168,9 +190,11 @@ PreservedAnalyses AggressiveDeadCodeElimination::run(Function& function, PassMan
         if (live_instructions.get(to_index(terminator->index())))
             continue;
 
-        // The branch is dead. Replace it with a jump to the immediate
-        // post-dominator, which is guaranteed to be the block that would
-        // execute regardless of the branch direction.
+        // The branch is dead — no live instruction depends on which
+        // path is taken. Replace it with an unconditional jump to one
+        // of the targets. We prefer the immediate post-dominator when
+        // it is a direct target; otherwise we jump to the true target
+        // and let SimplifyCFG clean up the resulting chain.
         auto* post_dominator = post_dominator_tree.immediate_post_dominator(block.ptr());
         if (!post_dominator)
             continue;
@@ -178,20 +202,15 @@ PreservedAnalyses AggressiveDeadCodeElimination::run(Function& function, PassMan
         auto* true_target = terminator->true_target();
         auto* false_target = terminator->false_target();
 
-        if (post_dominator == true_target) {
-            // Post-dominator is the true target: remove false edge.
-            CFG::replace_branch_with_jump(*block, *true_target, false_target);
+        if (true_target == false_target) {
+            // Both targets are the same block — just replace with a jump.
+            // Don't remove any predecessor since the single edge is kept.
+            block->remove_terminator();
+            block->append(JumpInstruction::create(*true_target));
         } else if (post_dominator == false_target) {
-            // Post-dominator is the false target: remove true edge.
             CFG::replace_branch_with_jump(*block, *false_target, true_target);
         } else {
-            // Post-dominator is a third block that both paths converge to.
-            // Remove both edges and add a new edge to the post-dominator.
-            block->remove_terminator();
-            CFG::remove_predecessor(*true_target, *block);
-            CFG::remove_predecessor(*false_target, *block);
-            block->append(JumpInstruction::create(*post_dominator));
-            CFG::add_predecessor(*post_dominator, *block);
+            CFG::replace_branch_with_jump(*block, *true_target, false_target);
         }
         converted_branches = true;
     }

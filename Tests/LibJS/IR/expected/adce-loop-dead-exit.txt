@@ -1,0 +1,394 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 3
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 3
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v19:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
+    Jump block1
+block1:
+    v29:number = Phi [block0:v5:int32, block9:v12:number]
+    v27:unknown = Phi [block0:v30:undefined, block9:v8:number]
+    v26:unknown = Phi [block0:v31:undefined, block9:v7:unknown]
+    v25:unknown = Phi [block0:v32:undefined, block9:v6:unknown]
+    v23:unknown = Phi [block0:v33:undefined, block9:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    v14:number = Add v29:number, 100
+    Jump block10
+block4:
+    v17:number = Mul v15:number, 2
+    Jump block11
+block5:
+    v28:unknown = Phi [block10:v2:undefined, block11:v18:number]
+    v24:unknown = Phi [block10:v23:unknown, block11:v17:number]
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v8:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    v15:number = Move v14:number
+    v22:boolean = GreaterThan v15:number, 200
+    Branch v22:boolean, block4, block5
+block4_split5:
+    v18:number = Move v17:number
+    Jump block5
+
+=== After SCCP ===
+function(v19:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block9:v12:number]
+    v27:unknown = Phi [block0:v30:undefined, block9:v8:number]
+    v26:unknown = Phi [block0:v31:undefined, block9:v7:unknown]
+    v25:unknown = Phi [block0:v32:undefined, block9:v6:unknown]
+    v23:unknown = Phi [block0:v33:undefined, block9:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    v14:number = Add v29:number, 100
+    Jump block10
+block4:
+    v17:number = Mul v15:number, 2
+    Jump block11
+block5:
+    v28:unknown = Phi [block10:v34:undefined, block11:v18:number]
+    v24:unknown = Phi [block10:v23:unknown, block11:v17:number]
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v8:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    v15:number = Move v14:number
+    v22:boolean = GreaterThan v15:number, 200
+    Branch v22:boolean, block4, block5
+block4_split5:
+    v18:number = Move v17:number
+    Jump block5
+
+=== Before optimization ===
+function(v19:unknown):
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block9:v12:number]
+    v27:unknown = Phi [block0:v30:undefined, block9:v8:number]
+    v26:unknown = Phi [block0:v31:undefined, block9:v7:unknown]
+    v25:unknown = Phi [block0:v32:undefined, block9:v6:unknown]
+    v23:unknown = Phi [block0:v33:undefined, block9:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    v14:number = Add v29:number, 100
+    Jump block10
+block4:
+    v17:number = Mul v15:number, 2
+    Jump block11
+block5:
+    v28:unknown = Phi [block10:v34:undefined, block11:v18:number]
+    v24:unknown = Phi [block10:v23:unknown, block11:v17:number]
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v8:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    v15:number = Move v14:number
+    v22:boolean = GreaterThan v15:number, 200
+    Branch v22:boolean, block4, block5
+block4_split5:
+    v18:number = Move v17:number
+    Jump block5
+
+=== After DeadCodeElimination ===
+function(v19:unknown):
+block0:
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block9:v12:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    v14:number = Add v29:number, 100
+    Jump block10
+block4:
+    Jump block11
+block5:
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v8:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    v15:number = Move v14:number
+    v22:boolean = GreaterThan v15:number, 200
+    Branch v22:boolean, block4, block5
+block4_split5:
+    Jump block5
+
+=== After AggressiveDeadCodeElimination ===
+function(v19:unknown):
+block0:
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block9:v12:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    Jump block10
+block4:
+    Jump block11
+block5:
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v8:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    Jump block5
+block4_split5:
+    Jump block5
+
+=== After CopyPropagation ===
+function(v19:unknown):
+block0:
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block9:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block3
+block2:
+    v6:unknown = GetGlobal console
+    Jump block6
+block3:
+    Jump block10
+block4:
+    Jump block11
+block5:
+    Return v29:number
+block2_split0:
+    v7:unknown = GetById v6:unknown.log
+    Jump block7
+block2_split1:
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    Jump block8
+block2_split2:
+    v11:number = Add v29:number, 1
+    Jump block9
+block2_split3:
+    v12:number = Move v11:number
+    Jump block1
+block3_split4:
+    Jump block5
+block4_split5:
+    Jump block5
+
+=== After SimplifyCFG ===
+function(v19:unknown):
+block0:
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block2:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block5
+block2:
+    v6:unknown = GetGlobal console
+    v7:unknown = GetById v6:unknown.log
+    v8:number = Move v29:number
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    v11:number = Add v29:number, 1
+    v12:number = Move v11:number
+    Jump block1
+block5:
+    Return v29:number
+
+=== After DeadCodeElimination ===
+function(v19:unknown):
+block0:
+    Jump block1
+block1:
+    v29:number = Phi [block0:v35:int32, block2:v11:number]
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block5
+block2:
+    v6:unknown = GetGlobal console
+    v7:unknown = GetById v6:unknown.log
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    v11:number = Add v29:number, 1
+    Jump block1
+block5:
+    Return v29:number
+
+=== After SsaDestructionPass ===
+function(v19:unknown):
+block0:
+    ParallelCopy [v29:number <- v35:int32]
+    Jump block1
+block1:
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block5
+block2:
+    v6:unknown = GetGlobal console
+    v7:unknown = GetById v6:unknown.log
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    v11:number = Add v29:number, 1
+    ParallelCopy [v29:number <- v11:number]
+    Jump block1
+block5:
+    Return v29:number
+
+=== After CopyCoalescing ===
+function(v19:unknown):
+block0:
+    ParallelCopy [v29:number <- v35:int32]
+    Jump block1
+block1:
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block5
+block2:
+    v6:unknown = GetGlobal console
+    v7:unknown = GetById v6:unknown.log
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    v11:number = Add v29:number, 1
+    Jump block1
+block5:
+    Return v29:number
+
+function(v19:unknown):
+block0:
+    ParallelCopy [v29:number <- v35:int32]
+    Jump block1
+block1:
+    v20:boolean = LessThan v29:number, v19:unknown
+    Branch v20:boolean, block2, block5
+block2:
+    v6:unknown = GetGlobal console
+    v7:unknown = GetById v6:unknown.log
+    v9:unknown = Call v7:unknown, v6:unknown, v29:number
+    v11:number = Add v29:number, 1
+    Jump block1
+block5:
+    Return v29:number
+
+0
+1
+2

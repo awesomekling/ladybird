@@ -31,7 +31,9 @@ static Vector<BasicBlock*> build_block_index_table(Function const& function, siz
     return table;
 }
 
-// Returns true if this block is an exit block (Return, End, or Throw terminator).
+// Returns true if this block is an exit block — a point where control
+// may leave the function. Yield is included because generators can be
+// abandoned without resuming, making every yield a potential exit.
 static bool is_exit_block(BasicBlock const& block)
 {
     auto* terminator = block.terminator();
@@ -41,6 +43,7 @@ static bool is_exit_block(BasicBlock const& block)
     case Opcode::Return:
     case Opcode::End:
     case Opcode::Throw:
+    case Opcode::Yield:
         return true;
     default:
         return false;

@@ -1,0 +1,121 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 5
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v3:unknown = Call v0:unknown, undefined, 5
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block2
+block1:
+    v3:int32 = Move 1
+    Return v3:int32
+block2:
+    v5:int32 = Move 2
+    Jump block3
+block3:
+    Return v5:int32
+
+=== After SCCP ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block2
+block1:
+    v3:int32 = Move 1
+    Return 1
+block2:
+    v5:int32 = Move 2
+    Jump block3
+block3:
+    Return 2
+
+=== Before optimization ===
+function(v6:unknown):
+block0:
+    v1:undefined = Move undefined
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block2
+block1:
+    v3:int32 = Move 1
+    Return 1
+block2:
+    v5:int32 = Move 2
+    Jump block3
+block3:
+    Return 2
+
+=== After DeadCodeElimination ===
+function(v6:unknown):
+block0:
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block2
+block1:
+    Return 1
+block2:
+    Jump block3
+block3:
+    Return 2
+
+=== After SimplifyCFG ===
+function(v6:unknown):
+block0:
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block3
+block1:
+    Return 1
+block3:
+    Return 2
+
+function(v6:unknown):
+block0:
+    v8:boolean = GreaterThan v6:unknown, 0
+    Branch v8:boolean, block1, block3
+block1:
+    Return 1
+block3:
+    Return 2

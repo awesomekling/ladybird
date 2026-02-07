@@ -1,7 +1,7 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
     v3:unknown = Call v0:unknown, undefined, false
@@ -12,7 +12,7 @@ block0_split1:
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
     v3:unknown = Call v0:unknown, undefined, false
@@ -23,7 +23,7 @@ block0_split1:
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetGlobal go
     Jump block1
 block0_split0:
     v3:unknown = Call v0:unknown, undefined, false
@@ -34,13 +34,13 @@ block0_split1:
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetGlobal go
     v3:unknown = Call v0:unknown, undefined, false
     End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetGlobal go
     v3:unknown = Call v0:unknown, undefined, false
     End v3:unknown
 
@@ -49,7 +49,7 @@ function(v1:unknown):
 block0:
     Branch v1:unknown, block0, block1
 block1:
-    End undefined
+    Return 42
 entry:
     Jump block0
 
@@ -58,7 +58,7 @@ function(v1:unknown):
 block0:
     Branch v1:unknown, block0, block1
 block1:
-    End undefined
+    Return 42
 entry:
     Jump block0
 
@@ -67,7 +67,7 @@ function(v1:unknown):
 block0:
     Branch v1:unknown, block0, block1
 block1:
-    End undefined
+    Return 42
 entry:
     Jump block0
 
@@ -76,22 +76,22 @@ function(v1:unknown):
 block0:
     Jump block1
 block1:
-    End undefined
+    Return 42
 entry:
     Jump block0
 
 === After SimplifyCFG ===
 function(v1:unknown):
 block1:
-    End undefined
+    Return 42
 entry:
     Jump block1
 
 === After SimplifyCFG ===
 function(v1:unknown):
 block1:
-    End undefined
+    Return 42
 
 function(v1:unknown):
 block1:
-    End undefined
+    Return 42
