@@ -480,6 +480,12 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
             CFG::add_block_predecessor(merge_block, *target_block);
             break;
         }
+        case Opcode::Throw: {
+            auto throw_instruction = TerminatorInstruction::create<Opcode::Throw>();
+            throw_instruction->add_operand(map_callee_value(terminator->operand(0), value_map));
+            target_block->append(move(throw_instruction));
+            break;
+        }
         default:
             VERIFY_NOT_REACHED();
         }
@@ -596,7 +602,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             callee_pass_manager.invalidate(preserved);
 
             // Callee body gates
-            static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 40;
+            static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 64;
             auto instruction_count = count_instructions(*callee_function);
             if (instruction_count > MAX_CALLEE_INSTRUCTIONS_FOR_INLINING) {
                 log_skip(ByteString::formatted("callee too large: {}, max {}", instruction_count, MAX_CALLEE_INSTRUCTIONS_FOR_INLINING).characters());
