@@ -467,6 +467,12 @@ op IsConstructor < Instruction
     m_value: Operand
 endop
 
+op IsNullish < Instruction
+    @nothrow
+    m_dst: Operand
+    m_value: Operand
+endop
+
 op IteratorClose < Instruction
     m_iterator_object: Operand
     m_iterator_next: Operand

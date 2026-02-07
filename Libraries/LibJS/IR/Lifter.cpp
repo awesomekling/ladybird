@@ -1306,6 +1306,13 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.dst(), result, block);
         break;
     }
+    case IsNullish: {
+        auto const& op = static_cast<Bytecode::Op::IsNullish const&>(instruction);
+        auto& src = get_or_create_value_for_operand(op.value(), block);
+        auto& result = m_builder.build_is_nullish(src);
+        define_operand(op.dst(), result, block);
+        break;
+    }
 
     // Completion tracking (for generators and finally blocks)
     case GetCompletionFields: {

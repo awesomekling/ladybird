@@ -322,12 +322,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::StrictlyEquals>(dst(), operand(0), undef_operand);
         break;
     }
-    case Opcode::IsNullish: {
-        auto null_index = get_or_add_constant(js_null());
-        auto null_operand = Bytecode::Operand(Bytecode::Operand::Type::Constant, null_index);
-        emit<Bytecode::Op::LooselyEquals>(dst(), operand(0), null_operand);
+    case Opcode::IsNullish:
+        emit<Bytecode::Op::IsNullish>(dst(), operand(0));
         break;
-    }
 
     // Increment/Decrement
     case Opcode::Increment:

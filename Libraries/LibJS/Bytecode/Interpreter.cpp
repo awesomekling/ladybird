@@ -492,6 +492,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(InstanceOf);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(IsCallable);
             HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(IsConstructor);
+            HANDLE_INSTRUCTION_WITHOUT_EXCEPTION_CHECK(IsNullish);
             HANDLE_INSTRUCTION(IteratorClose);
             HANDLE_INSTRUCTION(IteratorNext);
             HANDLE_INSTRUCTION(IteratorNextUnpack);
@@ -3257,6 +3258,11 @@ void IsCallable::execute_impl(Bytecode::Interpreter& interpreter) const
 void IsConstructor::execute_impl(Bytecode::Interpreter& interpreter) const
 {
     interpreter.set(dst(), Value(interpreter.get(value()).is_constructor()));
+}
+
+void IsNullish::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    interpreter.set(dst(), Value(interpreter.get(value()).is_nullish()));
 }
 
 }
