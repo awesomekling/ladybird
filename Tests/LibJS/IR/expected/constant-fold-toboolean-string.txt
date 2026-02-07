@@ -1,0 +1,133 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v8:string = Move v7:string
+    v10:string = Move v9:string
+    v11:boolean = Not v8:string
+    v12:boolean = Move v11:boolean
+    v13:boolean = Not v10:string
+    v14:boolean = Move v13:boolean
+    v15:boolean = ToBoolean v8:string
+    v16:boolean = Move v15:boolean
+    v17:boolean = ToBoolean v10:string
+    v18:boolean = Move v17:boolean
+    Return v12:boolean
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v8:string = Move v7:string
+    v10:string = Move v9:string
+    v11:boolean = Not v19:string
+    v12:boolean = Move v11:boolean
+    v13:boolean = Not v20:string
+    v14:boolean = Move v13:boolean
+    v15:boolean = ToBoolean v19:string
+    v16:boolean = Move v15:boolean
+    v17:boolean = ToBoolean v20:string
+    v18:boolean = Move v17:boolean
+    Return v12:boolean
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v8:string = Move v7:string
+    v10:string = Move v9:string
+    v11:boolean = Not v19:string
+    v12:boolean = Move v11:boolean
+    v13:boolean = Not v20:string
+    v14:boolean = Move v13:boolean
+    v15:boolean = ToBoolean v19:string
+    v16:boolean = Move v15:boolean
+    v17:boolean = ToBoolean v20:string
+    v18:boolean = Move v17:boolean
+    Return v12:boolean
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v11:boolean = Not v19:string
+    v12:boolean = Move v11:boolean
+    Return v12:boolean
+
+=== After CopyPropagation ===
+function():
+block0:
+    v11:boolean = Not v19:string
+    v12:boolean = Move v11:boolean
+    Return v11:boolean
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v11:boolean = Not v19:string
+    Return v11:boolean
+
+function():
+block0:
+    v11:boolean = Not v19:string
+    Return v11:boolean
