@@ -836,6 +836,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(JS::IR::g_dump_ir_between_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
     args_parser.add_option(JS::IR::g_lower_ir, "Lower IR back to bytecode and execute", "lower-ir", 'L');
     args_parser.add_option(JS::IR::g_log_tier_ups, "Log tier-up recompilations", "log-tier-ups", {});
+    args_parser.add_option(JS::IR::g_force_inline, "Force inlining regardless of profile thresholds", "force-inline", {});
     args_parser.add_option(tier_up_threshold, "Tier up functions after N calls (0 = disabled)", "tier-up-threshold", 'T', "count");
     args_parser.add_option(s_as_module, "Treat as module", "as-module", 'm');
     args_parser.add_option(s_print_last_result, "Print last result", "print-last-result", 'l');

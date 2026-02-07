@@ -34,6 +34,7 @@ bool g_optimize_ir = false;
 bool g_dump_ir_between_passes = false;
 bool g_lower_ir = false;
 bool g_log_tier_ups = false;
+bool g_force_inline = false;
 
 // IR Pipeline: SSA construction, optimization, and lowering preparation
 //

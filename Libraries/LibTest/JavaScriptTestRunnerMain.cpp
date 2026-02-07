@@ -133,6 +133,7 @@ int main(int argc, char** argv)
     args_parser.add_option(JS::IR::g_dump_ir, "Dump the IR", "dump-ir", 'I');
     args_parser.add_option(JS::IR::g_dump_ir_between_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
     args_parser.add_option(JS::IR::g_log_tier_ups, "Log tier-up recompilations", "log-tier-ups", {});
+    args_parser.add_option(JS::IR::g_force_inline, "Force inlining regardless of profile thresholds", "force-inline", {});
     args_parser.add_option(tier_up_threshold, "Tier up to IR after N calls (0 = disabled)", "tier-up-threshold", 0, "N");
     args_parser.add_option(max_failures, "Stop after N test failures (0 = unlimited)", "max-failures", 0, "N");
     args_parser.add_option(test_globs, "Only run tests matching the given glob", "filter", 'f', "glob");
