@@ -1,0 +1,353 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, true
+    Jump block2
+block0_split1:
+    SetGlobal it v3:unknown
+    Jump block3
+block0_split2:
+    v4:unknown = GetGlobal it
+    Jump block4
+block0_split3:
+    v5:unknown = GetById v4:unknown.next
+    Jump block5
+block0_split4:
+    v6:unknown = Call v5:unknown, v4:unknown
+    Jump block6
+block0_split5:
+    End v6:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, true
+    Jump block2
+block0_split1:
+    SetGlobal it v3:unknown
+    Jump block3
+block0_split2:
+    v4:unknown = GetGlobal it
+    Jump block4
+block0_split3:
+    v5:unknown = GetById v4:unknown.next
+    Jump block5
+block0_split4:
+    v6:unknown = Call v5:unknown, v4:unknown
+    Jump block6
+block0_split5:
+    End v6:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, true
+    Jump block2
+block0_split1:
+    SetGlobal it v3:unknown
+    Jump block3
+block0_split2:
+    v4:unknown = GetGlobal it
+    Jump block4
+block0_split3:
+    v5:unknown = GetById v4:unknown.next
+    Jump block5
+block0_split4:
+    v6:unknown = Call v5:unknown, v4:unknown
+    Jump block6
+block0_split5:
+    End v6:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    v3:unknown = Call v0:unknown, undefined, true
+    SetGlobal it v3:unknown
+    v4:unknown = GetGlobal it
+    v5:unknown = GetById v4:unknown.next
+    v6:unknown = Call v5:unknown, v4:unknown
+    End v6:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal gen
+    v3:unknown = Call v0:unknown, undefined, true
+    SetGlobal it v3:unknown
+    v4:unknown = GetGlobal it
+    v5:unknown = GetById v4:unknown.next
+    v6:unknown = Call v5:unknown, v4:unknown
+    End v6:unknown
+
+=== After SSAConstruction ===
+function(v12:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Branch v12:unknown, block2, block3
+block2:
+    v3:int32 = Move 1
+    Jump block4
+block3:
+    v5:int32 = Move 2
+    Jump block4
+block4:
+    v20:int32 = Phi [block2:v3:int32, block3:v5:int32]
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v7:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== After SCCP ===
+function(v12:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Branch v12:unknown, block2, block3
+block2:
+    v3:int32 = Move 1
+    Jump block4
+block3:
+    v5:int32 = Move 2
+    Jump block4
+block4:
+    v20:int32 = Phi [block2:v21:int32, block3:v22:int32]
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v7:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== Before optimization ===
+function(v12:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Branch v12:unknown, block2, block3
+block2:
+    v3:int32 = Move 1
+    Jump block4
+block3:
+    v5:int32 = Move 2
+    Jump block4
+block4:
+    v20:int32 = Phi [block2:v21:int32, block3:v22:int32]
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v7:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== After DeadCodeElimination ===
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Branch v12:unknown, block2, block3
+block2:
+    Jump block4
+block3:
+    Jump block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v7:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== After AggressiveDeadCodeElimination ===
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Jump block2
+block2:
+    Jump block4
+block3:
+    Jump block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v7:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== After CopyPropagation ===
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block1
+block1:
+    Jump block2
+block2:
+    Jump block4
+block3:
+    Jump block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    Jump block10
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+block5_split0:
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+
+=== After SimplifyCFG ===
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v7:unknown = Move v14:unknown
+    v8:unknown = GetCompletionFields v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+
+=== After DeadCodeElimination ===
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v8:unknown = GetCompletionFields v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
+
+function(v12:unknown):
+block0:
+    v11:unknown = Yield undefined, continuation: block4
+block4:
+    v14:unknown = Yield 42, continuation: block5
+block5:
+    v8:unknown = GetCompletionFields v14:unknown
+    v9:unknown = ExtractValue v8:unknown, 0
+    v10:unknown = ExtractValue v8:unknown, 1
+    v15:boolean = StrictlyEquals v9:unknown, 1
+    Branch v15:boolean, block6, block7
+block6:
+    v16:unknown = Yield undefined
+block7:
+    v18:boolean = StrictlyEquals v9:unknown, 5
+    Branch v18:boolean, block8, block9
+block8:
+    Throw v10:unknown
+block9:
+    v19:unknown = Yield v10:unknown
