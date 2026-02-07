@@ -1,0 +1,314 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal swapLoop
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal swapLoop
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3
+    Jump block2
+block0_split1:
+    End v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal swapLoop
+    v3:unknown = Call v0:unknown, undefined, 3
+    End v3:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal swapLoop
+    v3:unknown = Call v0:unknown, undefined, 3
+    End v3:unknown
+
+=== After SSAConstruction ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v6:int32
+    Jump block2
+block2:
+    v9:number = ToNumeric v18:number
+    v10:number = Increment v9:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v3:int32, block2:v8:int32]
+    v19:int32 = Phi [block0:v1:int32, block2:v7:int32]
+    v18:number = Phi [block0:v5:int32, block2:v10:number]
+    v17:unknown = Phi [block0:v21:unknown, block2:v6:int32]
+    v16:unknown = Phi [block0:v22:undefined, block2:v9:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== Before optimization ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v6:int32
+    Jump block2
+block2:
+    v9:number = ToNumeric v18:number
+    v10:number = Increment v9:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v3:int32, block2:v8:int32]
+    v19:int32 = Phi [block0:v1:int32, block2:v7:int32]
+    v18:number = Phi [block0:v5:int32, block2:v10:number]
+    v17:unknown = Phi [block0:v21:unknown, block2:v6:int32]
+    v16:unknown = Phi [block0:v22:undefined, block2:v9:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== After DeadCodeElimination ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v6:int32
+    Jump block2
+block2:
+    v9:number = ToNumeric v18:number
+    v10:number = Increment v9:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v3:int32, block2:v8:int32]
+    v19:int32 = Phi [block0:v1:int32, block2:v7:int32]
+    v18:number = Phi [block0:v5:int32, block2:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== After CopyPropagation ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v19:int32
+    Jump block2
+block2:
+    v9:number = ToNumeric v18:number
+    v10:number = Increment v9:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v2:int32, block2:v19:int32]
+    v19:int32 = Phi [block0:v0:int32, block2:v20:int32]
+    v18:number = Phi [block0:v4:int32, block2:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== After InstCombine ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v19:int32
+    Jump block2
+block2:
+    v10:number = Increment v18:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v2:int32, block2:v19:int32]
+    v19:int32 = Phi [block0:v0:int32, block2:v20:int32]
+    v18:number = Phi [block0:v4:int32, block2:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== After GlobalValueNumbering ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v19:int32
+    Jump block2
+block2:
+    v10:number = Increment v18:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v2:int32, block2:v19:int32]
+    v19:int32 = Phi [block0:v0:int32, block2:v20:int32]
+    v18:number = Phi [block0:v4:int32, block2:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    Jump block5
+block4_split0:
+    v13:number = Add v19:int32, v12:number
+    Jump block6
+block4_split1:
+    Return v13:number
+
+=== After SimplifyCFG ===
+function(v14:unknown):
+block0:
+    v1:int32 = Move 1
+    v3:int32 = Move 2
+    v5:int32 = Move 0
+    Jump block3
+block1:
+    v6:int32 = Move v19:int32
+    v7:int32 = Move v20:int32
+    v8:int32 = Move v19:int32
+    v10:number = Increment v18:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v2:int32, block1:v19:int32]
+    v19:int32 = Phi [block0:v0:int32, block1:v20:int32]
+    v18:number = Phi [block0:v4:int32, block1:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    v13:number = Add v19:int32, v12:number
+    Return v13:number
+
+=== After DeadCodeElimination ===
+function(v14:unknown):
+block0:
+    Jump block3
+block1:
+    v10:number = Increment v18:number
+    Jump block3
+block3:
+    v20:int32 = Phi [block0:v2:int32, block1:v19:int32]
+    v19:int32 = Phi [block0:v0:int32, block1:v20:int32]
+    v18:number = Phi [block0:v4:int32, block1:v10:number]
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    v13:number = Add v19:int32, v12:number
+    Return v13:number
+
+=== After SsaDestructionPass ===
+function(v14:unknown):
+block0:
+    ParallelCopy [v20:int32 <- v2:int32, v19:int32 <- v0:int32, v18:number <- v4:int32]
+    Jump block3
+block1:
+    v10:number = Increment v18:number
+    ParallelCopy [v20:int32 <- v19:int32, v19:int32 <- v20:int32, v18:number <- v10:number]
+    Jump block3
+block3:
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    v13:number = Add v19:int32, v12:number
+    Return v13:number
+
+=== After CopyCoalescing ===
+function(v14:unknown):
+block0:
+    ParallelCopy [v20:int32 <- v2:int32, v19:int32 <- v0:int32, v18:number <- v4:int32]
+    Jump block3
+block1:
+    v10:number = Increment v18:number
+    ParallelCopy [v20:int32 <- v19:int32, v19:int32 <- v20:int32]
+    Jump block3
+block3:
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    v13:number = Add v19:int32, v12:number
+    Return v13:number
+
+function(v14:unknown):
+block0:
+    ParallelCopy [v20:int32 <- v2:int32, v19:int32 <- v0:int32, v18:number <- v4:int32]
+    Jump block3
+block1:
+    v10:number = Increment v18:number
+    ParallelCopy [v20:int32 <- v19:int32, v19:int32 <- v20:int32]
+    Jump block3
+block3:
+    v15:boolean = LessThan v18:number, v14:unknown
+    Branch v15:boolean, block1, block4
+block4:
+    v12:number = Mul v20:int32, 10
+    v13:number = Add v19:int32, v12:number
+    Return v13:number
