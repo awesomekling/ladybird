@@ -272,9 +272,13 @@ void Instruction::set_result(Value* value)
 
 void Instruction::add_operand(Value* value)
 {
+    auto slot = static_cast<u32>(m_operands.size());
     m_operands.append(value ? Optional<ValueIndex>(value->index()) : Optional<ValueIndex>());
-    // NB: Use entries are added later by add_operand_uses() when the instruction
-    // is registered in the function arena and has a valid InstructionIndex.
+    // If the instruction is already registered in the function, add the use-list
+    // entry now. For pre-registration construction, use entries are added in bulk
+    // by add_operand_uses() when the instruction is first appended to a block.
+    if (m_function && value)
+        value->add_use(m_index, slot);
 }
 
 void Instruction::add_operand_uses()
