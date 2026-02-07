@@ -178,6 +178,26 @@ public:
         __builtin_memset(m_data, value ? 0xff : 0x00, size_in_bytes());
     }
 
+    void copy_from(BitmapView const& other)
+    {
+        VERIFY(other.size() == m_size);
+        __builtin_memcpy(m_data, other.data(), size_in_bytes());
+    }
+
+    void bitwise_or(BitmapView const& other)
+    {
+        VERIFY(other.size() == m_size);
+        for (size_t i = 0; i < size_in_bytes(); ++i)
+            m_data[i] |= other.data()[i];
+    }
+
+    void bitwise_and_not(BitmapView const& other)
+    {
+        VERIFY(other.size() == m_size);
+        for (size_t i = 0; i < size_in_bytes(); ++i)
+            m_data[i] &= ~other.data()[i];
+    }
+
 private:
     bool m_is_owning { true };
 };
