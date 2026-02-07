@@ -240,6 +240,9 @@ public:
         GC::Ptr<PrimitiveString> bigint;
         GC::Ptr<PrimitiveString> function;
         GC::Ptr<PrimitiveString> object_Object;
+        GC::Ptr<PrimitiveString> true_;
+        GC::Ptr<PrimitiveString> false_;
+        GC::Ptr<PrimitiveString> null;
     } cached_strings;
 
     void run_queued_promise_jobs()

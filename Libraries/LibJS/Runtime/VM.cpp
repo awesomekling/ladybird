@@ -92,6 +92,9 @@ VM::VM(ErrorMessages error_messages)
         .bigint = m_heap.allocate<PrimitiveString>("bigint"_string),
         .function = m_heap.allocate<PrimitiveString>("function"_string),
         .object_Object = m_heap.allocate<PrimitiveString>("[object Object]"_string),
+        .true_ = m_heap.allocate<PrimitiveString>("true"_string),
+        .false_ = m_heap.allocate<PrimitiveString>("false"_string),
+        .null = m_heap.allocate<PrimitiveString>("null"_string),
     };
 
     for (size_t i = 0; i < single_ascii_character_strings.size(); ++i)
@@ -298,6 +301,9 @@ void VM::gather_roots(HashMap<GC::Cell*, GC::HeapRoot>& roots)
     roots.set(cached_strings.bigint, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
     roots.set(cached_strings.function, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
     roots.set(cached_strings.object_Object, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
+    roots.set(cached_strings.true_, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
+    roots.set(cached_strings.false_, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
+    roots.set(cached_strings.null, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
 
 #define __JS_ENUMERATE(SymbolName, snake_name) \
     roots.set(m_well_known_symbols.snake_name, GC::HeapRoot { .type = GC::HeapRoot::Type::VM });
