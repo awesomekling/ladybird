@@ -247,9 +247,9 @@ impl<'a> Parser<'a> {
             TokenType::BigIntLiteral => {
                 let tok = self.consume();
                 let value = self.token_value(&tok);
-                // BigInt value is the string without the trailing 'n'
+                // Pass the full value including trailing 'n' — the C++ bytecode
+                // generator expects it and strips the 'n' itself.
                 let value_utf8: String = value.iter()
-                    .take(value.len().saturating_sub(1))
                     .map(|&c| c as u8 as char)
                     .collect();
                 (self.builder.create_bigint_literal(self.span_from(start), value_utf8.as_bytes()), true)
@@ -1106,7 +1106,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body.0, params, function_length, kind,
                 self.strict_mode || body.1, true,
-                true, false, false, false,
+                true, true, false, false,
             ))
         } else {
             // Expression body
@@ -1121,7 +1121,7 @@ impl<'a> Parser<'a> {
                 start.2, self.position().2 - start.2,
                 body, params, function_length, kind,
                 self.strict_mode, true,
-                true, false, false, false,
+                true, true, false, false,
             ))
         }
     }
