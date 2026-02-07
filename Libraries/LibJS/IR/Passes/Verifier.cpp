@@ -640,6 +640,38 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     }
                 }
 
+                // Check: When a block has both an explicit terminator edge and an
+                // implicit EH edge to the same target, the target must not have phi
+                // nodes. A phi can only hold one entry per predecessor, but the two
+                // paths (normal vs exception) may need different values. Intermediate
+                // split blocks should keep these paths separate.
+                // ScheduleJump is excluded since it intentionally targets the finalizer.
+                if (term->opcode() != Opcode::ScheduleJump) {
+                    auto check_eh_overlap = [&](BasicBlock* target) {
+                        if (!target)
+                            return;
+                        bool overlaps_eh = (target == block->exception_handler() || target == block->finalizer());
+                        if (!overlaps_eh)
+                            return;
+                        bool target_has_phis = !target->instructions().is_empty()
+                            && function.instruction_by_index(target->instructions().first())->opcode() == Opcode::Phi;
+                        if (!target_has_phis)
+                            return;
+                        if (target == block->exception_handler()) {
+                            report_error(ByteString::formatted(
+                                "Block{} terminator targets block{} which is also its exception handler and has phi nodes",
+                                block->index(), target->index()));
+                        }
+                        if (target == block->finalizer()) {
+                            report_error(ByteString::formatted(
+                                "Block{} terminator targets block{} which is also its finalizer and has phi nodes",
+                                block->index(), target->index()));
+                        }
+                    };
+                    check_eh_overlap(term->true_target());
+                    check_eh_overlap(term->false_target());
+                }
+
                 // Check: No critical edges in PostSSA
                 // A critical edge goes from a multi-successor block to a multi-predecessor block.
                 if (post_ssa && term->true_target_index().has_value() && term->false_target_index().has_value()) {
