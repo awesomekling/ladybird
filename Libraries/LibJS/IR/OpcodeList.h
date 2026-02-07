@@ -165,6 +165,8 @@
     OP(IteratorClose,                   false, E_CALL,       false, false, 3,   Type::Unknown,   false, 0, R_NONE) \
     OP(AsyncIteratorClose,              false, E_CALL,       false, false, 3,   Type::Unknown,   false, 0, R_NONE) \
     OP(IteratorToArray,                 false, E_CALL,       false, true,  3,   Type::Array,     false, 0, R_NONE) \
+    /* Async iterators */                                                                                                                    \
+    OP(CreateAsyncFromSyncIterator,     false, E_ALLOC,      false, true,  3,   Type::Object,    false, 0, R_NONE) \
     /* Generators/Async */                                                                                                                   \
     OP(Yield,                           true,  E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(Await,                           true,  E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \

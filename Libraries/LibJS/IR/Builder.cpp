@@ -848,6 +848,16 @@ void Builder::build_throw_if_tdz(Value& value)
     current_block().append(move(instruction));
 }
 
+// Async iterators
+Value& Builder::build_create_async_from_sync_iterator(Value& iterator, Value& next_method, Value& done)
+{
+    auto instruction = Instruction::create<Opcode::CreateAsyncFromSyncIterator>();
+    instruction->add_operand(&iterator);
+    instruction->add_operand(&next_method);
+    instruction->add_operand(&done);
+    return emit_with_result(move(instruction));
+}
+
 // Iterators
 Value& Builder::build_get_iterator(Value& iterable)
 {

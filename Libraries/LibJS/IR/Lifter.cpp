@@ -1275,9 +1275,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case CreateAsyncFromSyncIterator: {
         auto const& op = static_cast<Bytecode::Op::CreateAsyncFromSyncIterator const&>(instruction);
         auto& iterator = get_or_create_value_for_operand(op.iterator(), block);
-        // NB: CreateAsyncFromSyncIterator wraps a sync iterator. We use a move as a placeholder
-        // since the actual transformation happens at runtime.
-        auto& result = m_builder.build_move(iterator);
+        auto& next_method = get_or_create_value_for_operand(op.next_method(), block);
+        auto& done = get_or_create_value_for_operand(op.done(), block);
+        auto& result = m_builder.build_create_async_from_sync_iterator(iterator, next_method, done);
         define_operand(op.dst(), result, block);
         break;
     }

@@ -188,6 +188,9 @@ public:
     void build_throw_if_nullish(Value& value);
     void build_throw_if_tdz(Value& value);
 
+    // Async iterators
+    [[nodiscard]] Value& build_create_async_from_sync_iterator(Value& iterator, Value& next_method, Value& done);
+
     // Iterators
     [[nodiscard]] Value& build_get_iterator(Value& iterable);
     [[nodiscard]] Value& build_get_object_property_iterator(Value& object);

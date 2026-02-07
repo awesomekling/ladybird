@@ -876,6 +876,10 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::AsyncIteratorClose>(operand(0), operand(1), operand(2), Completion::Type::Normal, OptionalNone {});
         break;
     }
+    case Opcode::CreateAsyncFromSyncIterator:
+        // Operands: [iterator, next_method, done]
+        emit<Bytecode::Op::CreateAsyncFromSyncIterator>(dst(), operand(0), operand(1), operand(2));
+        break;
     case Opcode::IteratorToArray: {
         // Operands: [iterator_object, iterator_next, iterator_done]
         emit<Bytecode::Op::IteratorToArray>(dst(), operand(0), operand(1), operand(2));
