@@ -56,6 +56,17 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     for (auto const& block : function.basic_blocks())
         all_blocks.set(to_index(block->index()), true);
 
+    // Check: Entry block presence and membership
+    if (!function.basic_blocks().is_empty()) {
+        if (!function.entry_block()) {
+            report_error("Function has blocks but no entry block"sv);
+        } else if (!all_blocks.get(to_index(function.entry_block()->index()))) {
+            report_error("Entry block is not in the block list"sv);
+        }
+    } else if (function.entry_block()) {
+        report_error("Function has no blocks but entry block is set"sv);
+    }
+
     // Check: Entry block has no predecessors
     if (function.entry_block() && !function.entry_block()->predecessor_indices().is_empty()) {
         report_error("Entry block has predecessors"sv);
@@ -164,6 +175,17 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         HashTable<BlockIndex> block_predecessor_set;
         for (auto pred : block->predecessor_indices())
             block_predecessor_set.set(pred);
+
+        // Check: No phi nodes in blocks with zero predecessors
+        if (block->predecessor_indices().is_empty()) {
+            block->for_each_instruction([&](Instruction const& instruction) {
+                if (instruction.opcode() == Opcode::Phi) {
+                    report_error(ByteString::formatted(
+                        "Block{} has no predecessors but contains a Phi",
+                        block->index()));
+                }
+            });
+        }
 
         // Check: Block structure invariants
         if (!block->instructions().is_empty()) {
