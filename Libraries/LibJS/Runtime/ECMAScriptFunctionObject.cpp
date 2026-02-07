@@ -7,7 +7,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Debug.h>
 #include <AK/Function.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/BasicBlock.h>
@@ -276,6 +275,7 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
     // Skip functions with exception handlers for now - they require more complex control flow modeling
     if (auto threshold = vm().tier_up_threshold(); threshold > 0 && !data.m_tiered_up) {
         if (++data.m_call_count >= threshold) {
+            size_t old_bytecode_size = executable->bytecode.size();
             data.m_tiered_up = true;
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
@@ -286,6 +286,16 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
             executable = IR::Lowerer::lower(vm(), *ir_function, coalescing_map);
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
+            auto new_bytecode_size = executable->bytecode.size();
+            if (IR::g_log_tier_ups) {
+                if (old_bytecode_size == new_bytecode_size) {
+                    dbgln("Recompiled '{}' ({} -> {} bytes)", name(), old_bytecode_size, new_bytecode_size);
+                } else if (old_bytecode_size > new_bytecode_size) {
+                    dbgln("Recompiled '{}' ({} -> {} bytes) \033[32;1m-{}\033[0m 🐇", name(), old_bytecode_size, new_bytecode_size, old_bytecode_size - new_bytecode_size);
+                } else {
+                    dbgln("Recompiled '{}' ({} -> {} bytes) \033[31;1m+{}\033[0m 🐢", name(), old_bytecode_size, new_bytecode_size, new_bytecode_size - old_bytecode_size);
+                }
+            }
         }
     }
 

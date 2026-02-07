@@ -141,6 +141,8 @@ static ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_proc
         arguments.append("--dump-ir"sv);
     if (web_content_options.dump_ir_passes)
         arguments.append("--dump-ir-passes"sv);
+    if (web_content_options.log_tier_ups)
+        arguments.append("--log-tier-ups"sv);
     if (web_content_options.tier_up_threshold > 0) {
         arguments.append("--tier-up-threshold"sv);
         arguments.append(ByteString::number(web_content_options.tier_up_threshold));

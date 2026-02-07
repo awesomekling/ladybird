@@ -177,6 +177,7 @@ struct WebContentOptions {
     bool dump_bytecode { false };
     bool dump_ir { false };
     bool dump_ir_passes { false };
+    bool log_tier_ups { false };
     u32 tier_up_threshold { 0 };
 };
 

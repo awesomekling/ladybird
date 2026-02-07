@@ -130,6 +130,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     bool dump_bytecode = false;
     bool dump_ir = false;
     bool dump_ir_passes = false;
+    bool log_tier_ups = false;
     u32 tier_up_threshold = 0;
 
     Core::ArgsParser args_parser;
@@ -185,6 +186,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     args_parser.add_option(dump_bytecode, "Dump the bytecode", "dump-bytecode", 'd');
     args_parser.add_option(dump_ir, "Dump the IR", "dump-ir", 'I');
     args_parser.add_option(dump_ir_passes, "Dump IR after each optimization pass", "dump-ir-passes", {});
+    args_parser.add_option(log_tier_ups, "Log tier-up recompilations", "log-tier-ups", {});
     args_parser.add_option(tier_up_threshold, "Tier up functions after N calls (0 = disabled)", "tier-up-threshold", 'T', "count");
     args_parser.add_option(dns_server_address, "Set the DNS server address", "dns-server", 0, "host|address");
     args_parser.add_option(dns_server_port, "Set the DNS server port", "dns-port", 0, "port (default: 53 or 853 if --dot)");
@@ -301,6 +303,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
         .dump_bytecode = dump_bytecode,
         .dump_ir = dump_ir,
         .dump_ir_passes = dump_ir_passes,
+        .log_tier_ups = log_tier_ups,
         .tier_up_threshold = tier_up_threshold,
     };
 
