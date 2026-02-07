@@ -26,6 +26,7 @@ set(SOURCES
     IR/Lifter.cpp
     IR/LoopTree.cpp
     IR/Optimize.cpp
+    IR/PostDominatorTree.cpp
     IR/Lowerer.cpp
 
     IR/SSAConstruction.cpp

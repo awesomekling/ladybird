@@ -31,6 +31,7 @@ class ParallelCopyInstruction;
 class Loop;
 class LoopTree;
 class PhiInstruction;
+class PostDominatorTree;
 class TerminatorInstruction;
 class UnaryOpInstruction;
 class Value;

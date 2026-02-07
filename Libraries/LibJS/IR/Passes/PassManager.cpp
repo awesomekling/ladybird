@@ -77,11 +77,19 @@ LoopTree const& PassManager::loop_tree(Function const& function)
     return *m_loop_tree;
 }
 
+PostDominatorTree const& PassManager::post_dominator_tree(Function const& function)
+{
+    if (!m_post_dominator_tree)
+        m_post_dominator_tree = make<PostDominatorTree>(function);
+    return *m_post_dominator_tree;
+}
+
 void PassManager::invalidate(PreservedAnalyses const& preserved)
 {
     if (!preserved.are_dominators_preserved()) {
         m_dominator_tree = nullptr;
         m_loop_tree = nullptr;
+        m_post_dominator_tree = nullptr;
     }
 }
 
