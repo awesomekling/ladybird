@@ -221,6 +221,7 @@ block0:
     Jump block3
 block1:
     v9:number = Increment v13:number
+    ParallelCopy [v14:unknown <- v6:boolean]
     Jump block3
 block3:
     v11:boolean = LessThan v13:number, 10
@@ -235,6 +236,7 @@ block0:
     Jump block3
 block1:
     v9:number = Increment v13:number
+    ParallelCopy [v14:unknown <- v6:boolean]
     Jump block3
 block3:
     v11:boolean = LessThan v13:number, 10

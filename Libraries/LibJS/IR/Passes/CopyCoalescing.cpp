@@ -172,13 +172,20 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
 
                     bool phi_exception = !scratch_dsts.get(src);
 
+                    // Remember if dst already interfered with src before
+                    // this copy (set by another block's processing).
+                    bool src_already_interfered = phi_exception && interferes_with[dst].get(src);
+
                     // dst interferes with all live values.
                     for (size_t w = 0; w < bitmap_words; ++w)
                         interferes_with[dst].data()[w] |= live.data()[w];
 
                     // Remove self-interference and (conditionally) phi exception.
+                    // The phi exception only prevents adding NEW interference
+                    // from this copy — it must not clear pre-existing
+                    // interference set by other blocks.
                     interferes_with[dst].set(dst, false);
-                    if (phi_exception)
+                    if (phi_exception && !src_already_interfered)
                         interferes_with[dst].set(src, false);
 
                     // Symmetric: mark live values as interfering with dst.
