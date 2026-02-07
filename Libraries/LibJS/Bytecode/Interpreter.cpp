@@ -2627,7 +2627,19 @@ static ThrowCompletionOr<void> execute_call(
 
 ThrowCompletionOr<void> Call::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    return execute_call<CallType::Call>(interpreter, interpreter.get(m_callee), interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
+    auto callee = interpreter.get(m_callee);
+    if (callee.is_function()) {
+        auto& profile = interpreter.current_executable().call_target_profiles[m_call_target_profile_index];
+        auto& function = callee.as_function();
+        ++profile.total_count;
+        if (profile.callee.ptr() == &function)
+            ++profile.hit_count;
+        else if (profile.total_count == 1) {
+            profile.callee = function;
+            profile.hit_count = 1;
+        }
+    }
+    return execute_call<CallType::Call>(interpreter, callee, interpreter.get(m_this_value), { m_arguments, m_argument_count }, m_dst, m_expression_string, strict());
 }
 
 NEVER_INLINE ThrowCompletionOr<void> CallConstruct::execute_impl(Bytecode::Interpreter& interpreter) const
