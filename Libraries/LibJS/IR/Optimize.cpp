@@ -15,6 +15,7 @@
 #include <LibJS/IR/Passes/InstCombine.h>
 #include <LibJS/IR/Passes/LoopInvariantCodeMotion.h>
 #include <LibJS/IR/Passes/LoopSimplify.h>
+#include <LibJS/IR/Passes/PartialRedundancyElimination.h>
 #include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Passes/PostSSACleanup.h>
 #include <LibJS/IR/Passes/RedundantCheckElimination.h>
@@ -72,6 +73,7 @@ void optimize(Function& function)
 
     // Global Optimizations
     pass_manager.add_pass(make<GlobalValueNumbering>());
+    pass_manager.add_pass(make<PartialRedundancyElimination>());
 
     // CFG Cleanup
     pass_manager.add_pass(make<SimplifyCFG>());

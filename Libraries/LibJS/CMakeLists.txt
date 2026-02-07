@@ -38,6 +38,7 @@ set(SOURCES
     IR/Passes/InstCombine.cpp
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
+    IR/Passes/PartialRedundancyElimination.cpp
     IR/Passes/PassManager.cpp
     IR/Passes/SCCP.cpp
     IR/Passes/PostSSACleanup.cpp
