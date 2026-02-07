@@ -30,6 +30,7 @@ set(SOURCES
     IR/Lowerer.cpp
 
     IR/SSAConstruction.cpp
+    IR/Passes/ADCE.cpp
     IR/Passes/CopyCoalescing.cpp
     IR/Passes/CopyPropagation.cpp
     IR/Passes/DeadCodeElimination.cpp
