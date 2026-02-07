@@ -125,6 +125,32 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         }
     }
 
+    // Check: Instruction index uniqueness across blocks
+    // Each instruction index must appear in exactly one block's instruction list.
+    {
+        HashTable<InstructionIndex> seen_instructions;
+        for (auto const& block : function.basic_blocks()) {
+            HashTable<InstructionIndex> seen_in_block;
+            for (auto instruction_index : block->instructions()) {
+                // Check: No duplicate instruction indices within a block
+                if (seen_in_block.contains(instruction_index)) {
+                    report_error(ByteString::formatted(
+                        "Block{} has duplicate instruction index {}",
+                        block->index(), instruction_index));
+                }
+                seen_in_block.set(instruction_index);
+
+                // Check: Instruction index not in any other block
+                if (seen_instructions.contains(instruction_index)) {
+                    report_error(ByteString::formatted(
+                        "Instruction index {} appears in multiple blocks (found in block{})",
+                        instruction_index, block->index()));
+                }
+                seen_instructions.set(instruction_index);
+            }
+        }
+    }
+
     // Build set of all defined values, checking for unique definitions
     auto defined_values = MUST(AK::Bitmap::create(value_capacity, false));
     for (auto const& block : function.basic_blocks()) {
