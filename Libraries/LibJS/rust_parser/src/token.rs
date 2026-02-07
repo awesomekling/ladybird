@@ -427,6 +427,9 @@ pub struct Token {
     pub line_column: u32,
     pub offset: u32,
     pub trivia_has_line_terminator: bool,
+    /// Decoded identifier value, set when the identifier contains unicode
+    /// escape sequences (e.g. `l\u0065t` → `let`).
+    pub identifier_value: Option<Vec<u16>>,
 }
 
 impl Token {
@@ -441,6 +444,7 @@ impl Token {
             line_column: 0,
             offset: 0,
             trivia_has_line_terminator: false,
+            identifier_value: None,
         }
     }
 }

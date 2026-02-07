@@ -1127,16 +1127,18 @@ extern "C" ASTNodeHandle rust_parse_program(
     size_t source_len,
     void const* source_code,
     u8 program_type,
-    bool starts_in_strict_mode);
+    bool starts_in_strict_mode,
+    bool* out_has_errors);
 
 namespace JS {
 
-NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode)
+NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode, bool& out_has_errors)
 {
     auto const& code_view = source_code->code_view();
     auto length = code_view.length_in_code_units();
 
     ASTNodeHandle program;
+    out_has_errors = false;
 
     u8 pt = program_type == Program::Type::Script ? 0 : 1;
 
@@ -1147,10 +1149,10 @@ NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, P
         utf16_buf.ensure_capacity(length);
         for (size_t i = 0; i < length; ++i)
             utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-        program = rust_parse_program(utf16_buf.data(), length, source_code.ptr(), pt, starts_in_strict_mode);
+        program = rust_parse_program(utf16_buf.data(), length, source_code.ptr(), pt, starts_in_strict_mode, &out_has_errors);
     } else {
         auto utf16 = code_view.utf16_span();
-        program = rust_parse_program(reinterpret_cast<u16 const*>(utf16.data()), length, source_code.ptr(), pt, starts_in_strict_mode);
+        program = rust_parse_program(reinterpret_cast<u16 const*>(utf16.data()), length, source_code.ptr(), pt, starts_in_strict_mode, &out_has_errors);
     }
 
     // The Rust side added an extra ref before dropping the arena.

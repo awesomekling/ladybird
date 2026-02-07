@@ -153,19 +153,27 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Break);
 
-        let label = if !self.current_token.trivia_has_line_terminator
-            && !self.match_token(TokenType::Semicolon)
+        let label = if self.match_token(TokenType::Semicolon) {
+            self.consume();
+            None
+        } else if !self.current_token.trivia_has_line_terminator
             && !self.match_token(TokenType::CurlyClose)
             && !self.done()
             && self.match_identifier()
         {
             let tok = self.consume();
-            Some(self.token_value(&tok).to_vec())
+            let label_value = self.token_value(&tok).to_vec();
+
+            if !self.labels_in_scope.contains_key(&label_value) {
+                self.syntax_error("Label not found");
+            }
+
+            self.consume_or_insert_semicolon();
+            Some(label_value)
         } else {
+            self.consume_or_insert_semicolon();
             None
         };
-
-        self.consume_or_insert_semicolon();
 
         if label.is_none() && !self.in_break_context {
             self.syntax_error("Unlabeled 'break' not allowed outside of a loop or switch statement");
@@ -178,25 +186,35 @@ impl<'a> Parser<'a> {
 
     fn parse_continue_statement(&mut self) -> NodeHandle {
         let start = self.position();
+        if !self.in_continue_context {
+            self.syntax_error("'continue' not allow outside of a loop");
+        }
         self.consume_token(TokenType::Continue);
 
-        let label = if !self.current_token.trivia_has_line_terminator
-            && !self.match_token(TokenType::Semicolon)
+        let label = if self.match_token(TokenType::Semicolon) {
+            None
+        } else if !self.current_token.trivia_has_line_terminator
             && !self.match_token(TokenType::CurlyClose)
             && !self.done()
             && self.match_identifier()
         {
+            let label_line = self.current_token.line_number;
+            let label_col = self.current_token.line_column;
             let tok = self.consume();
-            Some(self.token_value(&tok).to_vec())
+            let label_value = self.token_value(&tok).to_vec();
+
+            if let Some(entry) = self.labels_in_scope.get_mut(&label_value) {
+                *entry = Some((label_line, label_col));
+            } else {
+                self.syntax_error("Label not found or invalid");
+            }
+
+            Some(label_value)
         } else {
             None
         };
 
         self.consume_or_insert_semicolon();
-
-        if label.is_none() && !self.in_continue_context {
-            self.syntax_error("Unlabeled 'continue' not allowed outside of a loop");
-        }
 
         self.builder.create_continue_statement(self.span_from(start), label.as_deref())
     }
@@ -534,12 +552,35 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
         self.consume(); // consume :
 
+        if self.labels_in_scope.contains_key(&label) {
+            self.syntax_error("Label has already been declared");
+        }
+
+        self.labels_in_scope.insert(label.clone(), None);
+
         let break_before = self.in_break_context;
         self.in_break_context = true;
 
+        // Check if body is an iteration statement (possibly through nested labels).
+        let body_starts_iteration = self.match_iteration_start();
+        self.last_inner_label_is_iteration = false;
         let body = self.parse_statement(allow_labelled_function);
 
+        // If this label is NOT on an iteration statement and a `continue`
+        // referenced it, that's a syntax error.
+        let is_iteration = body_starts_iteration || self.last_inner_label_is_iteration;
+        if !is_iteration {
+            if let Some(Some((line, col))) = self.labels_in_scope.get(&label) {
+                self.syntax_error_at(
+                    "labelled continue statement cannot use non iterating statement",
+                    *line, *col);
+            }
+        }
+
+        self.labels_in_scope.remove(&label);
         self.in_break_context = break_before;
+        // Propagate iteration info for nested labels.
+        self.last_inner_label_is_iteration = is_iteration;
 
         Some(self.builder.create_labelled_statement(self.span_from(start), &label, body))
     }

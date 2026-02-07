@@ -27,6 +27,7 @@ pub unsafe extern "C" fn rust_parse_program(
     source_code: *const c_void,
     program_type: u8,
     starts_in_strict_mode: bool,
+    out_has_errors: *mut bool,
 ) -> NodeHandle {
     let source_slice = std::slice::from_raw_parts(source, source_len);
     let pt = if program_type == 1 {
@@ -39,5 +40,8 @@ pub unsafe extern "C" fn rust_parse_program(
     // Add an extra ref so the program node survives arena destruction.
     // The C++ caller adopts this ref.
     parser.builder.ref_node(program);
+    if !out_has_errors.is_null() {
+        *out_has_errors = parser.has_errors();
+    }
     program
 }

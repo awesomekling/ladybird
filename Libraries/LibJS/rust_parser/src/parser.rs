@@ -6,6 +6,8 @@
 
 //! JavaScript parser: recursive descent with precedence climbing.
 
+use std::collections::HashMap;
+
 use crate::ast_bridge::{AstBuilder, NodeHandle, SourceCodeHandle, Span};
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
@@ -179,6 +181,14 @@ pub struct Parser<'a> {
     pub(crate) in_class_static_init_block: bool,
     pub(crate) function_might_need_arguments_object: bool,
     pub(crate) previous_token_was_period: bool,
+
+    /// Labels currently in scope. Value is Some(line, col) if a `continue`
+    /// statement referenced this label, None otherwise.
+    labels_in_scope: HashMap<Vec<u16>, Option<(u32, u32)>>,
+
+    /// Set by try_parse_labelled_statement to propagate iteration-ness
+    /// through nested labels (e.g., `a: b: for(...)`).
+    last_inner_label_is_iteration: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -216,6 +226,8 @@ impl<'a> Parser<'a> {
             in_class_static_init_block: false,
             function_might_need_arguments_object: false,
             previous_token_was_period: false,
+            labels_in_scope: HashMap::new(),
+            last_inner_label_is_iteration: false,
         }
     }
 
@@ -558,7 +570,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Extract the value of a token as a UTF-16 slice from the source.
-    pub(crate) fn token_value(&self, token: &Token) -> &[u16] {
+    /// For identifiers with unicode escape sequences, returns the decoded value.
+    pub(crate) fn token_value<'b>(&'b self, token: &'b Token) -> &'b [u16] {
+        if let Some(ref value) = token.identifier_value {
+            return value;
+        }
         let start = token.value_start as usize;
         let end = start + token.value_len as usize;
         if end <= self.source.len() {
@@ -757,6 +773,12 @@ impl<'a> Parser<'a> {
             return true;
         }
         false
+    }
+
+    /// Check if the current token starts an iteration statement.
+    fn match_iteration_start(&self) -> bool {
+        matches!(self.current_token_type(),
+            TokenType::For | TokenType::While | TokenType::Do)
     }
 
     pub(crate) fn match_export_or_import(&mut self) -> bool {

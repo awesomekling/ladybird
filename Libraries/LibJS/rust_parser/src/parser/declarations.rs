@@ -393,6 +393,7 @@ impl<'a> Parser<'a> {
         let in_function_before = self.in_function_context;
         let in_generator_before = self.in_generator_function_context;
         let await_before = self.await_expression_is_valid;
+        let old_labels = std::mem::take(&mut self.labels_in_scope);
         self.in_function_context = true;
         self.in_generator_function_context = is_generator;
         self.await_expression_is_valid = is_async;
@@ -407,6 +408,7 @@ impl<'a> Parser<'a> {
         self.in_function_context = in_function_before;
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;
+        self.labels_in_scope = old_labels;
 
         self.builder.scope_node_shrink_to_fit(body);
         self.pop_scope();

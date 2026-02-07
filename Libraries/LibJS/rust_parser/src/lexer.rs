@@ -712,7 +712,7 @@ impl<'a> Lexer<'a> {
         let mut token_type = TokenType::Invalid;
         let did_consume_whitespace_or_comments = trivia_start != value_start;
 
-        let mut _identifier_value: Option<Vec<u16>> = None;
+        let mut identifier_value: Option<Vec<u16>> = None;
 
         if self.current_token_type == TokenType::RegexLiteral
             && !self.is_eof()
@@ -793,7 +793,7 @@ impl<'a> Lexer<'a> {
                         break;
                     }
                 }
-                _identifier_value = Some(builder);
+                identifier_value = Some(builder);
                 token_type = TokenType::PrivateIdentifier;
             } else {
                 token_type = TokenType::Invalid;
@@ -827,7 +827,7 @@ impl<'a> Lexer<'a> {
             } else {
                 token_type = TokenType::Identifier;
             }
-            _identifier_value = Some(builder);
+            identifier_value = Some(builder);
         } else if self.is_numeric_literal_start() {
             token_type = TokenType::NumericLiteral;
             let mut is_invalid = false;
@@ -1024,6 +1024,7 @@ impl<'a> Lexer<'a> {
             line_column: value_start_column_number,
             offset: value_start.saturating_sub(1) as u32,
             trivia_has_line_terminator,
+            identifier_value,
         }
     }
 
@@ -1103,6 +1104,7 @@ impl<'a> Lexer<'a> {
             line_column: 0,
             offset: value_start.saturating_sub(1) as u32,
             trivia_has_line_terminator: false,
+            identifier_value: None,
         }
     }
 }

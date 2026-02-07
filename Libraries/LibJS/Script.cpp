@@ -30,8 +30,11 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
     if (use_rust_parser) {
         (void)line_number_offset;
         auto source_code = SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text));
-        auto script = rust_parse(move(source_code), Program::Type::Script);
-        return realm.heap().allocate<Script>(realm, filename, move(script), host_defined);
+        bool has_errors = false;
+        auto script = rust_parse(source_code, Program::Type::Script, false, has_errors);
+        if (!has_errors)
+            return realm.heap().allocate<Script>(realm, filename, move(script), host_defined);
+        // Fall through to C++ parser for proper error reporting.
     }
 #endif
     // 1. Let script be ParseText(sourceText, Script).

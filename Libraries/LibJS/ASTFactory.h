@@ -22,7 +22,8 @@ class Program;
 class SourceCode;
 
 // High-level entry point: parse a script/module using the Rust parser.
-NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode = false);
+// Sets out_has_errors to true if the Rust parser detected syntax errors.
+NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode, bool& out_has_errors);
 }
 
 extern "C" {
