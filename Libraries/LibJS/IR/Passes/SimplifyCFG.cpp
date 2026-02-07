@@ -114,8 +114,12 @@ static bool try_eliminate_empty_blocks(Function& function)
             bool would_conflict = false;
             for (auto* pred : predecessors) {
                 // Check if this predecessor already reaches the target directly
+                // (via terminator edges or implicit exception handler/finalizer edges)
                 auto* pred_term = pred->terminator();
-                if (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target)) {
+                bool pred_already_reaches_target = (pred_term && (pred_term->true_target() == target || pred_term->false_target() == target))
+                    || pred->exception_handler() == target
+                    || pred->finalizer() == target;
+                if (pred_already_reaches_target) {
                     // This predecessor can reach target both directly and via empty block
                     // Check if any phi in target would have different values for these paths
                     for (auto instruction_index : target->instructions()) {
