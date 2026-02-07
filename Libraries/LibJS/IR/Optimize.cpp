@@ -7,6 +7,7 @@
 #include <LibJS/IR/Dump.h>
 #include <LibJS/IR/Function.h>
 #include <LibJS/IR/Optimize.h>
+#include <LibJS/IR/Passes/ADCE.h>
 #include <LibJS/IR/Passes/CopyCoalescing.h>
 #include <LibJS/IR/Passes/CopyPropagation.h>
 #include <LibJS/IR/Passes/DeadCodeElimination.h>
@@ -59,6 +60,7 @@ void optimize(Function& function)
     // Phase 3: Optimization passes
     // Dead Code Removal
     pass_manager.add_pass(make<DeadCodeElimination>());
+    pass_manager.add_pass(make<AggressiveDeadCodeElimination>());
 
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
