@@ -68,6 +68,9 @@ static bool has_unsupported_opcode(Function const& function)
             case Opcode::GetNewTarget:
             // Regex (table remapping not yet supported)
             case Opcode::NewRegExp:
+            // Terminators we can't clone
+            case Opcode::End:
+            case Opcode::ContinuePendingUnwind:
                 found = true;
                 break;
             default:
