@@ -590,6 +590,28 @@ static JS::Value try_constant_fold(Instruction& instruction, Function& function,
         }
         break;
 
+    case Opcode::ToString:
+        if (nops == 1) {
+            auto& vm = VM::the();
+            auto const& v = op(0)->constant_value();
+            if (v.is_string()) {
+                instruction.result()->replace_all_uses_with(op(0));
+                can_fold = true;
+                return {};
+            }
+            if (v.is_boolean()) {
+                result_value = JS::Value(v.as_bool() ? vm.cached_strings.true_ : vm.cached_strings.false_);
+                can_fold = true;
+            } else if (v.is_null()) {
+                result_value = JS::Value(vm.cached_strings.null);
+                can_fold = true;
+            } else if (v.is_undefined()) {
+                result_value = JS::Value(vm.cached_strings.undefined);
+                can_fold = true;
+            }
+        }
+        break;
+
     case Opcode::Move:
         // Move of a constant is just the constant
         if (nops == 1) {
