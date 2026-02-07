@@ -17,6 +17,7 @@
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Passes/PostSSACleanup.h>
+#include <LibJS/IR/Passes/RedundantCheckElimination.h>
 #include <LibJS/IR/Passes/SCCP.h>
 #include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
@@ -66,6 +67,7 @@ void optimize(Function& function)
     // Local Optimizations
     pass_manager.add_pass(make<CopyPropagation>());
     pass_manager.add_pass(make<TypeRefinement>());
+    pass_manager.add_pass(make<RedundantCheckElimination>());
     pass_manager.add_pass(make<InstCombine>());
 
     // Global Optimizations
