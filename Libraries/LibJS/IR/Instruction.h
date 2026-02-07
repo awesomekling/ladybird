@@ -207,6 +207,7 @@ constexpr bool requires_specialized_instruction(Opcode opcode)
     case Opcode::Call:
     case Opcode::CallBuiltin:
     case Opcode::CallDirectEval:
+    case Opcode::CallDirectEvalWithArgumentArray:
     case Opcode::CallWithArgumentArray:
         return true;
     default:

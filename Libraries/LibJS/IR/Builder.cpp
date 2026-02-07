@@ -433,6 +433,14 @@ Value& Builder::build_call_direct_eval(Value& callee, Value& this_value, Span<Va
     return emit_with_result(move(instruction));
 }
 
+Value& Builder::build_call_direct_eval_with_argument_array(Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
+{
+    auto instruction = CallInstruction::create(Opcode::CallDirectEvalWithArgumentArray, &callee, &this_value);
+    instruction->add_operand(&arguments);
+    instruction->set_expression_string(expression_string);
+    return emit_with_result(move(instruction));
+}
+
 Value& Builder::build_call_with_argument_array(Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string)
 {
     auto instruction = CallInstruction::create(Opcode::CallWithArgumentArray, &callee, &this_value);

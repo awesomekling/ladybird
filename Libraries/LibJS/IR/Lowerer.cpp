@@ -703,6 +703,16 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
     }
 
+    // CallDirectEvalWithArgumentArray
+    case Opcode::CallDirectEvalWithArgumentArray: {
+        // IR CallDirectEvalWithArgumentArray operands: [callee, this_value, arguments_array]
+        auto callee = operand(0);
+        auto this_value = operand(1);
+        auto arguments = operand(2);
+        emit<Bytecode::Op::CallDirectEvalWithArgumentArray>(dst(), callee, this_value, arguments, instruction.expression_string());
+        break;
+    }
+
     // CallWithArgumentArray
     case Opcode::CallWithArgumentArray: {
         // IR CallWithArgumentArray operands: [callee, this_value, arguments_array]

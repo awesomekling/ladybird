@@ -114,6 +114,7 @@
     OP(Call,                            false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(CallBuiltin,                     false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(CallDirectEval,                  false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
+    OP(CallDirectEvalWithArgumentArray, false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(CallWithArgumentArray,           false, E_CALL,       true,  true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(Construct,                       false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \
     OP(ConstructWithArgumentArray,      false, E_CALL,       false, true,  255, Type::Object,    false, 0, R_NONE) \

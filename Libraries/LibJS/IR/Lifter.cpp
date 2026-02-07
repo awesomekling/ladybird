@@ -937,8 +937,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto& callee = get_or_create_value_for_operand(op.callee(), block);
         auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
         auto& args_array = get_or_create_value_for_operand(op.arguments(), block);
-        Vector<Value*> args { &args_array };
-        auto& result = m_builder.build_call_direct_eval(callee, this_value, args.span(), op.expression_string());
+        auto& result = m_builder.build_call_direct_eval_with_argument_array(callee, this_value, args_array, op.expression_string());
         define_operand(op.dst(), result, block);
         break;
     }

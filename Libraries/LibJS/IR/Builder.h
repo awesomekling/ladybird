@@ -122,6 +122,7 @@ public:
     [[nodiscard]] Value& build_call(Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
     [[nodiscard]] Value& build_call_builtin(Value& callee, Value& this_value, Span<Value*> arguments, Bytecode::Builtin builtin, Optional<Bytecode::StringTableIndex> expression_string);
     [[nodiscard]] Value& build_call_direct_eval(Value& callee, Value& this_value, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string);
+    [[nodiscard]] Value& build_call_direct_eval_with_argument_array(Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     [[nodiscard]] Value& build_call_with_argument_array(Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
     [[nodiscard]] Value& build_construct(Value& callee, Span<Value*> arguments, Optional<Bytecode::StringTableIndex> expression_string = {});
     [[nodiscard]] Value& build_construct_with_argument_array(Value& callee, Value& this_value, Value& arguments, Optional<Bytecode::StringTableIndex> expression_string);
