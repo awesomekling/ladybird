@@ -33,13 +33,13 @@ bool g_optimize_ir = false;
 bool g_dump_ir_between_passes = false;
 bool g_lower_ir = false;
 
-// IR Pipeline Phases 2-3: SSA construction + optimization
+// IR Pipeline: SSA construction, optimization, and lowering preparation
 //
 // The full IR pipeline is:
-//   Phase 1: Bytecode → IR (CFG construction)           — Lifter::lift()
-//   Phase 2: SSA construction                            — SSAConstructionPass (always runs)
-//   Phase 3: Optimization passes on SSA-form IR          — (gated by g_optimize_ir)
-//   Phase 4: SSA destruction (phi coalescing) + lowering — Lowerer::lower() via PhiCoalescing
+//   RawCFG       → Bytecode → IR (CFG construction)          — Lifter::lift()
+//   SSA          → SSA construction                           — SSAConstructionPass
+//   OptimizedSSA → Optimization passes on SSA-form IR         — fixed-point loop
+//   PostSSA      → SSA destruction + lowering preparation     — SsaDestruction, CopyCoalescing, etc.
 CoalescingMap optimize(Function& function, SsaConstructionData ssa_construction_data)
 {
     // Phase 2: SSA construction (always runs, required before lowering)
@@ -79,6 +79,8 @@ CoalescingMap optimize(Function& function, SsaConstructionData ssa_construction_
     pass_manager.add_pass(make<SimplifyCFG>());
 
     pass_manager.run(function);
+
+    function.set_stage(IRStage::OptimizedSSA);
 
     // Loop Optimizations (run once, after the fixed-point loop).
     // LoopSimplify inserts preheader and single-latch blocks that

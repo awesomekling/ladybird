@@ -48,7 +48,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     };
 
     bool const full_mode = mode == VerifierMode::Full;
-    bool const post_ssa = function.stage() >= IRStage::PostSSA;
+    bool const post_ssa = function.stage() == IRStage::PostSSA;
     auto block_capacity = block_index_capacity(function);
     auto value_capacity = function.values().size();
 

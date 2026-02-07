@@ -22,7 +22,6 @@ enum class IRStage : u8 {
     SSA,
     OptimizedSSA,
     PostSSA,
-    Lowered,
 };
 
 struct SsaConstructionData {
