@@ -98,31 +98,25 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
             auto& block = *blocks[i];
 
             // live_out[B] = union of live_in[S] for each successor S.
-            __builtin_memset(scratch_out.data(), 0, scratch_out.size_in_bytes());
+            scratch_out.fill(false);
             CFG::for_each_successor(block, [&](BasicBlock& successor) {
                 auto it = block_to_dense.find(successor.index());
                 if (it == block_to_dense.end())
                     return;
-                auto successor_dense = it->value;
-                for (size_t bit = 0; bit < value_count; ++bit) {
-                    if (live_in[successor_dense].get(bit))
-                        scratch_out.set(bit, true);
-                }
+                scratch_out.bitwise_or(live_in[it->value]);
             });
 
             // live_in[B] = gen[B] | (live_out[B] - kill[B])
-            __builtin_memset(scratch_in.data(), 0, scratch_in.size_in_bytes());
-            for (size_t bit = 0; bit < value_count; ++bit) {
-                if (gen[i].get(bit) || (scratch_out.get(bit) && !kill[i].get(bit)))
-                    scratch_in.set(bit, true);
-            }
+            scratch_in.copy_from(scratch_out);
+            scratch_in.bitwise_and_not(kill[i]);
+            scratch_in.bitwise_or(gen[i]);
 
-            if (__builtin_memcmp(scratch_out.data(), live_out[i].data(), scratch_out.size_in_bytes()) != 0) {
-                __builtin_memcpy(live_out[i].data(), scratch_out.data(), scratch_out.size_in_bytes());
+            if (scratch_out != live_out[i]) {
+                live_out[i].copy_from(scratch_out);
                 changed = true;
             }
-            if (__builtin_memcmp(scratch_in.data(), live_in[i].data(), scratch_in.size_in_bytes()) != 0) {
-                __builtin_memcpy(live_in[i].data(), scratch_in.data(), scratch_in.size_in_bytes());
+            if (scratch_in != live_in[i]) {
+                live_in[i].copy_from(scratch_in);
                 changed = true;
             }
         }
@@ -134,7 +128,6 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
     // values that are simultaneously live. For ParallelCopy instructions,
     // we apply the phi exception: dst does not interfere with src.
 
-    auto bitmap_words = (value_count + 7) / 8;
     Vector<Bitmap> interferes_with;
     interferes_with.ensure_capacity(value_count);
     for (size_t i = 0; i < value_count; ++i)
@@ -147,7 +140,7 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
             continue;
 
         auto live = MUST(Bitmap::create(value_count, false));
-        __builtin_memcpy(live.data(), live_out[block_index].data(), live.size_in_bytes());
+        live.copy_from(live_out[block_index]);
 
         for (size_t i = instructions.size(); i-- > 0;) {
             auto* instruction = function.instruction_by_index(instructions[i]);
@@ -177,8 +170,7 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                     bool src_already_interfered = phi_exception && interferes_with[dst].get(src);
 
                     // dst interferes with all live values.
-                    for (size_t w = 0; w < bitmap_words; ++w)
-                        interferes_with[dst].data()[w] |= live.data()[w];
+                    interferes_with[dst].bitwise_or(live);
 
                     // Remove self-interference and (conditionally) phi exception.
                     // The phi exception only prevents adding NEW interference
@@ -187,12 +179,6 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                     interferes_with[dst].set(dst, false);
                     if (phi_exception && !src_already_interfered)
                         interferes_with[dst].set(src, false);
-
-                    // Symmetric: mark live values as interfering with dst.
-                    for (size_t bit = 0; bit < value_count; ++bit) {
-                        if (live.get(bit) && (bit != src || !phi_exception))
-                            interferes_with[bit].set(dst, true);
-                    }
                 }
 
                 // Update live set: remove all dsts, then add all srcs.
@@ -205,15 +191,8 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                     auto d = static_cast<u32>(*result_index);
 
                     // d interferes with all live values.
-                    for (size_t w = 0; w < bitmap_words; ++w)
-                        interferes_with[d].data()[w] |= live.data()[w];
+                    interferes_with[d].bitwise_or(live);
                     interferes_with[d].set(d, false);
-
-                    // Symmetric.
-                    for (size_t bit = 0; bit < value_count; ++bit) {
-                        if (live.get(bit))
-                            interferes_with[bit].set(d, true);
-                    }
 
                     live.set(d, false);
                 }
@@ -326,7 +305,7 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                 bool has_interference = false;
                 for (auto a : class_members[dst_rep]) {
                     for (auto b : class_members[src_rep]) {
-                        if (interferes_with[a].get(b)) {
+                        if (interferes_with[a].get(b) || interferes_with[b].get(a)) {
                             has_interference = true;
                             break;
                         }
