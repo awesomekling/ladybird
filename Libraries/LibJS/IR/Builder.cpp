@@ -170,6 +170,11 @@ Value& Builder::build_get_length(Value& base, Optional<Bytecode::IdentifierTable
     return result;
 }
 
+Value& Builder::build_get_length_with_this(Value& base, Value& this_value)
+{
+    return build_binary_op(Opcode::GetLengthWithThis, base, this_value);
+}
+
 void Builder::build_put_by_id(Value& base, Bytecode::PropertyKeyTableIndex property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier, Bytecode::PutKind put_kind)
 {
     auto instruction = Instruction::create<Opcode::PutById>();

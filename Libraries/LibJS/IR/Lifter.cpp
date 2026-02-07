@@ -955,7 +955,8 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetLengthWithThis: {
         auto const& op = static_cast<Bytecode::Op::GetLengthWithThis const&>(instruction);
         auto& base = get_or_create_value_for_operand(op.base(), block);
-        auto& result = m_builder.build_get_length(base);
+        auto& this_value = get_or_create_value_for_operand(op.this_value(), block);
+        auto& result = m_builder.build_get_length_with_this(base, this_value);
         result.defining_instruction()->set_cache_index(CacheIndex { op.cache_index() });
         define_operand(op.dst(), result, block);
         break;

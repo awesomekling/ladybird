@@ -360,6 +360,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::GetLength:
         emit<Bytecode::Op::GetLength>(dst(), operand(0), instruction.base_identifier(), instruction.cache_index().value());
         break;
+    case Opcode::GetLengthWithThis:
+        emit<Bytecode::Op::GetLengthWithThis>(dst(), operand(0), operand(1), instruction.cache_index().value());
+        break;
 
     // Property access
     case Opcode::GetById:
