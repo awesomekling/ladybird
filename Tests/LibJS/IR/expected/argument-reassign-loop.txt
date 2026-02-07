@@ -242,4 +242,4 @@ block2:
 block3:
     Return v12:unknown
 
-Tiered up function 'countdown' (136 -> 104) 🚀
+Tiered up function 'countdown' (136 -> 104) 🚀 -32

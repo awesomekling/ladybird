@@ -236,4 +236,4 @@ block0:
     v14:boolean = LessThan v8:number, v12:number
     Return v14:boolean
 
-Tiered up function 'go' (216 -> 120) 🚀
+Tiered up function 'go' (216 -> 120) 🚀 -96

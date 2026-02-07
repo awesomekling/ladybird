@@ -406,4 +406,4 @@ block9: [finalizer: block2]
     v8:object = Construct v6:unknown, v7:string
     Throw v8:object
 
-Tiered up function 'gen' (280 -> 264) 🚀
+Tiered up function 'gen' (280 -> 264) 🚀 -16

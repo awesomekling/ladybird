@@ -371,4 +371,4 @@ block6:
     v8:unknown = Add v16:unknown, v17:number
     Jump block2
 
-Tiered up function 'go' (184 -> 120) 🚀
+Tiered up function 'go' (184 -> 120) 🚀 -64

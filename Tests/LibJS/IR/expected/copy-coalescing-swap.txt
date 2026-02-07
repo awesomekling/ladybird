@@ -342,4 +342,4 @@ block4:
     v13:number = Add v19:int32, v12:number
     Return v13:number
 
-Tiered up function 'swapLoop' (184 -> 192) 💣
+Tiered up function 'swapLoop' (184 -> 192) 🐢 +8

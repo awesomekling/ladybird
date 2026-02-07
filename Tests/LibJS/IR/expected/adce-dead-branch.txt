@@ -96,4 +96,4 @@ function(v1:unknown):
 block1:
     Return 42
 
-Tiered up function 'go' (24 -> 8) 🚀
+Tiered up function 'go' (24 -> 8) 🚀 -16

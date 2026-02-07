@@ -301,7 +301,7 @@ block0:
     v12:unknown = Call v11:unknown, v10:object
     Return v12:unknown
 
-Tiered up function 'test' (296 -> 248) 🚀
+Tiered up function 'test' (296 -> 248) 🚀 -48
 === After SSAConstruction ===
 function():
 block0:
@@ -375,7 +375,6 @@ block0:
     v2:object = SuperCallWithArgumentArray v1:unknown
     Return v2:object
 
-Tiered up function 'C' (104 -> 104) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -395,7 +394,6 @@ function():
 block0:
     End undefined
 
-Tiered up function 'B' (8 -> 8) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -587,7 +585,7 @@ block0:
     v13:unknown = Add v12:unknown, v8:unknown
     Return v13:unknown
 
-Tiered up function 'doTest' (192 -> 128) 🚀
+Tiered up function 'doTest' (192 -> 128) 🚀 -64
 === After SSAConstruction ===
 function():
 block0:
@@ -606,5 +604,3 @@ block0:
 function():
 block0:
     Return 2
-
-Tiered up function 'get x' (8 -> 8) 🚀

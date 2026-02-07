@@ -438,4 +438,4 @@ block10:
 block11:
     v26:unknown = Yield v8:unknown
 
-Tiered up function 'count' (272 -> 240) 🚀
+Tiered up function 'count' (272 -> 240) 🚀 -32

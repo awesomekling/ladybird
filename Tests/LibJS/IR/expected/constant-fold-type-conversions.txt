@@ -142,4 +142,4 @@ block0:
     v6:int32 = ToInt32 3
     Return false
 
-Tiered up function 'go' (136 -> 24) 🚀
+Tiered up function 'go' (136 -> 24) 🚀 -112

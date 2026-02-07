@@ -130,4 +130,4 @@ function(v6:unknown):
 block3:
     Return 1
 
-Tiered up function 'go' (96 -> 8) 🚀
+Tiered up function 'go' (96 -> 8) 🚀 -88

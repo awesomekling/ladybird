@@ -378,5 +378,3 @@ block5:
 block4_split7:
     LeaveUnwindContext
     Return v11:unknown
-
-Tiered up function 'valueToString' (328 -> 328) 🚀

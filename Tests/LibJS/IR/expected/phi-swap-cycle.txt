@@ -380,4 +380,4 @@ block1_split0:
     ParallelCopy [v25:int32 <- v24:int32, v24:int32 <- v25:int32]
     Jump block3
 
-Tiered up function 'cycle' (296 -> 176) 🚀
+Tiered up function 'cycle' (296 -> 176) 🚀 -120

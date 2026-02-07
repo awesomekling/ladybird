@@ -123,4 +123,4 @@ block0:
     v9:boolean = StrictlyEquals v5:boolean, v5:boolean
     Return v9:boolean
 
-Tiered up function 'go' (120 -> 40) 🚀
+Tiered up function 'go' (120 -> 40) 🚀 -80

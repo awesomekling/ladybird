@@ -140,4 +140,4 @@ block0:
     v7:boolean = LooselyEquals v2:object, null
     Return v5:string
 
-Tiered up function 'go' (88 -> 40) 🚀
+Tiered up function 'go' (88 -> 40) 🚀 -48

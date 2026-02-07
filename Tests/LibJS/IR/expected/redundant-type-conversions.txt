@@ -158,4 +158,4 @@ block0:
     v4:int32 = ToInt32 v3:unknown
     Return v4:int32
 
-Tiered up function 'go' (104 -> 24) 🚀
+Tiered up function 'go' (104 -> 24) 🚀 -80

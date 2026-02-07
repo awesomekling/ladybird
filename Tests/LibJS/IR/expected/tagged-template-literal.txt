@@ -95,7 +95,6 @@ block0:
     v4:unknown = Call v0:unknown, undefined, v2:array
     Return v4:unknown
 
-Tiered up function 'go' (96 -> 96) 🚀
 === After SSAConstruction ===
 function(v2:unknown):
 block0:
@@ -142,4 +141,4 @@ block0:
     v3:unknown = GetByValue v2:unknown, 0
     Return v3:unknown
 
-Tiered up function 'tag' (48 -> 32) 🚀
+Tiered up function 'tag' (48 -> 32) 🚀 -16

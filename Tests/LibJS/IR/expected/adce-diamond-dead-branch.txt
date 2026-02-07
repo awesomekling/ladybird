@@ -163,7 +163,7 @@ block3:
     v7:unknown = Call v6:unknown, undefined
     Return 42
 
-Tiered up function 'go' (128 -> 56) 🚀
+Tiered up function 'go' (128 -> 56) 🚀 -72
 Uncaught exception: 
 [ReferenceError] 'bar' is not defined
     at go (/Users/kling/src/ladybird/Tests/LibJS/IR/input/adce-diamond-dead-branch.js:12:5)

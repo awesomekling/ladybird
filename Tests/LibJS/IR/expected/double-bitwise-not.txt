@@ -89,5 +89,3 @@ block0:
     v1:int32 = BitwiseNot v0:unknown
     v2:int32 = BitwiseNot v1:int32
     Return v2:int32
-
-Tiered up function 'go' (40 -> 40) 🚀

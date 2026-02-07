@@ -531,4 +531,4 @@ block9:
 block10:
     Throw v25:unknown
 
-Tiered up function 'fetchValue' (512 -> 400) 🚀
+Tiered up function 'fetchValue' (512 -> 400) 🚀 -112

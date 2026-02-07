@@ -269,7 +269,7 @@ block0:
     LeaveLexicalEnvironment
     Return v10:unknown
 
-Tiered up function 'test_var_binding' (288 -> 240) 🚀
+Tiered up function 'test_var_binding' (288 -> 240) 🚀 -48
 === After SSAConstruction ===
 function():
 block0:
@@ -288,5 +288,3 @@ block0:
 function():
 block0:
     Return v0:string
-
-Tiered up function 'hoisted' (8 -> 8) 🚀

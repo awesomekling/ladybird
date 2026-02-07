@@ -129,4 +129,4 @@ block3:
     LeaveUnwindContext
     ContinuePendingUnwind block2
 
-Tiered up function 'foo' (104 -> 64) 🚀
+Tiered up function 'foo' (104 -> 64) 🚀 -40

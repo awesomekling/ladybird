@@ -483,4 +483,4 @@ pcopy_block0_block3:
     ParallelCopy [v27:number <- v33:int32]
     Jump block3
 
-Tiered up function 'countdown' (272 -> 248) 🚀
+Tiered up function 'countdown' (272 -> 248) 🚀 -24

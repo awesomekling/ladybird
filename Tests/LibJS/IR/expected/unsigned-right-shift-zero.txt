@@ -128,4 +128,4 @@ block0:
     v6:number = UnsignedRightShift v3:int32, 0
     Return v6:number
 
-Tiered up function 'go' (72 -> 40) 🚀
+Tiered up function 'go' (72 -> 40) 🚀 -32

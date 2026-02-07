@@ -372,4 +372,4 @@ block2:
 block3:
     Return v13:array
 
-Tiered up function 'foo' (344 -> 240) 🚀
+Tiered up function 'foo' (344 -> 240) 🚀 -104

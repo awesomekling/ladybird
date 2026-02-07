@@ -403,4 +403,4 @@ block2_split6:
     LeaveUnwindContext
     End undefined
 
-Tiered up function 'f' (280 -> 296) 💣
+Tiered up function 'f' (280 -> 296) 🐢 +16

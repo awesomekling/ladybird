@@ -271,4 +271,4 @@ block3:
 block4:
     Return v14:unknown
 
-Tiered up function 'go' (136 -> 112) 🚀
+Tiered up function 'go' (136 -> 112) 🚀 -24

@@ -473,4 +473,4 @@ block8: [finalizer: block5]
 block10:
     Return v16:number
 
-Tiered up function 'foo' (232 -> 160) 🚀
+Tiered up function 'foo' (232 -> 160) 🚀 -72

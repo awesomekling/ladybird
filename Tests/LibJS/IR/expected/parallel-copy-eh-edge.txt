@@ -269,7 +269,7 @@ block2_split1:
     LeaveUnwindContext
     Return v10:unknown
 
-Tiered up function 'ehEdge' (200 -> 152) 🚀
+Tiered up function 'ehEdge' (200 -> 152) 🚀 -48
 === After SSAConstruction ===
 function():
 block0:
@@ -289,7 +289,6 @@ function():
 block0:
     Return 1
 
-Tiered up function '' (8 -> 8) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -308,5 +307,3 @@ block0:
 function():
 block0:
     Return 2
-
-Tiered up function '' (8 -> 8) 🚀

@@ -212,4 +212,4 @@ block0:
     v17:string = TypeofBinding
     Return true
 
-Tiered up function 'go' (320 -> 48) 🚀
+Tiered up function 'go' (320 -> 48) 🚀 -272

@@ -337,4 +337,4 @@ block3:
 block4:
     Return v22:unknown
 
-Tiered up function 'go' (232 -> 112) 🚀
+Tiered up function 'go' (232 -> 112) 🚀 -120

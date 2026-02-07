@@ -89,4 +89,4 @@ function():
 block1:
     Return 100
 
-Tiered up function 'go' (72 -> 8) 🚀
+Tiered up function 'go' (72 -> 8) 🚀 -64

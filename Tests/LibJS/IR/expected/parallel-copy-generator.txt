@@ -428,4 +428,4 @@ block10:
 block11:
     v30:unknown = Yield v14:unknown
 
-Tiered up function 'gen' (368 -> 272) 🚀
+Tiered up function 'gen' (368 -> 272) 🚀 -96

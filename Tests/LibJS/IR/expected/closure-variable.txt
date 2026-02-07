@@ -111,7 +111,6 @@ block0:
     v2:function = NewFunction
     Return v2:function
 
-Tiered up function 'make_counter' (88 -> 88) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -174,4 +173,4 @@ block0:
     SetBinding count v2:number
     Return v1:unknown
 
-Tiered up function '' (72 -> 96) 💣
+Tiered up function '' (72 -> 96) 🐢 +24

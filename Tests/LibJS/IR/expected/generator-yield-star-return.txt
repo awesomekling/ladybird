@@ -1214,7 +1214,7 @@ pcopy_block18_block3:
     ParallelCopy [v44:unknown <- v42:unknown]
     Jump block3
 
-Tiered up function 'outer' (848 -> 1000) 💣
+Tiered up function 'outer' (848 -> 1000) 🐢 +152
 === After SSAConstruction ===
 function():
 block0:
@@ -1499,4 +1499,4 @@ block10:
 block11:
     v26:unknown = Yield v8:unknown
 
-Tiered up function 'inner' (272 -> 240) 🚀
+Tiered up function 'inner' (272 -> 240) 🚀 -32

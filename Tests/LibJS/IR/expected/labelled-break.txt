@@ -62,5 +62,3 @@ block0:
 function():
 block0:
     End undefined
-
-Tiered up function 'foo' (8 -> 8) 🚀

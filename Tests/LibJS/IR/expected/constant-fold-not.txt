@@ -101,4 +101,4 @@ function():
 block0:
     Return true
 
-Tiered up function 'go' (184 -> 8) 🚀
+Tiered up function 'go' (184 -> 8) 🚀 -176

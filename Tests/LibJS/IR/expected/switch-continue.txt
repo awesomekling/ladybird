@@ -262,4 +262,4 @@ block3:
 block4:
     Return v10:number
 
-Tiered up function 'foo' (152 -> 64) 🚀
+Tiered up function 'foo' (152 -> 64) 🚀 -88

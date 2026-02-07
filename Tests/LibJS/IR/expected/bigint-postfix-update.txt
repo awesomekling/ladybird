@@ -134,4 +134,4 @@ block0:
     v6:number = Increment v9:bigint
     Return v9:bigint
 
-Tiered up function 'foo' (88 -> 48) 🚀
+Tiered up function 'foo' (88 -> 48) 🚀 -40

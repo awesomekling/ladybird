@@ -492,4 +492,4 @@ block9:
 block10:
     Throw v19:unknown
 
-Tiered up function 'fetchAll' (368 -> 240) 🚀
+Tiered up function 'fetchAll' (368 -> 240) 🚀 -128

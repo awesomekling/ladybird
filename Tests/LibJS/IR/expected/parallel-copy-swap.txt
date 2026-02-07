@@ -354,4 +354,4 @@ block4:
     v18:number = Add v17:number, v23:int32
     Return v18:number
 
-Tiered up function 'swap' (248 -> 192) 🚀
+Tiered up function 'swap' (248 -> 192) 🚀 -56

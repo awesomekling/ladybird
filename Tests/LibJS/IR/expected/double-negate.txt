@@ -89,5 +89,3 @@ block0:
     v1:number = Negate v0:unknown
     v2:number = Negate v1:number
     Return v2:number
-
-Tiered up function 'go' (40 -> 40) 🚀

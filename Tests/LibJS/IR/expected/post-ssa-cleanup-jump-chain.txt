@@ -618,4 +618,4 @@ split_block6_block9:
     ParallelCopy [v39:int32 <- v50:int32]
     Jump block5
 
-Tiered up function 'test' (408 -> 288) 🚀
+Tiered up function 'test' (408 -> 288) 🚀 -120
