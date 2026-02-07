@@ -40,7 +40,7 @@ bool g_lower_ir = false;
 //   Phase 2: SSA construction                            — SSAConstructionPass (always runs)
 //   Phase 3: Optimization passes on SSA-form IR          — (gated by g_optimize_ir)
 //   Phase 4: SSA destruction (phi coalescing) + lowering — Lowerer::lower() via PhiCoalescing
-void optimize(Function& function, SsaConstructionData ssa_construction_data)
+CoalescingMap optimize(Function& function, SsaConstructionData ssa_construction_data)
 {
     // Phase 2: SSA construction (always runs, required before lowering)
     PassManager pass_manager;
@@ -123,6 +123,8 @@ void optimize(Function& function, SsaConstructionData ssa_construction_data)
     run_once(post_ssa_cleanup_pass);
 
     function.set_stage(IRStage::PostSSA);
+
+    return move(copy_coalescing_pass).coalescing_map();
 }
 
 }

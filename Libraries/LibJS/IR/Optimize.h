@@ -9,6 +9,7 @@
 #include <LibJS/Export.h>
 #include <LibJS/IR/Forward.h>
 #include <LibJS/IR/Function.h>
+#include <LibJS/IR/Passes/CopyCoalescing.h>
 
 namespace JS::IR {
 
@@ -17,6 +18,6 @@ JS_API extern bool g_optimize_ir;
 JS_API extern bool g_dump_ir_between_passes;
 JS_API extern bool g_lower_ir;
 
-JS_API void optimize(Function&, SsaConstructionData);
+JS_API CoalescingMap optimize(Function&, SsaConstructionData);
 
 }

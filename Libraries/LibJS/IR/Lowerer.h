@@ -15,15 +15,16 @@
 #include <LibJS/Bytecode/Operand.h>
 #include <LibJS/Bytecode/Register.h>
 #include <LibJS/IR/Forward.h>
+#include <LibJS/IR/Passes/CopyCoalescing.h>
 
 namespace JS::IR {
 
 class Lowerer {
 public:
-    static GC::Ref<Bytecode::Executable> lower(VM&, Function const&);
+    static GC::Ref<Bytecode::Executable> lower(VM&, Function const&, CoalescingMap const&);
 
 private:
-    explicit Lowerer(VM&, Function const&);
+    Lowerer(VM&, Function const&, CoalescingMap const&);
 
     void lower_blocks();
     void lower_instruction(Instruction const&);
@@ -42,6 +43,7 @@ private:
 
     VM& m_vm;
     Function const& m_function;
+    CoalescingMap const& m_coalescing_map;
     Vector<NonnullOwnPtr<Bytecode::BasicBlock>> m_bytecode_blocks;
     Bytecode::BasicBlock* m_current_block { nullptr };
     Vector<Optional<Bytecode::Operand>> m_value_to_operand;

@@ -19,9 +19,10 @@
 
 namespace JS::IR {
 
-Lowerer::Lowerer(VM& vm, Function const& function)
+Lowerer::Lowerer(VM& vm, Function const& function, CoalescingMap const& coalescing_map)
     : m_vm(vm)
     , m_function(function)
+    , m_coalescing_map(coalescing_map)
 {
     auto value_count = function.values().size();
     m_value_to_operand.resize(value_count);
@@ -95,7 +96,7 @@ u32 Lowerer::get_or_add_constant(JS::Value constant_value)
 Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 {
     auto vi = static_cast<u32>(value.index());
-    auto representative = static_cast<u32>(m_function.coalesced_representative(ValueIndex(vi)));
+    auto representative = static_cast<u32>(m_coalescing_map.representative(ValueIndex(vi)));
 
     if (m_value_to_operand[representative].has_value())
         return m_value_to_operand[representative].value();
@@ -1130,11 +1131,11 @@ void Lowerer::lower_blocks()
 // IR Pipeline Phase 4: IR → Bytecode lowering
 // SsaDestructionPass has already replaced phi nodes with ParallelCopy
 // instructions. The lowerer resolves each ParallelCopy into Mov bytecodes.
-GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function)
+GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, CoalescingMap const& coalescing_map)
 {
     VERIFY(function.stage() == IRStage::PostSSA);
 
-    Lowerer lowerer(vm, function);
+    Lowerer lowerer(vm, function, coalescing_map);
     if (function.source_executable())
         lowerer.m_strict = function.source_executable()->is_strict_mode ? Strict::Yes : Strict::No;
     lowerer.lower_blocks();

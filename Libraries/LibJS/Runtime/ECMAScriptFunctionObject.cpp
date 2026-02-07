@@ -280,10 +280,10 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
             auto [ir_function, ssa_data] = IR::Lifter::lift(*executable);
-            IR::optimize(*ir_function, move(ssa_data));
+            auto coalescing_map = IR::optimize(*ir_function, move(ssa_data));
             if (IR::g_dump_ir)
                 dbgln("{}", IR::dump(*ir_function));
-            executable = IR::Lowerer::lower(vm(), *ir_function);
+            executable = IR::Lowerer::lower(vm(), *ir_function, coalescing_map);
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
         }

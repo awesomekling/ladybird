@@ -153,12 +153,13 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
 
             if (IR::g_dump_ir || IR::g_lower_ir) {
                 auto [ir_function, ssa_data] = IR::Lifter::lift(*executable);
+                IR::CoalescingMap coalescing_map;
                 if (IR::g_optimize_ir || IR::g_lower_ir)
-                    IR::optimize(*ir_function, move(ssa_data));
+                    coalescing_map = IR::optimize(*ir_function, move(ssa_data));
                 if (IR::g_dump_ir)
                     dbgln("{}", IR::dump(*ir_function));
                 if (IR::g_lower_ir) {
-                    executable = IR::Lowerer::lower(vm, *ir_function);
+                    executable = IR::Lowerer::lower(vm, *ir_function, coalescing_map);
                     if (g_dump_bytecode) {
                         dbgln("=== Lowered bytecode ===");
                         executable->dump();

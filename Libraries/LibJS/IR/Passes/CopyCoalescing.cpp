@@ -337,11 +337,9 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
 
     // Phase 4: Store coalescing map and prune copies.
 
-    Vector<ValueIndex> coalescing_map;
-    coalescing_map.resize(value_count);
+    m_coalescing_map.representative_map.resize(value_count);
     for (u32 i = 0; i < value_count; ++i)
-        coalescing_map[i] = ValueIndex(find(i));
-    function.set_coalescing_map(move(coalescing_map));
+        m_coalescing_map.representative_map[i] = ValueIndex(find(i));
 
     // Remove coalesced copies from ParallelCopy instructions.
     // Keep the original Value pointers — do NOT call replace_all_uses_with.
