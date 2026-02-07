@@ -588,9 +588,10 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             callee_pass_manager.invalidate(preserved);
 
             // Callee body gates
+            static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 40;
             auto instruction_count = count_instructions(*callee_function);
-            if (instruction_count > 40) {
-                log_skip("callee too large");
+            if (instruction_count > MAX_CALLEE_INSTRUCTIONS_FOR_INLINING) {
+                log_skip(ByteString::formatted("callee too large: {}, max {}", instruction_count, MAX_CALLEE_INSTRUCTIONS_FOR_INLINING).characters());
                 return;
             }
             if (has_unsupported_opcode(*callee_function)) {
