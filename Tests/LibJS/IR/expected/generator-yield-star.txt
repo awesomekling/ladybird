@@ -827,6 +827,7 @@ pcopy_block18_block3:
     ParallelCopy [v52:unknown <- v27:unknown, v44:unknown <- v42:unknown]
     Jump block3
 
+=== After CopyCoalescing ===
 function():
 block0:
     v31:unknown = Yield undefined, continuation: block1
@@ -845,7 +846,7 @@ block3:
     v12:unknown = GetCompletionFields v44:unknown
     v13:unknown = ExtractValue v12:unknown, 0
     v14:unknown = ExtractValue v12:unknown, 1
-    ParallelCopy [v51:unknown <- v52:unknown, v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
+    ParallelCopy [v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
     Jump block2
 block4:
     v33:unknown = Yield undefined
@@ -900,13 +901,95 @@ block18:
     v29:unknown = GetById v26:unknown.value
     v42:unknown = Yield v29:unknown, continuation: block43
 pcopy_block14_block3:
-    ParallelCopy [v52:unknown <- v22:unknown, v44:unknown <- v39:unknown]
+    ParallelCopy [v44:unknown <- v39:unknown]
     Jump block3
 pcopy_block8_block3:
-    ParallelCopy [v52:unknown <- v16:unknown, v44:unknown <- v36:unknown]
+    ParallelCopy [v44:unknown <- v36:unknown]
     Jump block3
 pcopy_block18_block3:
-    ParallelCopy [v52:unknown <- v27:unknown, v44:unknown <- v42:unknown]
+    ParallelCopy [v44:unknown <- v42:unknown]
+    Jump block3
+
+function():
+block0:
+    v31:unknown = Yield undefined, continuation: block1
+block1:
+    v0:unknown = GetGlobal inner
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetIterator v2:unknown
+    v4:unknown = ExtractValue v3:unknown, 0
+    v5:unknown = ExtractValue v3:unknown, 1
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v1:undefined, v46:unknown <- v7:int32]
+    Jump block2
+block2:
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
+block3:
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    ParallelCopy [v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
+    Jump block2
+block4:
+    v33:unknown = Yield undefined
+block5:
+    v15:unknown = Call v5:unknown, v4:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
+block6:
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
+block7:
+    v17:unknown = GetById v15:unknown.value
+    Jump block4
+block8:
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block42
+block9:
+    v19:unknown = GetById v4:unknown.throw
+    v37:boolean = IsUndefined v19:unknown
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetById v4:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
+block11:
+    v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
+block12:
+    IteratorClose v4:unknown, v5:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
+block13:
+    v24:unknown = GetById v21:unknown.value
+    Jump block4
+block14:
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block41
+block15:
+    v40:unknown = Yield v47:unknown
+block16:
+    v26:unknown = Call v20:unknown, v4:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
+block17:
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
+block18:
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block43
+pcopy_block14_block3:
+    ParallelCopy [v44:unknown <- v39:unknown]
+    Jump block3
+pcopy_block8_block3:
+    ParallelCopy [v44:unknown <- v36:unknown]
+    Jump block3
+pcopy_block18_block3:
+    ParallelCopy [v44:unknown <- v42:unknown]
     Jump block3
 
 === After SSAConstruction ===

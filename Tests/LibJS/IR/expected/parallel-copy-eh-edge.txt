@@ -219,6 +219,7 @@ block2_split1:
     LeaveUnwindContext
     Return v10:unknown
 
+=== After CopyCoalescing ===
 function(v6:unknown, v9:unknown):
 block0:
     EnterUnwindContext block2
@@ -232,7 +233,25 @@ block2: [handler: block1]
     v7:unknown = Call v6:unknown, undefined
     Jump block4
 block2_split0: [handler: block1]
-    ParallelCopy [v13:unknown <- v7:unknown]
+    v10:unknown = Call v9:unknown, undefined
+    Jump block5
+block2_split1:
+    LeaveUnwindContext
+    Return v10:unknown
+
+function(v6:unknown, v9:unknown):
+block0:
+    EnterUnwindContext block2
+block1:
+    v4:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    Return v13:unknown
+block2: [handler: block1]
+    ParallelCopy [v13:unknown <- v2:string]
+    v7:unknown = Call v6:unknown, undefined
+    Jump block4
+block2_split0: [handler: block1]
     v10:unknown = Call v9:unknown, undefined
     Jump block5
 block2_split1:

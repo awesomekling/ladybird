@@ -180,6 +180,7 @@ block2:
 block3:
     Return v12:unknown
 
+=== After CopyCoalescing ===
 function(v4:unknown):
 block0:
     ParallelCopy [v13:unknown <- v4:unknown, v12:unknown <- v2:int32]
@@ -190,7 +191,20 @@ block1:
 block2:
     v5:unknown = Add v12:unknown, v13:unknown
     v8:unknown = Sub v13:unknown, 1
-    ParallelCopy [v13:unknown <- v8:unknown, v12:unknown <- v5:unknown]
+    Jump block1
+block3:
+    Return v12:unknown
+
+function(v4:unknown):
+block0:
+    ParallelCopy [v13:unknown <- v4:unknown, v12:unknown <- v2:int32]
+    Jump block1
+block1:
+    v10:boolean = GreaterThan v13:unknown, 0
+    Branch v10:boolean, block2, block3
+block2:
+    v5:unknown = Add v12:unknown, v13:unknown
+    v8:unknown = Sub v13:unknown, 1
     Jump block1
 block3:
     Return v12:unknown

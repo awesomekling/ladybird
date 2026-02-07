@@ -454,6 +454,37 @@ split_block5_block2:
 split_block7_block2:
     Jump block2
 
+=== After CopyCoalescing ===
+function():
+block0:
+    ParallelCopy [v24:unknown <- v4:int32, v23:number <- v4:int32]
+    Jump block3
+block2:
+    v9:number = Increment v23:number
+    Jump block3
+block3:
+    v16:boolean = LessThan v23:number, 3
+    Branch v16:boolean, block12, block4
+block4:
+    Return v24:unknown
+block5:
+    v18:boolean = StrictlyEquals v27:number, 1
+    Branch v18:boolean, block13, block10
+block7:
+    v20:boolean = LessThan v27:number, 3
+    Branch v20:boolean, block5, block14
+block10:
+    v13:unknown = Add v25:unknown, 1
+    v11:number = Increment v27:number
+    Jump block7
+split_block3_block7:
+    ParallelCopy [v27:number <- v4:int32]
+    Jump block7
+split_block5_block2:
+    Jump block2
+split_block7_block2:
+    Jump block2
+
 === After PostSSACleanup ===
 function():
 block0:
@@ -461,7 +492,6 @@ block0:
     Jump block3
 block2:
     v9:number = Increment v23:number
-    ParallelCopy [v24:unknown <- v25:unknown, v23:number <- v9:number]
     Jump block3
 block3:
     v16:boolean = LessThan v23:number, 3
@@ -477,10 +507,9 @@ block7:
 block10:
     v13:unknown = Add v25:unknown, 1
     v11:number = Increment v27:number
-    ParallelCopy [v27:number <- v11:number, v25:unknown <- v13:unknown]
     Jump block7
 split_block3_block7:
-    ParallelCopy [v27:number <- v4:int32, v25:unknown <- v24:unknown]
+    ParallelCopy [v27:number <- v4:int32]
     Jump block7
 
 function():
@@ -489,7 +518,6 @@ block0:
     Jump block3
 block2:
     v9:number = Increment v23:number
-    ParallelCopy [v24:unknown <- v25:unknown, v23:number <- v9:number]
     Jump block3
 block3:
     v16:boolean = LessThan v23:number, 3
@@ -505,8 +533,7 @@ block7:
 block10:
     v13:unknown = Add v25:unknown, 1
     v11:number = Increment v27:number
-    ParallelCopy [v27:number <- v11:number, v25:unknown <- v13:unknown]
     Jump block7
 split_block3_block7:
-    ParallelCopy [v27:number <- v4:int32, v25:unknown <- v24:unknown]
+    ParallelCopy [v27:number <- v4:int32]
     Jump block7

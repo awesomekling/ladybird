@@ -289,6 +289,7 @@ block2_split4:
     LeaveUnwindContext
     End undefined
 
+=== After CopyCoalescing ===
 function():
 block0:
     EnterUnwindContext block2
@@ -307,11 +308,40 @@ block2_split1: [handler: block1]
     v14:unknown = Call v10:unknown, undefined, 10, false
     Jump block6
 block2_split2: [handler: block1]
-    ParallelCopy [v28:unknown <- v14:unknown, v27:int32 <- v16:int32]
+    ParallelCopy [v27:int32 <- v16:int32]
     v18:unknown = GetGlobal mayThrow
     Jump block7
 block2_split3: [handler: block1]
-    ParallelCopy [v28:unknown <- v14:unknown, v27:int32 <- v16:int32]
+    ParallelCopy [v27:int32 <- v16:int32]
+    v21:unknown = Call v18:unknown, undefined, 20, true
+    Jump block8
+block2_split4:
+    LeaveUnwindContext
+    End undefined
+
+function():
+block0:
+    EnterUnwindContext block2
+block1:
+    v3:unknown = Catch
+    LeaveUnwindContext
+    RestoreScheduledJump
+    v7:array = NewArray v27:int32, v28:unknown
+    Return v7:array
+block2: [handler: block1]
+    ParallelCopy [v28:unknown <- v0:int32, v27:int32 <- v8:int32]
+    v10:unknown = GetGlobal mayThrow
+    Jump block5
+block2_split1: [handler: block1]
+    ParallelCopy [v28:unknown <- v0:int32, v27:int32 <- v8:int32]
+    v14:unknown = Call v10:unknown, undefined, 10, false
+    Jump block6
+block2_split2: [handler: block1]
+    ParallelCopy [v27:int32 <- v16:int32]
+    v18:unknown = GetGlobal mayThrow
+    Jump block7
+block2_split3: [handler: block1]
+    ParallelCopy [v27:int32 <- v16:int32]
     v21:unknown = Call v18:unknown, undefined, 20, true
     Jump block8
 block2_split4:

@@ -249,6 +249,7 @@ split_block5_block1:
     ParallelCopy [v18:unknown <- v8:unknown, v16:unknown <- v17:unknown]
     Jump block1
 
+=== After CopyCoalescing ===
 function(v7:unknown):
 block0:
     ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
@@ -260,15 +261,47 @@ block3:
     Return v17:unknown
 block4:
     v5:unknown = Add v16:unknown, 1
-    ParallelCopy [v17:unknown <- v5:unknown]
     Jump block5
 block5:
     v8:unknown = Sub v18:unknown, 1
     v12:boolean = GreaterThan v8:unknown, 0
     Branch v12:boolean, block9, block3
 split_block1_block5:
-    ParallelCopy [v17:unknown <- v16:unknown]
     Jump block5
 split_block5_block1:
-    ParallelCopy [v18:unknown <- v8:unknown, v16:unknown <- v17:unknown]
     Jump block1
+
+=== After PostSSACleanup ===
+function(v7:unknown):
+block0:
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    Jump block1
+block1:
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block5
+block5:
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block1, block3
+
+function(v7:unknown):
+block0:
+    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v2:int32]
+    Jump block1
+block1:
+    v11:boolean = GreaterThan v18:unknown, 5
+    Branch v11:boolean, block4, block5
+block3:
+    Return v17:unknown
+block4:
+    v5:unknown = Add v16:unknown, 1
+    Jump block5
+block5:
+    v8:unknown = Sub v18:unknown, 1
+    v12:boolean = GreaterThan v8:unknown, 0
+    Branch v12:boolean, block1, block3

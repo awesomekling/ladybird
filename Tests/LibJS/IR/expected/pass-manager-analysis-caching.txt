@@ -273,6 +273,7 @@ block3:
 block4:
     Return v22:unknown
 
+=== After CopyCoalescing ===
 function(v7:unknown):
 block0:
     v8:string = Typeof v7:unknown
@@ -281,7 +282,21 @@ block0:
 block1:
     v12:boolean = StrictlyEquals v8:string, v8:string
     v15:number = Increment v19:number
-    ParallelCopy [v22:unknown <- v12:boolean, v19:number <- v15:number]
+    Jump block3
+block3:
+    v17:boolean = LessThan v19:number, 10
+    Branch v17:boolean, block1, block4
+block4:
+    Return v22:unknown
+
+function(v7:unknown):
+block0:
+    v8:string = Typeof v7:unknown
+    ParallelCopy [v22:unknown <- v0:undefined, v19:number <- v5:int32]
+    Jump block3
+block1:
+    v12:boolean = StrictlyEquals v8:string, v8:string
+    v15:number = Increment v19:number
     Jump block3
 block3:
     v17:boolean = LessThan v19:number, 10

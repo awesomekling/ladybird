@@ -128,54 +128,99 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
         }
     }
 
-    // Phase 2: Coalesce non-interfering copies using union-find.
+    // Phase 2: Build interference graph.
     //
-    // A copy dst <- src can be coalesced only if ALL copies that define
-    // dst use the SAME src. If dst has different sources on different
-    // paths, coalescing with one source would make the other paths
-    // write to the wrong value.
+    // Walk all blocks backward, recording pairwise interference between
+    // values that are simultaneously live. For ParallelCopy instructions,
+    // we apply the phi exception: dst does not interfere with src.
 
-    // For each dst value, track its unique source (or mark as non-coalesceable).
-    // non_coalesceable[v] = true means v has copies from multiple different sources.
-    HashMap<u32, u32> dst_to_unique_src;
-    Bitmap non_coalesceable = MUST(Bitmap::create(value_count, false));
+    auto bitmap_words = (value_count + 7) / 8;
+    Vector<Bitmap> interferes_with;
+    interferes_with.ensure_capacity(value_count);
+    for (size_t i = 0; i < value_count; ++i)
+        interferes_with.unchecked_append(MUST(Bitmap::create(value_count, false)));
 
-    for (auto& block : function.basic_blocks()) {
-        block->for_each_instruction([&](Instruction const& instruction) {
-            if (instruction.opcode() != Opcode::ParallelCopy)
-                return;
-            auto const& pcopy = static_cast<ParallelCopyInstruction const&>(instruction);
-            for (size_t j = 0; j < pcopy.copies().size(); ++j) {
-                auto dst = static_cast<u32>(pcopy.copies()[j].dst);
-                auto src = static_cast<u32>(pcopy.copies()[j].src);
+    for (size_t block_index = 0; block_index < block_count; ++block_index) {
+        auto& block = *blocks[block_index];
+        auto const& instructions = block.instructions();
+        if (instructions.is_empty())
+            continue;
 
-                if (non_coalesceable.get(dst))
-                    continue;
+        auto live = MUST(Bitmap::create(value_count, false));
+        __builtin_memcpy(live.data(), live_out[block_index].data(), live.size_in_bytes());
 
-                auto it = dst_to_unique_src.find(dst);
-                if (it == dst_to_unique_src.end()) {
-                    dst_to_unique_src.set(dst, src);
-                } else if (it->value != src) {
-                    non_coalesceable.set(dst, true);
+        for (size_t i = instructions.size(); i-- > 0;) {
+            auto* instruction = function.instruction_by_index(instructions[i]);
+
+            if (instruction->opcode() == Opcode::ParallelCopy) {
+                auto const& pcopy = static_cast<ParallelCopyInstruction const&>(*instruction);
+
+                // Collect all dsts in this ParallelCopy so we can restrict
+                // the phi exception: dst must not lose interference with a
+                // src that is itself a dst in the same ParallelCopy (swap).
+                auto scratch_dsts = MUST(Bitmap::create(value_count, false));
+                for (size_t j = 0; j < pcopy.copies().size(); ++j)
+                    scratch_dsts.set(static_cast<u32>(pcopy.copies()[j].dst), true);
+
+                // For each copy dst <- src: dst interferes with everything
+                // live, EXCEPT src (phi exception). The phi exception is
+                // suppressed when src is also a dst in the same copy, since
+                // swapped values must interfere.
+                for (size_t j = 0; j < pcopy.copies().size(); ++j) {
+                    auto dst = static_cast<u32>(pcopy.copies()[j].dst);
+                    auto src = static_cast<u32>(pcopy.copies()[j].src);
+
+                    bool phi_exception = !scratch_dsts.get(src);
+
+                    // dst interferes with all live values.
+                    for (size_t w = 0; w < bitmap_words; ++w)
+                        interferes_with[dst].data()[w] |= live.data()[w];
+
+                    // Remove self-interference and (conditionally) phi exception.
+                    interferes_with[dst].set(dst, false);
+                    if (phi_exception)
+                        interferes_with[dst].set(src, false);
+
+                    // Symmetric: mark live values as interfering with dst.
+                    for (size_t bit = 0; bit < value_count; ++bit) {
+                        if (live.get(bit) && (bit != src || !phi_exception))
+                            interferes_with[bit].set(dst, true);
+                    }
+                }
+
+                // Update live set: remove all dsts, then add all srcs.
+                for (size_t j = 0; j < pcopy.copies().size(); ++j)
+                    live.set(static_cast<u32>(pcopy.copies()[j].dst), false);
+                for (size_t j = 0; j < pcopy.copies().size(); ++j)
+                    live.set(static_cast<u32>(pcopy.copies()[j].src), true);
+            } else {
+                if (auto result_index = instruction->result_index(); result_index.has_value()) {
+                    auto d = static_cast<u32>(*result_index);
+
+                    // d interferes with all live values.
+                    for (size_t w = 0; w < bitmap_words; ++w)
+                        interferes_with[d].data()[w] |= live.data()[w];
+                    interferes_with[d].set(d, false);
+
+                    // Symmetric.
+                    for (size_t bit = 0; bit < value_count; ++bit) {
+                        if (live.get(bit))
+                            interferes_with[bit].set(d, true);
+                    }
+
+                    live.set(d, false);
+                }
+
+                for (size_t j = 0; j < instruction->operand_count(); ++j) {
+                    if (auto operand_index = instruction->operand_index(j); operand_index.has_value())
+                        live.set(static_cast<u32>(*operand_index), true);
                 }
             }
-        });
+        }
     }
 
-    // Track values with non-ParallelCopy definitions. Once a
-    // representative has such a def, merging it into another value
-    // would leave the instruction writing to a dead value.
-    Bitmap has_non_pcopy_def = MUST(Bitmap::create(value_count, false));
-    for (auto& block : function.basic_blocks()) {
-        block->for_each_instruction([&](Instruction const& instruction) {
-            if (instruction.opcode() == Opcode::ParallelCopy)
-                return;
-            if (auto result_index = instruction.result_index(); result_index.has_value())
-                has_non_pcopy_def.set(static_cast<u32>(*result_index), true);
-        });
-    }
+    // Phase 3: Coalesce using interference graph with union-find.
 
-    // Union-find data structure.
     Vector<u32> parent;
     parent.resize(value_count);
     for (u32 i = 0; i < value_count; ++i)
@@ -189,117 +234,128 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
         return x;
     };
 
-    // Merge dst into src: src becomes the representative.
-    auto merge_dst_into_src = [&](u32 dst, u32 src) {
-        dst = find(dst);
-        src = find(src);
-        if (dst == src)
-            return;
-        parent[dst] = src;
+    // Track members of each equivalence class for cross-class checks.
+    Vector<Vector<u32>> class_members;
+    class_members.resize(value_count);
+    for (u32 i = 0; i < value_count; ++i)
+        class_members[i].append(i);
+
+    auto is_non_coalesceable_value = [&](u32 index) -> bool {
+        auto const& value = *function.values()[index];
+        if (value.is_constant() || value.is_parameter() || value.is_this())
+            return true;
+        if (auto* defining = value.defining_instruction()) {
+            if (defining->opcode() == Opcode::Yield || defining->opcode() == Opcode::Await)
+                return true;
+            // ExtractValue results are bound to specific tuple element
+            // registers in the Lowerer and cannot be reassigned.
+            if (defining->opcode() == Opcode::ExtractValue)
+                return true;
+            // Comparison results used as Branch conditions may be fused with
+            // the Branch in the Lowerer (JumpStrictlyEquals, etc). Fusion
+            // skips writing the result to a register, so coalescing another
+            // value into the same register would leave that register
+            // uninitialized on the fused path. Guard against this by marking
+            // comparison results that feed a Branch as non-coalesceable.
+            switch (defining->opcode()) {
+            case Opcode::LessThan:
+            case Opcode::LessThanEquals:
+            case Opcode::GreaterThan:
+            case Opcode::GreaterThanEquals:
+            case Opcode::LooselyEquals:
+            case Opcode::StrictlyEquals:
+            case Opcode::LooselyInequals:
+            case Opcode::StrictlyInequals: {
+                for (auto const& use : value.uses()) {
+                    auto* using_instruction = function.instruction_by_index(use.instruction);
+                    if (using_instruction->opcode() == Opcode::Branch
+                        && using_instruction->operand(0) == &value)
+                        return true;
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        }
+        return false;
     };
 
     bool any_coalesced = false;
 
-    for (size_t block_index = 0; block_index < block_count; ++block_index) {
-        auto& block = *blocks[block_index];
-        auto const& instructions = block.instructions();
-        if (instructions.is_empty())
-            continue;
+    for (auto& block : function.basic_blocks()) {
+        block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.opcode() != Opcode::ParallelCopy)
+                return;
+            auto const& pcopy = static_cast<ParallelCopyInstruction const&>(instruction);
 
-        // Create a working live set, initialized from live_out[B].
-        auto live = MUST(Bitmap::create(value_count, false));
-        __builtin_memcpy(live.data(), live_out[block_index].data(), live.size_in_bytes());
+            for (size_t j = 0; j < pcopy.copies().size(); ++j) {
+                auto dst = static_cast<u32>(pcopy.copies()[j].dst);
+                auto src = static_cast<u32>(pcopy.copies()[j].src);
 
-        // Walk instructions backward.
-        for (size_t i = instructions.size(); i-- > 0;) {
-            auto* instruction = function.instruction_by_index(instructions[i]);
+                if (is_non_coalesceable_value(dst) || is_non_coalesceable_value(src))
+                    continue;
 
-            if (instruction->opcode() == Opcode::ParallelCopy) {
-                auto const& pcopy = static_cast<ParallelCopyInstruction const&>(*instruction);
+                auto dst_rep = find(dst);
+                auto src_rep = find(src);
+                if (dst_rep == src_rep)
+                    continue;
 
-                // Check each copy for coalescing opportunity.
-                for (size_t j = 0; j < pcopy.copies().size(); ++j) {
-                    auto dst = static_cast<u32>(pcopy.copies()[j].dst);
-                    auto src = static_cast<u32>(pcopy.copies()[j].src);
-
-                    // Skip if dst has different sources on different paths.
-                    if (non_coalesceable.get(dst))
-                        continue;
-
-                    auto dst_rep = find(dst);
-                    auto src_rep = find(src);
-
-                    // Already coalesced.
-                    if (dst_rep == src_rep)
-                        continue;
-
-                    // If dst's representative has a non-ParallelCopy
-                    // definition, merging it into src would leave that
-                    // instruction writing to a dead value.
-                    if (has_non_pcopy_def.get(dst_rep))
-                        continue;
-
-                    // Safe to coalesce if src is not live after the copy
-                    // (no interference between dst and src).
-                    if (!live.get(src)) {
-                        merge_dst_into_src(dst, src);
-                        any_coalesced = true;
+                // Cross-class interference check.
+                bool has_interference = false;
+                for (auto a : class_members[dst_rep]) {
+                    for (auto b : class_members[src_rep]) {
+                        if (interferes_with[a].get(b)) {
+                            has_interference = true;
+                            break;
+                        }
                     }
+                    if (has_interference)
+                        break;
                 }
+                if (has_interference)
+                    continue;
 
-                // Update live set: remove all dsts, then add all srcs.
-                for (size_t j = 0; j < pcopy.copies().size(); ++j)
-                    live.set(static_cast<u32>(pcopy.copies()[j].dst), false);
-                for (size_t j = 0; j < pcopy.copies().size(); ++j)
-                    live.set(static_cast<u32>(pcopy.copies()[j].src), true);
-            } else {
-                // Remove result from live.
-                if (auto result_index = instruction->result_index(); result_index.has_value())
-                    live.set(static_cast<u32>(*result_index), false);
-
-                // Add operands to live.
-                for (size_t j = 0; j < instruction->operand_count(); ++j) {
-                    if (auto operand_index = instruction->operand_index(j); operand_index.has_value())
-                        live.set(static_cast<u32>(*operand_index), true);
-                }
+                // Merge dst class into src class.
+                auto& dst_members = class_members[dst_rep];
+                auto& src_members = class_members[src_rep];
+                src_members.extend(move(dst_members));
+                parent[dst_rep] = src_rep;
+                any_coalesced = true;
             }
-        }
+        });
     }
 
     if (!any_coalesced)
         return PreservedAnalyses::all();
 
-    // Phase 3: Rewrite IR.
+    // Phase 4: Store coalescing map and prune copies.
 
-    // Replace all uses of coalesced values with their representative.
-    for (u32 i = 0; i < value_count; ++i) {
-        auto representative = find(i);
-        if (representative != i) {
-            auto* value = function.values()[i].ptr();
-            auto* representative_value = function.values()[representative].ptr();
-            value->replace_all_uses_with(representative_value);
-        }
-    }
+    Vector<ValueIndex> coalescing_map;
+    coalescing_map.resize(value_count);
+    for (u32 i = 0; i < value_count; ++i)
+        coalescing_map[i] = ValueIndex(find(i));
+    function.set_coalescing_map(move(coalescing_map));
 
-    // Rebuild ParallelCopy instructions, removing no-op copies.
-    //
-    // After SSA destruction, ParallelCopy instructions appear in two
-    // positions: prepended at the start (handler edge copies) or just
-    // before the terminator (normal edge copies). We detect position
-    // by checking if any non-ParallelCopy, non-terminator instruction
-    // precedes it.
+    // Remove coalesced copies from ParallelCopy instructions.
+    // Keep the original Value pointers — do NOT call replace_all_uses_with.
     for (auto& block : function.basic_blocks()) {
-        struct ReplacementCopy {
+        bool has_parallel_copies = false;
+        block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.opcode() == Opcode::ParallelCopy)
+                has_parallel_copies = true;
+        });
+        if (!has_parallel_copies)
+            continue;
+
+        struct PositionedCopy {
             Value* dst;
             Value* src;
         };
 
-        Vector<ReplacementCopy> start_copies;
-        Vector<ReplacementCopy> end_copies;
-        bool has_parallel_copies = false;
+        Vector<PositionedCopy> start_copies;
+        Vector<PositionedCopy> end_copies;
 
-        // Walk instructions to find ParallelCopy instructions and
-        // classify them by position.
         bool seen_non_pcopy = false;
         for (auto instruction_index : block->instructions()) {
             auto* instruction = function.instruction_by_index(instruction_index);
@@ -309,17 +365,13 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                 continue;
             }
 
-            has_parallel_copies = true;
             auto const& pcopy = static_cast<ParallelCopyInstruction const&>(*instruction);
-
-            // If we haven't seen a non-ParallelCopy instruction yet,
-            // this is a start (handler) copy. Otherwise it's an end copy.
             auto& target = seen_non_pcopy ? end_copies : start_copies;
 
             for (size_t j = 0; j < pcopy.copies().size(); ++j) {
-                auto dst = find(static_cast<u32>(pcopy.copies()[j].dst));
-                auto src = find(static_cast<u32>(pcopy.copies()[j].src));
-                if (dst != src) {
+                auto dst = static_cast<u32>(pcopy.copies()[j].dst);
+                auto src = static_cast<u32>(pcopy.copies()[j].src);
+                if (find(dst) != find(src)) {
                     target.append({
                         function.values()[dst].ptr(),
                         function.values()[src].ptr(),
@@ -328,15 +380,10 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
             }
         }
 
-        if (!has_parallel_copies)
-            continue;
-
-        // Remove all old ParallelCopy instructions.
         block->remove_instructions_if([](Instruction const& instruction) {
             return instruction.opcode() == Opcode::ParallelCopy;
         });
 
-        // Re-insert at start if needed.
         if (!start_copies.is_empty()) {
             auto new_pcopy = ParallelCopyInstruction::create();
             for (auto& copy : start_copies)
@@ -344,7 +391,6 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
             block->prepend(move(new_pcopy));
         }
 
-        // Re-insert before terminator if needed.
         if (!end_copies.is_empty()) {
             auto new_pcopy = ParallelCopyInstruction::create();
             for (auto& copy : end_copies)

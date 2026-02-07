@@ -67,6 +67,15 @@ public:
     BasicBlock* entry_block() const { return m_entry_block; }
     void set_entry_block(BasicBlock* block) { m_entry_block = block; }
 
+    void set_coalescing_map(Vector<ValueIndex> map) { m_coalescing_map = move(map); }
+
+    ValueIndex coalesced_representative(ValueIndex index) const
+    {
+        if (m_coalescing_map.is_empty())
+            return index;
+        return m_coalescing_map[static_cast<u32>(index)];
+    }
+
     // Factory methods for blocks
     [[nodiscard]] BasicBlock& create_block(String name = {});
 
@@ -91,6 +100,7 @@ private:
     Value* m_this_value { nullptr };
     BasicBlock* m_entry_block { nullptr };
     Vector<NonnullOwnPtr<Instruction>> m_all_instructions;
+    Vector<ValueIndex> m_coalescing_map;
     ValueIndex m_next_value_index { 0 };
     BlockIndex m_next_block_index { 0 };
     InstructionIndex m_next_instruction_index { 0 };

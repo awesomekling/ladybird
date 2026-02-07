@@ -95,22 +95,24 @@ u32 Lowerer::get_or_add_constant(JS::Value constant_value)
 Bytecode::Operand Lowerer::operand_for_value(Value const& value)
 {
     auto vi = static_cast<u32>(value.index());
-    if (m_value_to_operand[vi].has_value())
-        return m_value_to_operand[vi].value();
+    auto representative = static_cast<u32>(m_function.coalesced_representative(ValueIndex(vi)));
 
+    if (m_value_to_operand[representative].has_value())
+        return m_value_to_operand[representative].value();
+
+    // Type-based operand decision uses the ORIGINAL value.
+    // Constants, parameters, this, and yield/await results are never coalesced,
+    // so the original value's type check is always correct.
     Bytecode::Operand operand = [&]() {
         if (value.is_constant()) {
-            // For constants, create a constant operand
             auto constant_value = value.constant_value();
             auto index = get_or_add_constant(constant_value);
             return Bytecode::Operand(Bytecode::Operand::Type::Constant, index);
         }
         if (value.is_parameter()) {
-            // For parameters, create an argument operand
             return Bytecode::Operand(Bytecode::Operand::Type::Argument, value.parameter_index());
         }
         if (value.is_this()) {
-            // For this, use the this register
             return Bytecode::Operand(Bytecode::Register::this_value());
         }
         // Yield and Await results are resume values that appear in the accumulator (reg0)
@@ -121,7 +123,7 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
         return allocate_register();
     }();
 
-    m_value_to_operand[vi] = operand;
+    m_value_to_operand[representative] = operand;
     return operand;
 }
 
