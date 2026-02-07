@@ -422,8 +422,14 @@ impl<'a> Parser<'a> {
             self.builder.scope_node_set_strict_mode(body);
         }
 
+        let strict_before = self.strict_mode;
+        if has_use_strict {
+            self.strict_mode = true;
+        }
+
         self.parse_statement_list(body, false);
 
+        self.strict_mode = strict_before;
         self.in_function_context = in_function_before;
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;

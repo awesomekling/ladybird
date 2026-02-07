@@ -1299,8 +1299,13 @@ fn parse_numeric_value(value: &[u16]) -> f64 {
     } else if s.starts_with("0b") || s.starts_with("0B") {
         parse_integer_with_radix(&s[2..], 2)
     } else if s.starts_with('0') && s.len() > 1 && s.as_bytes()[1].is_ascii_digit() {
-        // Legacy octal: 010 = 8
-        parse_integer_with_radix(&s[1..], 8)
+        // Legacy octal: 010 = 8. If any digit is 8 or 9, it's decimal.
+        let digits = &s[1..];
+        if digits.bytes().all(|b| b >= b'0' && b <= b'7') {
+            parse_integer_with_radix(digits, 8)
+        } else {
+            s.parse::<f64>().unwrap_or(f64::NAN)
+        }
     } else {
         s.parse::<f64>().unwrap_or(f64::NAN)
     }
