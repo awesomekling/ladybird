@@ -1,0 +1,542 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block5
+block1:
+    v7:unknown = GetGlobal Error
+    Jump block9
+block2:
+    v12:unknown = GetGlobal go
+    Jump block13
+block3:
+    v19:unknown = GetGlobal Error
+    Jump block17
+block4:
+    End v18:undefined
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined, undefined
+    Jump block6
+block0_split1:
+    SetGlobal result v2:unknown
+    Jump block7
+block0_split2:
+    v3:unknown = GetGlobal result
+    Jump block8
+block0_split3:
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
+block1_split4:
+    v8:unknown = GetGlobal result
+    Jump block10
+block1_split5:
+    v10:unknown = Add v9:string, v8:unknown
+    Jump block11
+block1_split6:
+    v11:object = Construct v7:unknown, v10:unknown
+    Jump block12
+block1_split7:
+    Throw v11:object
+block2_split8:
+    v14:unknown = Call v12:unknown, undefined, 42
+    Jump block14
+block2_split9:
+    SetGlobal result v14:unknown
+    Jump block15
+block2_split10:
+    v15:unknown = GetGlobal result
+    Jump block16
+block2_split11:
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    v18:undefined = Move undefined
+    Branch v17:boolean, block3, block4
+block3_split12:
+    v20:unknown = GetGlobal result
+    Jump block18
+block3_split13:
+    v22:unknown = Add v21:string, v20:unknown
+    Jump block19
+block3_split14:
+    v23:object = Construct v19:unknown, v22:unknown
+    Jump block20
+block3_split15:
+    Throw v23:object
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block5
+block1:
+    v7:unknown = GetGlobal Error
+    Jump block9
+block2:
+    v12:unknown = GetGlobal go
+    Jump block13
+block3:
+    v19:unknown = GetGlobal Error
+    Jump block17
+block4:
+    End undefined
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined, undefined
+    Jump block6
+block0_split1:
+    SetGlobal result v2:unknown
+    Jump block7
+block0_split2:
+    v3:unknown = GetGlobal result
+    Jump block8
+block0_split3:
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
+block1_split4:
+    v8:unknown = GetGlobal result
+    Jump block10
+block1_split5:
+    v10:unknown = Add v9:string, v8:unknown
+    Jump block11
+block1_split6:
+    v11:object = Construct v7:unknown, v10:unknown
+    Jump block12
+block1_split7:
+    Throw v11:object
+block2_split8:
+    v14:unknown = Call v12:unknown, undefined, 42
+    Jump block14
+block2_split9:
+    SetGlobal result v14:unknown
+    Jump block15
+block2_split10:
+    v15:unknown = GetGlobal result
+    Jump block16
+block2_split11:
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    v18:undefined = Move undefined
+    Branch v17:boolean, block3, block4
+block3_split12:
+    v20:unknown = GetGlobal result
+    Jump block18
+block3_split13:
+    v22:unknown = Add v21:string, v20:unknown
+    Jump block19
+block3_split14:
+    v23:object = Construct v19:unknown, v22:unknown
+    Jump block20
+block3_split15:
+    Throw v23:object
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block5
+block1:
+    v7:unknown = GetGlobal Error
+    Jump block9
+block2:
+    v12:unknown = GetGlobal go
+    Jump block13
+block3:
+    v19:unknown = GetGlobal Error
+    Jump block17
+block4:
+    End undefined
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined, undefined
+    Jump block6
+block0_split1:
+    SetGlobal result v2:unknown
+    Jump block7
+block0_split2:
+    v3:unknown = GetGlobal result
+    Jump block8
+block0_split3:
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
+block1_split4:
+    v8:unknown = GetGlobal result
+    Jump block10
+block1_split5:
+    v10:unknown = Add v9:string, v8:unknown
+    Jump block11
+block1_split6:
+    v11:object = Construct v7:unknown, v10:unknown
+    Jump block12
+block1_split7:
+    Throw v11:object
+block2_split8:
+    v14:unknown = Call v12:unknown, undefined, 42
+    Jump block14
+block2_split9:
+    SetGlobal result v14:unknown
+    Jump block15
+block2_split10:
+    v15:unknown = GetGlobal result
+    Jump block16
+block2_split11:
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    v18:undefined = Move undefined
+    Branch v17:boolean, block3, block4
+block3_split12:
+    v20:unknown = GetGlobal result
+    Jump block18
+block3_split13:
+    v22:unknown = Add v21:string, v20:unknown
+    Jump block19
+block3_split14:
+    v23:object = Construct v19:unknown, v22:unknown
+    Jump block20
+block3_split15:
+    Throw v23:object
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block5
+block1:
+    v7:unknown = GetGlobal Error
+    Jump block9
+block2:
+    v12:unknown = GetGlobal go
+    Jump block13
+block3:
+    v19:unknown = GetGlobal Error
+    Jump block17
+block4:
+    End undefined
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined, undefined
+    Jump block6
+block0_split1:
+    SetGlobal result v2:unknown
+    Jump block7
+block0_split2:
+    v3:unknown = GetGlobal result
+    Jump block8
+block0_split3:
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    Branch v5:boolean, block1, block2
+block1_split4:
+    v8:unknown = GetGlobal result
+    Jump block10
+block1_split5:
+    v10:unknown = Add v9:string, v8:unknown
+    Jump block11
+block1_split6:
+    v11:object = Construct v7:unknown, v10:unknown
+    Jump block12
+block1_split7:
+    Throw v11:object
+block2_split8:
+    v14:unknown = Call v12:unknown, undefined, 42
+    Jump block14
+block2_split9:
+    SetGlobal result v14:unknown
+    Jump block15
+block2_split10:
+    v15:unknown = GetGlobal result
+    Jump block16
+block2_split11:
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    Branch v17:boolean, block3, block4
+block3_split12:
+    v20:unknown = GetGlobal result
+    Jump block18
+block3_split13:
+    v22:unknown = Add v21:string, v20:unknown
+    Jump block19
+block3_split14:
+    v23:object = Construct v19:unknown, v22:unknown
+    Jump block20
+block3_split15:
+    Throw v23:object
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined, undefined
+    SetGlobal result v2:unknown
+    v3:unknown = GetGlobal result
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal result
+    v10:unknown = Add v9:string, v8:unknown
+    v11:object = Construct v7:unknown, v10:unknown
+    Throw v11:object
+block2:
+    v12:unknown = GetGlobal go
+    v14:unknown = Call v12:unknown, undefined, 42
+    SetGlobal result v14:unknown
+    v15:unknown = GetGlobal result
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    Branch v17:boolean, block3, block4
+block3:
+    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal result
+    v22:unknown = Add v21:string, v20:unknown
+    v23:object = Construct v19:unknown, v22:unknown
+    Throw v23:object
+block4:
+    End undefined
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined, undefined
+    SetGlobal result v2:unknown
+    v3:unknown = GetGlobal result
+    v5:boolean = StrictlyInequals v3:unknown, v4:string
+    Branch v5:boolean, block1, block2
+block1:
+    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal result
+    v10:unknown = Add v9:string, v8:unknown
+    v11:object = Construct v7:unknown, v10:unknown
+    Throw v11:object
+block2:
+    v12:unknown = GetGlobal go
+    v14:unknown = Call v12:unknown, undefined, 42
+    SetGlobal result v14:unknown
+    v15:unknown = GetGlobal result
+    v17:boolean = StrictlyInequals v15:unknown, v16:string
+    Branch v17:boolean, block3, block4
+block3:
+    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal result
+    v22:unknown = Add v21:string, v20:unknown
+    v23:object = Construct v19:unknown, v22:unknown
+    Throw v23:object
+block4:
+    End undefined
+
+=== After SSAConstruction ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block1, block2
+block1:
+    v3:string = Move v2:string
+    Jump block3
+block2:
+    v5:string = Move v4:string
+    Jump block3
+block3:
+    v13:string = Phi [block1:v3:string, block2:v5:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v12:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Jump block6
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Jump block7
+block4_split0:
+    Return v7:unknown
+block5_split1:
+    Return v9:unknown
+
+=== After SCCP ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block1, block2
+block1:
+    v3:string = Move v2:string
+    Jump block3
+block2:
+    v5:string = Move v4:string
+    Jump block3
+block3:
+    v13:string = Phi [block1:v14:string, block2:v15:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v12:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Jump block6
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Jump block7
+block4_split0:
+    Return v7:unknown
+block5_split1:
+    Return v9:unknown
+
+=== Before optimization ===
+function(v10:unknown):
+block0:
+    v1:undefined = Move undefined
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block1, block2
+block1:
+    v3:string = Move v2:string
+    Jump block3
+block2:
+    v5:string = Move v4:string
+    Jump block3
+block3:
+    v13:string = Phi [block1:v14:string, block2:v15:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v12:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Jump block6
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Jump block7
+block4_split0:
+    Return v7:unknown
+block5_split1:
+    Return v9:unknown
+
+=== After DeadCodeElimination ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block1, block2
+block1:
+    Jump block3
+block2:
+    Jump block3
+block3:
+    v13:string = Phi [block1:v14:string, block2:v15:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v12:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Jump block6
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Jump block7
+block4_split0:
+    Return v7:unknown
+block5_split1:
+    Return v9:unknown
+
+=== After GlobalValueNumbering ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block1, block2
+block1:
+    Jump block3
+block2:
+    Jump block3
+block3:
+    v13:string = Phi [block1:v14:string, block2:v15:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Jump block6
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Jump block7
+block4_split0:
+    Return v7:unknown
+block5_split1:
+    Return v9:unknown
+
+=== After SimplifyCFG ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block3, block2
+block2:
+    Jump block3
+block3:
+    v13:string = Phi [block2:v15:string, block0:v14:string]
+    v12:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Return v7:unknown
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Return v9:unknown
+
+=== After DeadCodeElimination ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block3, block2
+block2:
+    Jump block3
+block3:
+    v13:string = Phi [block2:v15:string, block0:v14:string]
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Return v7:unknown
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Return v9:unknown
+
+=== After SplitCriticalEdges ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block8, block2
+block2:
+    Jump block3
+block3:
+    v13:string = Phi [block2:v15:string, block8:v14:string]
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Return v7:unknown
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Return v9:unknown
+split_block0_block3:
+    Jump block3
+
+=== After SsaDestructionPass ===
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block8, block2
+block2:
+    ParallelCopy [v13:string <- v15:string]
+    Jump block3
+block3:
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Return v7:unknown
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Return v9:unknown
+split_block0_block3:
+    ParallelCopy [v13:string <- v14:string]
+    Jump block3
+
+function(v10:unknown):
+block0:
+    v11:boolean = StrictlyEquals v10:unknown, undefined
+    Branch v11:boolean, block8, block2
+block2:
+    ParallelCopy [v13:string <- v15:string]
+    Jump block3
+block3:
+    Branch v11:boolean, block4, block5
+block4:
+    v7:unknown = Add v13:string, v6:string
+    Return v7:unknown
+block5:
+    v9:unknown = Add v13:string, v8:string
+    Return v9:unknown
+split_block0_block3:
+    ParallelCopy [v13:string <- v14:string]
+    Jump block3
+
+Tiered up function 'go' (152 -> 136) 🚀
