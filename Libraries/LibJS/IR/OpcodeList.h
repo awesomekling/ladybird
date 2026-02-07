@@ -139,13 +139,13 @@
     OP(AddPrivateName,                  false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
     OP(CreateVariableEnvironment,       false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
     /* Object creation */                                                                                                                    \
-    OP(NewObject,                       false, E_THROW,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
-    OP(NewArray,                        false, E_THROW,      false, true,  255, Type::Array,     false, 0, R_NONE) \
+    OP(NewObject,                       false, E_WRITE,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
+    OP(NewArray,                        false, E_WRITE,      false, true,  255, Type::Array,     false, 0, R_NONE) \
     OP(NewArrayWithLength,              false, E_THROW,      false, true,  1,   Type::Array,     false, 0, R_NONE) \
     OP(ArrayAppend,                     false, E_THROW_WRITE,false, false, 2,   Type::Unknown,   false, 0, R_NONE) \
     OP(NewClass,                        false, E_CALL,       false, true,  255, Type::Function,  false, 0, R_NONE) \
-    OP(NewFunction,                     false, E_THROW,      false, true,  255, Type::Function,  false, 0, R_NONE) \
-    OP(NewRegExp,                       false, E_THROW,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
+    OP(NewFunction,                     false, E_WRITE,      false, true,  255, Type::Function,  false, 0, R_NONE) \
+    OP(NewRegExp,                       false, E_WRITE,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
     OP(GetTemplateObject,               false, E_WRITE,      false, true,  255, Type::Array,     false, 0, R_NONE) \
     OP(InitObjectLiteralProperty,       false, E_WRITE,      false, false, 2,   Type::Unknown,   false, 0, R_NONE) \
     OP(CacheObjectShape,                false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
