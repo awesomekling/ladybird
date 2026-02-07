@@ -100,6 +100,267 @@ static size_t count_return_terminators(Function const& function)
     return count;
 }
 
+static Value* map_callee_value(Value* callee_value, HashMap<ValueIndex, Value*> const& value_map)
+{
+    if (!callee_value)
+        return nullptr;
+    auto it = value_map.find(callee_value->index());
+    VERIFY(it != value_map.end());
+    return it->value;
+}
+
+static void clone_instruction(
+    Instruction const& source,
+    Function& caller,
+    Builder& builder,
+    HashMap<ValueIndex, Value*>& value_map)
+{
+    auto opcode = source.opcode();
+
+    auto map = [&](Value* value) -> Value* {
+        return map_callee_value(value, value_map);
+    };
+
+    NonnullOwnPtr<Instruction> new_instruction = [&]() -> NonnullOwnPtr<Instruction> {
+        if (is_call_opcode(opcode)) {
+            auto instruction = CallInstruction::create(opcode, map(source.operand(0)), map(source.operand(1)));
+            for (size_t i = 2; i < source.operand_count(); ++i)
+                instruction->add_operand(map(source.operand(i)));
+            return instruction;
+        }
+
+        if (opcode == Opcode::GetById) {
+            auto const& get_by_id = static_cast<GetByIdInstruction const&>(source);
+            return GetByIdInstruction::create(map(get_by_id.base()), get_by_id.property());
+        }
+
+        // Binary ops use specialized instruction class
+        if (source.operand_count() == 2 && opcode_operand_arity(opcode) == 2 && opcode_has_result(opcode)) {
+            return BinaryOpInstruction::create(opcode, map(source.operand(0)), map(source.operand(1)));
+        }
+
+        // Unary ops use specialized instruction class
+        if (source.operand_count() == 1 && opcode_operand_arity(opcode) == 1 && opcode_has_result(opcode)) {
+            return UnaryOpInstruction::create(opcode, map(source.operand(0)));
+        }
+
+        // Generic instruction
+        auto instruction = Instruction::create(opcode);
+        for (size_t i = 0; i < source.operand_count(); ++i)
+            instruction->add_operand(map(source.operand(i)));
+        return instruction;
+    }();
+
+    // Copy all metadata fields
+    new_instruction->set_property_key_index(source.property_key_index());
+    new_instruction->set_identifier_index(source.identifier_index());
+    new_instruction->set_cache_index(source.cache_index());
+    new_instruction->set_property_slot(source.property_slot());
+    new_instruction->set_extract_index(source.extract_index());
+    new_instruction->set_iterator_hint(source.iterator_hint());
+    new_instruction->set_function_node(source.function_node());
+    new_instruction->set_class_expression(source.class_expression());
+    new_instruction->set_lhs_name(source.lhs_name());
+    new_instruction->set_base_identifier(source.base_identifier());
+    new_instruction->set_environment_mode(source.environment_mode());
+    new_instruction->set_is_immutable(source.is_immutable());
+    new_instruction->set_is_global(source.is_global());
+    new_instruction->set_is_strict(source.is_strict());
+    new_instruction->set_capacity(source.capacity());
+    new_instruction->set_regex_source_index(source.regex_source_index());
+    new_instruction->set_regex_flags_index(source.regex_flags_index());
+    new_instruction->set_regex_index(source.regex_index());
+    new_instruction->set_expression_string(source.expression_string());
+    new_instruction->set_builtin(source.builtin());
+    new_instruction->set_arguments_kind(source.arguments_kind());
+    new_instruction->set_create_arguments_needs_dst(source.create_arguments_needs_dst());
+    new_instruction->set_rest_index(source.rest_index());
+    new_instruction->set_is_synthetic(source.is_synthetic());
+    new_instruction->set_put_kind(source.put_kind());
+    new_instruction->set_is_spread(source.is_spread());
+    new_instruction->set_completion_type(source.completion_type());
+    new_instruction->set_string_table_index(source.string_table_index());
+    if (source.source_record().has_value())
+        new_instruction->set_source_record(source.source_record().value());
+
+    if (opcode_has_result(opcode)) {
+        auto& result = caller.create_value_for_instruction();
+        new_instruction->set_result(&result);
+        builder.insertion_block()->append(move(new_instruction));
+        result.defining_instruction()->recompute_result_type();
+        if (source.result())
+            value_map.set(source.result()->index(), &result);
+    } else {
+        builder.insertion_block()->append(move(new_instruction));
+    }
+}
+
+static void inline_candidate(InlineCandidate& candidate, Function& caller)
+{
+    auto& call = *candidate.call;
+    auto& call_block = *candidate.call_block;
+    auto& callee_function = *candidate.callee_function;
+
+    // The call block ends with: [...instructions...] Call Jump(continuation)
+    // After EH splitting, the Call is always the last non-terminator.
+    auto* jump_terminator = call_block.terminator();
+    VERIFY(jump_terminator);
+    VERIFY(jump_terminator->opcode() == Opcode::Jump);
+    auto& continuation_block = static_cast<JumpInstruction*>(jump_terminator)->target();
+
+    Builder builder(caller);
+
+    // Save the call's operands before removing it.
+    auto* callee_operand = call.callee();
+    auto* this_value = call.this_value();
+    Vector<Value*> arguments;
+    for (size_t i = 0; i < call.argument_count(); ++i)
+        arguments.append(call.argument(i));
+    auto expression_string = call.expression_string();
+    auto profile_cache_index = call.cache_index();
+    auto* call_result_value = call.result();
+
+    // Remove the Call and Jump from call_block.
+    call_block.remove_terminator();
+    call_block.remove_instructions_if([&](Instruction const& instruction) {
+        return &instruction == &call;
+    });
+
+    // Remove call_block as predecessor of continuation_block.
+    CFG::remove_predecessor(continuation_block, call_block);
+
+    // Build value map: callee values -> caller values
+    HashMap<ValueIndex, Value*> value_map;
+
+    // Map callee parameters to call arguments
+    for (auto* param : callee_function.parameters()) {
+        auto param_index = param->parameter_index();
+        Value* mapped = param_index < arguments.size()
+            ? arguments[param_index]
+            : &caller.create_constant(JS::js_undefined());
+        value_map.set(param->index(), mapped);
+    }
+
+    // Map callee 'this' to call's this_value
+    for (auto& value : callee_function.values()) {
+        if (value->is_this()) {
+            value_map.set(value->index(), this_value);
+            break;
+        }
+    }
+
+    // Map callee constants
+    for (auto& value : callee_function.values()) {
+        if (value->is_constant())
+            value_map.set(value->index(), &caller.create_constant(value->constant_value()));
+    }
+
+    // Create blocks in caller for each callee block
+    HashMap<BlockIndex, BasicBlock*> block_map;
+    for (auto& callee_block : callee_function.basic_blocks()) {
+        auto& new_block = caller.create_block(
+            String::formatted("inline_{}", callee_block->name()).release_value_but_fixme_should_propagate_errors());
+        block_map.set(callee_block->index(), &new_block);
+    }
+
+    auto* fast_entry_block = block_map.get(callee_function.entry_block()->index()).value();
+
+    // Create slow_block and merge_block
+    auto& slow_block = caller.create_block("inline_slow"_string);
+    auto& merge_block = caller.create_block("inline_merge"_string);
+
+    // Emit guard in call_block: guard = StrictlyEquals(callee, expected_callee)
+    builder.set_insertion_block(&call_block);
+    auto& expected_callee = caller.create_constant(JS::Value(candidate.callee.ptr()));
+    auto& guard_value = builder.build_strictly_equals(*callee_operand, expected_callee);
+    builder.build_branch(guard_value, *fast_entry_block, slow_block);
+
+    // Build slow path: re-emit the original call
+    builder.set_insertion_block(&slow_block);
+    auto& slow_call_result = builder.build_call(*callee_operand, *this_value, arguments.span(), expression_string);
+    slow_call_result.defining_instruction()->set_cache_index(profile_cache_index);
+    builder.build_jump(merge_block);
+
+    // Track the return value from the fast path
+    Value* fast_return_value = nullptr;
+    BasicBlock* fast_return_block = nullptr;
+
+    // Clone callee instructions into the mapped blocks
+    for (auto& callee_block : callee_function.basic_blocks()) {
+        auto* target_block = block_map.get(callee_block->index()).value();
+        builder.set_insertion_block(target_block);
+
+        // Clone phi instructions first
+        callee_block->for_each_phi([&](PhiInstruction const& phi) {
+            Vector<Value*> mapped_values;
+            Vector<BlockIndex> mapped_predecessors;
+            for (size_t i = 0; i < phi.incoming_count(); ++i) {
+                auto* mapped_block = block_map.get(phi.incoming_block(i)).value();
+                mapped_predecessors.append(mapped_block->index());
+                auto* incoming = phi.incoming_value(i);
+                mapped_values.append(map_callee_value(incoming, value_map));
+            }
+            auto& phi_result = builder.build_phi(move(mapped_values), move(mapped_predecessors));
+            value_map.set(phi.result()->index(), &phi_result);
+        });
+
+        // Clone non-phi, non-terminator instructions
+        callee_block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.opcode() == Opcode::Phi)
+                return;
+            if (instruction.is_terminator())
+                return;
+            clone_instruction(instruction, caller, builder, value_map);
+        });
+
+        // Handle terminators
+        auto* terminator = callee_block->terminator();
+        if (!terminator)
+            continue;
+
+        switch (terminator->opcode()) {
+        case Opcode::Jump: {
+            auto const& jump = static_cast<JumpInstruction const&>(*terminator);
+            auto* mapped_target = block_map.get(jump.target().index()).value();
+            builder.build_jump(*mapped_target);
+            break;
+        }
+        case Opcode::Branch: {
+            auto const& branch = static_cast<BranchInstruction const&>(*terminator);
+            auto* condition = map_callee_value(branch.condition(), value_map);
+            auto* true_target = block_map.get(branch.true_branch().index()).value();
+            auto* false_target = block_map.get(branch.false_branch().index()).value();
+            builder.build_branch(*condition, *true_target, *false_target);
+            break;
+        }
+        case Opcode::Return: {
+            fast_return_value = map_callee_value(terminator->operand(0), value_map);
+            fast_return_block = target_block;
+            builder.build_jump(merge_block);
+            break;
+        }
+        default:
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    VERIFY(fast_return_value);
+    VERIFY(fast_return_block);
+
+    // Build merge block with phi
+    builder.set_insertion_block(&merge_block);
+    auto& merged_result = builder.build_phi(
+        { &slow_call_result, fast_return_value },
+        { slow_block.index(), fast_return_block->index() });
+
+    // Replace all uses of the original call result with the phi result
+    if (call_result_value)
+        call_result_value->replace_all_uses_with(&merged_result);
+
+    // Jump from merge_block to continuation
+    builder.build_jump(continuation_block);
+}
+
 PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
 {
     auto source_executable = function.source_executable();
@@ -116,7 +377,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             if (instruction.opcode() != Opcode::Call)
                 return;
 
-            auto& call = static_cast<CallInstruction const&>(instruction);
+            auto const& call = static_cast<CallInstruction const&>(instruction);
             auto profile_index = static_cast<u32>(call.cache_index());
             if (profile_index >= source_executable->call_target_profiles.size())
                 return;
@@ -182,8 +443,10 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
     if (candidates.is_empty())
         return PreservedAnalyses::all();
 
-    // Transform will be implemented in the next commit.
-    return PreservedAnalyses::all();
+    for (auto& candidate : candidates)
+        inline_candidate(candidate, function);
+
+    return PreservedAnalyses::none();
 }
 
 }

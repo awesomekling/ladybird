@@ -234,6 +234,15 @@ public:
         return adopt_own(*new Instruction(Op));
     }
 
+    // Runtime opcode factory for instruction cloning. The caller must ensure
+    // the opcode does not require a specialized instruction class.
+    [[nodiscard]] static NonnullOwnPtr<Instruction> create(Opcode opcode)
+    {
+        VERIFY(!requires_specialized_instruction(opcode));
+        VERIFY(!is_terminator_opcode(opcode));
+        return adopt_own(*new Instruction(opcode));
+    }
+
     virtual ~Instruction() = default;
 
     Opcode opcode() const { return m_opcode; }
