@@ -1240,6 +1240,7 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, C
         source_executable->global_variable_caches.size(),
         source_executable->template_object_caches.size(),
         source_executable->object_shape_caches.size(),
+        source_executable->call_target_profiles.size(),
         number_of_registers,
         source_executable->is_strict_mode ? Strict::Yes : Strict::No);
 

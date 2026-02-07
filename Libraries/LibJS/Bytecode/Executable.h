@@ -86,6 +86,12 @@ struct ObjectShapeCache {
     Vector<u32> property_offsets;
 };
 
+struct CallTargetProfile {
+    GC::Weak<FunctionObject> callee;
+    u32 hit_count { 0 };
+    u32 total_count { 0 };
+};
+
 struct SourceRecord {
     u32 source_start_offset {};
     u32 source_end_offset {};
@@ -113,6 +119,7 @@ public:
         size_t number_of_global_variable_caches,
         size_t number_of_template_object_caches,
         size_t number_of_object_shape_caches,
+        size_t number_of_call_target_profiles,
         size_t number_of_registers,
         Strict);
 
@@ -124,6 +131,7 @@ public:
     Vector<GlobalVariableCache> global_variable_caches;
     Vector<TemplateObjectCache> template_object_caches;
     Vector<ObjectShapeCache> object_shape_caches;
+    Vector<CallTargetProfile> call_target_profiles;
     NonnullOwnPtr<StringTable> string_table;
     NonnullOwnPtr<IdentifierTable> identifier_table;
     NonnullOwnPtr<PropertyKeyTable> property_key_table;

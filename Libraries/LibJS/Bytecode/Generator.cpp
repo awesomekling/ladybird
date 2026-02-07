@@ -473,6 +473,7 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
         generator.m_next_global_variable_cache,
         generator.m_next_template_object_cache,
         generator.m_next_object_shape_cache,
+        0,
         generator.m_next_register,
         generator.m_strict);
 
