@@ -597,7 +597,7 @@ impl<'a> Parser<'a> {
 
     /// Extract the original value (trivia + value) of a token.
     pub(crate) fn token_original_value(&self, token: &Token) -> &[u16] {
-        let start = token.trivia_start as usize;
+        let start = token.value_start as usize;
         let end = (token.value_start + token.value_len) as usize;
         if end <= self.source.len() {
             &self.source[start..end]
