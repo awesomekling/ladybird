@@ -1,0 +1,137 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal add
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Jump block2
+block0_split1:
+    Return v5:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal add
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Jump block2
+block0_split1:
+    Return v5:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal add
+    Jump block1
+block0_split0:
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Jump block2
+block0_split1:
+    Return v5:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal add
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Return v5:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal add
+    v5:unknown = Call v0:unknown, undefined, 1, 2, 3
+    Return v5:unknown
+
+=== After SSAConstruction ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    v3:unknown = Add v0:unknown, v1:unknown
+    Jump block1
+block0_split0:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== After SCCP ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    v3:unknown = Add v0:unknown, v1:unknown
+    Jump block1
+block0_split0:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== Before optimization ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    v3:unknown = Add v0:unknown, v1:unknown
+    Jump block1
+block0_split0:
+    v4:unknown = Add v3:unknown, v2:unknown
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== After SimplifyCFG ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    v3:unknown = Add v0:unknown, v1:unknown
+    v4:unknown = Add v3:unknown, v2:unknown
+    Return v4:unknown
+
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    v3:unknown = Add v0:unknown, v1:unknown
+    v4:unknown = Add v3:unknown, v2:unknown
+    Return v4:unknown
