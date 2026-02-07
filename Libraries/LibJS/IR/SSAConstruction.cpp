@@ -277,6 +277,9 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                     // No reaching definition: variable was never written on this path.
                     // Locals use the empty value (TDZ marker), registers use undefined.
                     auto decoded = m_executable.original_operand_from_raw(raw);
+                    // Formal parameters must always have a reaching definition (seeded at entry).
+                    VERIFY(decoded.type() != Bytecode::Operand::Type::Argument
+                        || decoded.index() >= m_executable.formal_parameter_count);
                     auto& default_value = m_function.create_constant(
                         decoded.is_local() ? js_special_empty_value() : js_undefined());
                     instruction.set_operand(i, &default_value);
@@ -328,6 +331,9 @@ void SSAConstruction::rename_ssa(BasicBlock& start_block, HashMap<u32, Vector<Va
                     // No definition reaches here.
                     // Locals use the empty value (TDZ marker), registers use undefined.
                     auto decoded = m_executable.original_operand_from_raw(raw);
+                    // Formal parameters must always have a reaching definition (seeded at entry).
+                    VERIFY(decoded.type() != Bytecode::Operand::Type::Argument
+                        || decoded.index() >= m_executable.formal_parameter_count);
                     reaching = &m_function.create_constant(
                         decoded.is_local() ? js_special_empty_value() : JS::js_undefined());
                 }
