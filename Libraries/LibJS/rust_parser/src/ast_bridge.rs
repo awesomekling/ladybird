@@ -85,6 +85,13 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         value: *const u8, value_len: usize,
     ) -> NodeHandle;
+    pub fn ast_create_regexp_literal(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        pattern: *const u16, pattern_len: usize,
+        flags: *const u16, flags_len: usize,
+    ) -> NodeHandle;
 
     // Identifiers
     pub fn ast_create_identifier(
@@ -584,6 +591,11 @@ impl AstBuilder {
     pub fn create_bigint_literal(&self, span: Span, value: &[u8]) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_bigint_literal(a, sc, sl, scol, so, el, ecol, eo, value.as_ptr(), value.len()) }
+    }
+
+    pub fn create_regexp_literal(&self, span: Span, pattern: &[u16], flags: &[u16]) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_regexp_literal(a, sc, sl, scol, so, el, ecol, eo, pattern.as_ptr(), pattern.len(), flags.as_ptr(), flags.len()) }
     }
 
     // === Identifiers ===

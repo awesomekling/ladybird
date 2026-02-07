@@ -82,6 +82,12 @@ ASTNodeHandle ast_create_bigint_literal(ASTArenaHandle arena, SourceCodeHandle s
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     char const* value, size_t value_len);
 
+ASTNodeHandle ast_create_regexp_literal(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    uint16_t const* pattern, size_t pattern_len,
+    uint16_t const* flags, size_t flags_len);
+
 // === Identifiers ===
 ASTNodeHandle ast_create_identifier(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,

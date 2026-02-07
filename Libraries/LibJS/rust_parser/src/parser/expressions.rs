@@ -364,9 +364,19 @@ impl<'a> Parser<'a> {
 
             TokenType::RegexLiteral => {
                 let tok = self.consume();
-                let _value = self.token_value(&tok);
-                // TODO: Create RegExpLiteral node
-                (self.builder.create_identifier(self.span_from(start), &super::utf16_lit("undefined")), true)
+                let value = self.token_value(&tok).to_vec();
+                let pattern = if value.len() >= 2 {
+                    &value[1..value.len() - 1]
+                } else {
+                    &value[..]
+                };
+                let flags = if self.match_token(TokenType::RegexFlags) {
+                    let ftok = self.consume();
+                    self.token_value(&ftok).to_vec()
+                } else {
+                    Vec::new()
+                };
+                (self.builder.create_regexp_literal(self.span_from(start), pattern, &flags), true)
             }
 
             TokenType::Slash | TokenType::SlashEquals => {
@@ -374,9 +384,20 @@ impl<'a> Parser<'a> {
                 let tok = self.lexer.force_slash_as_regex();
                 self.current_token = tok;
                 let tok = self.consume();
-                let _value = self.token_value(&tok);
-                // TODO: Create RegExpLiteral node
-                (self.builder.create_identifier(self.span_from(start), &super::utf16_lit("undefined")), true)
+                let value = self.token_value(&tok).to_vec();
+                // Strip leading and trailing slash from pattern
+                let pattern = if value.len() >= 2 {
+                    &value[1..value.len() - 1]
+                } else {
+                    &value[..]
+                };
+                let flags = if self.match_token(TokenType::RegexFlags) {
+                    let ftok = self.consume();
+                    self.token_value(&ftok).to_vec()
+                } else {
+                    Vec::new()
+                };
+                (self.builder.create_regexp_literal(self.span_from(start), pattern, &flags), true)
             }
 
             _ => {

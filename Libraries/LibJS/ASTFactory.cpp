@@ -13,8 +13,10 @@
 #include <AK/Vector.h>
 #include <LibJS/AST.h>
 #include <LibJS/ASTFactory.h>
+#include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/SourceCode.h>
 #include <LibJS/SourceRange.h>
+#include <LibRegex/Regex.h>
 
 using namespace JS;
 
@@ -197,6 +199,35 @@ ASTNodeHandle ast_create_bigint_literal(ASTArenaHandle arena_handle, SourceCodeH
     auto& arena = *static_cast<ASTArena*>(arena_handle);
     auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
     return arena_add(arena, create_ast_node<BigIntLiteral>(range, ByteString(StringView { value, value_len })));
+}
+
+ASTNodeHandle ast_create_regexp_literal(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    u16 const* pattern, size_t pattern_len,
+    u16 const* flags, size_t flags_len)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+
+    auto pattern_utf16 = Utf16String::from_utf16(make_utf16_view(pattern, pattern_len));
+    auto flags_utf16 = Utf16String::from_utf16(make_utf16_view(flags, flags_len));
+
+    auto parsed_flags = JS::RegExpObject::default_flags;
+    if (flags_len > 0) {
+        auto parsed_flags_or_error = regex_flags_from_string(flags_utf16.utf16_view());
+        if (!parsed_flags_or_error.is_error())
+            parsed_flags = parsed_flags_or_error.release_value();
+    }
+
+    String parsed_pattern;
+    auto parsed_pattern_result = parse_regex_pattern(pattern_utf16.utf16_view(), parsed_flags.has_flag_set(ECMAScriptFlags::Unicode), parsed_flags.has_flag_set(ECMAScriptFlags::UnicodeSets));
+    if (!parsed_pattern_result.is_error())
+        parsed_pattern = parsed_pattern_result.release_value();
+
+    auto parsed_regex = Regex<ECMA262>::parse_pattern(parsed_pattern, parsed_flags);
+
+    return arena_add(arena, create_ast_node<RegExpLiteral>(range, move(parsed_regex), move(parsed_pattern), parsed_flags, move(pattern_utf16), move(flags_utf16)));
 }
 
 // === Identifiers ===
