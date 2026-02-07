@@ -70,6 +70,8 @@ public:
     [[nodiscard]] Value& build_not(Value& operand);
     [[nodiscard]] Value& build_is_undefined(Value& operand);
     [[nodiscard]] Value& build_is_nullish(Value& operand);
+    [[nodiscard]] Value& build_is_callable(Value& operand);
+    [[nodiscard]] Value& build_is_constructor(Value& operand);
 
     // Increment/Decrement
     [[nodiscard]] Value& build_increment(Value& operand);

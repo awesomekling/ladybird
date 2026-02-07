@@ -89,6 +89,8 @@ Value& Builder::build_to_length(Value& operand) { return build_unary_op(Opcode::
 Value& Builder::build_not(Value& operand) { return build_unary_op(Opcode::Not, operand); }
 Value& Builder::build_is_undefined(Value& operand) { return build_unary_op(Opcode::IsUndefined, operand); }
 Value& Builder::build_is_nullish(Value& operand) { return build_unary_op(Opcode::IsNullish, operand); }
+Value& Builder::build_is_callable(Value& operand) { return build_unary_op(Opcode::IsCallable, operand); }
+Value& Builder::build_is_constructor(Value& operand) { return build_unary_op(Opcode::IsConstructor, operand); }
 
 // Increment/Decrement
 Value& Builder::build_increment(Value& operand) { return build_unary_op(Opcode::Increment, operand); }

@@ -327,6 +327,12 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::IsNullish:
         emit<Bytecode::Op::IsNullish>(dst(), operand(0));
         break;
+    case Opcode::IsCallable:
+        emit<Bytecode::Op::IsCallable>(dst(), operand(0));
+        break;
+    case Opcode::IsConstructor:
+        emit<Bytecode::Op::IsConstructor>(dst(), operand(0));
+        break;
 
     // Increment/Decrement
     case Opcode::Increment:

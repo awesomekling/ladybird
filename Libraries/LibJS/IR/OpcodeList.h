@@ -71,6 +71,8 @@
     OP(Not,                             false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     OP(IsUndefined,                     false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     OP(IsNullish,                       false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
+    OP(IsCallable,                      false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
+    OP(IsConstructor,                   false, E_NONE,       false, true,  1,   Type::Boolean,   false, 0, R_NONE) \
     /* Increment/Decrement (may call ToNumeric -> ToPrimitive) */                                                                             \
     OP(Increment,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     OP(Decrement,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \

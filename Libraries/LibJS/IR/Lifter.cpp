@@ -1299,14 +1299,14 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case IsCallable: {
         auto const& op = static_cast<Bytecode::Op::IsCallable const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_builder.build_move(src);
+        auto& result = m_builder.build_is_callable(src);
         define_operand(op.dst(), result, block);
         break;
     }
     case IsConstructor: {
         auto const& op = static_cast<Bytecode::Op::IsConstructor const&>(instruction);
         auto& src = get_or_create_value_for_operand(op.value(), block);
-        auto& result = m_builder.build_move(src);
+        auto& result = m_builder.build_is_constructor(src);
         define_operand(op.dst(), result, block);
         break;
     }
