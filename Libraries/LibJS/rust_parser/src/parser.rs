@@ -724,7 +724,16 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn match_declaration(&mut self) -> bool {
         match self.current_token_type() {
-            TokenType::Function | TokenType::Class | TokenType::Const | TokenType::Let => true,
+            TokenType::Function | TokenType::Class | TokenType::Const => true,
+            TokenType::Let => {
+                if !self.strict_mode {
+                    // In non-strict mode, `let` can be an identifier (e.g., label).
+                    // Check lookahead to distinguish `let x` (declaration) from `let:` (label).
+                    self.try_match_let_declaration()
+                } else {
+                    true
+                }
+            }
             TokenType::Async => {
                 // async function
                 let next = self.next_token();
@@ -737,6 +746,17 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
+    }
+
+    fn try_match_let_declaration(&mut self) -> bool {
+        let next = self.next_token();
+        if next.token_type.is_identifier_name() && self.token_value(&next) != utf16_lit("in") {
+            return true;
+        }
+        if next.token_type == TokenType::CurlyOpen || next.token_type == TokenType::BracketOpen {
+            return true;
+        }
+        false
     }
 
     pub(crate) fn match_export_or_import(&mut self) -> bool {

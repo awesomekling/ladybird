@@ -51,8 +51,8 @@ impl<'a> Parser<'a> {
                 self.parse_expression_statement()
             }
             _ => {
-                if self.match_identifier_name() && allow_labelled_function {
-                    if let Some(labelled) = self.try_parse_labelled_statement() {
+                if self.match_identifier_name() {
+                    if let Some(labelled) = self.try_parse_labelled_statement(allow_labelled_function) {
                         return labelled;
                     }
                 }
@@ -515,7 +515,7 @@ impl<'a> Parser<'a> {
 
     // === Labelled statement ===
 
-    fn try_parse_labelled_statement(&mut self) -> Option<NodeHandle> {
+    fn try_parse_labelled_statement(&mut self, allow_labelled_function: bool) -> Option<NodeHandle> {
         let start = self.position();
 
         // Quick check: identifier followed by colon
@@ -537,7 +537,7 @@ impl<'a> Parser<'a> {
         let break_before = self.in_break_context;
         self.in_break_context = true;
 
-        let body = self.parse_statement(true);
+        let body = self.parse_statement(allow_labelled_function);
 
         self.in_break_context = break_before;
 

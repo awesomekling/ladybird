@@ -35,8 +35,8 @@ impl<'a> Parser<'a> {
 
             TokenType::Async => true,
 
-            TokenType::Yield => self.in_generator_function_context,
-            TokenType::Await => self.await_expression_is_valid || self.program_type == super::ProgramType::Module,
+            TokenType::Yield => true,
+            TokenType::Await => true,
 
             TokenType::Import => {
                 // import( and import. are expressions
