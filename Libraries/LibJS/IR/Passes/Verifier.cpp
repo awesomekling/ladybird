@@ -396,6 +396,16 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             }
 
+            // Check: LoadConstant operand must be a constant value
+            if (instruction.opcode() == Opcode::LoadConstant && instruction.operand_count() > 0) {
+                auto* operand = instruction.operand(0);
+                if (operand && !operand->is_constant()) {
+                    report_error(ByteString::formatted(
+                        "LoadConstant in block{} has non-constant operand v{}",
+                        block->index(), operand->index()));
+                }
+            }
+
             // Check: AST pointer presence
             if (instruction.opcode() == Opcode::NewFunction && !instruction.function_node()) {
                 report_error(ByteString::formatted(
