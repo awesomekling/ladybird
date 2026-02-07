@@ -108,14 +108,26 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     for (auto const& block : function.basic_blocks()) {
         block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.result()) {
-                auto vi = to_index(instruction.result()->index());
+                auto* result = instruction.result();
+                auto vi = to_index(result->index());
                 // Check: No two instructions share the same result Value*
                 if (defined_values.get(vi)) {
                     report_error(ByteString::formatted(
                         "Value v{} is defined by multiple instructions",
-                        instruction.result()->index()));
+                        result->index()));
                 }
                 defined_values.set(vi, true);
+
+                // Check: Result/defining-instruction round-trip
+                if (!result->is_instruction()) {
+                    report_error(ByteString::formatted(
+                        "Result v{} of {} is not instruction-kind",
+                        result->index(), opcode_to_string(instruction.opcode())));
+                } else if (result->defining_instruction() != &instruction) {
+                    report_error(ByteString::formatted(
+                        "Result v{} of {} has wrong defining_instruction",
+                        result->index(), opcode_to_string(instruction.opcode())));
+                }
             }
         });
     }
@@ -546,6 +558,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                         "Constant v{} has type {} but JS::Value implies {}",
                         value->index(), type_to_string(ir_type), type_to_string(*expected_type)));
                 }
+            }
+        }
+
+        // Check: Defining-instruction/result round-trip
+        if (value->is_instruction() && value->defining_instruction()) {
+            if (value->defining_instruction()->result() != value.ptr()) {
+                report_error(ByteString::formatted(
+                    "Value v{} has defining_instruction but that instruction's result is not this value",
+                    value->index()));
             }
         }
 
