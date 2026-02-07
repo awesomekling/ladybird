@@ -646,14 +646,13 @@ impl<'a> Parser<'a> {
             return self.builder.create_meta_property(self.span_from(start), 0); // NewTarget = 0
         }
 
-        // new new ... or new expr(args)
-        if self.match_token(TokenType::New) {
-            let inner = self.parse_new_expression();
-            return inner;
-        }
-
-        let forbidden = ForbiddenTokens::none().forbid(&[TokenType::ParenOpen, TokenType::QuestionMarkPeriod]);
-        let callee = self.parse_expression(19, Associativity::Right, forbidden);
+        // new new ... (chained new expression)
+        let callee = if self.match_token(TokenType::New) {
+            self.parse_new_expression()
+        } else {
+            let forbidden = ForbiddenTokens::none().forbid(&[TokenType::ParenOpen, TokenType::QuestionMarkPeriod]);
+            self.parse_expression(19, Associativity::Right, forbidden)
+        };
 
         if self.match_token(TokenType::ParenOpen) {
             let (arg_values, arg_spreads) = self.parse_arguments();
