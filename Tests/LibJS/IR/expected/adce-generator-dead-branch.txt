@@ -351,3 +351,5 @@ block8:
     Throw v10:unknown
 block9:
     v19:unknown = Yield v10:unknown
+
+Tiered up function 'gen' (224 -> 136) 🚀

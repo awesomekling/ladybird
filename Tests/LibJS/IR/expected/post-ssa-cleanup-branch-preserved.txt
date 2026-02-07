@@ -175,3 +175,5 @@ block1:
 block2:
     v8:unknown = Add v6:unknown, 2
     Return v8:unknown
+
+Tiered up function 'choose' (112 -> 64) 🚀

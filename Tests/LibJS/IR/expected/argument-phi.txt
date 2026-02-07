@@ -152,3 +152,5 @@ block2:
 split_block0_block2:
     ParallelCopy [v5:unknown <- v2:unknown]
     Jump block2
+
+Tiered up function 'foo' (48 -> 72) 💣

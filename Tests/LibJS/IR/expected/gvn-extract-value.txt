@@ -253,3 +253,5 @@ block1:
 block3:
     ThrowIfTDZ v8:unknown
     Return v8:unknown
+
+Tiered up function 'go' (128 -> 88) 🚀

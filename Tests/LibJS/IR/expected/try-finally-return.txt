@@ -128,3 +128,5 @@ block3:
     SetException v5:unknown
     LeaveUnwindContext
     ContinuePendingUnwind block2
+
+Tiered up function 'foo' (104 -> 64) 🚀

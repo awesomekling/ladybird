@@ -183,3 +183,5 @@ block1:
 block2:
     v6:unknown = Sub v2:unknown, 1
     Return v6:unknown
+
+Tiered up function 'diamond' (120 -> 72) 🚀

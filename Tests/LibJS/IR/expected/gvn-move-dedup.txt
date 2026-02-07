@@ -108,3 +108,5 @@ function(v3:unknown):
 block0:
     v6:boolean = StrictlyEquals v3:unknown, v3:unknown
     Return v6:boolean
+
+Tiered up function 'go' (88 -> 24) 🚀

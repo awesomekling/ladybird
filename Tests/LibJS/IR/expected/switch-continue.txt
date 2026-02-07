@@ -261,3 +261,5 @@ block3:
     Branch v7:boolean, block2, block4
 block4:
     Return v10:number
+
+Tiered up function 'foo' (152 -> 64) 🚀

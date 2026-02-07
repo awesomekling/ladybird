@@ -119,3 +119,5 @@ block2:
 function(v1:unknown, v2:unknown):
 block2:
     Return 0
+
+Tiered up function 'go' (56 -> 8) 🚀

@@ -170,3 +170,5 @@ function():
 block0:
     v7:int32 = ToInt32 1.7
     Return -1
+
+Tiered up function 'go' (184 -> 24) 🚀

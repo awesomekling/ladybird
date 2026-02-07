@@ -567,6 +567,7 @@ block5_split11:
     LeaveUnwindContext
     Return v25:string
 
+Tiered up function 'test' (512 -> 368) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -640,6 +641,7 @@ block0:
     v2:object = SuperCallWithArgumentArray v1:unknown
     Return v2:object
 
+Tiered up function 'B' (104 -> 104) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -659,6 +661,7 @@ function():
 block0:
     End undefined
 
+Tiered up function 'A' (8 -> 8) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -715,3 +718,5 @@ block0:
     v0:unknown = ResolveSuperBase
     v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
     End undefined
+
+Tiered up function 'bar' (48 -> 48) 🚀

@@ -323,3 +323,5 @@ block4:
 split_block2_block2:
     ParallelCopy [v18:unknown <- v6:unknown]
     Jump block2
+
+Tiered up function 'test' (144 -> 120) 🚀

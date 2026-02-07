@@ -174,4 +174,5 @@ block1:
 block2:
     Return 42
 
+Tiered up function 'go' (112 -> 112) 🚀
 "hello"

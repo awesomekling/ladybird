@@ -402,3 +402,5 @@ block2_split5: [handler: block1]
 block2_split6:
     LeaveUnwindContext
     End undefined
+
+Tiered up function 'f' (280 -> 296) 💣

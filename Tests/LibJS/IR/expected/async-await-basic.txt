@@ -530,3 +530,5 @@ block9:
     v37:unknown = Yield v25:unknown
 block10:
     Throw v25:unknown
+
+Tiered up function 'fetchValue' (512 -> 400) 🚀

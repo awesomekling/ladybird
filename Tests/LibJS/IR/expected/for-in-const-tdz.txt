@@ -675,3 +675,5 @@ block7: [handler: block1]
     Jump block15
 block7_split4:
     Branch v15:unknown, block6, block7
+
+Tiered up function 'test_for_in_tdz' (328 -> 232) 🚀

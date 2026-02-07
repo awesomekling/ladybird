@@ -146,3 +146,5 @@ block0_split3:
 function():
 block0_split3:
     Return 4.9375
+
+Tiered up function 'go' (232 -> 8) 🚀

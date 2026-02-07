@@ -416,14 +416,19 @@ PreservedAnalyses TypeRefinement::run(Function& function, PassManager& pass_mana
                             bool false_target_is_unique = false_target->predecessor_indices().size() == 1;
 
                             dominators.for_each_dominator_child(block, [&](BasicBlock& child) {
+                                auto facts_before = scoped_facts.size();
                                 if (&child == true_target && true_target_is_unique && !true_mask.is_empty()) {
                                     set_fact(guarded_value->index(), true_mask);
-                                    self(self, &child);
                                 } else if (&child == false_target && false_target_is_unique && !false_mask.is_empty()) {
                                     set_fact(guarded_value->index(), false_mask);
-                                    self(self, &child);
-                                } else {
-                                    self(self, &child);
+                                }
+                                self(self, &child);
+                                // Restore facts installed for this child before
+                                // visiting the next sibling.
+                                while (scoped_facts.size() > facts_before) {
+                                    auto& fact = scoped_facts.last();
+                                    type_facts.set(fact.value, fact.previous_mask);
+                                    scoped_facts.take_last();
                                 }
                             });
 

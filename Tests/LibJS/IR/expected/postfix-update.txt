@@ -134,3 +134,5 @@ block0:
     v5:unknown = ToNumeric v3:array
     v6:number = Increment v5:unknown
     Return v5:unknown
+
+Tiered up function 'foo' (104 -> 64) 🚀

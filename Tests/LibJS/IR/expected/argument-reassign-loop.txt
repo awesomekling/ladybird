@@ -241,3 +241,5 @@ block2:
     Jump block1
 block3:
     Return v12:unknown
+
+Tiered up function 'countdown' (136 -> 104) 🚀

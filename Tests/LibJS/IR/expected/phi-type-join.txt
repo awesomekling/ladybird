@@ -169,3 +169,5 @@ block3:
 split_block0_block3:
     ParallelCopy [v11:number <- v14:int32]
     Jump block3
+
+Tiered up function 'go' (128 -> 80) 🚀

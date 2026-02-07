@@ -112,3 +112,5 @@ block0_split1:
 function():
 block0_split1:
     Return 14
+
+Tiered up function 'go' (136 -> 8) 🚀

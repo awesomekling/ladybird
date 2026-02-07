@@ -169,3 +169,5 @@ block0_split4:
 function():
 block0_split4:
     Return 0
+
+Tiered up function 'go' (312 -> 8) 🚀

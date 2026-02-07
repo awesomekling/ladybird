@@ -127,3 +127,5 @@ block2:
 function():
 block2:
     Return true
+
+Tiered up function 'go' (200 -> 8) 🚀

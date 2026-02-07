@@ -83,3 +83,5 @@ block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     v1:unknown = GetLength v0:unknown
     Return v1:unknown
+
+Tiered up function 'foo' (48 -> 48) 🚀

@@ -371,3 +371,5 @@ block2:
     Jump block1
 block3:
     Return v13:array
+
+Tiered up function 'foo' (344 -> 240) 🚀

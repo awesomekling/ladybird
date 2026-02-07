@@ -127,3 +127,5 @@ block0:
     v3:int32 = ToInt32 v2:unknown
     v6:number = UnsignedRightShift v3:int32, 0
     Return v6:number
+
+Tiered up function 'go' (72 -> 40) 🚀

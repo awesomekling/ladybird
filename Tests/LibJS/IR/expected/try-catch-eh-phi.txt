@@ -354,6 +354,7 @@ block2_split3:
     LeaveUnwindContext
     End undefined
 
+Tiered up function 'test' (352 -> 320) 🚀
 === After SSAConstruction ===
 function(v1:unknown, v3:unknown):
 block0:
@@ -419,3 +420,5 @@ block1:
     Throw v2:object
 block2:
     Return v1:unknown
+
+Tiered up function 'mayThrow' (80 -> 80) 🚀

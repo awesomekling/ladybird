@@ -471,6 +471,7 @@ block5_split2:
     v17:boolean = StrictlyEquals v6:unknown, 1
     Branch v17:boolean, block6, block7
 
+Tiered up function 'g' (304 -> 296) 🚀
 Uncaught exception: 
 [ReferenceError] 'cleanup' is not defined
     at g (/Users/kling/src/ladybird/Tests/LibJS/IR/input/generator-return-in-try-finally.js:7:9)

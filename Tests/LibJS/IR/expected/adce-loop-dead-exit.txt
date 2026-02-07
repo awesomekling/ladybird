@@ -389,6 +389,7 @@ block2:
 block5:
     Return v29:number
 
+Tiered up function 'go' (320 -> 152) 🚀
 0
 1
 2

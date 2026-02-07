@@ -181,6 +181,7 @@ block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     Return 42
 
+Tiered up function 'f1' (40 -> 24) 🚀
 === After SSAConstruction ===
 function():
 block0:
@@ -248,3 +249,5 @@ block0:
     v3:array = NewArray 1, 2
     v5:unknown = GetLength v3:array
     Return v5:unknown
+
+Tiered up function 'f2' (96 -> 72) 🚀

@@ -139,3 +139,5 @@ block0:
     v2:object = NewObject
     v7:boolean = LooselyEquals v2:object, null
     Return v5:string
+
+Tiered up function 'go' (88 -> 40) 🚀

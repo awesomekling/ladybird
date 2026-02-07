@@ -379,3 +379,5 @@ block3:
 block4:
     v13:number = Mul v21:number, v20:number
     Return v13:number
+
+Tiered up function 'rotate' (216 -> 192) 🚀

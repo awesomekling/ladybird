@@ -267,3 +267,5 @@ block3:
     Branch v11:boolean, block1, block4
 block4:
     Return v13:number
+
+Tiered up function 'sumTo' (152 -> 96) 🚀

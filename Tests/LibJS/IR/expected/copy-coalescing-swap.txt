@@ -341,3 +341,5 @@ block4:
     v12:number = Mul v20:int32, 10
     v13:number = Add v19:int32, v12:number
     Return v13:number
+
+Tiered up function 'swapLoop' (184 -> 192) 💣

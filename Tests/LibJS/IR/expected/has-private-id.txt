@@ -149,6 +149,7 @@ function():
 block0:
     End undefined
 
+Tiered up function 'Foo' (8 -> 8) 🚀
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
@@ -183,3 +184,5 @@ function(v0:unknown):
 block0:
     v1:boolean = HasPrivateId v0:unknown
     Return v1:boolean
+
+Tiered up function 'check' (24 -> 24) 🚀

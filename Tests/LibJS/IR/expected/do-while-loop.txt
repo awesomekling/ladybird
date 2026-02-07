@@ -95,3 +95,5 @@ block1:
 function(v1:unknown):
 block1:
     End undefined
+
+Tiered up function 'foo' (24 -> 8) 🚀

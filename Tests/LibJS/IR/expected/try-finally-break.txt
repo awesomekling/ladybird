@@ -472,3 +472,5 @@ block8: [finalizer: block5]
     ScheduleJump finalizer: block5, target: block10
 block10:
     Return v16:number
+
+Tiered up function 'foo' (232 -> 160) 🚀

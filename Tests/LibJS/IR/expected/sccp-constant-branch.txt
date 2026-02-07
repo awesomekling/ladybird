@@ -88,3 +88,5 @@ block1:
 function():
 block1:
     Return 42
+
+Tiered up function 'go' (72 -> 8) 🚀

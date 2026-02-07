@@ -73,3 +73,5 @@ block0:
 function():
 block0:
     Return 3
+
+Tiered up function 'go' (64 -> 8) 🚀

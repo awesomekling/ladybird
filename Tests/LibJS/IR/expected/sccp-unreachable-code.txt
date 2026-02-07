@@ -105,3 +105,5 @@ function(v4:unknown):
 block1:
     v5:unknown = Add v4:unknown, 1
     Return v5:unknown
+
+Tiered up function 'go' (96 -> 24) 🚀

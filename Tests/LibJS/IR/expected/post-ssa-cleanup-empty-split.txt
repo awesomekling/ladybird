@@ -346,3 +346,5 @@ block5:
     v8:unknown = Sub v18:unknown, 1
     v12:boolean = GreaterThan v8:unknown, 0
     Branch v12:boolean, block1, block3
+
+Tiered up function 'loopWithBranch' (160 -> 120) 🚀

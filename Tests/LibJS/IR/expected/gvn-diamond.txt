@@ -177,3 +177,5 @@ block1:
 block2:
     v12:boolean = StrictlyEquals v5:string, v5:string
     Return v12:boolean
+
+Tiered up function 'go' (216 -> 80) 🚀

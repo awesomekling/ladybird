@@ -437,3 +437,5 @@ block10:
     Throw v8:unknown
 block11:
     v26:unknown = Yield v8:unknown
+
+Tiered up function 'count' (272 -> 240) 🚀
