@@ -473,7 +473,7 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
         generator.m_next_global_variable_cache,
         generator.m_next_template_object_cache,
         generator.m_next_object_shape_cache,
-        0,
+        generator.m_next_call_target_profile,
         generator.m_next_register,
         generator.m_strict);
 
@@ -1699,6 +1699,7 @@ CodeGenerationErrorOr<void> Generator::generate_builtin_abstract_operation(Ident
             callee,
             this_value,
             expression_string_index,
+            next_call_target_profile(),
             argument_operands);
         return {};
     }
@@ -1807,6 +1808,7 @@ CodeGenerationErrorOr<void> Generator::generate_builtin_abstract_operation(Ident
             add_constant(m_vm.current_realm()->intrinsics().snake_name##_abstract_operation_function()),     \
             add_constant(js_undefined()),                                                                    \
             intern_string(builtin_identifier.string().to_utf16_string()),                                    \
+            next_call_target_profile(),                                                                      \
             argument_operands);                                                                              \
         return {};                                                                                           \
     }

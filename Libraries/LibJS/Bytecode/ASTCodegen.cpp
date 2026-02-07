@@ -1968,6 +1968,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> CallExpression::generat
                 callee,
                 this_value,
                 expression_string_index,
+                generator.next_call_target_profile(),
                 argument_operands);
         }
     }
@@ -2163,7 +2164,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
 
         // i. Let innerResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « received.[[Value]] »).
         auto inner_result = generator.allocate_register();
-        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, next_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, next_method, iterator, OptionalNone {}, generator.next_call_target_profile(), ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // ii. If generatorKind is async, set innerResult to ? Await(innerResult).
         if (generator.is_in_async_generator_function()) {
@@ -2250,7 +2251,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
         generator.switch_to_basic_block(throw_method_is_defined_block);
 
         // 1. Let innerResult be ? Call(throw, iterator, « received.[[Value]] »).
-        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, throw_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_result, throw_method, iterator, OptionalNone {}, generator.next_call_target_profile(), ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // 2. If generatorKind is async, set innerResult to ? Await(innerResult).
         if (generator.is_in_async_generator_function()) {
@@ -2345,7 +2346,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> YieldExpression::genera
 
         // iv. Let innerReturnResult be ? Call(return, iterator, « received.[[Value]] »).
         auto inner_return_result = generator.allocate_register();
-        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_return_result, return_method, iterator, OptionalNone {}, ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
+        generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(1, inner_return_result, return_method, iterator, OptionalNone {}, generator.next_call_target_profile(), ReadonlySpan<ScopedOperand> { &received_completion_value, 1 });
 
         // v. If generatorKind is async, set innerReturnResult to ? Await(innerReturnResult).
         if (generator.is_in_async_generator_function()) {
@@ -2727,7 +2728,7 @@ Bytecode::CodeGenerationErrorOr<Optional<ScopedOperand>> TaggedTemplateLiteral::
     }
 
     auto dst = choose_dst(generator, preferred_dst);
-    generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(argument_regs.size(), dst, tag, this_value, OptionalNone {}, argument_regs);
+    generator.emit_with_extra_operand_slots<Bytecode::Op::Call>(argument_regs.size(), dst, tag, this_value, OptionalNone {}, generator.next_call_target_profile(), argument_regs);
     return dst;
 }
 

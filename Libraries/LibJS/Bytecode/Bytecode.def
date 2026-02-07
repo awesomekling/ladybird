@@ -80,6 +80,7 @@ op Call < Instruction
     m_this_value: Operand
     m_argument_count: u32
     m_expression_string: Optional<StringTableIndex>
+    m_call_target_profile_index: u32
     m_arguments: Operand[]
 endop
 

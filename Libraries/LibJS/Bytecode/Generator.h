@@ -378,6 +378,7 @@ public:
     [[nodiscard]] size_t next_property_lookup_cache() { return m_next_property_lookup_cache++; }
     [[nodiscard]] size_t next_template_object_cache() { return m_next_template_object_cache++; }
     [[nodiscard]] u32 next_object_shape_cache() { return m_next_object_shape_cache++; }
+    [[nodiscard]] u32 next_call_target_profile() { return m_next_call_target_profile++; }
 
     enum class DeduplicateConstant {
         Yes,
@@ -469,6 +470,7 @@ private:
     u32 m_next_global_variable_cache { 0 };
     u32 m_next_template_object_cache { 0 };
     u32 m_next_object_shape_cache { 0 };
+    u32 m_next_call_target_profile { 0 };
     FunctionKind m_enclosing_function_kind { FunctionKind::Normal };
     Vector<LabelableScope> m_continuable_scopes;
     Vector<LabelableScope> m_breakable_scopes;
