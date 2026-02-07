@@ -751,6 +751,11 @@ Value& Builder::build_get_new_target()
     return emit_with_result(Instruction::create<Opcode::GetNewTarget>());
 }
 
+Value& Builder::build_get_import_meta()
+{
+    return emit_with_result(Instruction::create<Opcode::GetImportMeta>());
+}
+
 // Exception handling
 Value& Builder::build_catch()
 {

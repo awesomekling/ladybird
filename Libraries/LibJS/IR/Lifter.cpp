@@ -1194,7 +1194,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Module/Import related
     case GetImportMeta: {
         auto const& op = static_cast<Bytecode::Op::GetImportMeta const&>(instruction);
-        auto& result = m_function->create_register_value();
+        auto& result = m_builder.build_get_import_meta();
         define_operand(op.dst(), result, block);
         break;
     }

@@ -179,6 +179,8 @@
     OP(CreateRestParams,                false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
     /* New target */                                                                                                                         \
     OP(GetNewTarget,                    false, E_THROW,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
+    /* Import meta */                                                                                                                        \
+    OP(GetImportMeta,                   false, E_CALL,       false, true,  0,   Type::Object,    false, 0, R_NONE) \
     /* Exception handling */                                                                                                                 \
     OP(Catch,                           false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
     OP(EnterUnwindContext,              true,  E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \

@@ -167,6 +167,7 @@ public:
     [[nodiscard]] Value& build_create_arguments(Bytecode::Op::ArgumentsKind kind, bool is_immutable, bool needs_dst);
     [[nodiscard]] Value& build_create_rest_params(u32 rest_index);
     [[nodiscard]] Value& build_get_new_target();
+    [[nodiscard]] Value& build_get_import_meta();
 
     // Exception handling
     [[nodiscard]] Value& build_catch();

@@ -667,6 +667,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::GetNewTarget:
         emit<Bytecode::Op::GetNewTarget>(dst());
         break;
+    case Opcode::GetImportMeta:
+        emit<Bytecode::Op::GetImportMeta>(dst());
+        break;
 
     // Exception handling
     case Opcode::Catch:
