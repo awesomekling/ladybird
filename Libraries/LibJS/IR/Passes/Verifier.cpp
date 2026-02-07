@@ -48,6 +48,7 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     };
 
     bool const full_mode = mode == VerifierMode::Full;
+    bool const post_ssa = function.stage() >= IRStage::PostSSA;
     auto block_capacity = block_index_capacity(function);
     auto value_capacity = function.values().size();
 
@@ -352,6 +353,37 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     report_error(ByteString::formatted(
                         "{} in block{} should not have a result but does",
                         opcode_to_string(instruction.opcode()), block->index()));
+                }
+            }
+
+            // Check: PostSSA - no phi nodes allowed
+            if (post_ssa && instruction.opcode() == Opcode::Phi) {
+                report_error(ByteString::formatted(
+                    "Phi in block{} exists after SSA destruction (stage >= PostSSA)",
+                    block->index()));
+            }
+
+            // Check: ParallelCopy internal consistency (PostSSA only)
+            if (post_ssa && instruction.opcode() == Opcode::ParallelCopy) {
+                auto const& pcopy = static_cast<ParallelCopyInstruction const&>(instruction);
+                if (pcopy.copies().size() != pcopy.operand_count()) {
+                    report_error(ByteString::formatted(
+                        "ParallelCopy in block{} has {} copies but {} operands",
+                        block->index(), pcopy.copies().size(), pcopy.operand_count()));
+                }
+                for (size_t i = 0; i < pcopy.copies().size() && i < pcopy.operand_count(); ++i) {
+                    if (pcopy.copy_src(i) != pcopy.operand(i)) {
+                        report_error(ByteString::formatted(
+                            "ParallelCopy in block{} copy_src({}) does not match operand({})",
+                            block->index(), i, i));
+                    }
+                    // Copy destinations must be instruction-kind values
+                    auto* dst = pcopy.copy_dst(i);
+                    if (dst && !dst->is_instruction()) {
+                        report_error(ByteString::formatted(
+                            "ParallelCopy in block{} copy_dst({}) v{} is not instruction-kind",
+                            block->index(), i, dst->index()));
+                    }
                 }
             }
 
