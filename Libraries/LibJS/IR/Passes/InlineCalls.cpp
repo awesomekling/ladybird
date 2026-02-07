@@ -370,8 +370,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
     Vector<InlineCandidate> candidates;
 
     for (auto& block : function.basic_blocks()) {
-        if (block->exception_handler_index().has_value() || block->finalizer_index().has_value())
-            continue;
+        bool block_has_eh = block->exception_handler_index().has_value() || block->finalizer_index().has_value();
 
         block->for_each_instruction([&](Instruction const& instruction) {
             if (instruction.opcode() != Opcode::Call)
@@ -383,29 +382,60 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
                 return;
 
             auto const& profile = source_executable->call_target_profiles[profile_index];
+            if (profile.total_count == 0)
+                return;
+
+            auto callee_ptr = profile.callee.ptr();
+            auto hit_rate = profile.hit_count * 100 / profile.total_count;
+
+            auto log_skip = [&](char const* reason) {
+                if (g_log_tier_ups) {
+                    if (callee_ptr)
+                        dbgln("  call[{}]: {} ({}% of {} calls) -- not inlined: {}", profile_index, static_cast<FunctionObject*>(callee_ptr)->name_for_call_stack(), hit_rate, profile.total_count, reason);
+                    else
+                        dbgln("  call[{}]: ?? ({}% of {} calls) -- not inlined: {}", profile_index, hit_rate, profile.total_count, reason);
+                }
+            };
 
             // Profile gates
-            if (profile.total_count < 64)
+            if (profile.total_count < 64) {
+                log_skip("too few calls");
                 return;
-            if (profile.hit_count * 100 < profile.total_count * 90)
+            }
+            if (hit_rate < 90) {
+                log_skip("polymorphic");
                 return;
-            auto callee_ptr = profile.callee.ptr();
-            if (!callee_ptr)
+            }
+            if (!callee_ptr) {
+                log_skip("callee GC'd");
                 return;
+            }
 
             // Callee must be an ECMAScript function
             auto* ecma_callee = dynamic_cast<ECMAScriptFunctionObject*>(static_cast<FunctionObject*>(callee_ptr));
-            if (!ecma_callee)
+            if (!ecma_callee) {
+                log_skip("not an ECMAScript function");
                 return;
+            }
 
             // Callee must have a bytecode executable
             auto callee_executable = ecma_callee->bytecode_executable();
-            if (!callee_executable)
+            if (!callee_executable) {
+                log_skip("no bytecode");
                 return;
+            }
 
             // No recursive inlining
-            if (callee_executable == source_executable)
+            if (callee_executable == source_executable) {
+                log_skip("recursive");
                 return;
+            }
+
+            // Call site must not have exception handler
+            if (block_has_eh) {
+                log_skip("call site has exception handler");
+                return;
+            }
 
             // Lift callee bytecode to IR and optimize it
             auto [callee_function, ssa_data] = Lifter::lift(*callee_executable);
@@ -421,15 +451,19 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             callee_pass_manager.invalidate(preserved);
 
             // Callee body gates
-            if (count_instructions(*callee_function) > 40)
+            auto instruction_count = count_instructions(*callee_function);
+            if (instruction_count > 40) {
+                log_skip("callee too large");
                 return;
-            if (has_unsupported_opcode(*callee_function))
+            }
+            if (has_unsupported_opcode(*callee_function)) {
+                log_skip("unsupported opcode in callee");
                 return;
-            if (count_return_terminators(*callee_function) != 1)
+            }
+            if (count_return_terminators(*callee_function) != 1) {
+                log_skip("multiple returns");
                 return;
-
-            if (g_log_tier_ups)
-                dbgln("  inline candidate: call[{}] -> {}", profile_index, ecma_callee->name_for_call_stack());
+            }
 
             candidates.append({
                 .call = const_cast<CallInstruction*>(&call),
@@ -443,8 +477,15 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
     if (candidates.is_empty())
         return PreservedAnalyses::all();
 
-    for (auto& candidate : candidates)
+    for (auto& candidate : candidates) {
+        if (g_log_tier_ups) {
+            auto profile_index = static_cast<u32>(candidate.call->cache_index());
+            auto const& profile = source_executable->call_target_profiles[profile_index];
+            auto hit_rate = profile.hit_count * 100 / profile.total_count;
+            dbgln("  call[{}]: {} ({}% of {} calls) \033[32;1m[inlined]\033[0m", profile_index, candidate.callee->name_for_call_stack(), hit_rate, profile.total_count);
+        }
         inline_candidate(candidate, function);
+    }
 
     return PreservedAnalyses::none();
 }

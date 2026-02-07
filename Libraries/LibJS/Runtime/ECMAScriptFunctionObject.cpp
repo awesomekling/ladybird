@@ -295,17 +295,8 @@ ThrowCompletionOr<void> ECMAScriptFunctionObject::get_stack_frame_size(size_t& r
                 } else {
                     dbgln("Recompiled '{}' ({} -> {} bytes) \033[31;1m+{}\033[0m 🐢", name(), old_bytecode_size, new_bytecode_size, new_bytecode_size - old_bytecode_size);
                 }
-                for (size_t i = 0; i < executable->call_target_profiles.size(); ++i) {
-                    auto const& profile = executable->call_target_profiles[i];
-                    if (profile.total_count == 0)
-                        continue;
-                    auto callee = profile.callee.ptr();
-                    auto hit_rate = profile.hit_count * 100 / profile.total_count;
-                    if (callee)
-                        dbgln("  call[{}]: {} ({}% of {} calls)", i, callee->name_for_call_stack(), hit_rate, profile.total_count);
-                    else
-                        dbgln("  call[{}]: ?? ({}% of {} calls)", i, hit_rate, profile.total_count);
-                }
+                // NB: Call profile details are now logged by the InlineCalls pass,
+                // which also annotates each call with its inlining decision.
             }
         }
     }
