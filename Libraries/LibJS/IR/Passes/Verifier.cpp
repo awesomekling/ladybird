@@ -701,6 +701,15 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         }
     }
 
+    // Check: Value index sanity — values()[i]->index() == i
+    for (size_t i = 0; i < function.values().size(); ++i) {
+        if (to_index(function.values()[i]->index()) != i) {
+            report_error(ByteString::formatted(
+                "values()[{}] has index v{} (expected v{})",
+                i, function.values()[i]->index(), i));
+        }
+    }
+
     // Check: Use lists should only contain instructions still present in the function
     // (catches stale references from dead block elimination or other passes)
     HashTable<Instruction const*> all_instructions;
