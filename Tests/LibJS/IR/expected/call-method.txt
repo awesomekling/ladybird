@@ -1,0 +1,203 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v4:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v4:object
+    v7:unknown = Call v5:unknown, v6:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v4:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v4:object
+    v7:unknown = Call v5:unknown, v6:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v4:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v4:object
+    v7:unknown = Call v5:unknown, v6:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v4:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v4:object
+    v7:unknown = Call v5:unknown, v6:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v2:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v2:object
+    v7:unknown = Call v5:unknown, v2:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== After GlobalValueNumbering ===
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v2:object.foo
+    Jump block1
+block0_split0:
+    v6:object = Move v2:object
+    v7:unknown = Call v5:unknown, v2:object
+    Jump block2
+block0_split1:
+    Return v7:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v4:object = Move v2:object
+    v5:unknown = GetById v2:object.foo
+    v6:object = Move v2:object
+    v7:unknown = Call v5:unknown, v2:object
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v5:unknown = GetById v2:object.foo
+    v7:unknown = Call v5:unknown, v2:object
+    Return v7:unknown
+
+function():
+block0:
+    v2:object = NewObject
+    v3:function = NewFunction
+    InitObjectLiteralProperty v2:object, v3:function
+    CacheObjectShape v2:object
+    v5:unknown = GetById v2:object.foo
+    v7:unknown = Call v5:unknown, v2:object
+    Return v7:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    Return 42
+
+=== After SCCP ===
+function():
+block0:
+    Return 42
+
+=== Before optimization ===
+function():
+block0:
+    Return 42
+
+function():
+block0:
+    Return 42

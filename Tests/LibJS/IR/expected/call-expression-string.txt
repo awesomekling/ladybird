@@ -1,0 +1,213 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v3:object
+    v5:function = NewFunction
+    PutById v4:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v3:object
+    v8:unknown = Call v6:unknown, undefined, v7:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v3:object
+    v5:function = NewFunction
+    PutById v4:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v3:object
+    v8:unknown = Call v6:unknown, undefined, v7:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v3:object
+    v5:function = NewFunction
+    PutById v4:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v3:object
+    v8:unknown = Call v6:unknown, undefined, v7:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v3:object
+    v5:function = NewFunction
+    PutById v4:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v3:object
+    v8:unknown = Call v6:unknown, undefined, v7:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v2:object
+    v5:function = NewFunction
+    PutById v2:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v2:object
+    v8:unknown = Call v6:unknown, undefined, v2:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== After GlobalValueNumbering ===
+function():
+block0:
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v2:object
+    v5:function = NewFunction
+    PutById v2:object, v5:function.toString
+    Jump block1
+block0_split0:
+    v6:unknown = GetGlobal String
+    Jump block2
+block0_split1:
+    v7:object = Move v2:object
+    v8:unknown = Call v6:unknown, undefined, v2:object
+    Jump block3
+block0_split2:
+    Return v8:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v2:object = NewObject
+    v3:object = Move v2:object
+    v4:object = Move v2:object
+    v5:function = NewFunction
+    PutById v2:object, v5:function.toString
+    v6:unknown = GetGlobal String
+    v7:object = Move v2:object
+    v8:unknown = Call v6:unknown, undefined, v2:object
+    Return v8:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    v5:function = NewFunction
+    PutById v2:object, v5:function.toString
+    v6:unknown = GetGlobal String
+    v8:unknown = Call v6:unknown, undefined, v2:object
+    Return v8:unknown
+
+function():
+block0:
+    v2:object = NewObject
+    v5:function = NewFunction
+    PutById v2:object, v5:function.toString
+    v6:unknown = GetGlobal String
+    v8:unknown = Call v6:unknown, undefined, v2:object
+    Return v8:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    Return v0:string
+
+=== After SCCP ===
+function():
+block0:
+    Return v0:string
+
+=== Before optimization ===
+function():
+block0:
+    Return v0:string
+
+function():
+block0:
+    Return v0:string
