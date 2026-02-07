@@ -232,7 +232,7 @@ block2_split2:
 block2_split3:
     Jump block1
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function():
 block0:
     v9:array = NewArray 1, 2, 3, 4, 5

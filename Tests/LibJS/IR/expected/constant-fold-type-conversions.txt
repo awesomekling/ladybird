@@ -111,10 +111,19 @@ block0_split0:
     v9:boolean = Move v8:boolean
     Return v8:boolean
 
+=== After RedundantCheckElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    v7:int32 = Move 3
+    v8:boolean = Not 3
+    v9:boolean = Move v8:boolean
+    Return v8:boolean
+
 === After InstCombine ===
 function():
 block0:
-    v6:int32 = ToInt32 3
     Jump block1
 block0_split0:
     v7:int32 = Move 3
@@ -124,8 +133,7 @@ block0_split0:
 
 === After SimplifyCFG ===
 function():
-block0:
-    v6:int32 = ToInt32 3
+block0_split0:
     v7:int32 = Move 3
     v8:boolean = Not 3
     v9:boolean = Move false
@@ -133,11 +141,9 @@ block0:
 
 === After DeadCodeElimination ===
 function():
-block0:
-    v6:int32 = ToInt32 3
+block0_split0:
     Return false
 
 function():
-block0:
-    v6:int32 = ToInt32 3
+block0_split0:
     Return false

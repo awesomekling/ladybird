@@ -298,7 +298,7 @@ block5_split2:
     v18:boolean = StrictlyEquals v12:unknown, 1
     Branch v18:boolean, block6, block7
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function(v5:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1

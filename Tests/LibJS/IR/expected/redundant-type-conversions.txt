@@ -115,7 +115,7 @@ block0_split1:
     v7:int32 = Move v6:int32
     Return v6:int32
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function(v3:unknown):
 block0:
     v4:int32 = ToInt32 v3:unknown

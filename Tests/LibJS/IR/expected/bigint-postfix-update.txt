@@ -103,33 +103,29 @@ block0_split0:
     v7:bigint = Move v5:bigint
     Return v5:bigint
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:number = Increment v9:bigint
+    v6:number = Increment v8:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v9:bigint
-    Return v9:bigint
+    v7:bigint = Move v8:bigint
+    Return v8:bigint
 
 === After SimplifyCFG ===
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:number = Increment v9:bigint
-    v7:bigint = Move v9:bigint
-    Return v9:bigint
+    v6:number = Increment v8:bigint
+    v7:bigint = Move v8:bigint
+    Return v8:bigint
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:number = Increment v9:bigint
-    Return v9:bigint
+    v6:number = Increment v8:bigint
+    Return v8:bigint
 
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:number = Increment v9:bigint
-    Return v9:bigint
+    v6:number = Increment v8:bigint
+    Return v8:bigint

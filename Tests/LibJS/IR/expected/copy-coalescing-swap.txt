@@ -199,7 +199,7 @@ block4_split0:
 block4_split1:
     Return v13:number
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function(v14:unknown):
 block0:
     Jump block3

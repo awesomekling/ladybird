@@ -190,7 +190,7 @@ block3_split7:
 block4_split8:
     End v12:unknown
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function():
 block0:
     InitializeBinding x 10

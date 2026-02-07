@@ -182,7 +182,7 @@ block7:
 block8:
     Jump block2
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function():
 block0:
     Jump block3

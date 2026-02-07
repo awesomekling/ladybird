@@ -239,7 +239,7 @@ block5_split0:
     v10:number = Move v9:number
     ContinuePendingUnwind block6
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function():
 block0:
     Jump block3

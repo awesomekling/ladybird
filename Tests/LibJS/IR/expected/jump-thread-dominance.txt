@@ -342,7 +342,7 @@ block8_split3:
     v21:unknown = Move v20:unknown
     Jump block9
 
-=== After InstCombine ===
+=== After RedundantCheckElimination ===
 function(v14:unknown):
 block0:
     Jump block3
