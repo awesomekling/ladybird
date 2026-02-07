@@ -77,21 +77,21 @@ block0:
     End undefined
 
 === After SSAConstruction ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
+    v2:undefined = Move undefined
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
+    v4:int32 = Move 5
     Jump block3
 block2:
-    v4:int32 = Move v8:number
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v5:int32 = Move v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
-    v27:number = Phi [block1:v3:int32, block6:v8:number]
+    v27:number = Phi [block1:v4:int32, block6:v8:number]
     v26:unknown = Phi [block1:v28:undefined, block6:v6:unknown]
-    v25:unknown = Phi [block1:v29:undefined, block6:v4:int32]
+    v25:unknown = Phi [block1:v29:undefined, block6:v5:int32]
     v24:unknown = Phi [block1:v30:undefined, block6:v13:unknown]
     v23:unknown = Phi [block1:v31:undefined, block6:v12:unknown]
     v22:unknown = Phi [block1:v32:undefined, block6:v10:unknown]
@@ -125,21 +125,21 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === After SCCP ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
+    v2:undefined = Move undefined
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
+    v4:int32 = Move 5
     Jump block3
 block2:
-    v4:int32 = Move v8:number
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v5:int32 = Move v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
     v27:number = Phi [block1:v33:int32, block6:v8:number]
     v26:unknown = Phi [block1:v28:undefined, block6:v6:unknown]
-    v25:unknown = Phi [block1:v29:undefined, block6:v4:int32]
+    v25:unknown = Phi [block1:v29:undefined, block6:v5:int32]
     v24:unknown = Phi [block1:v30:undefined, block6:v13:unknown]
     v23:unknown = Phi [block1:v31:undefined, block6:v12:unknown]
     v22:unknown = Phi [block1:v32:undefined, block6:v10:unknown]
@@ -173,21 +173,21 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === Before optimization ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
+    v2:undefined = Move undefined
     v14:unknown = Yield undefined, continuation: block1
 block1:
-    v3:int32 = Move 5
+    v4:int32 = Move 5
     Jump block3
 block2:
-    v4:int32 = Move v8:number
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v5:int32 = Move v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
     v27:number = Phi [block1:v33:int32, block6:v8:number]
     v26:unknown = Phi [block1:v28:undefined, block6:v6:unknown]
-    v25:unknown = Phi [block1:v29:undefined, block6:v4:int32]
+    v25:unknown = Phi [block1:v29:undefined, block6:v5:int32]
     v24:unknown = Phi [block1:v30:undefined, block6:v13:unknown]
     v23:unknown = Phi [block1:v31:undefined, block6:v12:unknown]
     v22:unknown = Phi [block1:v32:undefined, block6:v10:unknown]
@@ -221,13 +221,13 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === After DeadCodeElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
     Jump block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
     v27:number = Phi [block1:v33:int32, block6:v8:number]
@@ -260,13 +260,13 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === After CopyPropagation ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
     Jump block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
     v27:number = Phi [block1:v33:int32, block6:v8:number]
@@ -299,13 +299,13 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === After RedundantCheckElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block1
 block1:
     Jump block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     Jump block10
 block3:
     v27:number = Phi [block1:v33:int32, block6:v8:number]
@@ -337,11 +337,11 @@ block5_split2:
     Branch v18:boolean, block6, block7
 
 === After SimplifyCFG ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
     v27:number = Phi [block0:v33:int32, block5:v8:number]
@@ -365,11 +365,11 @@ block9:
     v20:unknown = Yield v13:unknown
 
 === After DeadCodeElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
     v27:number = Phi [block0:v33:int32, block5:v8:number]
@@ -392,11 +392,11 @@ block9:
     v20:unknown = Yield v13:unknown
 
 === After SplitCriticalEdges ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block3
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
     v27:number = Phi [block0:v33:int32, block13:v8:number]
@@ -421,11 +421,11 @@ split_block5_block3:
     Jump block3
 
 === After SsaDestructionPass ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block14
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
     v8:number = Decrement v27:number
@@ -452,11 +452,11 @@ pcopy_block0_block3:
     ParallelCopy [v27:number <- v33:int32]
     Jump block3
 
-function(v5:unknown):
+function(v0:unknown):
 block0:
     v14:unknown = Yield undefined, continuation: block14
 block2:
-    v6:unknown = GetByValue v5:unknown, v8:number
+    v6:unknown = GetByValue v0:unknown, v8:number
     v15:unknown = Yield v6:unknown, continuation: block5
 block3:
     v8:number = Decrement v27:number

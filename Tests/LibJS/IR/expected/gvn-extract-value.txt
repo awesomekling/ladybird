@@ -50,10 +50,10 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = GetIterator v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -77,10 +77,10 @@ block3_split2:
     Return v10:unknown
 
 === After SCCP ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = GetIterator v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -104,10 +104,10 @@ block3_split2:
     Return v10:unknown
 
 === Before optimization ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = GetIterator v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -131,9 +131,9 @@ block3_split2:
     Return v10:unknown
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -157,9 +157,9 @@ block3_split2:
     Return v10:unknown
 
 === After CopyPropagation ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -183,9 +183,9 @@ block3_split2:
     Return v8:unknown
 
 === After SimplifyCFG ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -203,9 +203,9 @@ block3:
     Return v8:unknown
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -222,9 +222,9 @@ block3:
     Return v8:unknown
 
 === After SimplifyCFG ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2
@@ -238,9 +238,9 @@ block3:
     ThrowIfTDZ v8:unknown
     Return v8:unknown
 
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = GetIterator v2:unknown
+    v3:unknown = GetIterator v0:unknown
     v4:unknown = ExtractValue v3:unknown, 0
     v5:unknown = ExtractValue v3:unknown, 1
     v6:unknown = ExtractValue v3:unknown, 2

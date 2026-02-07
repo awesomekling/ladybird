@@ -45,14 +45,14 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = ToInt32 v6:unknown
+    v6:undefined = Move undefined
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -73,14 +73,14 @@ block0_split1:
     Return v12:boolean
 
 === After SCCP ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = ToInt32 v6:unknown
+    v6:undefined = Move undefined
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -101,14 +101,14 @@ block0_split1:
     Return v12:boolean
 
 === Before optimization ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = ToInt32 v6:unknown
+    v6:undefined = Move undefined
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -129,9 +129,9 @@ block0_split1:
     Return v12:boolean
 
 === After DeadCodeElimination ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -144,9 +144,9 @@ block0_split1:
     Return v12:boolean
 
 === After CopyPropagation ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -159,9 +159,9 @@ block0_split1:
     Return v11:boolean
 
 === After TypeRefinement ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -174,9 +174,9 @@ block0_split1:
     Return v11:boolean
 
 === After InstCombine ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v8:int32 = Move v7:int32
@@ -189,9 +189,9 @@ block0_split1:
     Return true
 
 === After SimplifyCFG ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     v8:int32 = Move v7:int32
     v9:string = Typeof v7:int32
     v11:boolean = StrictlyEquals v26:string, v10:string
@@ -200,14 +200,14 @@ block0:
     Return true
 
 === After DeadCodeElimination ===
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     v17:string = TypeofBinding
     Return true
 
-function(v6:unknown):
+function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v6:unknown
+    v7:int32 = ToInt32 v0:unknown
     v17:string = TypeofBinding
     Return true

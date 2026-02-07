@@ -111,383 +111,383 @@ block0:
     End v10:unknown
 
 === After SSAConstruction ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v1:undefined = Move undefined
-    v3:unknown = Move v21:unknown
-    v23:unknown = Await v22:unknown, continuation: block2
+    v3:undefined = Move undefined
+    v5:unknown = Move v23:unknown
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v4:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
     Jump block11
 block3:
-    v8:unknown = Move v7:unknown
-    v9:unknown = Move v23:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v11:unknown = Move v24:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v12:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block12
 block6:
-    v14:unknown = Add v8:unknown, v13:unknown
+    v16:unknown = Add v10:unknown, v15:unknown
     Jump block13
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v16:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v18:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
     Jump block14
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 block2_split0:
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block5_split1:
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6_split2:
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v15:unknown, continuation: block8
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v17:unknown, continuation: block8
 block8_split3:
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 
 === After SCCP ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v1:undefined = Move undefined
-    v3:unknown = Move v21:unknown
-    v23:unknown = Await v22:unknown, continuation: block2
+    v3:undefined = Move undefined
+    v5:unknown = Move v23:unknown
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v4:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
     Jump block11
 block3:
-    v8:unknown = Move v7:unknown
-    v9:unknown = Move v23:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v11:unknown = Move v24:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v12:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block12
 block6:
-    v14:unknown = Add v8:unknown, v13:unknown
+    v16:unknown = Add v10:unknown, v15:unknown
     Jump block13
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v16:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v18:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
     Jump block14
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 block2_split0:
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block5_split1:
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6_split2:
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v15:unknown, continuation: block8
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v17:unknown, continuation: block8
 block8_split3:
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 
 === Before optimization ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v1:undefined = Move undefined
-    v3:unknown = Move v21:unknown
-    v23:unknown = Await v22:unknown, continuation: block2
+    v3:undefined = Move undefined
+    v5:unknown = Move v23:unknown
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v4:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
     Jump block11
 block3:
-    v8:unknown = Move v7:unknown
-    v9:unknown = Move v23:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v11:unknown = Move v24:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v12:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block12
 block6:
-    v14:unknown = Add v8:unknown, v13:unknown
+    v16:unknown = Add v10:unknown, v15:unknown
     Jump block13
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v16:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v18:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
     Jump block14
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 block2_split0:
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block5_split1:
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6_split2:
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v15:unknown, continuation: block8
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v17:unknown, continuation: block8
 block8_split3:
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 
 === After DeadCodeElimination ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v23:unknown = Await v22:unknown, continuation: block2
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v4:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
     Jump block11
 block3:
-    v8:unknown = Move v7:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v12:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block12
 block6:
-    v14:unknown = Add v8:unknown, v13:unknown
+    v16:unknown = Add v10:unknown, v15:unknown
     Jump block13
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v16:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v18:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
     Jump block14
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 block2_split0:
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block5_split1:
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6_split2:
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v15:unknown, continuation: block8
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v17:unknown, continuation: block8
 block8_split3:
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 
 === After CopyPropagation ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v23:unknown = Await v22:unknown, continuation: block2
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v23:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v24:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
     Jump block11
 block3:
-    v8:unknown = Move v7:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v27:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v27:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block12
 block6:
-    v14:unknown = Add v7:unknown, v13:unknown
+    v16:unknown = Add v9:unknown, v15:unknown
     Jump block13
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v30:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v30:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
     Jump block14
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 block2_split0:
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block5_split1:
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6_split2:
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v14:unknown, continuation: block8
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v16:unknown, continuation: block8
 block8_split3:
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 
 === After SimplifyCFG ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v23:unknown = Await v22:unknown, continuation: block2
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v4:unknown = Move v23:unknown
-    v5:unknown = GetCompletionFields v23:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v6:unknown = Move v24:unknown
+    v7:unknown = GetCompletionFields v24:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block3:
-    v8:unknown = Move v7:unknown
-    v27:unknown = Await v26:unknown, continuation: block5
+    v10:unknown = Move v9:unknown
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v10:unknown = Move v27:unknown
-    v11:unknown = GetCompletionFields v27:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v12:unknown = Move v27:unknown
+    v13:unknown = GetCompletionFields v27:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6:
-    v14:unknown = Add v7:unknown, v13:unknown
-    v15:unknown = Move v14:unknown
-    v30:unknown = Await v14:unknown, continuation: block8
+    v16:unknown = Add v9:unknown, v15:unknown
+    v17:unknown = Move v16:unknown
+    v30:unknown = Await v16:unknown, continuation: block8
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v16:unknown = Move v30:unknown
-    v17:unknown = GetCompletionFields v30:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v18:unknown = Move v30:unknown
+    v19:unknown = GetCompletionFields v30:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 
 === After DeadCodeElimination ===
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v23:unknown = Await v22:unknown, continuation: block2
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v5:unknown = GetCompletionFields v23:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v7:unknown = GetCompletionFields v24:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block3:
-    v27:unknown = Await v26:unknown, continuation: block5
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v11:unknown = GetCompletionFields v27:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v13:unknown = GetCompletionFields v27:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6:
-    v14:unknown = Add v7:unknown, v13:unknown
-    v30:unknown = Await v14:unknown, continuation: block8
+    v16:unknown = Add v9:unknown, v15:unknown
+    v30:unknown = Await v16:unknown, continuation: block8
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v17:unknown = GetCompletionFields v30:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v19:unknown = GetCompletionFields v30:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown
 
-function(v22:unknown, v26:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v21:unknown = Yield undefined, continuation: block1
+    v23:unknown = Yield undefined, continuation: block1
 block1:
-    v23:unknown = Await v22:unknown, continuation: block2
+    v24:unknown = Await v0:unknown, continuation: block2
 block2:
-    v5:unknown = GetCompletionFields v23:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    v25:boolean = StrictlyEquals v6:unknown, 1
-    Branch v25:boolean, block3, block4
+    v7:unknown = GetCompletionFields v24:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v26:boolean = StrictlyEquals v8:unknown, 1
+    Branch v26:boolean, block3, block4
 block3:
-    v27:unknown = Await v26:unknown, continuation: block5
+    v27:unknown = Await v1:unknown, continuation: block5
 block4:
-    Throw v7:unknown
+    Throw v9:unknown
 block5:
-    v11:unknown = GetCompletionFields v27:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    v29:boolean = StrictlyEquals v12:unknown, 1
+    v13:unknown = GetCompletionFields v27:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    v29:boolean = StrictlyEquals v14:unknown, 1
     Branch v29:boolean, block6, block7
 block6:
-    v14:unknown = Add v7:unknown, v13:unknown
-    v30:unknown = Await v14:unknown, continuation: block8
+    v16:unknown = Add v9:unknown, v15:unknown
+    v30:unknown = Await v16:unknown, continuation: block8
 block7:
-    Throw v13:unknown
+    Throw v15:unknown
 block8:
-    v17:unknown = GetCompletionFields v30:unknown
-    v18:unknown = ExtractValue v17:unknown, 0
-    v19:unknown = ExtractValue v17:unknown, 1
-    v32:boolean = StrictlyEquals v18:unknown, 1
+    v19:unknown = GetCompletionFields v30:unknown
+    v20:unknown = ExtractValue v19:unknown, 0
+    v21:unknown = ExtractValue v19:unknown, 1
+    v32:boolean = StrictlyEquals v20:unknown, 1
     Branch v32:boolean, block9, block10
 block9:
-    v33:unknown = Yield v19:unknown
+    v33:unknown = Yield v21:unknown
 block10:
-    Throw v19:unknown
+    Throw v21:unknown

@@ -45,104 +45,104 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v7:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
+    Return v8:string
 block2:
-    Return v5:string
+    Return v6:string
 
 === After SCCP ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v7:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
+    Return v8:string
 block2:
-    Return v5:string
+    Return v6:string
 
 === Before optimization ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v7:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
+    Return v8:string
 block2:
-    Return v5:string
+    Return v6:string
 
 === After DeadCodeElimination ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v7:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
+    Return v8:string
 block2:
-    Return v5:string
+    Return v6:string
 
 === After CopyPropagation ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v6:string
-    Return v6:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
+    Return v7:string
 block2:
-    Return v4:string
+    Return v5:string
 
 === After GlobalValueNumbering ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v4:string = Typeof v3:unknown
-    v5:string = Move v4:string
-    Branch v8:unknown, block1, block2
+    v5:string = Typeof v0:unknown
+    v6:string = Move v5:string
+    Branch v1:unknown, block1, block2
 block1:
-    v6:string = Typeof v3:unknown
-    v7:string = Move v4:string
-    Return v4:string
+    v7:string = Typeof v0:unknown
+    v8:string = Move v5:string
+    Return v5:string
 block2:
-    Return v4:string
+    Return v5:string
 
 === After DeadCodeElimination ===
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v4:string = Typeof v3:unknown
-    Branch v8:unknown, block1, block2
+    v5:string = Typeof v0:unknown
+    Branch v1:unknown, block1, block2
 block1:
-    Return v4:string
+    Return v5:string
 block2:
-    Return v4:string
+    Return v5:string
 
-function(v3:unknown, v8:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v4:string = Typeof v3:unknown
-    Branch v8:unknown, block1, block2
+    v5:string = Typeof v0:unknown
+    Branch v1:unknown, block1, block2
 block1:
-    Return v4:string
+    Return v5:string
 block2:
-    Return v4:string
+    Return v5:string

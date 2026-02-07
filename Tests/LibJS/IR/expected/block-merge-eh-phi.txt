@@ -45,10 +45,10 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = Move v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
     v19:unknown = Phi [block2:v3:unknown, block5:v9:unknown, block6:v9:unknown, block7:v9:unknown, block8:v14:unknown, block9:v14:unknown]
@@ -61,7 +61,7 @@ block1:
     v6:unknown = Add v19:unknown, v5:unknown
     Jump block4
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block3:
     End undefined
@@ -75,7 +75,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -89,10 +89,10 @@ block2_split6:
     Jump block3
 
 === After SCCP ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = Move v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
     v19:unknown = Phi [block2:v3:unknown, block5:v9:unknown, block6:v9:unknown, block7:v9:unknown, block8:v14:unknown, block9:v14:unknown]
@@ -105,7 +105,7 @@ block1:
     v6:unknown = Add v19:unknown, v5:unknown
     Jump block4
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block3:
     End undefined
@@ -119,7 +119,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -133,10 +133,10 @@ block2_split6:
     Jump block3
 
 === Before optimization ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:unknown = Move v2:unknown
+    v2:undefined = Move undefined
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
     v19:unknown = Phi [block2:v3:unknown, block5:v9:unknown, block6:v9:unknown, block7:v9:unknown, block8:v14:unknown, block9:v14:unknown]
@@ -149,7 +149,7 @@ block1:
     v6:unknown = Add v19:unknown, v5:unknown
     Jump block4
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block3:
     End undefined
@@ -163,7 +163,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -177,9 +177,9 @@ block2_split6:
     Jump block3
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
     v19:unknown = Phi [block2:v3:unknown, block5:v9:unknown, block6:v9:unknown, block7:v9:unknown, block8:v14:unknown, block9:v14:unknown]
@@ -190,7 +190,7 @@ block1:
     v6:unknown = Add v19:unknown, v5:unknown
     Jump block4
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block3:
     End undefined
@@ -204,7 +204,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -218,12 +218,12 @@ block2_split6:
     Jump block3
 
 === After CopyPropagation ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
-    v19:unknown = Phi [block2:v2:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
+    v19:unknown = Phi [block2:v0:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
     v4:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
@@ -231,7 +231,7 @@ block1:
     v6:unknown = Add v19:unknown, v4:unknown
     Jump block4
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block3:
     End undefined
@@ -245,7 +245,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -259,12 +259,12 @@ block2_split6:
     Jump block3
 
 === After SimplifyCFG ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v0:unknown
     EnterUnwindContext block2
 block1:
-    v19:unknown = Phi [block2:v2:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
+    v19:unknown = Phi [block2:v0:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
     v4:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
@@ -272,7 +272,7 @@ block1:
     v6:unknown = Add v19:unknown, v4:unknown
     Return v6:unknown
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block2_split1: [handler: block1]
     v9:unknown = Move v8:unknown
@@ -282,7 +282,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v14:unknown = Move v13:unknown
@@ -296,18 +296,18 @@ block2_split6:
     End undefined
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v19:unknown = Phi [block2:v2:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
+    v19:unknown = Phi [block2:v0:unknown, block5:v8:unknown, block6:v8:unknown, block7:v8:unknown, block8:v13:unknown, block9:v13:unknown]
     v4:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
     v6:unknown = Add v19:unknown, v4:unknown
     Return v6:unknown
 block2: [handler: block1]
-    v8:unknown = Add v2:unknown, 1
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block2_split1: [handler: block1]
     v10:unknown = GetGlobal g
@@ -316,7 +316,7 @@ block2_split2: [handler: block1]
     v11:unknown = Call v10:unknown, undefined
     Jump block7
 block2_split3: [handler: block1]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     v15:unknown = GetGlobal h
@@ -329,7 +329,7 @@ block2_split6:
     End undefined
 
 === After SsaDestructionPass ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
@@ -339,8 +339,8 @@ block1:
     v6:unknown = Add v19:unknown, v4:unknown
     Return v6:unknown
 block2: [handler: block1]
-    ParallelCopy [v19:unknown <- v2:unknown]
-    v8:unknown = Add v2:unknown, 1
+    ParallelCopy [v19:unknown <- v0:unknown]
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block2_split1: [handler: block1]
     ParallelCopy [v19:unknown <- v8:unknown]
@@ -352,7 +352,7 @@ block2_split2: [handler: block1]
     Jump block7
 block2_split3: [handler: block1]
     ParallelCopy [v19:unknown <- v8:unknown]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     ParallelCopy [v19:unknown <- v13:unknown]
@@ -366,7 +366,7 @@ block2_split6:
     LeaveUnwindContext
     End undefined
 
-function(v2:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
@@ -376,8 +376,8 @@ block1:
     v6:unknown = Add v19:unknown, v4:unknown
     Return v6:unknown
 block2: [handler: block1]
-    ParallelCopy [v19:unknown <- v2:unknown]
-    v8:unknown = Add v2:unknown, 1
+    ParallelCopy [v19:unknown <- v0:unknown]
+    v8:unknown = Add v0:unknown, 1
     Jump block5
 block2_split1: [handler: block1]
     ParallelCopy [v19:unknown <- v8:unknown]
@@ -389,7 +389,7 @@ block2_split2: [handler: block1]
     Jump block7
 block2_split3: [handler: block1]
     ParallelCopy [v19:unknown <- v8:unknown]
-    v13:unknown = Add v2:unknown, 2
+    v13:unknown = Add v0:unknown, 2
     Jump block8
 block2_split4: [handler: block1]
     ParallelCopy [v19:unknown <- v13:unknown]

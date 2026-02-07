@@ -151,6 +151,7 @@ public:
     Vector<LocalVariable> local_variable_names;
     u32 local_index_base { 0 };
     u32 argument_index_base { 0 };
+    u32 formal_parameter_count { 0 };
 
     Optional<PropertyKeyTableIndex> length_identifier;
 

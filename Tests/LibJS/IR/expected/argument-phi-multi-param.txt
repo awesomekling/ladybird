@@ -45,81 +45,81 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Branch v0:unknown, block1, block2
 block1:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    v4:unknown = Phi [block0:v1:unknown, block1:v3:unknown]
+    v4:unknown = Phi [block0:v2:unknown, block1:v3:unknown]
     Return v4:unknown
 
 === After SCCP ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Branch v0:unknown, block1, block2
 block1:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    v4:unknown = Phi [block0:v1:unknown, block1:v3:unknown]
+    v4:unknown = Phi [block0:v2:unknown, block1:v3:unknown]
     Return v4:unknown
 
 === Before optimization ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Branch v0:unknown, block1, block2
 block1:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    v4:unknown = Phi [block0:v1:unknown, block1:v3:unknown]
+    v4:unknown = Phi [block0:v2:unknown, block1:v3:unknown]
     Return v4:unknown
 
 === After CopyPropagation ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:unknown = Move v0:unknown
+    v2:unknown = Move v0:unknown
     Branch v0:unknown, block1, block2
 block1:
-    v3:unknown = Move v2:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    v4:unknown = Phi [block0:v0:unknown, block1:v2:unknown]
+    v4:unknown = Phi [block0:v0:unknown, block1:v1:unknown]
     Return v4:unknown
 
 === After DeadCodeElimination ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block1, block2
 block1:
     Jump block2
 block2:
-    v4:unknown = Phi [block0:v0:unknown, block1:v2:unknown]
+    v4:unknown = Phi [block0:v0:unknown, block1:v1:unknown]
     Return v4:unknown
 
 === After SplitCriticalEdges ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block1, block3
 block1:
     Jump block2
 block2:
-    v4:unknown = Phi [block1:v2:unknown, block3:v0:unknown]
+    v4:unknown = Phi [block1:v1:unknown, block3:v0:unknown]
     Return v4:unknown
 split_block0_block2:
     Jump block2
 
 === After SsaDestructionPass ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block1, block3
 block1:
-    ParallelCopy [v4:unknown <- v2:unknown]
+    ParallelCopy [v4:unknown <- v1:unknown]
     Jump block2
 block2:
     Return v4:unknown
@@ -128,7 +128,7 @@ split_block0_block2:
     Jump block2
 
 === After CopyCoalescing ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block1, block3
 block1:
@@ -140,7 +140,7 @@ split_block0_block2:
     Jump block2
 
 === After PostSSACleanup ===
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block2, block3
 block2:
@@ -149,7 +149,7 @@ split_block0_block2:
     ParallelCopy [v4:unknown <- v0:unknown]
     Jump block2
 
-function(v0:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Branch v0:unknown, block2, block3
 block2:

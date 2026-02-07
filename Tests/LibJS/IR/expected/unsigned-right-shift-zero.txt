@@ -45,10 +45,10 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = ToInt32 v2:unknown
+    v2:undefined = Move undefined
+    v3:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v4:int32 = Move v3:int32
@@ -58,10 +58,10 @@ block0_split1:
     Return v6:number
 
 === After SCCP ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = ToInt32 v2:unknown
+    v2:undefined = Move undefined
+    v3:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v4:int32 = Move v3:int32
@@ -71,10 +71,10 @@ block0_split1:
     Return v6:number
 
 === Before optimization ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = ToInt32 v2:unknown
+    v2:undefined = Move undefined
+    v3:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v4:int32 = Move v3:int32
@@ -84,9 +84,9 @@ block0_split1:
     Return v6:number
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:int32 = ToInt32 v2:unknown
+    v3:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v4:int32 = Move v3:int32
@@ -96,9 +96,9 @@ block0_split1:
     Return v6:number
 
 === After CopyPropagation ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:int32 = ToInt32 v2:unknown
+    v3:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
     v4:int32 = Move v3:int32
@@ -108,22 +108,22 @@ block0_split1:
     Return v6:number
 
 === After SimplifyCFG ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:int32 = ToInt32 v2:unknown
+    v3:int32 = ToInt32 v0:unknown
     v4:int32 = Move v3:int32
     v6:number = UnsignedRightShift v3:int32, 0
     Return v6:number
 
 === After DeadCodeElimination ===
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:int32 = ToInt32 v2:unknown
+    v3:int32 = ToInt32 v0:unknown
     v6:number = UnsignedRightShift v3:int32, 0
     Return v6:number
 
-function(v2:unknown):
+function(v0:unknown):
 block0:
-    v3:int32 = ToInt32 v2:unknown
+    v3:int32 = ToInt32 v0:unknown
     v6:number = UnsignedRightShift v3:int32, 0
     Return v6:number

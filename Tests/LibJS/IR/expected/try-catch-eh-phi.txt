@@ -355,67 +355,67 @@ block2_split3:
     End undefined
 
 === After SSAConstruction ===
-function(v1:unknown, v3:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v3:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
-    v0:unknown = GetGlobal Error
+    v2:unknown = GetGlobal Error
     Jump block3
 block2:
-    Return v1:unknown
+    Return v0:unknown
 block1_split0:
-    v2:object = Construct v0:unknown, v1:unknown
+    v3:object = Construct v2:unknown, v0:unknown
     Jump block4
 block1_split1:
-    Throw v2:object
+    Throw v3:object
 
 === After SCCP ===
-function(v1:unknown, v3:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v3:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
-    v0:unknown = GetGlobal Error
+    v2:unknown = GetGlobal Error
     Jump block3
 block2:
-    Return v1:unknown
+    Return v0:unknown
 block1_split0:
-    v2:object = Construct v0:unknown, v1:unknown
+    v3:object = Construct v2:unknown, v0:unknown
     Jump block4
 block1_split1:
-    Throw v2:object
+    Throw v3:object
 
 === Before optimization ===
-function(v1:unknown, v3:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v3:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
-    v0:unknown = GetGlobal Error
+    v2:unknown = GetGlobal Error
     Jump block3
 block2:
-    Return v1:unknown
+    Return v0:unknown
 block1_split0:
-    v2:object = Construct v0:unknown, v1:unknown
+    v3:object = Construct v2:unknown, v0:unknown
     Jump block4
 block1_split1:
-    Throw v2:object
+    Throw v3:object
 
 === After SimplifyCFG ===
-function(v1:unknown, v3:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v3:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
-    v0:unknown = GetGlobal Error
-    v2:object = Construct v0:unknown, v1:unknown
-    Throw v2:object
+    v2:unknown = GetGlobal Error
+    v3:object = Construct v2:unknown, v0:unknown
+    Throw v3:object
 block2:
-    Return v1:unknown
+    Return v0:unknown
 
-function(v1:unknown, v3:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v3:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
-    v0:unknown = GetGlobal Error
-    v2:object = Construct v0:unknown, v1:unknown
-    Throw v2:object
+    v2:unknown = GetGlobal Error
+    v3:object = Construct v2:unknown, v0:unknown
+    Throw v3:object
 block2:
-    Return v1:unknown
+    Return v0:unknown

@@ -513,6 +513,9 @@ CodeGenerationErrorOr<GC::Ref<Executable>> Generator::compile(VM& vm, ASTNode co
     VERIFY(!Checked<u32>::addition_would_overflow(executable->argument_index_base, max_argument_index));
     VERIFY(executable->argument_index_base + max_argument_index <= 0x1FFFFFFFu);
 
+    if (generator.m_shared_function_instance_data && generator.m_shared_function_instance_data->m_formal_parameters)
+        executable->formal_parameter_count = generator.m_shared_function_instance_data->m_formal_parameters->size();
+
     executable->length_identifier = generator.m_length_identifier;
 
     VERIFY(!Checked<u32>::addition_would_overflow(executable->number_of_registers, executable->local_variable_names.size()));

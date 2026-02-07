@@ -1266,6 +1266,9 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, C
     // Copy length_identifier for GetLength instruction support
     executable->length_identifier = source_executable->length_identifier;
 
+    // Copy formal parameter count for potential re-optimization
+    executable->formal_parameter_count = source_executable->formal_parameter_count;
+
     // Generate exception handlers from IR block annotations.
     // Each IR block may have an exception_handler and/or finalizer pointer
     // that was set during lifting and preserved through optimization passes.

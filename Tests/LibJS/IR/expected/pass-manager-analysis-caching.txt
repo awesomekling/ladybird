@@ -45,18 +45,18 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v9:string, v11:string
     v13:boolean = Move v12:boolean
@@ -66,10 +66,10 @@ block2:
     v15:number = Increment v14:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v4:undefined, block2:v13:boolean]
-    v21:unknown = Phi [block0:v3:undefined, block2:v9:string]
-    v20:unknown = Phi [block0:v2:undefined, block2:v11:string]
-    v19:number = Phi [block0:v6:int32, block2:v15:number]
+    v22:unknown = Phi [block0:v5:undefined, block2:v13:boolean]
+    v21:unknown = Phi [block0:v4:undefined, block2:v9:string]
+    v20:unknown = Phi [block0:v3:undefined, block2:v11:string]
+    v19:number = Phi [block0:v7:int32, block2:v15:number]
     v18:unknown = Phi [block0:v23:undefined, block2:v14:number]
     v17:boolean = LessThan v19:number, 10
     Branch v17:boolean, block1, block4
@@ -77,18 +77,18 @@ block4:
     Return v22:unknown
 
 === After SCCP ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v9:string, v11:string
     v13:boolean = Move v12:boolean
@@ -109,18 +109,18 @@ block4:
     Return v22:unknown
 
 === Before optimization ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v9:string, v11:string
     v13:boolean = Move v12:boolean
@@ -141,13 +141,13 @@ block4:
     Return v22:unknown
 
 === After DeadCodeElimination ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v9:string, v11:string
     v13:boolean = Move v12:boolean
@@ -165,13 +165,13 @@ block4:
     Return v22:unknown
 
 === After CopyPropagation ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v8:string, v10:string
     v13:boolean = Move v12:boolean
@@ -189,13 +189,13 @@ block4:
     Return v22:unknown
 
 === After RedundantCheckElimination ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v10:string
     v12:boolean = StrictlyEquals v8:string, v10:string
     v13:boolean = Move v12:boolean
@@ -212,13 +212,13 @@ block4:
     Return v22:unknown
 
 === After GlobalValueNumbering ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v8:string
     v12:boolean = StrictlyEquals v8:string, v8:string
     v13:boolean = Move v12:boolean
@@ -235,13 +235,13 @@ block4:
     Return v22:unknown
 
 === After SimplifyCFG ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v9:string = Move v8:string
-    v10:string = Typeof v7:unknown
+    v10:string = Typeof v0:unknown
     v11:string = Move v8:string
     v12:boolean = StrictlyEquals v8:string, v8:string
     v13:boolean = Move v12:boolean
@@ -256,11 +256,11 @@ block4:
     Return v22:unknown
 
 === After DeadCodeElimination ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v12:boolean = StrictlyEquals v8:string, v8:string
     v15:number = Increment v19:number
     Jump block3
@@ -273,11 +273,11 @@ block4:
     Return v22:unknown
 
 === After InstCombine ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v8:string = Typeof v7:unknown
+    v8:string = Typeof v0:unknown
     v15:number = Increment v19:number
     Jump block3
 block3:
@@ -289,7 +289,7 @@ block4:
     Return v22:unknown
 
 === After DeadCodeElimination ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
@@ -304,7 +304,7 @@ block4:
     Return v22:unknown
 
 === After SsaDestructionPass ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3
@@ -319,7 +319,7 @@ block4:
     Return v22:unknown
 
 === After CopyCoalescing ===
-function(v7:unknown):
+function(v0:unknown):
 block0:
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3
@@ -333,7 +333,7 @@ block3:
 block4:
     Return v22:unknown
 
-function(v7:unknown):
+function(v0:unknown):
 block0:
     ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
     Jump block3

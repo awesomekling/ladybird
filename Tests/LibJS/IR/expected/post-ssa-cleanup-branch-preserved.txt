@@ -45,133 +45,133 @@ block0:
     End v5:unknown
 
 === After SSAConstruction ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    v1:undefined = Move undefined
-    Branch v10:unknown, block1, block2
+    v4:undefined = Move undefined
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
+    v6:unknown = Add v1:unknown, 1
     Jump block4
 block2:
-    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Add v2:unknown, 2
     Jump block5
 block3:
-    Return v9:unknown
+    Return v10:unknown
 block1_split0:
-    v5:unknown = Move v4:unknown
-    Return v5:unknown
+    v7:unknown = Move v6:unknown
+    Return v7:unknown
 block2_split1:
-    v9:unknown = Move v8:unknown
+    v10:unknown = Move v9:unknown
     Jump block3
 
 === After SCCP ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    v1:undefined = Move undefined
-    Branch v10:unknown, block1, block2
+    v4:undefined = Move undefined
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
+    v6:unknown = Add v1:unknown, 1
     Jump block4
 block2:
-    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Add v2:unknown, 2
     Jump block5
 block3:
-    Return v9:unknown
+    Return v10:unknown
 block1_split0:
-    v5:unknown = Move v4:unknown
-    Return v5:unknown
+    v7:unknown = Move v6:unknown
+    Return v7:unknown
 block2_split1:
-    v9:unknown = Move v8:unknown
+    v10:unknown = Move v9:unknown
     Jump block3
 
 === Before optimization ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    v1:undefined = Move undefined
-    Branch v10:unknown, block1, block2
+    v4:undefined = Move undefined
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
+    v6:unknown = Add v1:unknown, 1
     Jump block4
 block2:
-    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Add v2:unknown, 2
     Jump block5
 block3:
-    Return v9:unknown
+    Return v10:unknown
 block1_split0:
-    v5:unknown = Move v4:unknown
-    Return v5:unknown
+    v7:unknown = Move v6:unknown
+    Return v7:unknown
 block2_split1:
-    v9:unknown = Move v8:unknown
+    v10:unknown = Move v9:unknown
     Jump block3
 
 === After DeadCodeElimination ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    Branch v10:unknown, block1, block2
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
+    v6:unknown = Add v1:unknown, 1
     Jump block4
 block2:
-    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Add v2:unknown, 2
     Jump block5
 block3:
-    Return v9:unknown
+    Return v10:unknown
 block1_split0:
-    v5:unknown = Move v4:unknown
-    Return v5:unknown
+    v7:unknown = Move v6:unknown
+    Return v7:unknown
 block2_split1:
-    v9:unknown = Move v8:unknown
+    v10:unknown = Move v9:unknown
     Jump block3
 
 === After CopyPropagation ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    Branch v10:unknown, block1, block2
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
+    v6:unknown = Add v1:unknown, 1
     Jump block4
 block2:
-    v8:unknown = Add v6:unknown, 2
+    v9:unknown = Add v2:unknown, 2
     Jump block5
 block3:
-    Return v8:unknown
+    Return v9:unknown
 block1_split0:
-    v5:unknown = Move v4:unknown
-    Return v4:unknown
+    v7:unknown = Move v6:unknown
+    Return v6:unknown
 block2_split1:
-    v9:unknown = Move v8:unknown
+    v10:unknown = Move v9:unknown
     Jump block3
 
 === After SimplifyCFG ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    Branch v10:unknown, block1, block2
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
-    v5:unknown = Move v4:unknown
-    Return v4:unknown
+    v6:unknown = Add v1:unknown, 1
+    v7:unknown = Move v6:unknown
+    Return v6:unknown
 block2:
-    v8:unknown = Add v6:unknown, 2
-    v9:unknown = Move v8:unknown
-    Return v8:unknown
+    v9:unknown = Add v2:unknown, 2
+    v10:unknown = Move v9:unknown
+    Return v9:unknown
 
 === After DeadCodeElimination ===
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    Branch v10:unknown, block1, block2
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v6:unknown = Add v1:unknown, 1
+    Return v6:unknown
 block2:
-    v8:unknown = Add v6:unknown, 2
-    Return v8:unknown
+    v9:unknown = Add v2:unknown, 2
+    Return v9:unknown
 
-function(v2:unknown, v6:unknown, v10:unknown):
+function(v0:unknown, v1:unknown, v2:unknown):
 block0:
-    Branch v10:unknown, block1, block2
+    Branch v0:unknown, block1, block2
 block1:
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v6:unknown = Add v1:unknown, 1
+    Return v6:unknown
 block2:
-    v8:unknown = Add v6:unknown, 2
-    Return v8:unknown
+    v9:unknown = Add v2:unknown, 2
+    Return v9:unknown

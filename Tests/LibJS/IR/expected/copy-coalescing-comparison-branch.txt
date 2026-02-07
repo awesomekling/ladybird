@@ -45,23 +45,23 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
     v20:unknown = Phi [block3:v22:undefined, block4:v9:unknown, block12:v24:undefined, block13:v9:unknown]
     v18:unknown = Phi [block3:v8:unknown, block4:v19:unknown, block12:v8:unknown, block13:v19:unknown]
     v17:unknown = Phi [block3:v23:undefined, block4:v26:undefined, block12:v25:undefined, block13:v11:unknown]
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
+    v2:unknown = GetGlobal Object
     Jump block7
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     Jump block12
 block4: [handler: block1]
     v19:unknown = Phi [block2:v21:undefined, block6:v8:unknown]
@@ -73,16 +73,16 @@ block5:
 block6:
     Jump block4
 block1_split0:
-    v2:unknown = GetById v1:unknown.prototype
+    v3:unknown = GetById v2:unknown.prototype
     Jump block8
 block1_split1:
-    v3:unknown = GetById v2:unknown.toString
+    v4:unknown = GetById v3:unknown.toString
     Jump block9
 block1_split2:
-    v4:unknown = GetById v3:unknown.call
+    v5:unknown = GetById v4:unknown.call
     Jump block10
 block1_split3:
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Jump block11
 block1_split4:
     Return v6:unknown
@@ -90,30 +90,30 @@ block3_split5: [handler: block1]
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block6
 block4_split6: [handler: block1]
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block4_split7:
     LeaveUnwindContext
     Return v11:unknown
 
 === After SCCP ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
     v20:unknown = Phi [block3:v22:undefined, block4:v9:unknown, block12:v24:undefined, block13:v9:unknown]
     v18:unknown = Phi [block3:v8:unknown, block4:v19:unknown, block12:v8:unknown, block13:v19:unknown]
     v17:unknown = Phi [block3:v23:undefined, block4:v26:undefined, block12:v25:undefined, block13:v11:unknown]
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
+    v2:unknown = GetGlobal Object
     Jump block7
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     Jump block12
 block4: [handler: block1]
     v19:unknown = Phi [block2:v21:undefined, block6:v8:unknown]
@@ -125,16 +125,16 @@ block5:
 block6:
     Jump block4
 block1_split0:
-    v2:unknown = GetById v1:unknown.prototype
+    v3:unknown = GetById v2:unknown.prototype
     Jump block8
 block1_split1:
-    v3:unknown = GetById v2:unknown.toString
+    v4:unknown = GetById v3:unknown.toString
     Jump block9
 block1_split2:
-    v4:unknown = GetById v3:unknown.call
+    v5:unknown = GetById v4:unknown.call
     Jump block10
 block1_split3:
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Jump block11
 block1_split4:
     Return v6:unknown
@@ -142,30 +142,30 @@ block3_split5: [handler: block1]
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block6
 block4_split6: [handler: block1]
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block4_split7:
     LeaveUnwindContext
     Return v11:unknown
 
 === Before optimization ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
     v20:unknown = Phi [block3:v22:undefined, block4:v9:unknown, block12:v24:undefined, block13:v9:unknown]
     v18:unknown = Phi [block3:v8:unknown, block4:v19:unknown, block12:v8:unknown, block13:v19:unknown]
     v17:unknown = Phi [block3:v23:undefined, block4:v26:undefined, block12:v25:undefined, block13:v11:unknown]
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
+    v2:unknown = GetGlobal Object
     Jump block7
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     Jump block12
 block4: [handler: block1]
     v19:unknown = Phi [block2:v21:undefined, block6:v8:unknown]
@@ -177,16 +177,16 @@ block5:
 block6:
     Jump block4
 block1_split0:
-    v2:unknown = GetById v1:unknown.prototype
+    v3:unknown = GetById v2:unknown.prototype
     Jump block8
 block1_split1:
-    v3:unknown = GetById v2:unknown.toString
+    v4:unknown = GetById v3:unknown.toString
     Jump block9
 block1_split2:
-    v4:unknown = GetById v3:unknown.call
+    v5:unknown = GetById v4:unknown.call
     Jump block10
 block1_split3:
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Jump block11
 block1_split4:
     Return v6:unknown
@@ -194,27 +194,27 @@ block3_split5: [handler: block1]
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block6
 block4_split6: [handler: block1]
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block4_split7:
     LeaveUnwindContext
     Return v11:unknown
 
 === After DeadCodeElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
+    v2:unknown = GetGlobal Object
     Jump block7
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     Jump block12
 block4: [handler: block1]
     v9:unknown = GetGlobal String
@@ -225,16 +225,16 @@ block5:
 block6:
     Jump block4
 block1_split0:
-    v2:unknown = GetById v1:unknown.prototype
+    v3:unknown = GetById v2:unknown.prototype
     Jump block8
 block1_split1:
-    v3:unknown = GetById v2:unknown.toString
+    v4:unknown = GetById v3:unknown.toString
     Jump block9
 block1_split2:
-    v4:unknown = GetById v3:unknown.call
+    v5:unknown = GetById v4:unknown.call
     Jump block10
 block1_split3:
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Jump block11
 block1_split4:
     Return v6:unknown
@@ -242,36 +242,36 @@ block3_split5: [handler: block1]
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block6
 block4_split6: [handler: block1]
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block4_split7:
     LeaveUnwindContext
     Return v11:unknown
 
 === After SimplifyCFG ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
-    v2:unknown = GetById v1:unknown.prototype
-    v3:unknown = GetById v2:unknown.toString
-    v4:unknown = GetById v3:unknown.call
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v2:unknown = GetGlobal Object
+    v3:unknown = GetById v2:unknown.prototype
+    v4:unknown = GetById v3:unknown.toString
+    v5:unknown = GetById v4:unknown.call
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Return v6:unknown
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block4
 block4: [handler: block1]
     v9:unknown = GetGlobal String
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block5:
     LeaveUnwindContext
@@ -281,29 +281,29 @@ block4_split7:
     Return v11:unknown
 
 === After SplitCriticalEdges ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
-    v2:unknown = GetById v1:unknown.prototype
-    v3:unknown = GetById v2:unknown.toString
-    v4:unknown = GetById v3:unknown.call
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v2:unknown = GetGlobal Object
+    v3:unknown = GetById v2:unknown.prototype
+    v4:unknown = GetById v3:unknown.toString
+    v5:unknown = GetById v4:unknown.call
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Return v6:unknown
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block15
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block16
 block4: [handler: block1]
     v9:unknown = GetGlobal String
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block5:
     LeaveUnwindContext
@@ -317,29 +317,29 @@ split_block3_block4:
     Jump block4
 
 === After PostSSACleanup ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
-    v2:unknown = GetById v1:unknown.prototype
-    v3:unknown = GetById v2:unknown.toString
-    v4:unknown = GetById v3:unknown.call
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v2:unknown = GetGlobal Object
+    v3:unknown = GetById v2:unknown.prototype
+    v4:unknown = GetById v3:unknown.toString
+    v5:unknown = GetById v4:unknown.call
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Return v6:unknown
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block4
 block4: [handler: block1]
     v9:unknown = GetGlobal String
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block5:
     LeaveUnwindContext
@@ -348,29 +348,29 @@ block4_split7:
     LeaveUnwindContext
     Return v11:unknown
 
-function(v5:unknown):
+function(v0:unknown):
 block0:
     EnterUnwindContext block2
 block1:
-    v0:unknown = Catch
+    v1:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
-    v1:unknown = GetGlobal Object
-    v2:unknown = GetById v1:unknown.prototype
-    v3:unknown = GetById v2:unknown.toString
-    v4:unknown = GetById v3:unknown.call
-    v6:unknown = Call v4:unknown, v3:unknown, v5:unknown
+    v2:unknown = GetGlobal Object
+    v3:unknown = GetById v2:unknown.prototype
+    v4:unknown = GetById v3:unknown.toString
+    v5:unknown = GetById v4:unknown.call
+    v6:unknown = Call v5:unknown, v4:unknown, v0:unknown
     Return v6:unknown
 block2:
-    v14:boolean = StrictlyEquals v5:unknown, 0
+    v14:boolean = StrictlyEquals v0:unknown, 0
     Branch v14:boolean, block3, block4
 block3: [handler: block1]
-    v8:unknown = Div 1, v5:unknown
+    v8:unknown = Div 1, v0:unknown
     v16:boolean = LessThan v8:unknown, 0
     Branch v16:boolean, block5, block4
 block4: [handler: block1]
     v9:unknown = GetGlobal String
-    v11:unknown = Call v9:unknown, undefined, v5:unknown
+    v11:unknown = Call v9:unknown, undefined, v0:unknown
     Jump block14
 block5:
     LeaveUnwindContext

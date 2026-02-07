@@ -45,27 +45,27 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function():
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = Move 0
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
     Jump block3
 block1:
     Jump block5
 block2:
-    v4:number = ToNumeric v10:number
-    v5:number = Increment v4:number
+    v5:number = ToNumeric v11:number
+    v6:number = Increment v5:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v3:int32, block2:v5:number]
-    v9:unknown = Phi [block0:v11:undefined, block2:v4:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v4:int32, block2:v6:number]
+    v10:unknown = Phi [block0:v12:undefined, block2:v5:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
-    v8:boolean = StrictlyEquals 0, v10:number
-    Branch v8:boolean, block7, block6
+    v9:boolean = StrictlyEquals 0, v11:number
+    Branch v9:boolean, block7, block6
 block6:
     Jump block8
 block7:
@@ -74,27 +74,27 @@ block8:
     Jump block2
 
 === After SCCP ===
-function():
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = Move 0
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
     Jump block3
 block1:
     Jump block5
 block2:
-    v4:number = ToNumeric v10:number
-    v5:number = Increment v4:number
+    v5:number = ToNumeric v11:number
+    v6:number = Increment v5:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v9:unknown = Phi [block0:v11:undefined, block2:v4:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v10:unknown = Phi [block0:v12:undefined, block2:v5:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
-    v8:boolean = StrictlyEquals 0, v10:number
-    Branch v8:boolean, block7, block6
+    v9:boolean = StrictlyEquals 0, v11:number
+    Branch v9:boolean, block7, block6
 block6:
     Jump block8
 block7:
@@ -103,27 +103,27 @@ block8:
     Jump block2
 
 === Before optimization ===
-function():
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v3:int32 = Move 0
+    v2:undefined = Move undefined
+    v4:int32 = Move 0
     Jump block3
 block1:
     Jump block5
 block2:
-    v4:number = ToNumeric v10:number
-    v5:number = Increment v4:number
+    v5:number = ToNumeric v11:number
+    v6:number = Increment v5:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v9:unknown = Phi [block0:v11:undefined, block2:v4:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v10:unknown = Phi [block0:v12:undefined, block2:v5:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
-    v8:boolean = StrictlyEquals 0, v10:number
-    Branch v8:boolean, block7, block6
+    v9:boolean = StrictlyEquals 0, v11:number
+    Branch v9:boolean, block7, block6
 block6:
     Jump block8
 block7:
@@ -132,24 +132,24 @@ block8:
     Jump block2
 
 === After DeadCodeElimination ===
-function():
+function(v0:unknown):
 block0:
     Jump block3
 block1:
     Jump block5
 block2:
-    v4:number = ToNumeric v10:number
-    v5:number = Increment v4:number
+    v5:number = ToNumeric v11:number
+    v6:number = Increment v5:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
-    v8:boolean = StrictlyEquals 0, v10:number
-    Branch v8:boolean, block7, block6
+    v9:boolean = StrictlyEquals 0, v11:number
+    Branch v9:boolean, block7, block6
 block6:
     Jump block8
 block7:
@@ -158,21 +158,21 @@ block8:
     Jump block2
 
 === After AggressiveDeadCodeElimination ===
-function():
+function(v0:unknown):
 block0:
     Jump block3
 block1:
     Jump block5
 block2:
-    v4:number = ToNumeric v10:number
-    v5:number = Increment v4:number
+    v5:number = ToNumeric v11:number
+    v6:number = Increment v5:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
     Jump block7
 block6:
@@ -183,20 +183,20 @@ block8:
     Jump block2
 
 === After RedundantCheckElimination ===
-function():
+function(v0:unknown):
 block0:
     Jump block3
 block1:
     Jump block5
 block2:
-    v5:number = Increment v10:number
+    v6:number = Increment v11:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block1, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block1, block4
 block4:
-    Return v10:number
+    Return v11:number
 block5:
     Jump block7
 block6:
@@ -207,57 +207,57 @@ block8:
     Jump block2
 
 === After SimplifyCFG ===
-function():
+function(v0:unknown):
 block0:
     Jump block3
 block2:
-    v5:number = Increment v10:number
+    v6:number = Increment v11:number
     Jump block3
 block3:
-    v10:number = Phi [block0:v12:int32, block2:v5:number]
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block2, block4
+    v11:number = Phi [block0:v13:int32, block2:v6:number]
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block2, block4
 block4:
-    Return v10:number
+    Return v11:number
 
 === After SsaDestructionPass ===
-function():
+function(v0:unknown):
 block0:
-    ParallelCopy [v10:number <- v12:int32]
+    ParallelCopy [v11:number <- v13:int32]
     Jump block3
 block2:
-    v5:number = Increment v10:number
-    ParallelCopy [v10:number <- v5:number]
+    v6:number = Increment v11:number
+    ParallelCopy [v11:number <- v6:number]
     Jump block3
 block3:
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block2, block4
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block2, block4
 block4:
-    Return v10:number
+    Return v11:number
 
 === After CopyCoalescing ===
-function():
+function(v0:unknown):
 block0:
-    ParallelCopy [v10:number <- v12:int32]
+    ParallelCopy [v11:number <- v13:int32]
     Jump block3
 block2:
-    v5:number = Increment v10:number
+    v6:number = Increment v11:number
     Jump block3
 block3:
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block2, block4
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block2, block4
 block4:
-    Return v10:number
+    Return v11:number
 
-function():
+function(v0:unknown):
 block0:
-    ParallelCopy [v10:number <- v12:int32]
+    ParallelCopy [v11:number <- v13:int32]
     Jump block3
 block2:
-    v5:number = Increment v10:number
+    v6:number = Increment v11:number
     Jump block3
 block3:
-    v7:boolean = LessThan v10:number, 3
-    Branch v7:boolean, block2, block4
+    v8:boolean = LessThan v11:number, 3
+    Branch v8:boolean, block2, block4
 block4:
-    Return v10:number
+    Return v11:number

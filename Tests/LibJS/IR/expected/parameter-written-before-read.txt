@@ -1,0 +1,267 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 10
+    InitObjectLiteralProperty v1:object, 20
+    CacheObjectShape v1:object
+    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    Jump block2
+block0_split1:
+    End v7:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 10
+    InitObjectLiteralProperty v1:object, 20
+    CacheObjectShape v1:object
+    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    Jump block2
+block0_split1:
+    End v7:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 10
+    InitObjectLiteralProperty v1:object, 20
+    CacheObjectShape v1:object
+    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    Jump block2
+block0_split1:
+    End v7:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 10
+    InitObjectLiteralProperty v1:object, 20
+    CacheObjectShape v1:object
+    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    End v7:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 10
+    InitObjectLiteralProperty v1:object, 20
+    CacheObjectShape v1:object
+    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    End v7:unknown
+
+=== After SSAConstruction ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
+    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Jump block3
+block2_split0:
+    Return v7:unknown
+
+=== After SCCP ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
+    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Jump block3
+block2_split0:
+    Return v7:unknown
+
+=== Before optimization ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
+    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Jump block3
+block2_split0:
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
+    v7:unknown = GetById v9:unknown.x
+    Jump block3
+block2_split0:
+    Return v7:unknown
+
+=== After CopyPropagation ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Jump block3
+block2_split0:
+    Return v7:unknown
+
+=== After SimplifyCFG ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    v6:object = Move v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+
+=== After SplitCriticalEdges ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block4
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    Jump block2
+block2:
+    v9:unknown = Phi [block1:v3:object, block4:v1:unknown]
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+split_block0_block2:
+    Jump block2
+
+=== After SsaDestructionPass ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block4
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    ParallelCopy [v9:unknown <- v3:object]
+    Jump block2
+block2:
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+split_block0_block2:
+    ParallelCopy [v9:unknown <- v1:unknown]
+    Jump block2
+
+=== After CopyCoalescing ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block4
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    Jump block2
+block2:
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+split_block0_block2:
+    Jump block2
+
+=== After PostSSACleanup ===
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    Jump block2
+block2:
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown
+
+function(v0:unknown, v1:unknown, v2:unknown):
+block0:
+    Branch v0:unknown, block1, block2
+block1:
+    v3:object = NewObject
+    InitObjectLiteralProperty v3:object, 1
+    InitObjectLiteralProperty v3:object, 2
+    CacheObjectShape v3:object
+    Jump block2
+block2:
+    v7:unknown = GetById v9:unknown.x
+    Return v7:unknown

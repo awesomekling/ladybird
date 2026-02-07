@@ -45,14 +45,14 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -60,8 +60,8 @@ block2:
     v9:number = Increment v8:number
     Jump block3
 block3:
-    v14:unknown = Phi [block0:v2:undefined, block2:v7:boolean]
-    v13:number = Phi [block0:v4:int32, block2:v9:number]
+    v14:unknown = Phi [block0:v3:undefined, block2:v7:boolean]
+    v13:number = Phi [block0:v5:int32, block2:v9:number]
     v12:unknown = Phi [block0:v15:undefined, block2:v8:number]
     v11:boolean = LessThan v13:number, 10
     Branch v11:boolean, block1, block4
@@ -69,14 +69,14 @@ block4:
     Return v14:unknown
 
 === After SCCP ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -93,14 +93,14 @@ block4:
     Return v14:unknown
 
 === Before optimization ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
+    v5:int32 = Move 0
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -117,11 +117,11 @@ block4:
     Return v14:unknown
 
 === After DeadCodeElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -137,11 +137,11 @@ block4:
     Return v14:unknown
 
 === After CopyPropagation ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -157,11 +157,11 @@ block4:
     Return v14:unknown
 
 === After RedundantCheckElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     Jump block2
 block2:
@@ -176,11 +176,11 @@ block4:
     Return v14:unknown
 
 === After SimplifyCFG ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v7:boolean = Move v6:boolean
     v9:number = Increment v13:number
     Jump block3
@@ -193,11 +193,11 @@ block4:
     Return v14:unknown
 
 === After DeadCodeElimination ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
     Jump block3
 block1:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     v9:number = Increment v13:number
     Jump block3
 block3:
@@ -209,9 +209,9 @@ block4:
     Return v14:unknown
 
 === After LoopInvariantCodeMotion ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     Jump block3
 block1:
     v9:number = Increment v13:number
@@ -225,9 +225,9 @@ block4:
     Return v14:unknown
 
 === After SsaDestructionPass ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     ParallelCopy [v14:unknown <- v16:undefined, v13:number <- v17:int32]
     Jump block3
 block1:
@@ -241,9 +241,9 @@ block4:
     Return v14:unknown
 
 === After CopyCoalescing ===
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     ParallelCopy [v14:unknown <- v16:undefined, v13:number <- v17:int32]
     Jump block3
 block1:
@@ -256,9 +256,9 @@ block3:
 block4:
     Return v14:unknown
 
-function(v5:unknown):
+function(v0:unknown):
 block0:
-    v6:boolean = Not v5:unknown
+    v6:boolean = Not v0:unknown
     ParallelCopy [v14:unknown <- v16:undefined, v13:number <- v17:int32]
     Jump block3
 block1:

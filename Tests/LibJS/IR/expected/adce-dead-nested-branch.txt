@@ -45,52 +45,52 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Jump block3
 block1:
-    Branch v1:unknown, block0, block2
+    Branch v0:unknown, block0, block2
 block2:
     Return 0
 block3:
-    Branch v2:unknown, block3, block4
+    Branch v1:unknown, block3, block4
 block4:
     Jump block1
 entry:
     Jump block0
 
 === After SCCP ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Jump block3
 block1:
-    Branch v1:unknown, block0, block2
+    Branch v0:unknown, block0, block2
 block2:
     Return 0
 block3:
-    Branch v2:unknown, block3, block4
+    Branch v1:unknown, block3, block4
 block4:
     Jump block1
 entry:
     Jump block0
 
 === Before optimization ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Jump block3
 block1:
-    Branch v1:unknown, block0, block2
+    Branch v0:unknown, block0, block2
 block2:
     Return 0
 block3:
-    Branch v2:unknown, block3, block4
+    Branch v1:unknown, block3, block4
 block4:
     Jump block1
 entry:
     Jump block0
 
 === After AggressiveDeadCodeElimination ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block0:
     Jump block3
 block1:
@@ -105,17 +105,17 @@ entry:
     Jump block0
 
 === After SimplifyCFG ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block2:
     Return 0
 entry:
     Jump block2
 
 === After SimplifyCFG ===
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block2:
     Return 0
 
-function(v1:unknown, v2:unknown):
+function(v0:unknown, v1:unknown):
 block2:
     Return 0

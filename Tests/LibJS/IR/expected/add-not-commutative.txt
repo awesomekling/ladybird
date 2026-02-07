@@ -45,15 +45,15 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v5:unknown = Add v3:unknown, v4:unknown
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:unknown = Add v0:unknown, v1:unknown
     Jump block1
 block0_split0:
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     Jump block2
 block0_split1:
     v8:unknown = Move v7:unknown
@@ -63,15 +63,15 @@ block0_split2:
     Return v9:unknown
 
 === After SCCP ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v5:unknown = Add v3:unknown, v4:unknown
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:unknown = Add v0:unknown, v1:unknown
     Jump block1
 block0_split0:
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     Jump block2
 block0_split1:
     v8:unknown = Move v7:unknown
@@ -81,15 +81,15 @@ block0_split2:
     Return v9:unknown
 
 === Before optimization ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
-    v5:unknown = Add v3:unknown, v4:unknown
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:unknown = Add v0:unknown, v1:unknown
     Jump block1
 block0_split0:
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     Jump block2
 block0_split1:
     v8:unknown = Move v7:unknown
@@ -99,13 +99,13 @@ block0_split2:
     Return v9:unknown
 
 === After DeadCodeElimination ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:unknown = Add v3:unknown, v4:unknown
+    v5:unknown = Add v0:unknown, v1:unknown
     Jump block1
 block0_split0:
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     Jump block2
 block0_split1:
     v8:unknown = Move v7:unknown
@@ -115,13 +115,13 @@ block0_split2:
     Return v9:unknown
 
 === After CopyPropagation ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:unknown = Add v3:unknown, v4:unknown
+    v5:unknown = Add v0:unknown, v1:unknown
     Jump block1
 block0_split0:
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     Jump block2
 block0_split1:
     v8:unknown = Move v7:unknown
@@ -131,26 +131,26 @@ block0_split2:
     Return v9:unknown
 
 === After SimplifyCFG ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:unknown = Add v3:unknown, v4:unknown
+    v5:unknown = Add v0:unknown, v1:unknown
     v6:unknown = Move v5:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     v8:unknown = Move v7:unknown
     v9:unknown = Add v5:unknown, v7:unknown
     Return v9:unknown
 
 === After DeadCodeElimination ===
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:unknown = Add v3:unknown, v4:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v5:unknown = Add v0:unknown, v1:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     v9:unknown = Add v5:unknown, v7:unknown
     Return v9:unknown
 
-function(v3:unknown, v4:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:unknown = Add v3:unknown, v4:unknown
-    v7:unknown = Add v4:unknown, v3:unknown
+    v5:unknown = Add v0:unknown, v1:unknown
+    v7:unknown = Add v1:unknown, v0:unknown
     v9:unknown = Add v5:unknown, v7:unknown
     Return v9:unknown

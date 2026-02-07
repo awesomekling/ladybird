@@ -45,150 +45,150 @@ block0:
     End v4:unknown
 
 === After SSAConstruction ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v6:string, v8:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
+    v10:boolean = StrictlyEquals v7:string, v9:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v6:string, v11:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v7:string, v12:string
+    Return v13:boolean
 
 === After SCCP ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v6:string, v8:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
+    v10:boolean = StrictlyEquals v7:string, v9:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v6:string, v11:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v7:string, v12:string
+    Return v13:boolean
 
 === Before optimization ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v1:undefined = Move undefined
-    v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v6:string, v8:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
+    v10:boolean = StrictlyEquals v7:string, v9:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v6:string, v11:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v7:string, v12:string
+    Return v13:boolean
 
 === After DeadCodeElimination ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v6:string, v8:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
+    v10:boolean = StrictlyEquals v7:string, v9:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v6:string, v11:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v7:string, v12:string
+    Return v13:boolean
 
 === After CopyPropagation ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v7:string
-    v9:boolean = StrictlyEquals v5:string, v7:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
+    v10:boolean = StrictlyEquals v6:string, v8:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v5:string, v10:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v6:string, v11:string
+    Return v13:boolean
 
 === After GlobalValueNumbering ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:string = Typeof v4:unknown
-    v6:string = Move v5:string
-    Branch v13:unknown, block1, block2
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
+    Branch v1:unknown, block1, block2
 block1:
-    v7:string = Typeof v4:unknown
-    v8:string = Move v5:string
-    v9:boolean = StrictlyEquals v5:string, v5:string
-    Return v9:boolean
+    v8:string = Typeof v0:unknown
+    v9:string = Move v6:string
+    v10:boolean = StrictlyEquals v6:string, v6:string
+    Return v10:boolean
 block2:
-    v10:string = Typeof v4:unknown
-    v11:string = Move v5:string
-    v12:boolean = StrictlyEquals v5:string, v5:string
-    Return v12:boolean
+    v11:string = Typeof v0:unknown
+    v12:string = Move v6:string
+    v13:boolean = StrictlyEquals v6:string, v6:string
+    Return v13:boolean
 
 === After DeadCodeElimination ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:string = Typeof v4:unknown
-    Branch v13:unknown, block1, block2
+    v6:string = Typeof v0:unknown
+    Branch v1:unknown, block1, block2
 block1:
-    v9:boolean = StrictlyEquals v5:string, v5:string
-    Return v9:boolean
+    v10:boolean = StrictlyEquals v6:string, v6:string
+    Return v10:boolean
 block2:
-    v12:boolean = StrictlyEquals v5:string, v5:string
-    Return v12:boolean
+    v13:boolean = StrictlyEquals v6:string, v6:string
+    Return v13:boolean
 
 === After InstCombine ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    v5:string = Typeof v4:unknown
-    Branch v13:unknown, block1, block2
+    v6:string = Typeof v0:unknown
+    Branch v1:unknown, block1, block2
 block1:
     Return true
 block2:
     Return true
 
 === After DeadCodeElimination ===
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v13:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
     Return true
 block2:
     Return true
 
-function(v4:unknown, v13:unknown):
+function(v0:unknown, v1:unknown):
 block0:
-    Branch v13:unknown, block1, block2
+    Branch v1:unknown, block1, block2
 block1:
     Return true
 block2:

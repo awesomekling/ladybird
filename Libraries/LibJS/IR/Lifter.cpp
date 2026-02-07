@@ -71,6 +71,18 @@ LiftResult Lifter::lift(Bytecode::Executable const& executable)
 
 void Lifter::lift_basic_blocks()
 {
+    // Pre-create Parameter values for all formal parameters.
+    // This ensures SSA construction always seeds them on the operand stack,
+    // even if the bytecode writes to a parameter slot before reading it
+    // in linear block order. Without this, SSA renaming would resolve
+    // unseen parameters to undefined on paths where the write doesn't dominate.
+    for (u32 i = 0; i < m_executable.formal_parameter_count; ++i) {
+        auto& parameter = m_function->create_parameter(i);
+        auto vi = to_index(parameter.index());
+        ensure_index(m_value_to_operand_raw, vi);
+        m_value_to_operand_raw[vi] = m_executable.argument_index_base + i;
+    }
+
     // First pass: create IR basic blocks for each bytecode basic block
     for (size_t i = 0; i < m_executable.basic_block_start_offsets.size(); ++i) {
         auto& block = m_function->create_block(String::formatted("block{}", i).release_value_but_fixme_should_propagate_errors());

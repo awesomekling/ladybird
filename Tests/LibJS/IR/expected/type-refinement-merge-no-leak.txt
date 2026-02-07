@@ -318,90 +318,90 @@ block4:
     End undefined
 
 === After SSAConstruction ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v2:undefined = Move undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block1, block2
 block1:
-    v3:string = Move v2:string
+    v4:string = Move v3:string
     Jump block3
 block2:
-    v5:string = Move v4:string
+    v6:string = Move v5:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v3:string, block2:v5:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v13:string = Phi [block1:v4:string, block2:v6:string]
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v12:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
+    v8:unknown = Add v13:string, v7:string
     Jump block6
 block5:
-    v9:unknown = Add v13:string, v8:string
+    v10:unknown = Add v13:string, v9:string
     Jump block7
 block4_split0:
-    Return v7:unknown
+    Return v8:unknown
 block5_split1:
-    Return v9:unknown
+    Return v10:unknown
 
 === After SCCP ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v2:undefined = Move undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block1, block2
 block1:
-    v3:string = Move v2:string
+    v4:string = Move v3:string
     Jump block3
 block2:
-    v5:string = Move v4:string
+    v6:string = Move v5:string
     Jump block3
 block3:
     v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v12:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
+    v8:unknown = Add v13:string, v7:string
     Jump block6
 block5:
-    v9:unknown = Add v13:string, v8:string
+    v10:unknown = Add v13:string, v9:string
     Jump block7
 block4_split0:
-    Return v7:unknown
+    Return v8:unknown
 block5_split1:
-    Return v9:unknown
+    Return v10:unknown
 
 === Before optimization ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v1:undefined = Move undefined
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v2:undefined = Move undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block1, block2
 block1:
-    v3:string = Move v2:string
+    v4:string = Move v3:string
     Jump block3
 block2:
-    v5:string = Move v4:string
+    v6:string = Move v5:string
     Jump block3
 block3:
     v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v12:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
+    v8:unknown = Add v13:string, v7:string
     Jump block6
 block5:
-    v9:unknown = Add v13:string, v8:string
+    v10:unknown = Add v13:string, v9:string
     Jump block7
 block4_split0:
-    Return v7:unknown
+    Return v8:unknown
 block5_split1:
-    Return v9:unknown
+    Return v10:unknown
 
 === After DeadCodeElimination ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block1, block2
 block1:
     Jump block3
@@ -409,23 +409,23 @@ block2:
     Jump block3
 block3:
     v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v12:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
+    v8:unknown = Add v13:string, v7:string
     Jump block6
 block5:
-    v9:unknown = Add v13:string, v8:string
+    v10:unknown = Add v13:string, v9:string
     Jump block7
 block4_split0:
-    Return v7:unknown
+    Return v8:unknown
 block5_split1:
-    Return v9:unknown
+    Return v10:unknown
 
 === After GlobalValueNumbering ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block1, block2
 block1:
     Jump block3
@@ -433,41 +433,41 @@ block2:
     Jump block3
 block3:
     v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
+    v8:unknown = Add v13:string, v7:string
     Jump block6
 block5:
-    v9:unknown = Add v13:string, v8:string
+    v10:unknown = Add v13:string, v9:string
     Jump block7
 block4_split0:
-    Return v7:unknown
+    Return v8:unknown
 block5_split1:
-    Return v9:unknown
+    Return v10:unknown
 
 === After SimplifyCFG ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block3, block2
 block2:
     Jump block3
 block3:
     v13:string = Phi [block2:v15:string, block0:v14:string]
-    v12:boolean = StrictlyEquals v10:unknown, undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
-    Return v7:unknown
+    v8:unknown = Add v13:string, v7:string
+    Return v8:unknown
 block5:
-    v9:unknown = Add v13:string, v8:string
-    Return v9:unknown
+    v10:unknown = Add v13:string, v9:string
+    Return v10:unknown
 
 === After DeadCodeElimination ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block3, block2
 block2:
     Jump block3
@@ -475,16 +475,16 @@ block3:
     v13:string = Phi [block2:v15:string, block0:v14:string]
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
-    Return v7:unknown
+    v8:unknown = Add v13:string, v7:string
+    Return v8:unknown
 block5:
-    v9:unknown = Add v13:string, v8:string
-    Return v9:unknown
+    v10:unknown = Add v13:string, v9:string
+    Return v10:unknown
 
 === After SplitCriticalEdges ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block8, block2
 block2:
     Jump block3
@@ -492,18 +492,18 @@ block3:
     v13:string = Phi [block2:v15:string, block8:v14:string]
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
-    Return v7:unknown
+    v8:unknown = Add v13:string, v7:string
+    Return v8:unknown
 block5:
-    v9:unknown = Add v13:string, v8:string
-    Return v9:unknown
+    v10:unknown = Add v13:string, v9:string
+    Return v10:unknown
 split_block0_block3:
     Jump block3
 
 === After SsaDestructionPass ===
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block8, block2
 block2:
     ParallelCopy [v13:string <- v15:string]
@@ -511,18 +511,18 @@ block2:
 block3:
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
-    Return v7:unknown
+    v8:unknown = Add v13:string, v7:string
+    Return v8:unknown
 block5:
-    v9:unknown = Add v13:string, v8:string
-    Return v9:unknown
+    v10:unknown = Add v13:string, v9:string
+    Return v10:unknown
 split_block0_block3:
     ParallelCopy [v13:string <- v14:string]
     Jump block3
 
-function(v10:unknown):
+function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v10:unknown, undefined
+    v11:boolean = StrictlyEquals v0:unknown, undefined
     Branch v11:boolean, block8, block2
 block2:
     ParallelCopy [v13:string <- v15:string]
@@ -530,11 +530,11 @@ block2:
 block3:
     Branch v11:boolean, block4, block5
 block4:
-    v7:unknown = Add v13:string, v6:string
-    Return v7:unknown
+    v8:unknown = Add v13:string, v7:string
+    Return v8:unknown
 block5:
-    v9:unknown = Add v13:string, v8:string
-    Return v9:unknown
+    v10:unknown = Add v13:string, v9:string
+    Return v10:unknown
 split_block0_block3:
     ParallelCopy [v13:string <- v14:string]
     Jump block3

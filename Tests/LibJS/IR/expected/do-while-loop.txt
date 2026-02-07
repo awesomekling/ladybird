@@ -45,34 +45,34 @@ block0:
     End v3:unknown
 
 === After SSAConstruction ===
-function(v1:unknown):
+function(v0:unknown):
 block0:
-    Branch v1:unknown, block0, block1
+    Branch v0:unknown, block0, block1
 block1:
     End undefined
 entry:
     Jump block0
 
 === After SCCP ===
-function(v1:unknown):
+function(v0:unknown):
 block0:
-    Branch v1:unknown, block0, block1
+    Branch v0:unknown, block0, block1
 block1:
     End undefined
 entry:
     Jump block0
 
 === Before optimization ===
-function(v1:unknown):
+function(v0:unknown):
 block0:
-    Branch v1:unknown, block0, block1
+    Branch v0:unknown, block0, block1
 block1:
     End undefined
 entry:
     Jump block0
 
 === After AggressiveDeadCodeElimination ===
-function(v1:unknown):
+function(v0:unknown):
 block0:
     Jump block1
 block1:
@@ -81,17 +81,17 @@ entry:
     Jump block0
 
 === After SimplifyCFG ===
-function(v1:unknown):
+function(v0:unknown):
 block1:
     End undefined
 entry:
     Jump block1
 
 === After SimplifyCFG ===
-function(v1:unknown):
+function(v0:unknown):
 block1:
     End undefined
 
-function(v1:unknown):
+function(v0:unknown):
 block1:
     End undefined
