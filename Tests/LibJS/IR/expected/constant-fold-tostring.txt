@@ -1,0 +1,227 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v8:undefined = Move undefined
+    v9:undefined = Move undefined
+    v10:undefined = Move undefined
+    v12:boolean = Move true
+    v14:boolean = Move false
+    v16:null = Move null
+    v17:undefined = Move undefined
+    v19:string = Move v18:string
+    v20:string = ToString v12:boolean
+    Jump block1
+block0_split0:
+    v21:string = Move v20:string
+    v22:string = ToString v14:boolean
+    Jump block2
+block0_split1:
+    v23:string = Move v22:string
+    v24:string = ToString v16:null
+    Jump block3
+block0_split2:
+    v25:string = Move v24:string
+    v26:string = ToString v17:undefined
+    Jump block4
+block0_split3:
+    v27:string = Move v26:string
+    v28:string = ToString v19:string
+    Jump block5
+block0_split4:
+    v29:string = Move v28:string
+    Return v21:string
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v8:undefined = Move undefined
+    v9:undefined = Move undefined
+    v10:undefined = Move undefined
+    v12:boolean = Move true
+    v14:boolean = Move false
+    v16:null = Move null
+    v17:undefined = Move undefined
+    v19:string = Move v18:string
+    v20:string = ToString true
+    Jump block1
+block0_split0:
+    v21:string = Move v20:string
+    v22:string = ToString false
+    Jump block2
+block0_split1:
+    v23:string = Move v22:string
+    v24:string = ToString null
+    Jump block3
+block0_split2:
+    v25:string = Move v24:string
+    v26:string = ToString undefined
+    Jump block4
+block0_split3:
+    v27:string = Move v26:string
+    v28:string = ToString v34:string
+    Jump block5
+block0_split4:
+    v29:string = Move v28:string
+    Return v21:string
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v4:undefined = Move undefined
+    v5:undefined = Move undefined
+    v6:undefined = Move undefined
+    v7:undefined = Move undefined
+    v8:undefined = Move undefined
+    v9:undefined = Move undefined
+    v10:undefined = Move undefined
+    v12:boolean = Move true
+    v14:boolean = Move false
+    v16:null = Move null
+    v17:undefined = Move undefined
+    v19:string = Move v18:string
+    v20:string = ToString true
+    Jump block1
+block0_split0:
+    v21:string = Move v20:string
+    v22:string = ToString false
+    Jump block2
+block0_split1:
+    v23:string = Move v22:string
+    v24:string = ToString null
+    Jump block3
+block0_split2:
+    v25:string = Move v24:string
+    v26:string = ToString undefined
+    Jump block4
+block0_split3:
+    v27:string = Move v26:string
+    v28:string = ToString v34:string
+    Jump block5
+block0_split4:
+    v29:string = Move v28:string
+    Return v21:string
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v20:string = ToString true
+    Jump block1
+block0_split0:
+    v21:string = Move v20:string
+    Jump block2
+block0_split1:
+    Jump block3
+block0_split2:
+    Jump block4
+block0_split3:
+    Jump block5
+block0_split4:
+    Return v21:string
+
+=== After CopyPropagation ===
+function():
+block0:
+    v20:string = ToString true
+    Jump block1
+block0_split0:
+    v21:string = Move v20:string
+    Jump block2
+block0_split1:
+    Jump block3
+block0_split2:
+    Jump block4
+block0_split3:
+    Jump block5
+block0_split4:
+    Return v20:string
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v20:string = ToString true
+    v21:string = Move v20:string
+    Jump block5
+block0_split4:
+    Return v20:string
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v20:string = ToString true
+    Jump block5
+block0_split4:
+    Return v20:string
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v20:string = ToString true
+    Return v20:string
+
+function():
+block0:
+    v20:string = ToString true
+    Return v20:string
