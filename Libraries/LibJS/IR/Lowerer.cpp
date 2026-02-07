@@ -581,6 +581,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::NewObject:
         emit<Bytecode::Op::NewObject>(dst(), instruction.cache_index().value());
         break;
+    case Opcode::NewObjectWithNoPrototype:
+        emit<Bytecode::Op::NewObjectWithNoPrototype>(dst());
+        break;
 
     // Postfix increment/decrement (dst gets old value, src gets mutated)
     case Opcode::PostfixIncrement:

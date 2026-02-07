@@ -144,6 +144,7 @@
     OP(CreateVariableEnvironment,       false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
     /* Object creation */                                                                                                                    \
     OP(NewObject,                       false, E_ALLOC,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
+    OP(NewObjectWithNoPrototype,        false, E_ALLOC,      false, true,  0,   Type::Object,    false, 0, R_NONE) \
     OP(NewArray,                        false, E_ALLOC,      false, true,  255, Type::Array,     false, 0, R_NONE) \
     OP(NewArrayWithLength,              false, E_THROW,      false, true,  1,   Type::Array,     false, 0, R_NONE) \
     OP(ArrayAppend,                     false, E_THROW_WRITE,false, false, 2,   Type::Unknown,   false, 0, R_NONE) \

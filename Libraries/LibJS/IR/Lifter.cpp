@@ -825,7 +825,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case NewObjectWithNoPrototype: {
         auto const& op = static_cast<Bytecode::Op::NewObjectWithNoPrototype const&>(instruction);
-        auto& result = m_builder.build_new_object();
+        auto& result = m_builder.build_new_object_with_no_prototype();
         define_operand(op.dst(), result, block);
         break;
     }

@@ -154,6 +154,7 @@ public:
 
     // Object creation
     [[nodiscard]] Value& build_new_object();
+    [[nodiscard]] Value& build_new_object_with_no_prototype();
     [[nodiscard]] Value& build_new_array(Span<Value*> elements);
     [[nodiscard]] Value& build_new_array_with_length(Value& length);
     void build_array_append(Value& array, Value& value, bool is_spread);

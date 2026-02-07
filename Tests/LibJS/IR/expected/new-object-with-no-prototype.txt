@@ -1,0 +1,107 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal Array
+    Jump block1
+block0_split0:
+    v1:unknown = GetById v0:unknown.fromAsync
+    Jump block2
+block0_split1:
+    v5:array = NewArray 1, 2, 3
+    v6:unknown = Call v1:unknown, v0:unknown, v5:array
+    Jump block3
+block0_split2:
+    Return v6:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal Array
+    Jump block1
+block0_split0:
+    v1:unknown = GetById v0:unknown.fromAsync
+    Jump block2
+block0_split1:
+    v5:array = NewArray 1, 2, 3
+    v6:unknown = Call v1:unknown, v0:unknown, v5:array
+    Jump block3
+block0_split2:
+    Return v6:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal Array
+    Jump block1
+block0_split0:
+    v1:unknown = GetById v0:unknown.fromAsync
+    Jump block2
+block0_split1:
+    v5:array = NewArray 1, 2, 3
+    v6:unknown = Call v1:unknown, v0:unknown, v5:array
+    Jump block3
+block0_split2:
+    Return v6:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal Array
+    v1:unknown = GetById v0:unknown.fromAsync
+    v5:array = NewArray 1, 2, 3
+    v6:unknown = Call v1:unknown, v0:unknown, v5:array
+    Return v6:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal Array
+    v1:unknown = GetById v0:unknown.fromAsync
+    v5:array = NewArray 1, 2, 3
+    v6:unknown = Call v1:unknown, v0:unknown, v5:array
+    Return v6:unknown

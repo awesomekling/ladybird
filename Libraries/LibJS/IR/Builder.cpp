@@ -638,6 +638,11 @@ Value& Builder::build_new_object()
     return emit_with_result(Instruction::create<Opcode::NewObject>());
 }
 
+Value& Builder::build_new_object_with_no_prototype()
+{
+    return emit_with_result(Instruction::create<Opcode::NewObjectWithNoPrototype>());
+}
+
 Value& Builder::build_new_array(Span<Value*> elements)
 {
     auto instruction = Instruction::create<Opcode::NewArray>();
