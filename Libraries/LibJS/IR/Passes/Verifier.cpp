@@ -57,6 +57,16 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
     for (auto const& block : function.basic_blocks())
         all_blocks.set(to_index(block->index()), true);
 
+    // Check: Block index map consistency
+    for (auto const& block : function.basic_blocks()) {
+        auto* looked_up = function.block_by_index(block->index());
+        if (looked_up != block.ptr()) {
+            report_error(ByteString::formatted(
+                "block_by_index(block{}) returns wrong block",
+                block->index()));
+        }
+    }
+
     // Check: Entry block presence and membership
     if (!function.basic_blocks().is_empty()) {
         if (!function.entry_block()) {
