@@ -216,7 +216,7 @@ block3:
 === After CopyCoalescing ===
 function(v4:unknown):
 block0:
-    ParallelCopy [v13:unknown <- v4:unknown, v12:unknown <- v15:int32]
+    ParallelCopy [v12:unknown <- v15:int32]
     Jump block1
 block1:
     v10:boolean = GreaterThan v13:unknown, 0
@@ -230,7 +230,7 @@ block3:
 
 function(v4:unknown):
 block0:
-    ParallelCopy [v13:unknown <- v4:unknown, v12:unknown <- v15:int32]
+    ParallelCopy [v12:unknown <- v15:int32]
     Jump block1
 block1:
     v10:boolean = GreaterThan v13:unknown, 0

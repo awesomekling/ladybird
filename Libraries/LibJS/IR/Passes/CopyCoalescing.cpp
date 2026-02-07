@@ -226,6 +226,20 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
         }
     }
 
+    // Parameters are all simultaneously live at function entry but have no
+    // defining instruction, so the instruction-based interference builder
+    // above never records edges between them. Add those edges explicitly.
+    for (u32 i = 0; i < value_count; ++i) {
+        if (!function.values()[i]->is_parameter())
+            continue;
+        for (u32 j = i + 1; j < value_count; ++j) {
+            if (!function.values()[j]->is_parameter())
+                continue;
+            interferes_with[i].set(j, true);
+            interferes_with[j].set(i, true);
+        }
+    }
+
     // Phase 3: Coalesce using interference graph with union-find.
 
     Vector<u32> parent;
@@ -249,7 +263,7 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
 
     auto is_non_coalesceable_value = [&](u32 index) -> bool {
         auto const& value = *function.values()[index];
-        if (value.is_constant() || value.is_parameter() || value.is_this())
+        if (value.is_constant() || value.is_this())
             return true;
         if (auto* defining = value.defining_instruction()) {
             if (defining->opcode() == Opcode::Yield || defining->opcode() == Opcode::Await)
@@ -323,11 +337,17 @@ PreservedAnalyses CopyCoalescing::run(Function& function, PassManager&)
                 if (has_interference)
                     continue;
 
-                // Merge dst class into src class.
-                auto& dst_members = class_members[dst_rep];
-                auto& src_members = class_members[src_rep];
-                src_members.extend(move(dst_members));
-                parent[dst_rep] = src_rep;
+                // Merge classes, preferring parameters as roots so the
+                // Lowerer maps the class to Argument operands.
+                bool dst_is_parameter = function.values()[dst_rep]->is_parameter();
+                bool src_is_parameter = function.values()[src_rep]->is_parameter();
+                if (dst_is_parameter && !src_is_parameter) {
+                    class_members[dst_rep].extend(move(class_members[src_rep]));
+                    parent[src_rep] = dst_rep;
+                } else {
+                    class_members[src_rep].extend(move(class_members[dst_rep]));
+                    parent[dst_rep] = src_rep;
+                }
                 any_coalesced = true;
             }
         });

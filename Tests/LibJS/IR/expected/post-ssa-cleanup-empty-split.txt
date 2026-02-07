@@ -293,7 +293,7 @@ split_block5_block1:
 === After CopyCoalescing ===
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
+    ParallelCopy [v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5
@@ -315,7 +315,7 @@ split_block5_block1:
 === After PostSSACleanup ===
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
+    ParallelCopy [v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5
@@ -332,7 +332,7 @@ block5:
 
 function(v7:unknown):
 block0:
-    ParallelCopy [v18:unknown <- v7:unknown, v16:unknown <- v21:int32]
+    ParallelCopy [v16:unknown <- v21:int32]
     Jump block1
 block1:
     v11:boolean = GreaterThan v18:unknown, 5

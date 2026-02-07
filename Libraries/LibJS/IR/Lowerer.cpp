@@ -100,23 +100,24 @@ Bytecode::Operand Lowerer::operand_for_value(Value const& value)
     if (m_value_to_operand[representative].has_value())
         return m_value_to_operand[representative].value();
 
-    // Type-based operand decision uses the ORIGINAL value.
-    // Constants, parameters, this, and yield/await results are never coalesced,
-    // so the original value's type check is always correct.
+    // Type-based operand decision uses the REPRESENTATIVE value so that
+    // when a regular value is coalesced with a parameter, it picks up the
+    // Argument operand instead of allocating a new register.
+    auto& representative_value = *m_function.values()[representative];
     Bytecode::Operand operand = [&]() {
-        if (value.is_constant()) {
-            auto constant_value = value.constant_value();
+        if (representative_value.is_constant()) {
+            auto constant_value = representative_value.constant_value();
             auto index = get_or_add_constant(constant_value);
             return Bytecode::Operand(Bytecode::Operand::Type::Constant, index);
         }
-        if (value.is_parameter()) {
-            return Bytecode::Operand(Bytecode::Operand::Type::Argument, value.parameter_index());
+        if (representative_value.is_parameter()) {
+            return Bytecode::Operand(Bytecode::Operand::Type::Argument, representative_value.parameter_index());
         }
-        if (value.is_this()) {
+        if (representative_value.is_this()) {
             return Bytecode::Operand(Bytecode::Register::this_value());
         }
         // Yield and Await results are resume values that appear in the accumulator (reg0)
-        if (auto* defining = value.defining_instruction()) {
+        if (auto* defining = representative_value.defining_instruction()) {
             if (defining->opcode() == Opcode::Yield || defining->opcode() == Opcode::Await)
                 return Bytecode::Operand(Bytecode::Register::accumulator());
         }

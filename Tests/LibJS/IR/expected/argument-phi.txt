@@ -140,6 +140,7 @@ split_block0_block2:
     ParallelCopy [v5:unknown <- v2:unknown]
     Jump block2
 
+=== After CopyCoalescing ===
 function(v2:unknown):
 block0:
     v4:boolean = StrictlyEquals v2:unknown, undefined
@@ -150,5 +151,25 @@ block1:
 block2:
     Return v5:unknown
 split_block0_block2:
-    ParallelCopy [v5:unknown <- v2:unknown]
     Jump block2
+
+=== After PostSSACleanup ===
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    ParallelCopy [v5:unknown <- v6:int32]
+    Jump block2
+block2:
+    Return v5:unknown
+
+function(v2:unknown):
+block0:
+    v4:boolean = StrictlyEquals v2:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    ParallelCopy [v5:unknown <- v6:int32]
+    Jump block2
+block2:
+    Return v5:unknown
