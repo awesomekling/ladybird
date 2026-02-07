@@ -198,7 +198,7 @@ SharedFunctionInstanceData::SharedFunctionInstanceData(
             // Directly iterate vars_to_initialize - already deduplicated by parser.
             for (auto const& var : function_scope_data.vars_to_initialize) {
                 // Skip vars that shadow parameters or "arguments" if needed.
-                if (var.is_parameter)
+                if (var.is_parameter || m_parameter_names.contains(var.identifier.string()))
                     continue;
                 if (var.identifier.string() == vm.names.arguments.as_string() && m_arguments_object_needed)
                     continue;
@@ -223,7 +223,7 @@ SharedFunctionInstanceData::SharedFunctionInstanceData(
 
             // Directly iterate vars_to_initialize - already deduplicated by parser.
             for (auto const& var : function_scope_data.vars_to_initialize) {
-                bool is_in_parameter_bindings = var.is_parameter || (var.identifier.string() == vm.names.arguments.as_string() && m_arguments_object_needed);
+                bool is_in_parameter_bindings = var.is_parameter || m_parameter_names.contains(var.identifier.string()) || (var.identifier.string() == vm.names.arguments.as_string() && m_arguments_object_needed);
                 m_var_names_to_initialize_binding.append({
                     .name = var.identifier.string(),
                     .local = to_function_local(var.identifier),
