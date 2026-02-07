@@ -1,0 +1,189 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal foo
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    Jump block2
+block0_split1:
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    Jump block3
+block0_split2:
+    v6:object = Move v2:object
+    v7:unknown = GetById v6:object.a
+    Jump block4
+block0_split3:
+    Return v7:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    Jump block2
+block0_split1:
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    Jump block3
+block0_split2:
+    v6:object = Move v2:object
+    v7:unknown = GetById v6:object.a
+    Jump block4
+block0_split3:
+    Return v7:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    Jump block2
+block0_split1:
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    Jump block3
+block0_split2:
+    v6:object = Move v2:object
+    v7:unknown = GetById v6:object.a
+    Jump block4
+block0_split3:
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    Jump block2
+block0_split1:
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    Jump block3
+block0_split2:
+    v6:object = Move v2:object
+    v7:unknown = GetById v6:object.a
+    Jump block4
+block0_split3:
+    Return v7:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    Jump block1
+block0_split0:
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    Jump block2
+block0_split1:
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    Jump block3
+block0_split2:
+    v6:object = Move v2:object
+    v7:unknown = GetById v2:object.a
+    Jump block4
+block0_split3:
+    Return v7:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    v6:object = Move v2:object
+    v7:unknown = GetById v2:object.a
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    v7:unknown = GetById v2:object.a
+    Return v7:unknown
+
+function():
+block0:
+    v2:object = NewObject
+    PutById v2:object, 1.a
+    v4:function = NewFunction v2:object
+    PutGetterById v2:object, v4:function
+    v5:function = NewFunction v2:object
+    PutSetterById v2:object, v5:function
+    v7:unknown = GetById v2:object.a
+    Return v7:unknown
