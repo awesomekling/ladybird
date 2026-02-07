@@ -355,6 +355,23 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                             "Instruction in block{} uses v{} which has no defining instruction (likely SSA renaming failure)",
                             block->index(), op->index()));
                     }
+
+                    // Check: Operand-to-use list completeness
+                    // The operand's use list must contain this (instruction, slot) pair.
+                    Use expected_use { instruction.index(), static_cast<u32>(i) };
+                    bool found_in_use_list = false;
+                    for (auto const& use : op->uses()) {
+                        if (use == expected_use) {
+                            found_in_use_list = true;
+                            break;
+                        }
+                    }
+                    if (!found_in_use_list) {
+                        report_error(ByteString::formatted(
+                            "Value v{} use list missing entry for {} in block{} at operand slot {}",
+                            op->index(), opcode_to_string(instruction.opcode()),
+                            block->index(), i));
+                    }
                 }
             }
         });
