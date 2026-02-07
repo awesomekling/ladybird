@@ -49,12 +49,12 @@ function():
 block0:
     EnterUnwindContext block5
 block1:
-    v34:unknown = Phi [block5:v37:unknown, block7:v36:unknown, block9:v59:unknown, block13:v43:unknown, block14:v49:unknown]
-    v31:unknown = Phi [block5:v38:undefined, block7:v15:unknown, block9:v60:undefined, block13:v44:undefined, block14:v50:undefined]
-    v29:unknown = Phi [block5:v39:undefined, block7:v19:unknown, block9:v19:unknown, block13:v45:undefined, block14:v51:undefined]
-    v27:unknown = Phi [block5:v40:undefined, block7:v18:unknown, block9:v18:unknown, block13:v46:undefined, block14:v52:undefined]
-    v25:unknown = Phi [block5:v41:undefined, block7:v17:unknown, block9:v17:unknown, block13:v47:undefined, block14:v53:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object, block14:v8:object]
+    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
+    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
+    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
+    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
+    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
+    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
     v0:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
@@ -71,24 +71,25 @@ block4:
     Return v7:string
 block5: [handler: block1]
     v8:object = NewObject
+    ThrowIfTDZ v37:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v54:unknown, block16:v36:unknown]
-    v32:unknown = Phi [block8:v55:undefined, block16:v15:unknown]
-    v30:unknown = Phi [block8:v56:undefined, block16:v19:unknown]
-    v28:unknown = Phi [block8:v57:undefined, block16:v18:unknown]
-    v26:unknown = Phi [block8:v58:undefined, block16:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block16:v14:unknown]
+    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
+    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
+    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
+    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
+    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
+    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block17:v61:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block17:v62:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block17:v8:object]
+    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
+    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
+    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v14:unknown = ExtractValue v13:unknown, 0
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block8:
     Jump block6
 block9: [handler: block1]
@@ -96,7 +97,7 @@ block9: [handler: block1]
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
-    Jump block17
+    Jump block16
 block10:
     v20:unknown = Move v14:unknown
     Jump block7
@@ -106,17 +107,14 @@ block1_split0:
 block1_split1:
     Branch v3:boolean, block2, block3
 block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v43:unknown, 1
     Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block8, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block10
-block9_split6:
+block9_split5:
     Jump block7
 
 === After SCCP ===
@@ -124,12 +122,12 @@ function():
 block0:
     EnterUnwindContext block5
 block1:
-    v34:unknown = Phi [block5:v37:unknown, block7:v36:unknown, block9:v59:unknown, block13:v43:unknown, block14:v49:unknown]
-    v31:unknown = Phi [block5:v38:undefined, block7:v15:unknown, block9:v60:undefined, block13:v44:undefined, block14:v50:undefined]
-    v29:unknown = Phi [block5:v39:undefined, block7:v19:unknown, block9:v19:unknown, block13:v45:undefined, block14:v51:undefined]
-    v27:unknown = Phi [block5:v40:undefined, block7:v18:unknown, block9:v18:unknown, block13:v46:undefined, block14:v52:undefined]
-    v25:unknown = Phi [block5:v41:undefined, block7:v17:unknown, block9:v17:unknown, block13:v47:undefined, block14:v53:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object, block14:v8:object]
+    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
+    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
+    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
+    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
+    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
+    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
     v0:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
@@ -138,32 +136,33 @@ block1:
     Jump block11
 block2:
     v5:string = Move v4:string
-    Return v63:string
+    Return v58:string
 block3:
     v7:string = Move v6:string
     Jump block4
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
+    ThrowIfTDZ v37:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v54:unknown, block16:v36:unknown]
-    v32:unknown = Phi [block8:v55:undefined, block16:v15:unknown]
-    v30:unknown = Phi [block8:v56:undefined, block16:v19:unknown]
-    v28:unknown = Phi [block8:v57:undefined, block16:v18:unknown]
-    v26:unknown = Phi [block8:v58:undefined, block16:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block16:v14:unknown]
+    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
+    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
+    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
+    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
+    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
+    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block17:v61:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block17:v62:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block17:v8:object]
+    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
+    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
+    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v14:unknown = ExtractValue v13:unknown, 0
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block8:
     Jump block6
 block9: [handler: block1]
@@ -171,7 +170,7 @@ block9: [handler: block1]
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
-    Jump block17
+    Jump block16
 block10:
     v20:unknown = Move v14:unknown
     Jump block7
@@ -181,17 +180,14 @@ block1_split0:
 block1_split1:
     Branch v3:boolean, block2, block3
 block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v43:unknown, 1
     Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block8, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block10
-block9_split6:
+block9_split5:
     Jump block7
 
 === Before optimization ===
@@ -199,12 +195,12 @@ function():
 block0:
     EnterUnwindContext block5
 block1:
-    v34:unknown = Phi [block5:v37:unknown, block7:v36:unknown, block9:v59:unknown, block13:v43:unknown, block14:v49:unknown]
-    v31:unknown = Phi [block5:v38:undefined, block7:v15:unknown, block9:v60:undefined, block13:v44:undefined, block14:v50:undefined]
-    v29:unknown = Phi [block5:v39:undefined, block7:v19:unknown, block9:v19:unknown, block13:v45:undefined, block14:v51:undefined]
-    v27:unknown = Phi [block5:v40:undefined, block7:v18:unknown, block9:v18:unknown, block13:v46:undefined, block14:v52:undefined]
-    v25:unknown = Phi [block5:v41:undefined, block7:v17:unknown, block9:v17:unknown, block13:v47:undefined, block14:v53:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object, block14:v8:object]
+    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
+    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
+    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
+    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
+    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
+    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
     v0:unknown = Catch
     LeaveUnwindContext
     RestoreScheduledJump
@@ -213,32 +209,33 @@ block1:
     Jump block11
 block2:
     v5:string = Move v4:string
-    Return v63:string
+    Return v58:string
 block3:
     v7:string = Move v6:string
     Jump block4
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
+    ThrowIfTDZ v37:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v54:unknown, block16:v36:unknown]
-    v32:unknown = Phi [block8:v55:undefined, block16:v15:unknown]
-    v30:unknown = Phi [block8:v56:undefined, block16:v19:unknown]
-    v28:unknown = Phi [block8:v57:undefined, block16:v18:unknown]
-    v26:unknown = Phi [block8:v58:undefined, block16:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block16:v14:unknown]
+    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
+    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
+    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
+    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
+    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
+    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block17:v61:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block17:v62:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block17:v8:object]
+    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
+    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
+    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v14:unknown = ExtractValue v13:unknown, 0
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block8:
     Jump block6
 block9: [handler: block1]
@@ -246,7 +243,7 @@ block9: [handler: block1]
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
-    Jump block17
+    Jump block16
 block10:
     v20:unknown = Move v14:unknown
     Jump block7
@@ -256,17 +253,14 @@ block1_split0:
 block1_split1:
     Branch v3:boolean, block2, block3
 block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v43:unknown, 1
     Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block8, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block10
-block9_split6:
+block9_split5:
     Jump block7
 
 === After DeadCodeElimination ===
@@ -281,13 +275,14 @@ block1:
     v2:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    Return v63:string
+    Return v58:string
 block3:
     Jump block4
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
+    ThrowIfTDZ v37:unknown
     Jump block13
 block6:
     LeaveUnwindContext
@@ -295,7 +290,7 @@ block6:
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block8:
     Jump block6
 block9: [handler: block1]
@@ -303,7 +298,7 @@ block9: [handler: block1]
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
-    Jump block17
+    Jump block16
 block10:
     Jump block7
 block1_split0:
@@ -312,17 +307,14 @@ block1_split0:
 block1_split1:
     Branch v3:boolean, block2, block3
 block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v43:unknown, 1
     Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block8, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block10
-block9_split6:
+block9_split5:
     Jump block7
 
 === After CopyPropagation ===
@@ -337,13 +329,14 @@ block1:
     v2:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    Return v63:string
+    Return v58:string
 block3:
     Jump block4
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
+    ThrowIfTDZ v37:unknown
     Jump block13
 block6:
     LeaveUnwindContext
@@ -351,7 +344,7 @@ block6:
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block8:
     Jump block6
 block9: [handler: block1]
@@ -359,7 +352,7 @@ block9: [handler: block1]
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
-    Jump block17
+    Jump block16
 block10:
     Jump block7
 block1_split0:
@@ -368,17 +361,14 @@ block1_split0:
 block1_split1:
     Branch v3:boolean, block2, block3
 block5_split2: [handler: block1]
-    ThrowIfTDZ v42:unknown
+    PutByValue v8:object, v43:unknown, 1
     Jump block14
-block5_split3: [handler: block1]
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block8, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block10
-block9_split6:
+block9_split5:
     Jump block7
 
 === After SimplifyCFG ===
@@ -394,31 +384,31 @@ block1:
     v3:boolean = InstanceOf v0:unknown, v2:unknown
     Branch v3:boolean, block2, block4
 block2:
-    Return v63:string
+    Return v58:string
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
-    ThrowIfTDZ v42:unknown
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
+    ThrowIfTDZ v37:unknown
+    PutByValue v8:object, v43:unknown, 1
+    Jump block14
 block6:
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block9: [handler: block1]
     v16:unknown = GetObjectPropertyIterator v8:object
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block6, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block7
 
 === After DeadCodeElimination ===
@@ -433,31 +423,31 @@ block1:
     v3:boolean = InstanceOf v0:unknown, v2:unknown
     Branch v3:boolean, block2, block4
 block2:
-    Return v63:string
+    Return v58:string
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
-    ThrowIfTDZ v42:unknown
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
+    ThrowIfTDZ v37:unknown
+    PutByValue v8:object, v43:unknown, 1
+    Jump block14
 block6:
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block9: [handler: block1]
     v16:unknown = GetObjectPropertyIterator v8:object
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block6, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block7
 
 === After SplitCriticalEdges ===
@@ -472,37 +462,37 @@ block1:
     v3:boolean = InstanceOf v0:unknown, v2:unknown
     Branch v3:boolean, block2, block4
 block2:
-    Return v63:string
+    Return v58:string
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
-    ThrowIfTDZ v42:unknown
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
+    ThrowIfTDZ v37:unknown
+    PutByValue v8:object, v43:unknown, 1
+    Jump block14
 block6:
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block9: [handler: block1]
     v16:unknown = GetObjectPropertyIterator v8:object
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block18, block9
-block7_split5:
-    Branch v15:unknown, block19, block20
-split_block5_split4_block6:
+    Branch v21:boolean, block17, block9
+block7_split4:
+    Branch v15:unknown, block18, block19
+split_block5_split3_block6:
     Jump block6
-split_block7_split5_block6:
+split_block7_split4_block6:
     Jump block6
-split_block7_split5_block7:
+split_block7_split4_block7:
     Jump block7
 
 === After PostSSACleanup ===
@@ -517,31 +507,31 @@ block1:
     v3:boolean = InstanceOf v0:unknown, v2:unknown
     Branch v3:boolean, block2, block4
 block2:
-    Return v63:string
+    Return v58:string
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
-    ThrowIfTDZ v42:unknown
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
+    ThrowIfTDZ v37:unknown
+    PutByValue v8:object, v43:unknown, 1
+    Jump block14
 block6:
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block9: [handler: block1]
     v16:unknown = GetObjectPropertyIterator v8:object
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block6, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block7
 
 function():
@@ -555,29 +545,29 @@ block1:
     v3:boolean = InstanceOf v0:unknown, v2:unknown
     Branch v3:boolean, block2, block4
 block2:
-    Return v63:string
+    Return v58:string
 block4:
-    Return v64:string
+    Return v59:string
 block5: [handler: block1]
     v8:object = NewObject
-    ThrowIfTDZ v42:unknown
-    PutByValue v8:object, v48:unknown, 1
-    Jump block15
+    ThrowIfTDZ v37:unknown
+    PutByValue v8:object, v43:unknown, 1
+    Jump block14
 block6:
     LeaveUnwindContext
     Return v11:string
 block7: [handler: block1]
     v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
     v15:unknown = ExtractValue v13:unknown, 1
-    Jump block16
+    Jump block15
 block9: [handler: block1]
     v16:unknown = GetObjectPropertyIterator v8:object
     v17:unknown = ExtractValue v16:unknown, 0
     v18:unknown = ExtractValue v16:unknown, 1
     v19:unknown = ExtractValue v16:unknown, 2
     Jump block7
-block5_split4:
+block5_split3:
     v21:boolean = IsNullish v8:object
     Branch v21:boolean, block6, block9
-block7_split5:
+block7_split4:
     Branch v15:unknown, block6, block7

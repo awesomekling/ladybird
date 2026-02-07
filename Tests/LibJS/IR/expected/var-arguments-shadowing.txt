@@ -186,12 +186,10 @@ function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     v3:array = NewArray 1, 2
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = GetLength v4:array
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     Return v5:unknown
 
 === After SCCP ===
@@ -199,12 +197,10 @@ function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     v3:array = NewArray 1, 2
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = GetLength v4:array
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     Return v5:unknown
 
 === Before optimization ===
@@ -212,12 +208,10 @@ function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     v3:array = NewArray 1, 2
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = GetLength v4:array
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     Return v5:unknown
 
 === After CopyPropagation ===
@@ -225,12 +219,10 @@ function():
 block0:
     v0:unknown = CreateArguments kind:mapped, immutable:false
     v3:array = NewArray 1, 2
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = GetLength v3:array
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     Return v5:unknown
 
 === After SimplifyCFG ===

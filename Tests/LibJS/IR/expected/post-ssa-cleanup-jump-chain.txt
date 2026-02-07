@@ -5,11 +5,9 @@ block0:
     Jump block1
 block0_split0:
     v4:array = NewArray 1, 2, 3
+    v6:unknown = Call v0:unknown, undefined, v4:array
     Jump block2
 block0_split1:
-    v6:unknown = Call v0:unknown, undefined, v4:array
-    Jump block3
-block0_split2:
     End v6:unknown
 
 === After SCCP ===
@@ -19,11 +17,9 @@ block0:
     Jump block1
 block0_split0:
     v4:array = NewArray 1, 2, 3
+    v6:unknown = Call v0:unknown, undefined, v4:array
     Jump block2
 block0_split1:
-    v6:unknown = Call v0:unknown, undefined, v4:array
-    Jump block3
-block0_split2:
     End v6:unknown
 
 === Before optimization ===
@@ -33,11 +29,9 @@ block0:
     Jump block1
 block0_split0:
     v4:array = NewArray 1, 2, 3
+    v6:unknown = Call v0:unknown, undefined, v4:array
     Jump block2
 block0_split1:
-    v6:unknown = Call v0:unknown, undefined, v4:array
-    Jump block3
-block0_split2:
     End v6:unknown
 
 === After SimplifyCFG ===

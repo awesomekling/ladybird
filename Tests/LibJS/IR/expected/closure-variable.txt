@@ -66,8 +66,6 @@ block0_split0:
     Jump block2
 block0_split1:
     v2:function = NewFunction
-    Jump block3
-block0_split2:
     Return v2:function
 
 === After SCCP ===
@@ -81,8 +79,6 @@ block0_split0:
     Jump block2
 block0_split1:
     v2:function = NewFunction
-    Jump block3
-block0_split2:
     Return v2:function
 
 === Before optimization ===
@@ -96,8 +92,6 @@ block0_split0:
     Jump block2
 block0_split1:
     v2:function = NewFunction
-    Jump block3
-block0_split2:
     Return v2:function
 
 === After SimplifyCFG ===

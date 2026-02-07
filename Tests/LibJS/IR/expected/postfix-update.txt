@@ -50,13 +50,11 @@ block0:
     v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:array = NewArray
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = ToNumeric v4:array
     v6:number = Increment v5:unknown
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     v7:unknown = Move v5:unknown
     Return v7:unknown
 
@@ -66,13 +64,11 @@ block0:
     v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:array = NewArray
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = ToNumeric v4:array
     v6:number = Increment v5:unknown
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     v7:unknown = Move v5:unknown
     Return v7:unknown
 
@@ -82,13 +78,11 @@ block0:
     v1:undefined = Move undefined
     v2:undefined = Move undefined
     v3:array = NewArray
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = ToNumeric v4:array
     v6:number = Increment v5:unknown
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     v7:unknown = Move v5:unknown
     Return v7:unknown
 
@@ -96,13 +90,11 @@ block0_split1:
 function():
 block0:
     v3:array = NewArray
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = ToNumeric v4:array
     v6:number = Increment v5:unknown
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     v7:unknown = Move v5:unknown
     Return v7:unknown
 
@@ -110,13 +102,11 @@ block0_split1:
 function():
 block0:
     v3:array = NewArray
-    Jump block1
-block0_split0:
     v4:array = Move v3:array
     v5:unknown = ToNumeric v3:array
     v6:number = Increment v5:unknown
-    Jump block2
-block0_split1:
+    Jump block1
+block0_split0:
     v7:unknown = Move v5:unknown
     Return v5:unknown
 

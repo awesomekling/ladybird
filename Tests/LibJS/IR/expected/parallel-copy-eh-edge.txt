@@ -5,14 +5,10 @@ block0:
     Jump block1
 block0_split0:
     v1:function = NewFunction
+    v2:function = NewFunction
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Jump block3
-block0_split2:
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
-    Jump block4
-block0_split3:
     End v4:unknown
 
 === After SCCP ===
@@ -22,14 +18,10 @@ block0:
     Jump block1
 block0_split0:
     v1:function = NewFunction
+    v2:function = NewFunction
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Jump block3
-block0_split2:
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
-    Jump block4
-block0_split3:
     End v4:unknown
 
 === Before optimization ===
@@ -39,14 +31,10 @@ block0:
     Jump block1
 block0_split0:
     v1:function = NewFunction
+    v2:function = NewFunction
+    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Jump block3
-block0_split2:
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
-    Jump block4
-block0_split3:
     End v4:unknown
 
 === After SimplifyCFG ===
