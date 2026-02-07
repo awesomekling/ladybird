@@ -357,6 +357,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::GetById:
         emit<Bytecode::Op::GetById>(dst(), operand(0), instruction.property_key_index(), instruction.base_identifier(), instruction.cache_index().value());
         break;
+    case Opcode::GetMethod:
+        emit<Bytecode::Op::GetMethod>(dst(), operand(0), instruction.property_key_index());
+        break;
     case Opcode::GetByIdWithThis:
         emit<Bytecode::Op::GetByIdWithThis>(dst(), operand(0), instruction.property_key_index(), operand(1), instruction.cache_index().value());
         break;

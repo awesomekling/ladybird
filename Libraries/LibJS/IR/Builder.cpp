@@ -126,6 +126,14 @@ Value& Builder::build_get_by_id(Value& base, Bytecode::PropertyKeyTableIndex pro
     return emit_with_result(move(instruction));
 }
 
+Value& Builder::build_get_method(Value& base, Bytecode::PropertyKeyTableIndex property)
+{
+    auto instruction = Instruction::create<Opcode::GetMethod>();
+    instruction->add_operand(&base);
+    instruction->set_property_key_index(property);
+    return emit_with_result(move(instruction));
+}
+
 Value& Builder::build_get_by_id_with_this(Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property)
 {
     auto instruction = Instruction::create<Opcode::GetByIdWithThis>();

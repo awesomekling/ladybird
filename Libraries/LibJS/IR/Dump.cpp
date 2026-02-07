@@ -138,6 +138,7 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
         break;
 
     case Opcode::GetById:
+    case Opcode::GetMethod:
     case Opcode::PutById:
     case Opcode::PutByIdWithThis:
     case Opcode::DeleteById:

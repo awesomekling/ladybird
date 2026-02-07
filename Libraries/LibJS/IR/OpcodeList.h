@@ -83,6 +83,7 @@
     OP(GetByIdWithThis,                 false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetByValue,                      false, E_CALL,       false, true,  2,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetByValueWithThis,              false, E_CALL,       false, true,  3,   Type::Unknown,   false, 0, R_NONE) \
+    OP(GetMethod,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetLength,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(PutById,                         false, E_CALL,       false, false, 2,   Type::Unknown,   false, 0, R_NONE) \
     OP(PutByIdWithThis,                 false, E_CALL,       false, false, 3,   Type::Unknown,   false, 0, R_NONE) \

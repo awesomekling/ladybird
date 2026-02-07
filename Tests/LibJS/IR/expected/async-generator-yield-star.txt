@@ -145,10 +145,10 @@ block17:
     SetCompletionType v29:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     Jump block59
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     Jump block60
 block20:
     v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
@@ -431,10 +431,10 @@ block17:
     SetCompletionType v29:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     Jump block59
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     Jump block60
 block20:
     v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
@@ -717,10 +717,10 @@ block17:
     SetCompletionType v29:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     Jump block59
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     Jump block60
 block20:
     v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
@@ -975,10 +975,10 @@ block17:
     SetCompletionType v29:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     Jump block59
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     Jump block60
 block20:
     v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
@@ -1231,10 +1231,10 @@ block17:
     SetCompletionType v85:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     Jump block59
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     Jump block60
 block20:
     v35:unknown = Call v33:unknown, v4:unknown, v122:unknown
@@ -1491,11 +1491,11 @@ block17:
     SetCompletionType v85:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:
@@ -1682,11 +1682,11 @@ block17:
     SetCompletionType v85:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:
@@ -1864,11 +1864,11 @@ block17:
     SetCompletionType v85:unknown
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:
@@ -2056,11 +2056,11 @@ block17:
     ParallelCopy [v129:unknown <- v22:unknown, v114:unknown <- v85:unknown]
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:
@@ -2256,11 +2256,11 @@ block17:
     ParallelCopy [v114:unknown <- v85:unknown]
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:
@@ -2455,11 +2455,11 @@ block17:
     ParallelCopy [v114:unknown <- v85:unknown]
     Jump block3
 block18:
-    v33:unknown = GetById v4:unknown.throw
+    v33:unknown = GetMethod v4:unknown.throw
     v89:boolean = IsUndefined v33:unknown
     Branch v89:boolean, block21, block20
 block19:
-    v34:unknown = GetById v4:unknown.return
+    v34:unknown = GetMethod v4:unknown.return
     v90:boolean = IsUndefined v34:unknown
     Branch v90:boolean, block33, block34
 block20:

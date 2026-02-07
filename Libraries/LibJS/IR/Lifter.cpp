@@ -963,7 +963,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     case GetMethod: {
         auto const& op = static_cast<Bytecode::Op::GetMethod const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);
-        auto& result = m_builder.build_get_by_id(object, op.property());
+        auto& result = m_builder.build_get_method(object, op.property());
         define_operand(op.dst(), result, block);
         break;
     }

@@ -90,6 +90,7 @@ public:
     [[nodiscard]] Value& build_get_by_id_with_this(Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property);
     [[nodiscard]] Value& build_get_by_value(Value& base, Value& property, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     [[nodiscard]] Value& build_get_by_value_with_this(Value& base, Value& this_value, Value& property);
+    [[nodiscard]] Value& build_get_method(Value& base, Bytecode::PropertyKeyTableIndex property);
     [[nodiscard]] Value& build_get_length(Value& base, Optional<Bytecode::IdentifierTableIndex> base_identifier = {});
     void build_put_by_id(Value& base, Bytecode::PropertyKeyTableIndex property, Value& value, Optional<Bytecode::IdentifierTableIndex> base_identifier = {}, Bytecode::PutKind = Bytecode::PutKind::Normal);
     void build_put_by_id_with_this(Value& base, Value& this_value, Bytecode::PropertyKeyTableIndex property, Value& value, Bytecode::PutKind = Bytecode::PutKind::Normal);

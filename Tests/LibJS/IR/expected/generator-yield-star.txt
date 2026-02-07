@@ -122,10 +122,10 @@ block8:
     v18:unknown = GetById v15:unknown.value
     Jump block27
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     Jump block28
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     Jump block29
 block11:
     v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
@@ -267,10 +267,10 @@ block8:
     v18:unknown = GetById v15:unknown.value
     Jump block27
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     Jump block28
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     Jump block29
 block11:
     v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
@@ -412,10 +412,10 @@ block8:
     v18:unknown = GetById v15:unknown.value
     Jump block27
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     Jump block28
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     Jump block29
 block11:
     v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
@@ -537,10 +537,10 @@ block8:
     v18:unknown = GetById v15:unknown.value
     Jump block27
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     Jump block28
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     Jump block29
 block11:
     v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
@@ -659,10 +659,10 @@ block8:
     v18:unknown = GetById v15:unknown.value
     Jump block27
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     Jump block28
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     Jump block29
 block11:
     v21:unknown = Call v19:unknown, v4:unknown, v47:unknown
@@ -787,11 +787,11 @@ block8:
     v18:unknown = GetById v15:unknown.value
     v36:unknown = Yield v18:unknown, continuation: block3
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     v37:boolean = IsUndefined v19:unknown
     Branch v37:boolean, block12, block11
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     v38:boolean = IsUndefined v20:unknown
     Branch v38:boolean, block15, block16
 block11:
@@ -864,11 +864,11 @@ block8:
     v18:unknown = GetById v15:unknown.value
     v36:unknown = Yield v18:unknown, continuation: block3
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     v37:boolean = IsUndefined v19:unknown
     Branch v37:boolean, block12, block11
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     v38:boolean = IsUndefined v20:unknown
     Branch v38:boolean, block15, block16
 block11:
@@ -938,11 +938,11 @@ block8:
     v18:unknown = GetById v15:unknown.value
     v36:unknown = Yield v18:unknown, continuation: block42
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     v37:boolean = IsUndefined v19:unknown
     Branch v37:boolean, block12, block11
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     v38:boolean = IsUndefined v20:unknown
     Branch v38:boolean, block15, block16
 block11:
@@ -1021,11 +1021,11 @@ block8:
     v18:unknown = GetById v15:unknown.value
     v36:unknown = Yield v18:unknown, continuation: block42
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     v37:boolean = IsUndefined v19:unknown
     Branch v37:boolean, block12, block11
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     v38:boolean = IsUndefined v20:unknown
     Branch v38:boolean, block15, block16
 block11:
@@ -1103,11 +1103,11 @@ block8:
     v18:unknown = GetById v15:unknown.value
     v36:unknown = Yield v18:unknown, continuation: block42
 block9:
-    v19:unknown = GetById v4:unknown.throw
+    v19:unknown = GetMethod v4:unknown.throw
     v37:boolean = IsUndefined v19:unknown
     Branch v37:boolean, block12, block11
 block10:
-    v20:unknown = GetById v4:unknown.return
+    v20:unknown = GetMethod v4:unknown.return
     v38:boolean = IsUndefined v20:unknown
     Branch v38:boolean, block15, block16
 block11:
