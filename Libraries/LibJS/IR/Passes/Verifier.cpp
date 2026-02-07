@@ -463,6 +463,13 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                         "ScheduleJump in block{} missing true_target or false_target",
                         block->index()));
                 }
+                // ScheduleJump's true_target must be the block's finalizer
+                if (term->true_target_index().has_value() && block->finalizer_index().has_value()
+                    && *term->true_target_index() != *block->finalizer_index()) {
+                    report_error(ByteString::formatted(
+                        "ScheduleJump in block{} true_target (block{}) does not match finalizer (block{})",
+                        block->index(), *term->true_target_index(), *block->finalizer_index()));
+                }
                 break;
             case Opcode::Branch:
                 if (!term->true_target_index().has_value() || !term->false_target_index().has_value()) {
