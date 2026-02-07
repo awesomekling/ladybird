@@ -418,7 +418,7 @@ impl<'a> Parser<'a> {
         self.await_expression_is_valid = is_async;
 
         let has_use_strict = self.parse_directive(body);
-        if has_use_strict {
+        if has_use_strict || self.strict_mode {
             self.builder.scope_node_set_strict_mode(body);
         }
 
