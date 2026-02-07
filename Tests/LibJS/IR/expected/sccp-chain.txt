@@ -1,0 +1,114 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 3
+    v7:number = Add v5:int32, 4
+    Jump block1
+block0_split0:
+    v8:number = Move v7:number
+    v10:number = Mul v8:number, 2
+    Jump block2
+block0_split1:
+    v11:number = Move v10:number
+    Return v11:number
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 3
+    v7:number = Add 3, 4
+    Jump block1
+block0_split0:
+    v8:number = Move 7
+    v10:number = Mul 7, 2
+    Jump block2
+block0_split1:
+    v11:number = Move 14
+    Return 14
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 3
+    v7:number = Add 3, 4
+    Jump block1
+block0_split0:
+    v8:number = Move 7
+    v10:number = Mul 7, 2
+    Jump block2
+block0_split1:
+    v11:number = Move 14
+    Return 14
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block0_split0:
+    Jump block2
+block0_split1:
+    Return 14
+
+=== After SimplifyCFG ===
+function():
+block0_split1:
+    Return 14
+
+function():
+block0_split1:
+    Return 14

@@ -16,6 +16,7 @@
 #include <LibJS/IR/Passes/LoopSimplify.h>
 #include <LibJS/IR/Passes/PassManager.h>
 #include <LibJS/IR/Passes/PostSSACleanup.h>
+#include <LibJS/IR/Passes/SCCP.h>
 #include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Passes/SimplifyCFG.h>
 #include <LibJS/IR/Passes/SplitCriticalEdges.h>
@@ -46,6 +47,14 @@ void optimize(Function& function)
 
     if (g_dump_ir_between_passes)
         dbgln("=== After {} ===\n{}", ssa_pass.name(), dump(function));
+
+    // SCCP: global constant propagation + unreachable code elimination
+    SCCP sccp_pass;
+    preserved = sccp_pass.run(function, pass_manager);
+    pass_manager.invalidate(preserved);
+
+    if (g_dump_ir_between_passes)
+        dbgln("=== After {} ===\n{}", sccp_pass.name(), dump(function));
 
     // Phase 3: Optimization passes
     // Dead Code Removal

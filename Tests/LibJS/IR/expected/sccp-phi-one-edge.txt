@@ -1,0 +1,119 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    End v2:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal go
+    v2:unknown = Call v0:unknown, undefined
+    End v2:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v7:int32 = Move 10
+    Branch v5:int32, block1, block2
+block1:
+    v9:number = Add v7:int32, 1
+    Jump block4
+block2:
+    v11:number = Sub v7:int32, 1
+    Jump block5
+block3:
+    Return v12:number
+block1_split0:
+    v10:number = Move v9:number
+    Return v10:number
+block2_split1:
+    v12:number = Move v11:number
+    Jump block3
+
+=== After SCCP ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v7:int32 = Move 10
+    Jump block1
+block1:
+    v9:number = Add 10, 1
+    Jump block4
+block1_split0:
+    v10:number = Move 11
+    Return 11
+
+=== Before optimization ===
+function():
+block0:
+    v1:undefined = Move undefined
+    v2:undefined = Move undefined
+    v3:undefined = Move undefined
+    v5:int32 = Move 5
+    v7:int32 = Move 10
+    Jump block1
+block1:
+    v9:number = Add 10, 1
+    Jump block4
+block1_split0:
+    v10:number = Move 11
+    Return 11
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    Jump block1
+block1:
+    Jump block4
+block1_split0:
+    Return 11
+
+=== After SimplifyCFG ===
+function():
+block1_split0:
+    Return 11
+
+function():
+block1_split0:
+    Return 11

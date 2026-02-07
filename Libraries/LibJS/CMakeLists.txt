@@ -37,6 +37,7 @@ set(SOURCES
     IR/Passes/LoopInvariantCodeMotion.cpp
     IR/Passes/LoopSimplify.cpp
     IR/Passes/PassManager.cpp
+    IR/Passes/SCCP.cpp
     IR/Passes/PostSSACleanup.cpp
     IR/Passes/SSAConstructionPass.cpp
     IR/Passes/SimplifyCFG.cpp
