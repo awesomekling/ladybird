@@ -296,6 +296,38 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 }
             }
 
+            // Check: Variable-arity operand minimums
+            {
+                Optional<size_t> minimum_operands;
+                switch (instruction.opcode()) {
+                case Opcode::Call:
+                case Opcode::CallBuiltin:
+                case Opcode::CallDirectEval:
+                    minimum_operands = 2; // callee + this
+                    break;
+                case Opcode::CallWithArgumentArray:
+                case Opcode::CallDirectEvalWithArgumentArray:
+                case Opcode::ConstructWithArgumentArray:
+                    minimum_operands = 3; // callee + this + arguments array
+                    break;
+                case Opcode::Construct:
+                case Opcode::SuperCallWithArgumentArray:
+                case Opcode::NewClass:
+                case Opcode::GetTemplateObject:
+                case Opcode::CopyObjectExcludingProperties:
+                    minimum_operands = 1;
+                    break;
+                default:
+                    break;
+                }
+                if (minimum_operands.has_value() && instruction.operand_count() < *minimum_operands) {
+                    report_error(ByteString::formatted(
+                        "{} in block{} has {} operands (minimum {})",
+                        opcode_to_string(instruction.opcode()), block->index(),
+                        instruction.operand_count(), *minimum_operands));
+                }
+            }
+
             // Check: Result type sanity
             // If a result type is set (not Unknown), verify it matches the opcode's
             // expected output type. This catches type corruption from optimization passes.
