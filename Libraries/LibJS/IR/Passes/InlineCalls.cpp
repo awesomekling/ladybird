@@ -66,6 +66,8 @@ static bool has_unsupported_opcode(Function const& function)
             case Opcode::CreateArguments:
             case Opcode::CreateRestParams:
             case Opcode::GetNewTarget:
+            // Regex (table remapping not yet supported)
+            case Opcode::NewRegExp:
                 found = true;
                 break;
             default:
@@ -113,12 +115,99 @@ static void clone_instruction(
     Instruction const& source,
     Function& caller,
     Builder& builder,
-    HashMap<ValueIndex, Value*>& value_map)
+    HashMap<ValueIndex, Value*>& value_map,
+    Bytecode::Executable const& callee_executable,
+    Bytecode::Executable& caller_executable)
 {
     auto opcode = source.opcode();
 
     auto map = [&](Value* value) -> Value* {
         return map_callee_value(value, value_map);
+    };
+
+    // Remap table indices from callee's executable tables to caller's.
+    auto remap_property_key = [&](Bytecode::PropertyKeyTableIndex index) -> Bytecode::PropertyKeyTableIndex {
+        if (index.value < callee_executable.property_key_table->property_keys().size())
+            return caller_executable.property_key_table->insert(callee_executable.property_key_table->get(index));
+        return index;
+    };
+
+    auto remap_identifier = [&](Bytecode::IdentifierTableIndex index) -> Bytecode::IdentifierTableIndex {
+        if (index.value < callee_executable.identifier_table->identifiers().size())
+            return caller_executable.identifier_table->insert(callee_executable.identifier_table->get(index));
+        return index;
+    };
+
+    auto remap_string = [&](Bytecode::StringTableIndex index) -> Bytecode::StringTableIndex {
+        if (index.value < callee_executable.string_table->strings().size())
+            return caller_executable.string_table->insert(callee_executable.string_table->get(index));
+        return index;
+    };
+
+    auto remap_optional_identifier = [&](Optional<Bytecode::IdentifierTableIndex> index) -> Optional<Bytecode::IdentifierTableIndex> {
+        if (!index.has_value())
+            return index;
+        return remap_identifier(index.value());
+    };
+
+    auto remap_optional_string = [&](Optional<Bytecode::StringTableIndex> index) -> Optional<Bytecode::StringTableIndex> {
+        if (!index.has_value())
+            return index;
+        return remap_string(index.value());
+    };
+
+    auto remap_cache_index = [&]() -> CacheIndex {
+        if (source.cache_index().value() == NumericLimits<u32>::max())
+            return source.cache_index();
+
+        // Allocate a fresh cache slot in the caller's executable.
+        auto uses_property_lookup_cache = opcode == Opcode::GetById
+            || opcode == Opcode::GetByIdWithThis
+            || opcode == Opcode::GetLength
+            || opcode == Opcode::GetLengthWithThis
+            || opcode == Opcode::PutById
+            || opcode == Opcode::PutByIdWithThis
+            || opcode == Opcode::PutGetterById
+            || opcode == Opcode::PutSetterById
+            || opcode == Opcode::PutPrototypeById
+            || opcode == Opcode::PutGetterByIdWithThis
+            || opcode == Opcode::PutSetterByIdWithThis
+            || opcode == Opcode::PutPrototypeByIdWithThis;
+        if (uses_property_lookup_cache) {
+            auto new_index = caller_executable.property_lookup_caches.size();
+            caller_executable.property_lookup_caches.empend();
+            return CacheIndex(new_index);
+        }
+
+        if (opcode == Opcode::GetGlobal || opcode == Opcode::SetGlobal) {
+            auto new_index = caller_executable.global_variable_caches.size();
+            caller_executable.global_variable_caches.empend();
+            return CacheIndex(new_index);
+        }
+
+        if (opcode == Opcode::GetTemplateObject) {
+            auto new_index = caller_executable.template_object_caches.size();
+            caller_executable.template_object_caches.empend();
+            return CacheIndex(new_index);
+        }
+
+        auto uses_object_shape_cache = opcode == Opcode::NewObject
+            || opcode == Opcode::CacheObjectShape
+            || opcode == Opcode::InitObjectLiteralProperty;
+        if (uses_object_shape_cache) {
+            auto new_index = caller_executable.object_shape_caches.size();
+            caller_executable.object_shape_caches.empend();
+            return CacheIndex(new_index);
+        }
+
+        if (opcode == Opcode::Call) {
+            auto new_index = caller_executable.call_target_profiles.size();
+            caller_executable.call_target_profiles.empend();
+            return CacheIndex(new_index);
+        }
+
+        // Unknown cache type; invalidate.
+        return CacheIndex(NumericLimits<u32>::max());
     };
 
     NonnullOwnPtr<Instruction> new_instruction = [&]() -> NonnullOwnPtr<Instruction> {
@@ -131,7 +220,7 @@ static void clone_instruction(
 
         if (opcode == Opcode::GetById) {
             auto const& get_by_id = static_cast<GetByIdInstruction const&>(source);
-            return GetByIdInstruction::create(map(get_by_id.base()), get_by_id.property());
+            return GetByIdInstruction::create(map(get_by_id.base()), remap_property_key(get_by_id.property()));
         }
 
         // Binary ops use specialized instruction class
@@ -151,26 +240,26 @@ static void clone_instruction(
         return instruction;
     }();
 
-    // Copy all metadata fields
-    new_instruction->set_property_key_index(source.property_key_index());
-    new_instruction->set_identifier_index(source.identifier_index());
-    new_instruction->set_cache_index(source.cache_index());
+    // Copy metadata fields, remapping table indices from callee to caller.
+    new_instruction->set_property_key_index(remap_property_key(source.property_key_index()));
+    new_instruction->set_identifier_index(remap_identifier(source.identifier_index()));
+    new_instruction->set_cache_index(remap_cache_index());
     new_instruction->set_property_slot(source.property_slot());
     new_instruction->set_extract_index(source.extract_index());
     new_instruction->set_iterator_hint(source.iterator_hint());
     new_instruction->set_function_node(source.function_node());
     new_instruction->set_class_expression(source.class_expression());
-    new_instruction->set_lhs_name(source.lhs_name());
-    new_instruction->set_base_identifier(source.base_identifier());
+    new_instruction->set_lhs_name(remap_optional_identifier(source.lhs_name()));
+    new_instruction->set_base_identifier(remap_optional_identifier(source.base_identifier()));
     new_instruction->set_environment_mode(source.environment_mode());
     new_instruction->set_is_immutable(source.is_immutable());
     new_instruction->set_is_global(source.is_global());
     new_instruction->set_is_strict(source.is_strict());
     new_instruction->set_capacity(source.capacity());
-    new_instruction->set_regex_source_index(source.regex_source_index());
-    new_instruction->set_regex_flags_index(source.regex_flags_index());
+    new_instruction->set_regex_source_index(remap_string(source.regex_source_index()));
+    new_instruction->set_regex_flags_index(remap_string(source.regex_flags_index()));
     new_instruction->set_regex_index(source.regex_index());
-    new_instruction->set_expression_string(source.expression_string());
+    new_instruction->set_expression_string(remap_optional_string(source.expression_string()));
     new_instruction->set_builtin(source.builtin());
     new_instruction->set_arguments_kind(source.arguments_kind());
     new_instruction->set_create_arguments_needs_dst(source.create_arguments_needs_dst());
@@ -179,27 +268,35 @@ static void clone_instruction(
     new_instruction->set_put_kind(source.put_kind());
     new_instruction->set_is_spread(source.is_spread());
     new_instruction->set_completion_type(source.completion_type());
-    new_instruction->set_string_table_index(source.string_table_index());
+    new_instruction->set_string_table_index(remap_string(source.string_table_index()));
     if (source.source_record().has_value())
         new_instruction->set_source_record(source.source_record().value());
 
-    if (opcode_has_result(opcode)) {
-        auto& result = caller.create_value_for_instruction();
-        new_instruction->set_result(&result);
+    if (opcode_has_result(opcode) && source.result()) {
+        // Use pre-created value from the value_map if available,
+        // otherwise create a new one (e.g. for non-inlined clones).
+        Value* result;
+        auto it = value_map.find(source.result()->index());
+        if (it != value_map.end()) {
+            result = it->value;
+        } else {
+            result = &caller.create_value_for_instruction();
+            value_map.set(source.result()->index(), result);
+        }
+        new_instruction->set_result(result);
         builder.insertion_block()->append(move(new_instruction));
-        result.defining_instruction()->recompute_result_type();
-        if (source.result())
-            value_map.set(source.result()->index(), &result);
+        result->defining_instruction()->recompute_result_type();
     } else {
         builder.insertion_block()->append(move(new_instruction));
     }
 }
 
-static void inline_candidate(InlineCandidate& candidate, Function& caller)
+static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytecode::Executable& caller_executable)
 {
     auto& call = *candidate.call;
     auto& call_block = *candidate.call_block;
     auto& callee_function = *candidate.callee_function;
+    auto& callee_executable = *callee_function.source_executable();
 
     // The call block ends with: [...instructions...] Call Jump(continuation)
     // After EH splitting, the Call is always the last non-terminator.
@@ -226,8 +323,9 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
         return &instruction == &call;
     });
 
-    // Remove call_block as predecessor of continuation_block.
-    CFG::remove_predecessor(continuation_block, call_block);
+    // NB: Don't remove call_block as predecessor of continuation_block yet.
+    // We use replace_predecessor at the end to atomically swap it with
+    // merge_block, preserving phi incoming values in continuation_block.
 
     // Build value map: callee values -> caller values
     HashMap<ValueIndex, Value*> value_map;
@@ -281,6 +379,25 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
     slow_call_result.defining_instruction()->set_cache_index(profile_cache_index);
     builder.build_jump(merge_block);
 
+    // Pre-create result values for all callee instructions so that
+    // phi incoming values from back-edges (loops) can be resolved.
+    for (auto& callee_block : callee_function.basic_blocks()) {
+        callee_block->for_each_phi([&](PhiInstruction const& phi) {
+            if (phi.result()) {
+                auto& result = caller.create_value_for_instruction();
+                value_map.set(phi.result()->index(), &result);
+            }
+        });
+        callee_block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.opcode() == Opcode::Phi)
+                return;
+            if (opcode_has_result(instruction.opcode()) && instruction.result()) {
+                auto& result = caller.create_value_for_instruction();
+                value_map.set(instruction.result()->index(), &result);
+            }
+        });
+    }
+
     // Track the return value from the fast path
     Value* fast_return_value = nullptr;
     BasicBlock* fast_return_block = nullptr;
@@ -290,7 +407,7 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
         auto* target_block = block_map.get(callee_block->index()).value();
         builder.set_insertion_block(target_block);
 
-        // Clone phi instructions first
+        // Clone phi instructions, using pre-created result values.
         callee_block->for_each_phi([&](PhiInstruction const& phi) {
             Vector<Value*> mapped_values;
             Vector<BlockIndex> mapped_predecessors;
@@ -301,7 +418,12 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
                 mapped_values.append(map_callee_value(incoming, value_map));
             }
             auto& phi_result = builder.build_phi(move(mapped_values), move(mapped_predecessors));
-            value_map.set(phi.result()->index(), &phi_result);
+            // Replace the pre-created placeholder with the actual phi result.
+            if (phi.result()) {
+                auto* pre_created = value_map.get(phi.result()->index()).value();
+                pre_created->replace_all_uses_with(&phi_result);
+                value_map.set(phi.result()->index(), &phi_result);
+            }
         });
 
         // Clone non-phi, non-terminator instructions
@@ -310,7 +432,7 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
                 return;
             if (instruction.is_terminator())
                 return;
-            clone_instruction(instruction, caller, builder, value_map);
+            clone_instruction(instruction, caller, builder, value_map, callee_executable, caller_executable);
         });
 
         // Handle terminators
@@ -318,11 +440,16 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
         if (!terminator)
             continue;
 
+        // NB: Use manual instruction creation instead of builder.build_jump/
+        // build_branch to avoid CFG::add_predecessor adding duplicate null
+        // entries to phis that we already cloned above. We add predecessor
+        // entries directly to the target blocks without touching their phis.
         switch (terminator->opcode()) {
         case Opcode::Jump: {
             auto const& jump = static_cast<JumpInstruction const&>(*terminator);
             auto* mapped_target = block_map.get(jump.target().index()).value();
-            builder.build_jump(*mapped_target);
+            target_block->append(JumpInstruction::create(*mapped_target));
+            CFG::add_block_predecessor(*mapped_target, *target_block);
             break;
         }
         case Opcode::Branch: {
@@ -330,13 +457,16 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
             auto* condition = map_callee_value(branch.condition(), value_map);
             auto* true_target = block_map.get(branch.true_branch().index()).value();
             auto* false_target = block_map.get(branch.false_branch().index()).value();
-            builder.build_branch(*condition, *true_target, *false_target);
+            target_block->append(BranchInstruction::create(condition, *true_target, *false_target));
+            CFG::add_block_predecessor(*true_target, *target_block);
+            CFG::add_block_predecessor(*false_target, *target_block);
             break;
         }
         case Opcode::Return: {
             fast_return_value = map_callee_value(terminator->operand(0), value_map);
             fast_return_block = target_block;
-            builder.build_jump(merge_block);
+            target_block->append(JumpInstruction::create(merge_block));
+            CFG::add_block_predecessor(merge_block, *target_block);
             break;
         }
         default:
@@ -357,8 +487,12 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller)
     if (call_result_value)
         call_result_value->replace_all_uses_with(&merged_result);
 
-    // Jump from merge_block to continuation
-    builder.build_jump(continuation_block);
+    // Jump from merge_block to continuation.
+    // Use a manual Jump + replace_predecessor instead of build_jump to
+    // preserve phi incoming values that continuation_block had for call_block.
+    auto jump_instruction = JumpInstruction::create(continuation_block);
+    merge_block.append(move(jump_instruction));
+    CFG::replace_predecessor(continuation_block, call_block, merge_block);
 }
 
 PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
@@ -477,6 +611,8 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
     if (candidates.is_empty())
         return PreservedAnalyses::all();
 
+    auto& caller_executable = *const_cast<Bytecode::Executable*>(source_executable.ptr());
+
     for (auto& candidate : candidates) {
         if (g_log_tier_ups) {
             auto profile_index = static_cast<u32>(candidate.call->cache_index());
@@ -484,7 +620,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             auto hit_rate = profile.hit_count * 100 / profile.total_count;
             dbgln("  call[{}]: {} ({}% of {} calls) \033[32;1m[inlined]\033[0m", profile_index, candidate.callee->name_for_call_stack(), hit_rate, profile.total_count);
         }
-        inline_candidate(candidate, function);
+        inline_candidate(candidate, function, caller_executable);
     }
 
     return PreservedAnalyses::none();

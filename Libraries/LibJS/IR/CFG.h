@@ -40,6 +40,11 @@ public:
         BasicBlock& predecessor,
         AK::Function<Value*(Instruction&)> value_for_phi = nullptr);
 
+    // Add a predecessor to a block's predecessor list WITHOUT adding phi
+    // operands. Used when cloning callee blocks during inlining, where phi
+    // operands are already populated by the phi cloning step.
+    static void add_block_predecessor(BasicBlock& block, BasicBlock& predecessor);
+
     // Replace all occurrences of `old_pred` with `new_pred` in block's
     // predecessor list and all phi nodes.
     static void replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred);

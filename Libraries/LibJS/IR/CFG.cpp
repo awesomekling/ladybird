@@ -37,6 +37,13 @@ void CFG::add_predecessor(BasicBlock& block, BasicBlock& predecessor, AK::Functi
     });
 }
 
+void CFG::add_block_predecessor(BasicBlock& block, BasicBlock& predecessor)
+{
+    if (block.predecessor_indices().contains_slow(predecessor.index()))
+        return;
+    block.add_predecessor(predecessor.index());
+}
+
 void CFG::replace_predecessor(BasicBlock& block, BasicBlock& old_pred, BasicBlock& new_pred)
 {
     if (&old_pred == &new_pred)
