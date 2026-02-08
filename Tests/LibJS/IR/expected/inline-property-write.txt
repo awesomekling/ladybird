@@ -1,0 +1,198 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 0
+    CacheObjectShape v0:object
+    SetGlobal o v0:object
+    Jump block1
+block0_split0:
+    v2:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v4:unknown = Call v2:unknown, undefined
+    Jump block3
+block0_split2:
+    v5:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v6:unknown = Call v5:unknown, undefined
+    Jump block5
+block0_split4:
+    End v6:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 0
+    CacheObjectShape v0:object
+    SetGlobal o v0:object
+    Jump block1
+block0_split0:
+    v2:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v4:unknown = Call v2:unknown, undefined
+    Jump block3
+block0_split2:
+    v5:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v6:unknown = Call v5:unknown, undefined
+    Jump block5
+block0_split4:
+    End v6:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 0
+    CacheObjectShape v0:object
+    SetGlobal o v0:object
+    Jump block1
+block0_split0:
+    v2:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v4:unknown = Call v2:unknown, undefined
+    Jump block3
+block0_split2:
+    v5:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v6:unknown = Call v5:unknown, undefined
+    Jump block5
+block0_split4:
+    End v6:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 0
+    CacheObjectShape v0:object
+    SetGlobal o v0:object
+    v2:unknown = GetGlobal caller
+    v4:unknown = Call v2:unknown, undefined
+    v5:unknown = GetGlobal caller
+    v6:unknown = Call v5:unknown, undefined
+    End v6:unknown
+
+function():
+block0:
+    v0:object = NewObject
+    InitObjectLiteralProperty v0:object, 0
+    CacheObjectShape v0:object
+    SetGlobal o v0:object
+    v2:unknown = GetGlobal caller
+    v4:unknown = Call v2:unknown, undefined
+    v5:unknown = GetGlobal caller
+    v6:unknown = Call v5:unknown, undefined
+    End v6:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal o
+    Jump block2
+block0_split1:
+    v4:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Jump block3
+block0_split2:
+    Return v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal o
+    Jump block2
+block0_split1:
+    v4:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Jump block3
+block0_split2:
+    Return v4:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal o
+    Jump block2
+block0_split1:
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block4
+block0_split2:
+    Return v8:unknown
+inline_block0:
+    PutById v1:unknown, 42.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v8:unknown = Phi [block7:v7:unknown, block5:v1:unknown]
+    Jump block3
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Jump block6
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal o
+    Jump block2
+block0_split1:
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block4
+block0_split2:
+    Return v8:unknown
+inline_block0:
+    PutById v1:unknown, 42.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v8:unknown = Phi [block7:v7:unknown, block5:v1:unknown]
+    Jump block3
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Jump block6
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    v1:unknown = GetGlobal o
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block4
+inline_block0:
+    PutById v1:unknown, 42.x
+    Return v1:unknown
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Return v7:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal setX
+    v1:unknown = GetGlobal o
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block4
+inline_block0:
+    PutById v1:unknown, 42.x
+    Return v1:unknown
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, 42
+    Return v7:unknown

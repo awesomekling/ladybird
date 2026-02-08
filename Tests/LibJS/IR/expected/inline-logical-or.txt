@@ -1,0 +1,204 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    Jump block1
+block0_split0:
+    v4:unknown = Call v0:unknown, undefined, 0, 42
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    Jump block1
+block0_split0:
+    v4:unknown = Call v0:unknown, undefined, 0, 42
+    Jump block2
+block0_split1:
+    Return v4:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    Jump block1
+block0_split0:
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v8:int32 = Move 0
+    Branch 0, block5, block4
+inline_block1:
+    v9:int32 = Move 42
+    Jump block5
+inline_block2:
+    v11:unknown = Phi [block3:v8:int32, block4:v9:int32]
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v7:unknown, block5:v11:unknown]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Jump block6
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    Jump block1
+block0_split0:
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v8:int32 = Move 0
+    Branch 0, block5, block4
+inline_block1:
+    v9:int32 = Move 42
+    Jump block5
+inline_block2:
+    v11:unknown = Phi [block3:v8:int32, block4:v9:int32]
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v7:unknown, block5:v11:unknown]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Jump block6
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    Jump block1
+block0_split0:
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v8:int32 = Move 0
+    Branch 0, block5, block4
+inline_block1:
+    v9:int32 = Move 42
+    Jump block5
+inline_block2:
+    v11:unknown = Phi [block3:v2:int32, block4:v3:int32]
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v7:unknown, block5:v11:unknown]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Jump block6
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+inline_block0:
+    v8:int32 = Move 0
+    v9:int32 = Move 42
+    Return 42
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Return v7:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetGlobal either
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+inline_block0:
+    Return 42
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Return v7:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal either
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block7, block3
+inline_block0:
+    Return 42
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, 0, 42
+    Return v7:unknown

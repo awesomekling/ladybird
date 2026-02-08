@@ -1,0 +1,221 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:object = NewObject
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 99
+    CacheObjectShape v1:object
+    InitObjectLiteralProperty v0:object, v1:object
+    CacheObjectShape v0:object
+    SetGlobal deep v0:object
+    Jump block1
+block0_split0:
+    v3:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v5:unknown = Call v3:unknown, undefined
+    Jump block3
+block0_split2:
+    v6:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v7:unknown = Call v6:unknown, undefined
+    Jump block5
+block0_split4:
+    End v7:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:object = NewObject
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 99
+    CacheObjectShape v1:object
+    InitObjectLiteralProperty v0:object, v1:object
+    CacheObjectShape v0:object
+    SetGlobal deep v0:object
+    Jump block1
+block0_split0:
+    v3:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v5:unknown = Call v3:unknown, undefined
+    Jump block3
+block0_split2:
+    v6:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v7:unknown = Call v6:unknown, undefined
+    Jump block5
+block0_split4:
+    End v7:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:object = NewObject
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 99
+    CacheObjectShape v1:object
+    InitObjectLiteralProperty v0:object, v1:object
+    CacheObjectShape v0:object
+    SetGlobal deep v0:object
+    Jump block1
+block0_split0:
+    v3:unknown = GetGlobal caller
+    Jump block2
+block0_split1:
+    v5:unknown = Call v3:unknown, undefined
+    Jump block3
+block0_split2:
+    v6:unknown = GetGlobal caller
+    Jump block4
+block0_split3:
+    v7:unknown = Call v6:unknown, undefined
+    Jump block5
+block0_split4:
+    End v7:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:object = NewObject
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 99
+    CacheObjectShape v1:object
+    InitObjectLiteralProperty v0:object, v1:object
+    CacheObjectShape v0:object
+    SetGlobal deep v0:object
+    v3:unknown = GetGlobal caller
+    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = GetGlobal caller
+    v7:unknown = Call v6:unknown, undefined
+    End v7:unknown
+
+function():
+block0:
+    v0:object = NewObject
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 99
+    CacheObjectShape v1:object
+    InitObjectLiteralProperty v0:object, v1:object
+    CacheObjectShape v0:object
+    SetGlobal deep v0:object
+    v3:unknown = GetGlobal caller
+    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = GetGlobal caller
+    v7:unknown = Call v6:unknown, undefined
+    End v7:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal deep
+    Jump block2
+block0_split1:
+    v3:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block3
+block0_split2:
+    Return v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal deep
+    Jump block2
+block0_split1:
+    v3:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block3
+block0_split2:
+    Return v3:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal deep
+    Jump block2
+block0_split1:
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block4
+block0_split2:
+    Return v9:unknown
+inline_block0:
+    v7:unknown = GetById v1:unknown.a
+    Jump block5
+inline_block0_split0:
+    v8:unknown = GetById v7:unknown.b
+    Jump block6
+inline_block0_split1:
+    Jump block7
+inline_merge:
+    v9:unknown = Phi [block8:v6:unknown, block6:v8:unknown]
+    Jump block3
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block7
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    Jump block1
+block0_split0:
+    v1:unknown = GetGlobal deep
+    Jump block2
+block0_split1:
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block4
+block0_split2:
+    Return v9:unknown
+inline_block0:
+    v7:unknown = GetById v1:unknown.a
+    Jump block5
+inline_block0_split0:
+    v8:unknown = GetById v7:unknown.b
+    Jump block6
+inline_block0_split1:
+    Jump block7
+inline_merge:
+    v9:unknown = Phi [block8:v6:unknown, block6:v8:unknown]
+    Jump block3
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block7
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    v1:unknown = GetGlobal deep
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block4
+inline_block0:
+    v7:unknown = GetById v1:unknown.a
+    v8:unknown = GetById v7:unknown.b
+    Return v8:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Return v6:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal deepGet
+    v1:unknown = GetGlobal deep
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block4
+inline_block0:
+    v7:unknown = GetById v1:unknown.a
+    v8:unknown = GetById v7:unknown.b
+    Return v8:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Return v6:unknown

@@ -1,0 +1,174 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3.7
+    Jump block2
+block0_split1:
+    Return v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 3.7
+    Jump block2
+block0_split1:
+    Return v3:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    Jump block1
+block0_split0:
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block3
+block0_split1:
+    Return v10:unknown
+inline_block0:
+    v7:unknown = GetGlobal Math
+    Jump block4
+inline_block0_split0:
+    v8:unknown = GetById v7:unknown.floor
+    Jump block5
+inline_block0_split1:
+    v9:unknown = CallBuiltin v8:unknown, v7:unknown, 3.7
+    Jump block6
+inline_block0_split2:
+    Jump block7
+inline_merge:
+    v10:unknown = Phi [block8:v6:unknown, block6:v9:unknown]
+    Jump block2
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, 3.7
+    Jump block7
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    Jump block1
+block0_split0:
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block3
+block0_split1:
+    Return v10:unknown
+inline_block0:
+    v7:unknown = GetGlobal Math
+    Jump block4
+inline_block0_split0:
+    v8:unknown = GetById v7:unknown.floor
+    Jump block5
+inline_block0_split1:
+    v9:unknown = CallBuiltin v8:unknown, v7:unknown, 3.7
+    Jump block6
+inline_block0_split2:
+    Jump block7
+inline_merge:
+    v10:unknown = Phi [block8:v6:unknown, block6:v9:unknown]
+    Jump block2
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, 3.7
+    Jump block7
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block3
+inline_block0:
+    v7:unknown = GetGlobal Math
+    v8:unknown = GetById v7:unknown.floor
+    v9:unknown = CallBuiltin v8:unknown, v7:unknown, 3.7
+    Return v9:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, 3.7
+    Return v6:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal roundDown
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block8, block3
+inline_block0:
+    v7:unknown = GetGlobal Math
+    v8:unknown = GetById v7:unknown.floor
+    v9:unknown = CallBuiltin v8:unknown, v7:unknown, 3.7
+    Return v9:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, 3.7
+    Return v6:unknown
