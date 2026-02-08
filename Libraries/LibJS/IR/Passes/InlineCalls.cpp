@@ -421,9 +421,9 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
         });
     }
 
-    // Track the return value from the fast path
-    Value* fast_return_value = nullptr;
-    BasicBlock* fast_return_block = nullptr;
+    // Track return values from the fast path (one per Return/End in callee)
+    Vector<Value*> fast_return_values;
+    Vector<BlockIndex> fast_return_block_indices;
 
     // Clone callee instructions into the mapped blocks
     for (auto& callee_block : callee_function.basic_blocks()) {
@@ -487,8 +487,8 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
         }
         case Opcode::Return:
         case Opcode::End: {
-            fast_return_value = map_callee_value(terminator->operand(0), value_map);
-            fast_return_block = target_block;
+            fast_return_values.append(map_callee_value(terminator->operand(0), value_map));
+            fast_return_block_indices.append(target_block->index());
             target_block->append(JumpInstruction::create(merge_block));
             CFG::add_block_predecessor(merge_block, *target_block);
             break;
@@ -504,14 +504,21 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
         }
     }
 
-    VERIFY(fast_return_value);
-    VERIFY(fast_return_block);
+    VERIFY(!fast_return_values.is_empty());
 
     // Build merge block with phi
+    // Collect all incoming values: slow path + all fast path returns
+    Vector<Value*> phi_values;
+    Vector<BlockIndex> phi_blocks;
+    phi_values.append(&slow_call_result);
+    phi_blocks.append(slow_block.index());
+    for (size_t i = 0; i < fast_return_values.size(); ++i) {
+        phi_values.append(fast_return_values[i]);
+        phi_blocks.append(fast_return_block_indices[i]);
+    }
+
     builder.set_insertion_block(&merge_block);
-    auto& merged_result = builder.build_phi(
-        { &slow_call_result, fast_return_value },
-        { slow_block.index(), fast_return_block->index() });
+    auto& merged_result = builder.build_phi(phi_values, phi_blocks);
 
     // Replace all uses of the original call result with the phi result
     if (call_result_value)
@@ -648,8 +655,6 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             auto exit_count = count_exit_terminators(*callee_function);
             if (exit_count == 0)
                 rejection_reasons.append("no return");
-            else if (exit_count > 1)
-                rejection_reasons.append(ByteString::formatted("multiple returns ({})", exit_count));
 
             // Non-strict functions that use 'this' can't be inlined because
             // [[Call]] coerces 'this' (undefined/null -> globalThis, primitives
