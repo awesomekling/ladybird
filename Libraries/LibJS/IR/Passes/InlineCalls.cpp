@@ -27,60 +27,66 @@ struct InlineCandidate {
     NonnullOwnPtr<Function> callee_function;
 };
 
-static bool has_unsupported_opcode(Function const& function)
+static bool is_unsupported_opcode(Opcode opcode)
 {
+    switch (opcode) {
+    // Environment ops
+    case Opcode::CreateLexicalEnvironment:
+    case Opcode::LeaveLexicalEnvironment:
+    case Opcode::CreateVariable:
+    case Opcode::GetBinding:
+    case Opcode::SetBinding:
+    case Opcode::InitializeBinding:
+    case Opcode::EnterObjectEnvironment:
+    case Opcode::CreatePrivateEnvironment:
+    case Opcode::LeavePrivateEnvironment:
+    case Opcode::CreateVariableEnvironment:
+    // Exception handling ops
+    case Opcode::EnterUnwindContext:
+    case Opcode::LeaveUnwindContext:
+    case Opcode::Catch:
+    case Opcode::ScheduleJump:
+    case Opcode::LeaveFinally:
+    case Opcode::RestoreScheduledJump:
+    case Opcode::GetException:
+    case Opcode::SetException:
+    // Generator/async ops
+    case Opcode::Yield:
+    case Opcode::Await:
+    case Opcode::PrepareYield:
+    case Opcode::GetCompletionFields:
+    case Opcode::SetCompletionType:
+    // Eval
+    case Opcode::CallDirectEval:
+    case Opcode::CallDirectEvalWithArgumentArray:
+    // Argument introspection
+    case Opcode::CreateArguments:
+    case Opcode::CreateRestParams:
+    case Opcode::GetNewTarget:
+    // Regex (table remapping not yet supported)
+    case Opcode::NewRegExp:
+    // Terminators we can't clone
+    case Opcode::End:
+    case Opcode::ContinuePendingUnwind:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static Vector<Opcode> find_unsupported_opcodes(Function const& function)
+{
+    HashTable<Opcode> seen;
+    Vector<Opcode> result;
     for (auto& block : function.basic_blocks()) {
-        bool found = false;
         block->for_each_instruction([&](Instruction const& instruction) {
-            switch (instruction.opcode()) {
-            // Environment ops
-            case Opcode::CreateLexicalEnvironment:
-            case Opcode::LeaveLexicalEnvironment:
-            case Opcode::CreateVariable:
-            case Opcode::GetBinding:
-            case Opcode::SetBinding:
-            case Opcode::InitializeBinding:
-            case Opcode::EnterObjectEnvironment:
-            case Opcode::CreatePrivateEnvironment:
-            case Opcode::LeavePrivateEnvironment:
-            case Opcode::CreateVariableEnvironment:
-            // Exception handling ops
-            case Opcode::EnterUnwindContext:
-            case Opcode::LeaveUnwindContext:
-            case Opcode::Catch:
-            case Opcode::ScheduleJump:
-            case Opcode::LeaveFinally:
-            case Opcode::RestoreScheduledJump:
-            case Opcode::GetException:
-            case Opcode::SetException:
-            // Generator/async ops
-            case Opcode::Yield:
-            case Opcode::Await:
-            case Opcode::PrepareYield:
-            case Opcode::GetCompletionFields:
-            case Opcode::SetCompletionType:
-            // Eval
-            case Opcode::CallDirectEval:
-            case Opcode::CallDirectEvalWithArgumentArray:
-            // Argument introspection
-            case Opcode::CreateArguments:
-            case Opcode::CreateRestParams:
-            case Opcode::GetNewTarget:
-            // Regex (table remapping not yet supported)
-            case Opcode::NewRegExp:
-            // Terminators we can't clone
-            case Opcode::End:
-            case Opcode::ContinuePendingUnwind:
-                found = true;
-                break;
-            default:
-                break;
+            if (is_unsupported_opcode(instruction.opcode()) && !seen.contains(instruction.opcode())) {
+                seen.set(instruction.opcode());
+                result.append(instruction.opcode());
             }
         });
-        if (found)
-            return true;
     }
-    return false;
+    return result;
 }
 
 static size_t count_instructions(Function const& function)
@@ -551,6 +557,16 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
                         dbgln("  call[{}]: ?? ({}% of {} calls) -- not inlined: {}", profile_index, hit_rate, profile.total_count, reason);
                 }
             };
+            auto log_reject = [&](Vector<ByteString> const& reasons) {
+                if (g_log_tier_ups) {
+                    if (callee_ptr)
+                        dbgln("  call[{}]: {} ({}% of {} calls) -- not inlined:", profile_index, static_cast<FunctionObject*>(callee_ptr)->name_for_call_stack(), hit_rate, profile.total_count);
+                    else
+                        dbgln("  call[{}]: ?? ({}% of {} calls) -- not inlined:", profile_index, hit_rate, profile.total_count);
+                    for (auto const& reason : reasons)
+                        dbgln("    - {}", reason);
+                }
+            };
 
             // Profile gates
             if (!g_force_inline && profile.total_count < 64) {
@@ -613,21 +629,24 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             preserved = sccp_pass.run(*callee_function, callee_pass_manager);
             callee_pass_manager.invalidate(preserved);
 
-            // Callee body gates
+            // Callee body gates — collect all reasons before rejecting so the
+            // log shows every issue, not just the first one we hit.
             static constexpr size_t MAX_CALLEE_INSTRUCTIONS_FOR_INLINING = 40;
+            Vector<ByteString> rejection_reasons;
+
             auto instruction_count = count_instructions(*callee_function);
-            if (instruction_count > MAX_CALLEE_INSTRUCTIONS_FOR_INLINING) {
-                log_skip(ByteString::formatted("callee too large: {}, max {}", instruction_count, MAX_CALLEE_INSTRUCTIONS_FOR_INLINING).characters());
-                return;
-            }
-            if (has_unsupported_opcode(*callee_function)) {
-                log_skip("unsupported opcode in callee");
-                return;
-            }
-            if (count_return_terminators(*callee_function) != 1) {
-                log_skip("multiple returns");
-                return;
-            }
+            if (instruction_count > MAX_CALLEE_INSTRUCTIONS_FOR_INLINING)
+                rejection_reasons.append(ByteString::formatted("callee too large: {}, max {}", instruction_count, MAX_CALLEE_INSTRUCTIONS_FOR_INLINING));
+
+            auto unsupported_opcodes = find_unsupported_opcodes(*callee_function);
+            for (auto opcode : unsupported_opcodes)
+                rejection_reasons.append(ByteString::formatted("unsupported opcode: {}", opcode_to_string(opcode)));
+
+            auto return_count = count_return_terminators(*callee_function);
+            if (return_count == 0)
+                rejection_reasons.append("no return");
+            else if (return_count > 1)
+                rejection_reasons.append(ByteString::formatted("multiple returns ({})", return_count));
 
             // Non-strict functions that use 'this' can't be inlined because
             // [[Call]] coerces 'this' (undefined/null -> globalThis, primitives
@@ -640,10 +659,13 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
                         break;
                     }
                 }
-                if (uses_this) {
-                    log_skip("non-strict function uses 'this'");
-                    return;
-                }
+                if (uses_this)
+                    rejection_reasons.append("non-strict function uses 'this'");
+            }
+
+            if (!rejection_reasons.is_empty()) {
+                log_reject(rejection_reasons);
+                return;
             }
 
             candidates.append({
