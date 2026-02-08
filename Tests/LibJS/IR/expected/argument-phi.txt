@@ -113,63 +113,43 @@ block2:
     v5:unknown = Phi [block0:v0:unknown, block1:v6:int32]
     Return v5:unknown
 
-=== After SplitCriticalEdges ===
-function(v0:unknown):
-block0:
-    v4:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v4:boolean, block1, block3
-block1:
-    Jump block2
-block2:
-    v5:unknown = Phi [block1:v6:int32, block3:v0:unknown]
-    Return v5:unknown
-split_block0_block2:
-    Jump block2
-
-=== After SsaDestructionPass ===
-function(v0:unknown):
-block0:
-    v4:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v4:boolean, block1, block3
-block1:
-    ParallelCopy [v5:unknown <- v6:int32]
-    Jump block2
-block2:
-    Return v5:unknown
-split_block0_block2:
-    ParallelCopy [v5:unknown <- v0:unknown]
-    Jump block2
-
-=== After CopyCoalescing ===
-function(v0:unknown):
-block0:
-    v4:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v4:boolean, block1, block3
-block1:
-    ParallelCopy [v5:unknown <- v6:int32]
-    Jump block2
-block2:
-    Return v5:unknown
-split_block0_block2:
-    Jump block2
-
-=== After PostSSACleanup ===
+=== After SimplifyCFG ===
 function(v0:unknown):
 block0:
     v4:boolean = StrictlyEquals v0:unknown, undefined
     Branch v4:boolean, block1, block2
 block1:
-    ParallelCopy [v5:unknown <- v6:int32]
-    Jump block2
+    Return 42
 block2:
+    v5:unknown = Phi [block0:v0:unknown]
     Return v5:unknown
+
+=== After CopyPropagation ===
+function(v0:unknown):
+block0:
+    v4:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    Return 42
+block2:
+    v5:unknown = Phi [block0:v0:unknown]
+    Return v0:unknown
+
+=== After DeadCodeElimination ===
+function(v0:unknown):
+block0:
+    v4:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v4:boolean, block1, block2
+block1:
+    Return 42
+block2:
+    Return v0:unknown
 
 function(v0:unknown):
 block0:
     v4:boolean = StrictlyEquals v0:unknown, undefined
     Branch v4:boolean, block1, block2
 block1:
-    ParallelCopy [v5:unknown <- v6:int32]
-    Jump block2
+    Return 42
 block2:
-    Return v5:unknown
+    Return v0:unknown

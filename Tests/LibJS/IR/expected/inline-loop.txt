@@ -214,11 +214,56 @@ inline_block3:
     v23:boolean = LessThanEquals v24:unknown, 10
     Branch v23:boolean, block4, block8
 inline_merge:
-    v27:unknown = Phi [block9:v12:unknown, block6:v25:unknown]
+    v27:unknown = Phi [block6:v25:unknown]
     Return v27:unknown
 inline_slow:
     v12:unknown = Call v0:unknown, undefined, 10
-    Jump block8
+    Return v12:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:unknown = GetGlobal sumTo
+    v11:boolean = StrictlyInequals v0:unknown, v10:object
+    Branch v11:boolean, block9, block6
+inline_block1:
+    v17:unknown = Add v25:unknown, v24:unknown
+    v18:unknown = ToNumeric v24:unknown
+    v19:unknown = Increment v18:unknown
+    Jump block6
+inline_block3:
+    v25:unknown = Phi [block4:v17:unknown, block0:v8:int32]
+    v24:unknown = Phi [block4:v19:unknown, block0:v9:int32]
+    v23:boolean = LessThanEquals v24:unknown, 10
+    Branch v23:boolean, block4, block8
+inline_merge:
+    v27:unknown = Phi [block6:v25:unknown]
+    Return v25:unknown
+inline_slow:
+    v12:unknown = Call v0:unknown, undefined, 10
+    Return v12:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetGlobal sumTo
+    v11:boolean = StrictlyInequals v0:unknown, v10:object
+    Branch v11:boolean, block9, block6
+inline_block1:
+    v17:unknown = Add v25:unknown, v24:unknown
+    v18:unknown = ToNumeric v24:unknown
+    v19:unknown = Increment v18:unknown
+    Jump block6
+inline_block3:
+    v25:unknown = Phi [block4:v17:unknown, block0:v8:int32]
+    v24:unknown = Phi [block4:v19:unknown, block0:v9:int32]
+    v23:boolean = LessThanEquals v24:unknown, 10
+    Branch v23:boolean, block4, block8
+inline_merge:
+    Return v25:unknown
+inline_slow:
+    v12:unknown = Call v0:unknown, undefined, 10
+    Return v12:unknown
 
 === After SplitCriticalEdges ===
 function():
@@ -235,17 +280,14 @@ inline_block3:
     v25:unknown = Phi [block4:v17:unknown, block10:v8:int32]
     v24:unknown = Phi [block4:v19:unknown, block10:v9:int32]
     v23:boolean = LessThanEquals v24:unknown, 10
-    Branch v23:boolean, block4, block11
+    Branch v23:boolean, block4, block8
 inline_merge:
-    v27:unknown = Phi [block9:v12:unknown, block11:v25:unknown]
-    Return v27:unknown
+    Return v25:unknown
 inline_slow:
     v12:unknown = Call v0:unknown, undefined, 10
-    Jump block8
+    Return v12:unknown
 split_block0_inline_block3:
     Jump block6
-split_inline_block3_inline_merge:
-    Jump block8
 
 === After SsaDestructionPass ===
 function():
@@ -261,19 +303,15 @@ inline_block1:
     Jump block6
 inline_block3:
     v23:boolean = LessThanEquals v24:unknown, 10
-    Branch v23:boolean, block4, block11
+    Branch v23:boolean, block4, block8
 inline_merge:
-    Return v27:unknown
+    Return v25:unknown
 inline_slow:
     v12:unknown = Call v0:unknown, undefined, 10
-    ParallelCopy [v27:unknown <- v12:unknown]
-    Jump block8
+    Return v12:unknown
 split_block0_inline_block3:
     ParallelCopy [v25:unknown <- v8:int32, v24:unknown <- v9:int32]
     Jump block6
-split_inline_block3_inline_merge:
-    ParallelCopy [v27:unknown <- v25:unknown]
-    Jump block8
 
 === After CopyCoalescing ===
 function():
@@ -288,37 +326,12 @@ inline_block1:
     Jump block6
 inline_block3:
     v23:boolean = LessThanEquals v24:unknown, 10
-    Branch v23:boolean, block4, block11
-inline_merge:
-    Return v27:unknown
-inline_slow:
-    v12:unknown = Call v0:unknown, undefined, 10
-    Jump block8
-split_block0_inline_block3:
-    ParallelCopy [v25:unknown <- v8:int32, v24:unknown <- v9:int32]
-    Jump block6
-split_inline_block3_inline_merge:
-    Jump block8
-
-=== After PostSSACleanup ===
-function():
-block0:
-    v0:unknown = GetGlobal sumTo
-    v11:boolean = StrictlyInequals v0:unknown, v10:object
-    Branch v11:boolean, block9, block10
-inline_block1:
-    v17:unknown = Add v25:unknown, v24:unknown
-    v18:unknown = ToNumeric v24:unknown
-    v19:unknown = Increment v18:unknown
-    Jump block6
-inline_block3:
-    v23:boolean = LessThanEquals v24:unknown, 10
     Branch v23:boolean, block4, block8
 inline_merge:
-    Return v27:unknown
+    Return v25:unknown
 inline_slow:
     v12:unknown = Call v0:unknown, undefined, 10
-    Jump block8
+    Return v12:unknown
 split_block0_inline_block3:
     ParallelCopy [v25:unknown <- v8:int32, v24:unknown <- v9:int32]
     Jump block6
@@ -337,10 +350,10 @@ inline_block3:
     v23:boolean = LessThanEquals v24:unknown, 10
     Branch v23:boolean, block4, block8
 inline_merge:
-    Return v27:unknown
+    Return v25:unknown
 inline_slow:
     v12:unknown = Call v0:unknown, undefined, 10
-    Jump block8
+    Return v12:unknown
 split_block0_inline_block3:
     ParallelCopy [v25:unknown <- v8:int32, v24:unknown <- v9:int32]
     Jump block6

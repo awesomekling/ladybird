@@ -345,13 +345,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    v25:unknown = Phi [block18:v23:unknown, block15:v24:unknown]
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 
 === After DeadCodeElimination ===
 function():
@@ -381,13 +378,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    v25:unknown = Phi [block18:v23:unknown, block15:v24:unknown]
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 
 === After SimplifyCFG ===
 function():
@@ -413,13 +407,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    v25:unknown = Phi [block18:v23:unknown, block15:v24:unknown]
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 
 === After SplitCriticalEdges ===
 function():
@@ -445,13 +436,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    v25:unknown = Phi [block18:v23:unknown, block15:v24:unknown]
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 split_block0_inline_merge:
     Jump block9
 split_inline_merge_inline_merge:
@@ -481,14 +469,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    ParallelCopy [v25:unknown <- v24:unknown]
-    Jump block17
-inline_merge:
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    ParallelCopy [v25:unknown <- v23:unknown]
-    Jump block17
+    Return v23:unknown
 split_block0_inline_merge:
     ParallelCopy [v15:unknown <- v26:int32]
     Jump block9
@@ -518,12 +502,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 split_block0_inline_merge:
     ParallelCopy [v15:unknown <- v26:int32]
     Jump block9
@@ -552,12 +534,10 @@ inline_slow:
     Jump block13
 inline_block0:
     v24:unknown = Add v15:unknown, v20:unknown
-    Jump block17
-inline_merge:
-    Return v25:unknown
+    Return v24:unknown
 inline_slow:
     v23:unknown = Call v0:unknown, undefined, v15:unknown, v20:unknown
-    Jump block17
+    Return v23:unknown
 split_block0_inline_merge:
     ParallelCopy [v15:unknown <- v26:int32]
     Jump block9

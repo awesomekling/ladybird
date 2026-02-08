@@ -172,13 +172,10 @@ block0:
 inline_block0:
     v9:number = Add 1, 2
     v10:number = Add 3, 3
-    Jump block6
-inline_merge:
-    v11:unknown = Phi [block7:v8:unknown, block3:v13:int32]
-    Return v11:unknown
+    Return 6
 inline_slow:
     v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
+    Return v8:unknown
 
 === After DeadCodeElimination ===
 function():
@@ -187,83 +184,18 @@ block0:
     v7:boolean = StrictlyInequals v0:unknown, v6:object
     Branch v7:boolean, block7, block3
 inline_block0:
-    Jump block6
-inline_merge:
-    v11:unknown = Phi [block7:v8:unknown, block3:v13:int32]
-    Return v11:unknown
+    Return 6
 inline_slow:
     v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetGlobal add
-    v7:boolean = StrictlyInequals v0:unknown, v6:object
-    Branch v7:boolean, block7, block6
-inline_merge:
-    v11:unknown = Phi [block7:v8:unknown, block0:v13:int32]
-    Return v11:unknown
-inline_slow:
-    v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
-
-=== After SplitCriticalEdges ===
-function():
-block0:
-    v0:unknown = GetGlobal add
-    v7:boolean = StrictlyInequals v0:unknown, v6:object
-    Branch v7:boolean, block7, block8
-inline_merge:
-    v11:unknown = Phi [block7:v8:unknown, block8:v13:int32]
-    Return v11:unknown
-inline_slow:
-    v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
-split_block0_inline_merge:
-    Jump block6
-
-=== After SsaDestructionPass ===
-function():
-block0:
-    v0:unknown = GetGlobal add
-    v7:boolean = StrictlyInequals v0:unknown, v6:object
-    Branch v7:boolean, block7, block8
-inline_merge:
-    Return v11:unknown
-inline_slow:
-    v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    ParallelCopy [v11:unknown <- v8:unknown]
-    Jump block6
-split_block0_inline_merge:
-    ParallelCopy [v11:unknown <- v13:int32]
-    Jump block6
-
-=== After CopyCoalescing ===
-function():
-block0:
-    v0:unknown = GetGlobal add
-    v7:boolean = StrictlyInequals v0:unknown, v6:object
-    Branch v7:boolean, block7, block8
-inline_merge:
-    Return v11:unknown
-inline_slow:
-    v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
-split_block0_inline_merge:
-    ParallelCopy [v11:unknown <- v13:int32]
-    Jump block6
+    Return v8:unknown
 
 function():
 block0:
     v0:unknown = GetGlobal add
     v7:boolean = StrictlyInequals v0:unknown, v6:object
-    Branch v7:boolean, block7, block8
-inline_merge:
-    Return v11:unknown
+    Branch v7:boolean, block7, block3
+inline_block0:
+    Return 6
 inline_slow:
     v8:unknown = Call v0:unknown, undefined, 1, 2, 3
-    Jump block6
-split_block0_inline_merge:
-    ParallelCopy [v11:unknown <- v13:int32]
-    Jump block6
+    Return v8:unknown

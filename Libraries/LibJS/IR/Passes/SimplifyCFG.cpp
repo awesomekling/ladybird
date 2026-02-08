@@ -454,6 +454,68 @@ static bool try_thread_jumps(Function& function, DominatorTree& dominators)
     return changed;
 }
 
+static bool try_fold_return_into_predecessors(Function& function)
+{
+    bool changed = false;
+
+    for (auto& block : function.basic_blocks()) {
+        auto* terminator = block->terminator();
+        if (!terminator || terminator->opcode() != Opcode::Return)
+            continue;
+
+        // The Return operand must be a phi result defined in this block.
+        auto* return_value = terminator->operand(0);
+        if (!return_value || !return_value->defining_instruction())
+            continue;
+
+        auto* defining_instruction = return_value->defining_instruction();
+        if (defining_instruction->opcode() != Opcode::Phi || defining_instruction->parent_block() != block.ptr())
+            continue;
+
+        // Every non-terminator instruction in this block must be a phi.
+        bool all_phis = true;
+        block->for_each_instruction([&](Instruction const& instruction) {
+            if (instruction.is_terminator())
+                return;
+            if (instruction.opcode() != Opcode::Phi)
+                all_phis = false;
+        });
+        if (!all_phis)
+            continue;
+
+        auto& phi = static_cast<PhiInstruction&>(*defining_instruction);
+
+        // Fold into predecessors that end with Jump to this block.
+        Vector<BasicBlock*> predecessors_to_fold;
+        for (auto predecessor_index : block->predecessor_indices()) {
+            auto* predecessor = function.block_by_index(predecessor_index);
+            auto* predecessor_terminator = predecessor->terminator();
+            if (predecessor_terminator && predecessor_terminator->opcode() == Opcode::Jump
+                && predecessor_terminator->true_target() == block.ptr())
+                predecessors_to_fold.append(predecessor);
+        }
+
+        for (auto* predecessor : predecessors_to_fold) {
+            auto* incoming = phi.incoming_value_for(*predecessor);
+            if (!incoming)
+                continue;
+
+            // Replace Jump with Return(incoming_value).
+            predecessor->remove_terminator();
+            auto return_instruction = TerminatorInstruction::create<Opcode::Return>();
+            return_instruction->add_operand(incoming);
+            predecessor->append(move(return_instruction));
+
+            // Remove this predecessor from the block.
+            CFG::remove_predecessor(*block, *predecessor);
+
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 static bool try_eliminate_unreachable_blocks(Function& function)
 {
     auto capacity = block_index_capacity(function);
@@ -559,6 +621,7 @@ PreservedAnalyses SimplifyCFG::run(Function& function, PassManager&)
         iteration_changed |= try_thread_jumps(function, dominators);
         iteration_changed |= try_eliminate_empty_blocks(function);
         iteration_changed |= try_merge_blocks(function);
+        iteration_changed |= try_fold_return_into_predecessors(function);
         changed |= iteration_changed;
     } while (iteration_changed);
 

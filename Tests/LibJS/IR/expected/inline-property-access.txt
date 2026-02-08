@@ -184,47 +184,10 @@ block0:
     Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetById v1:unknown.x
-    Jump block6
-inline_merge:
-    v8:unknown = Phi [block7:v6:unknown, block4:v7:unknown]
-    Return v8:unknown
+    Return v7:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block6
-
-=== After SsaDestructionPass ===
-function():
-block0:
-    v0:unknown = GetGlobal getX
-    v1:unknown = GetGlobal point
-    v5:boolean = StrictlyInequals v0:unknown, v4:object
-    Branch v5:boolean, block7, block4
-inline_block0:
-    v7:unknown = GetById v1:unknown.x
-    ParallelCopy [v8:unknown <- v7:unknown]
-    Jump block6
-inline_merge:
-    Return v8:unknown
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined, v1:unknown
-    ParallelCopy [v8:unknown <- v6:unknown]
-    Jump block6
-
-=== After CopyCoalescing ===
-function():
-block0:
-    v0:unknown = GetGlobal getX
-    v1:unknown = GetGlobal point
-    v5:boolean = StrictlyInequals v0:unknown, v4:object
-    Branch v5:boolean, block7, block4
-inline_block0:
-    v7:unknown = GetById v1:unknown.x
-    Jump block6
-inline_merge:
-    Return v8:unknown
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block6
+    Return v6:unknown
 
 function():
 block0:
@@ -234,9 +197,7 @@ block0:
     Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetById v1:unknown.x
-    Jump block6
-inline_merge:
-    Return v8:unknown
+    Return v7:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block6
+    Return v6:unknown

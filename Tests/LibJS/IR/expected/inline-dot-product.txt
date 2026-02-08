@@ -270,61 +270,10 @@ inline_block0:
     v12:unknown = GetById v2:unknown.y
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
-    Jump block13
-inline_merge:
-    v15:unknown = Phi [block14:v7:unknown, block5:v14:unknown]
-    Return v15:unknown
+    Return v14:unknown
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block13
-
-=== After SsaDestructionPass ===
-function():
-block0:
-    v0:unknown = GetGlobal dot
-    v1:unknown = GetGlobal v1
-    v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyInequals v0:unknown, v5:object
-    Branch v6:boolean, block14, block5
-inline_block0:
-    v8:unknown = GetById v1:unknown.x
-    v9:unknown = GetById v2:unknown.x
-    v10:unknown = Mul v8:unknown, v9:unknown
-    v11:unknown = GetById v1:unknown.y
-    v12:unknown = GetById v2:unknown.y
-    v13:unknown = Mul v11:unknown, v12:unknown
-    v14:unknown = Add v10:unknown, v13:unknown
-    ParallelCopy [v15:unknown <- v14:unknown]
-    Jump block13
-inline_merge:
-    Return v15:unknown
-inline_slow:
-    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    ParallelCopy [v15:unknown <- v7:unknown]
-    Jump block13
-
-=== After CopyCoalescing ===
-function():
-block0:
-    v0:unknown = GetGlobal dot
-    v1:unknown = GetGlobal v1
-    v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyInequals v0:unknown, v5:object
-    Branch v6:boolean, block14, block5
-inline_block0:
-    v8:unknown = GetById v1:unknown.x
-    v9:unknown = GetById v2:unknown.x
-    v10:unknown = Mul v8:unknown, v9:unknown
-    v11:unknown = GetById v1:unknown.y
-    v12:unknown = GetById v2:unknown.y
-    v13:unknown = Mul v11:unknown, v12:unknown
-    v14:unknown = Add v10:unknown, v13:unknown
-    Jump block13
-inline_merge:
-    Return v15:unknown
-inline_slow:
-    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block13
+    Return v7:unknown
 
 function():
 block0:
@@ -341,9 +290,7 @@ inline_block0:
     v12:unknown = GetById v2:unknown.y
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
-    Jump block13
-inline_merge:
-    Return v15:unknown
+    Return v14:unknown
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block13
+    Return v7:unknown
