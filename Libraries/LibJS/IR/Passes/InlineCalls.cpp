@@ -17,6 +17,7 @@
 #include <LibJS/IR/Passes/SSAConstructionPass.h>
 #include <LibJS/IR/Value.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
+#include <LibJS/Runtime/GlobalEnvironment.h>
 
 namespace JS::IR {
 
@@ -25,6 +26,7 @@ struct InlineCandidate {
     BasicBlock* call_block;
     GC::Ref<ECMAScriptFunctionObject> callee;
     NonnullOwnPtr<Function> callee_function;
+    bool needs_this_coercion { false };
 };
 
 static bool is_unsupported_opcode(Opcode opcode)
@@ -358,7 +360,7 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
         value_map.set(param->index(), mapped);
     }
 
-    // Map callee 'this' to call's this_value
+    // Map callee 'this' to call's this_value (with coercion for non-strict)
     for (auto& value : callee_function.values()) {
         if (value->is_this()) {
             value_map.set(value->index(), this_value);
@@ -388,13 +390,58 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
     auto& merge_block = caller.create_block("inline_merge"_string);
     auto& slow_block = caller.create_block("inline_slow"_string);
 
+    // For non-strict callees that use 'this', emit OrdinaryCallBindThis
+    // coercion: null/undefined -> globalThis, otherwise -> ToObject.
+    // This goes between the guard and the callee entry block.
+    BasicBlock* guard_fast_target = fast_entry_block;
+    if (candidate.needs_this_coercion) {
+        auto& this_check_block = caller.create_block("inline_this_check"_string);
+        auto& this_global_block = caller.create_block("inline_this_global"_string);
+        auto& this_object_block = caller.create_block("inline_this_object"_string);
+        auto& this_merge_block = caller.create_block("inline_this_merge"_string);
+
+        builder.set_insertion_block(&this_check_block);
+        auto& is_nullish = builder.build_is_nullish(*this_value);
+        builder.build_branch(is_nullish, this_global_block, this_object_block);
+        CFG::add_block_predecessor(this_global_block, this_check_block);
+        CFG::add_block_predecessor(this_object_block, this_check_block);
+
+        builder.set_insertion_block(&this_global_block);
+        auto& global_this = caller.create_constant(
+            JS::Value(&candidate.callee->realm()->global_environment().global_this_value()));
+        builder.build_jump(this_merge_block);
+        CFG::add_block_predecessor(this_merge_block, this_global_block);
+
+        builder.set_insertion_block(&this_object_block);
+        auto& to_object_result = builder.build_to_object(*this_value);
+        builder.build_jump(this_merge_block);
+        CFG::add_block_predecessor(this_merge_block, this_object_block);
+
+        builder.set_insertion_block(&this_merge_block);
+        auto& coerced_this = builder.build_phi(
+            { &global_this, &to_object_result },
+            { this_global_block.index(), this_object_block.index() });
+        builder.build_jump(*fast_entry_block);
+        CFG::add_block_predecessor(*fast_entry_block, this_merge_block);
+
+        // Update the this mapping to use coerced value
+        for (auto& value : callee_function.values()) {
+            if (value->is_this()) {
+                value_map.set(value->index(), &coerced_this);
+                break;
+            }
+        }
+
+        guard_fast_target = &this_check_block;
+    }
+
     // Emit guard in call_block: guard = StrictlyInequals(callee, expected_callee)
     // We use StrictlyInequals so the hot (fast) path is the false branch,
     // which the lowerer places as the fallthrough in bytecode.
     builder.set_insertion_block(&call_block);
     auto& expected_callee = caller.create_constant(JS::Value(candidate.callee.ptr()));
     auto& guard_value = builder.build_strictly_inequals(*callee_operand, expected_callee);
-    builder.build_branch(guard_value, slow_block, *fast_entry_block);
+    builder.build_branch(guard_value, slow_block, *guard_fast_target);
 
     // Build slow path: re-emit the original call
     builder.set_insertion_block(&slow_block);
@@ -656,24 +703,22 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             if (exit_count == 0)
                 rejection_reasons.append("no return");
 
-            // Non-strict functions that use 'this' can't be inlined because
-            // [[Call]] coerces 'this' (undefined/null -> globalThis, primitives
-            // get boxed) and we bypass that when inlining.
-            if (!static_cast<FunctionObject*>(ecma_callee)->is_strict_mode()) {
-                bool uses_this = false;
-                for (auto& value : callee_function->values()) {
-                    if (value->is_this()) {
-                        uses_this = true;
-                        break;
-                    }
-                }
-                if (uses_this)
-                    rejection_reasons.append("non-strict function uses 'this'");
-            }
-
             if (!rejection_reasons.is_empty()) {
                 log_reject(rejection_reasons);
                 return;
+            }
+
+            // Non-strict functions that use 'this' need this-coercion
+            // (undefined/null -> globalThis, primitives -> ToObject)
+            // because [[Call]] normally does this in OrdinaryCallBindThis.
+            bool needs_this_coercion = false;
+            if (!static_cast<FunctionObject*>(ecma_callee)->is_strict_mode()) {
+                for (auto& value : callee_function->values()) {
+                    if (value->is_this()) {
+                        needs_this_coercion = true;
+                        break;
+                    }
+                }
             }
 
             candidates.append({
@@ -681,6 +726,7 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
                 .call_block = block.ptr(),
                 .callee = *ecma_callee,
                 .callee_function = move(callee_function),
+                .needs_this_coercion = needs_this_coercion,
             });
         });
     }
