@@ -1,9 +1,9 @@
-function helper(x) {
+function add(a, b) {
     "use strict";
-    return x + 1;
+    return a + b;
 }
 function caller() {
-    return helper(42);
+    return add(3, 4);
 }
 caller();
 caller();

@@ -1,8 +1,9 @@
-// Test that the InlineCalls pass handles calls with multiple arguments.
 function add(a, b, c) {
+    "use strict";
     return a + b + c;
 }
 function caller() {
     return add(1, 2, 3);
 }
+caller();
 caller();

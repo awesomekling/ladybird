@@ -69,29 +69,29 @@ block0:
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v0:unknown, undefined, 3, 4
     Jump block2
 block0_split1:
-    Return v3:unknown
+    Return v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v0:unknown, undefined, 3, 4
     Jump block2
 block0_split1:
-    Return v3:unknown
+    Return v4:unknown
 
 === After InlineCalls ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     Jump block1
 block0_split0:
     v6:boolean = StrictlyEquals v0:unknown, v5:object
@@ -99,12 +99,12 @@ block0_split0:
 block0_split1:
     Return v9:unknown
 inline_block0:
-    v8:number = Add 42, 1
+    v8:number = Add 3, 4
     Jump block4
 inline_block0_split0:
     Jump block6
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block4:v8:number]
@@ -113,7 +113,7 @@ inline_merge:
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     Jump block1
 block0_split0:
     v6:boolean = StrictlyEquals v0:unknown, v5:object
@@ -121,12 +121,12 @@ block0_split0:
 block0_split1:
     Return v9:unknown
 inline_block0:
-    v8:number = Add 42, 1
+    v8:number = Add 3, 4
     Jump block4
 inline_block0_split0:
     Jump block6
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block4:v8:number]
@@ -135,7 +135,7 @@ inline_merge:
 === After InstCombine ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     Jump block1
 block0_split0:
     v6:boolean = StrictlyEquals v0:unknown, v5:object
@@ -143,12 +143,12 @@ block0_split0:
 block0_split1:
     Return v9:unknown
 inline_block0:
-    v8:number = Add 42, 1
+    v8:number = Add 3, 4
     Jump block4
 inline_block0_split0:
     Jump block6
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block4:v10:int32]
@@ -157,14 +157,14 @@ inline_merge:
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block3, block5
 inline_block0:
-    v8:number = Add 42, 1
+    v8:number = Add 3, 4
     Jump block6
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block3:v10:int32]
@@ -173,13 +173,13 @@ inline_merge:
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block3, block5
 inline_block0:
     Jump block6
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block3:v10:int32]
@@ -188,11 +188,11 @@ inline_merge:
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block6, block5
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block0:v10:int32]
@@ -201,11 +201,11 @@ inline_merge:
 === After SplitCriticalEdges ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block7, block5
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     v9:unknown = Phi [block5:v7:unknown, block7:v10:int32]
@@ -216,11 +216,11 @@ split_block0_inline_merge:
 === After SsaDestructionPass ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block7, block5
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     ParallelCopy [v9:unknown <- v7:unknown]
     Jump block6
 inline_merge:
@@ -232,11 +232,11 @@ split_block0_inline_merge:
 === After CopyCoalescing ===
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block7, block5
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     Return v9:unknown
@@ -246,11 +246,11 @@ split_block0_inline_merge:
 
 function():
 block0:
-    v0:unknown = GetGlobal helper
+    v0:unknown = GetGlobal add
     v6:boolean = StrictlyEquals v0:unknown, v5:object
     Branch v6:boolean, block7, block5
 inline_slow:
-    v7:unknown = Call v0:unknown, undefined, 42
+    v7:unknown = Call v0:unknown, undefined, 3, 4
     Jump block6
 inline_merge:
     Return v9:unknown

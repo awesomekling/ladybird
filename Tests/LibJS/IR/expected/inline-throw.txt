@@ -1,0 +1,283 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    Return v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    Jump block1
+block0_split0:
+    v3:unknown = Call v0:unknown, undefined, 5
+    Jump block2
+block0_split1:
+    Return v3:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block3, block8
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:boolean = LessThan 5, 0
+    Branch v9:boolean, block4, block5
+inline_block1:
+    v10:unknown = GetGlobal RangeError
+    Jump block6
+inline_block2:
+    Jump block9
+inline_block1_split0:
+    v11:object = Construct v10:unknown, v4:string
+    Jump block7
+inline_block1_split1:
+    Throw v11:object
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block5:v2:int32]
+    Jump block2
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block3, block8
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:boolean = LessThan 5, 0
+    Branch v9:boolean, block4, block5
+inline_block1:
+    v10:unknown = GetGlobal RangeError
+    Jump block6
+inline_block2:
+    Jump block9
+inline_block1_split0:
+    v11:object = Construct v10:unknown, v4:string
+    Jump block7
+inline_block1_split1:
+    Throw v11:object
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block5:v2:int32]
+    Jump block2
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block3, block8
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:boolean = LessThan 5, 0
+    Branch false, block4, block5
+inline_block1:
+    v10:unknown = GetGlobal RangeError
+    Jump block6
+inline_block2:
+    Jump block9
+inline_block1_split0:
+    v11:object = Construct v10:unknown, v4:string
+    Jump block7
+inline_block1_split1:
+    Throw v11:object
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block5:v2:int32]
+    Jump block2
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block3, block8
+inline_block0:
+    v9:boolean = LessThan 5, 0
+    Jump block9
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block3:v2:int32]
+    Return v12:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block3, block8
+inline_block0:
+    Jump block9
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block3:v2:int32]
+    Return v12:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block9, block8
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block0:v2:int32]
+    Return v12:unknown
+
+=== After SplitCriticalEdges ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block10, block8
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    v12:unknown = Phi [block8:v8:unknown, block10:v2:int32]
+    Return v12:unknown
+split_block0_inline_merge:
+    Jump block9
+
+=== After SsaDestructionPass ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block10, block8
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    ParallelCopy [v12:unknown <- v8:unknown]
+    Jump block9
+inline_merge:
+    Return v12:unknown
+split_block0_inline_merge:
+    ParallelCopy [v12:unknown <- v2:int32]
+    Jump block9
+
+=== After CopyCoalescing ===
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block10, block8
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    Return v12:unknown
+split_block0_inline_merge:
+    ParallelCopy [v12:unknown <- v2:int32]
+    Jump block9
+
+function():
+block0:
+    v0:unknown = GetGlobal check
+    v7:boolean = StrictlyEquals v0:unknown, v6:object
+    Branch v7:boolean, block10, block8
+inline_slow:
+    v8:unknown = Call v0:unknown, undefined, 5
+    Jump block9
+inline_merge:
+    Return v12:unknown
+split_block0_inline_merge:
+    ParallelCopy [v12:unknown <- v2:int32]
+    Jump block9

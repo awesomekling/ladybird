@@ -1,9 +1,9 @@
-function helper(x) {
+function constant() {
     "use strict";
-    return x + 1;
+    return 42;
 }
 function caller() {
-    return helper(42);
+    return constant();
 }
 caller();
 caller();

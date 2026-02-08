@@ -1,8 +1,10 @@
-// Test that the InlineCalls pass handles arithmetic helper functions.
 function square(x) {
+    "use strict";
     return x * x;
 }
-function sum_of_squares(a, b) {
+function caller(a, b) {
+    "use strict";
     return square(a) + square(b);
 }
-sum_of_squares(3, 4);
+caller(3, 4);
+caller(3, 4);

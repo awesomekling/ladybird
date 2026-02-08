@@ -1,0 +1,279 @@
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    Jump block1
+block0_split0:
+    v2:unknown = Call v0:unknown, undefined
+    Jump block2
+block0_split1:
+    v3:unknown = GetGlobal caller
+    Jump block3
+block0_split2:
+    v4:unknown = Call v3:unknown, undefined
+    Jump block4
+block0_split3:
+    End v4:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+function():
+block0:
+    v0:unknown = GetGlobal caller
+    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = GetGlobal caller
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    Jump block1
+block0_split0:
+    v6:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block2
+block0_split1:
+    Return v6:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    Jump block1
+block0_split0:
+    v6:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block2
+block0_split1:
+    Return v6:unknown
+
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block3, block7
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:number = Add 1, 2
+    Jump block4
+inline_block0_split0:
+    v11:number = Add v10:number, 3
+    Jump block5
+inline_block0_split1:
+    v12:number = Add v11:number, 4
+    Jump block6
+inline_block0_split2:
+    Jump block8
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block6:v12:number]
+    Jump block2
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block3, block7
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:number = Add 1, 2
+    Jump block4
+inline_block0_split0:
+    v11:number = Add v10:number, 3
+    Jump block5
+inline_block0_split1:
+    v12:number = Add v11:number, 4
+    Jump block6
+inline_block0_split2:
+    Jump block8
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block6:v12:number]
+    Jump block2
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block3, block7
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:number = Add 1, 2
+    Jump block4
+inline_block0_split0:
+    v11:number = Add 3, 3
+    Jump block5
+inline_block0_split1:
+    v12:number = Add 6, 4
+    Jump block6
+inline_block0_split2:
+    Jump block8
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block6:v16:int32]
+    Jump block2
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block3, block7
+inline_block0:
+    v10:number = Add 1, 2
+    v11:number = Add 3, 3
+    v12:number = Add 6, 4
+    Jump block8
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block3:v16:int32]
+    Return v13:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block3, block7
+inline_block0:
+    Jump block8
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block3:v16:int32]
+    Return v13:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block8, block7
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block0:v16:int32]
+    Return v13:unknown
+
+=== After SplitCriticalEdges ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block9, block7
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block7:v9:unknown, block9:v16:int32]
+    Return v13:unknown
+split_block0_inline_merge:
+    Jump block8
+
+=== After SsaDestructionPass ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block9, block7
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    ParallelCopy [v13:unknown <- v9:unknown]
+    Jump block8
+inline_merge:
+    Return v13:unknown
+split_block0_inline_merge:
+    ParallelCopy [v13:unknown <- v16:int32]
+    Jump block8
+
+=== After CopyCoalescing ===
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block9, block7
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    Return v13:unknown
+split_block0_inline_merge:
+    ParallelCopy [v13:unknown <- v16:int32]
+    Jump block8
+
+function():
+block0:
+    v0:unknown = GetGlobal sum4
+    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    Branch v8:boolean, block9, block7
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block8
+inline_merge:
+    Return v13:unknown
+split_block0_inline_merge:
+    ParallelCopy [v13:unknown <- v16:int32]
+    Jump block8

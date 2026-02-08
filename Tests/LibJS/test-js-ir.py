@@ -84,8 +84,17 @@ def test(file: Path, rebaseline: bool = False) -> bool:
         "--dump-ir",  # Dump the IR
         "--dump-ir-passes",  # Dump IR after each optimization pass
         "--optimize-ir",  # Run the optimizer
-        "--tier-up-threshold=1",  # Tier up functions on first call
     ]
+
+    if file.name.startswith("inline-"):
+        # Inlining tests need forced inlining and a tier-up threshold > 1
+        # so that profile data is collected before tier-up.
+        args += [
+            "--force-inline",
+            "--tier-up-threshold=2",
+        ]
+    else:
+        args.append("--tier-up-threshold=1")
     process = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     stdout = process.stdout.decode().strip()
