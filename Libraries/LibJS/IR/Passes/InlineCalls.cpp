@@ -59,6 +59,9 @@ static bool is_unsupported_opcode(Opcode opcode)
     // Eval
     case Opcode::CallDirectEval:
     case Opcode::CallDirectEvalWithArgumentArray:
+    // Environment-dependent this/super resolution
+    case Opcode::ResolveThisBinding:
+    case Opcode::ResolveSuperBase:
     // Argument introspection
     case Opcode::CreateArguments:
     case Opcode::CreateRestParams:
@@ -66,7 +69,6 @@ static bool is_unsupported_opcode(Opcode opcode)
     // Regex (table remapping not yet supported)
     case Opcode::NewRegExp:
     // Terminators we can't clone
-    case Opcode::End:
     case Opcode::ContinuePendingUnwind:
         return true;
     default:
@@ -100,12 +102,12 @@ static size_t count_instructions(Function const& function)
     return count;
 }
 
-static size_t count_return_terminators(Function const& function)
+static size_t count_exit_terminators(Function const& function)
 {
     size_t count = 0;
     for (auto& block : function.basic_blocks()) {
         auto* terminator = block->terminator();
-        if (terminator && terminator->opcode() == Opcode::Return)
+        if (terminator && (terminator->opcode() == Opcode::Return || terminator->opcode() == Opcode::End))
             ++count;
     }
     return count;
@@ -483,7 +485,8 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
             CFG::add_block_predecessor(*false_target, *target_block);
             break;
         }
-        case Opcode::Return: {
+        case Opcode::Return:
+        case Opcode::End: {
             fast_return_value = map_callee_value(terminator->operand(0), value_map);
             fast_return_block = target_block;
             target_block->append(JumpInstruction::create(merge_block));
@@ -642,11 +645,11 @@ PreservedAnalyses InlineCalls::run(Function& function, PassManager&)
             for (auto opcode : unsupported_opcodes)
                 rejection_reasons.append(ByteString::formatted("unsupported opcode: {}", opcode_to_string(opcode)));
 
-            auto return_count = count_return_terminators(*callee_function);
-            if (return_count == 0)
+            auto exit_count = count_exit_terminators(*callee_function);
+            if (exit_count == 0)
                 rejection_reasons.append("no return");
-            else if (return_count > 1)
-                rejection_reasons.append(ByteString::formatted("multiple returns ({})", return_count));
+            else if (exit_count > 1)
+                rejection_reasons.append(ByteString::formatted("multiple returns ({})", exit_count));
 
             // Non-strict functions that use 'this' can't be inlined because
             // [[Call]] coerces 'this' (undefined/null -> globalThis, primitives
