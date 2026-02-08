@@ -94,18 +94,18 @@ block0:
     v0:unknown = GetGlobal constant
     Jump block1
 block0_split0:
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block3, block4
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block3
 block0_split1:
     Return v7:unknown
 inline_block0:
-    Jump block5
+    Jump block4
+inline_merge:
+    v7:unknown = Phi [block5:v6:unknown, block3:v3:int32]
+    Jump block2
 inline_slow:
     v6:unknown = Call v0:unknown, undefined
-    Jump block5
-inline_merge:
-    v7:unknown = Phi [block4:v6:unknown, block3:v3:int32]
-    Jump block2
+    Jump block4
 
 === Before optimization ===
 function():
@@ -113,88 +113,88 @@ block0:
     v0:unknown = GetGlobal constant
     Jump block1
 block0_split0:
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block3, block4
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block3
 block0_split1:
     Return v7:unknown
 inline_block0:
-    Jump block5
+    Jump block4
+inline_merge:
+    v7:unknown = Phi [block5:v6:unknown, block3:v3:int32]
+    Jump block2
 inline_slow:
     v6:unknown = Call v0:unknown, undefined
-    Jump block5
-inline_merge:
-    v7:unknown = Phi [block4:v6:unknown, block3:v3:int32]
-    Jump block2
+    Jump block4
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal constant
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
     Branch v5:boolean, block5, block4
+inline_merge:
+    v7:unknown = Phi [block5:v6:unknown, block0:v3:int32]
+    Return v7:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined
-    Jump block5
-inline_merge:
-    v7:unknown = Phi [block4:v6:unknown, block0:v3:int32]
-    Return v7:unknown
+    Jump block4
 
 === After SplitCriticalEdges ===
 function():
 block0:
     v0:unknown = GetGlobal constant
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block6, block4
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block6
+inline_merge:
+    v7:unknown = Phi [block5:v6:unknown, block6:v3:int32]
+    Return v7:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined
-    Jump block5
-inline_merge:
-    v7:unknown = Phi [block4:v6:unknown, block6:v3:int32]
-    Return v7:unknown
+    Jump block4
 split_block0_inline_merge:
-    Jump block5
+    Jump block4
 
 === After SsaDestructionPass ===
 function():
 block0:
     v0:unknown = GetGlobal constant
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block6, block4
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block6
+inline_merge:
+    Return v7:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined
     ParallelCopy [v7:unknown <- v6:unknown]
-    Jump block5
-inline_merge:
-    Return v7:unknown
+    Jump block4
 split_block0_inline_merge:
     ParallelCopy [v7:unknown <- v3:int32]
-    Jump block5
+    Jump block4
 
 === After CopyCoalescing ===
 function():
 block0:
     v0:unknown = GetGlobal constant
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block6, block4
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined
-    Jump block5
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block6
 inline_merge:
     Return v7:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined
+    Jump block4
 split_block0_inline_merge:
     ParallelCopy [v7:unknown <- v3:int32]
-    Jump block5
+    Jump block4
 
 function():
 block0:
     v0:unknown = GetGlobal constant
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block6, block4
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined
-    Jump block5
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block5, block6
 inline_merge:
     Return v7:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined
+    Jump block4
 split_block0_inline_merge:
     ParallelCopy [v7:unknown <- v3:int32]
-    Jump block5
+    Jump block4

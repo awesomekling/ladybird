@@ -94,8 +94,8 @@ block0:
     v0:unknown = GetGlobal sum4
     Jump block1
 block0_split0:
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block3, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block3
 block0_split1:
     Return v13:unknown
 inline_block0:
@@ -108,13 +108,13 @@ inline_block0_split1:
     v12:number = Add v11:number, 4
     Jump block6
 inline_block0_split2:
-    Jump block8
+    Jump block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block6:v12:number]
+    Jump block2
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block6:v12:number]
-    Jump block2
+    Jump block7
 
 === Before optimization ===
 function():
@@ -122,8 +122,8 @@ block0:
     v0:unknown = GetGlobal sum4
     Jump block1
 block0_split0:
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block3, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block3
 block0_split1:
     Return v13:unknown
 inline_block0:
@@ -136,13 +136,13 @@ inline_block0_split1:
     v12:number = Add v11:number, 4
     Jump block6
 inline_block0_split2:
-    Jump block8
+    Jump block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block6:v12:number]
+    Jump block2
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block6:v12:number]
-    Jump block2
+    Jump block7
 
 === After InstCombine ===
 function():
@@ -150,8 +150,8 @@ block0:
     v0:unknown = GetGlobal sum4
     Jump block1
 block0_split0:
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block3, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block3
 block0_split1:
     Return v13:unknown
 inline_block0:
@@ -164,116 +164,116 @@ inline_block0_split1:
     v12:number = Add 6, 4
     Jump block6
 inline_block0_split2:
-    Jump block8
+    Jump block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block6:v16:int32]
+    Jump block2
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block6:v16:int32]
-    Jump block2
+    Jump block7
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block3, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block3
 inline_block0:
     v10:number = Add 1, 2
     v11:number = Add 3, 3
     v12:number = Add 6, 4
-    Jump block8
+    Jump block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block3:v16:int32]
+    Return v13:unknown
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block3:v16:int32]
-    Return v13:unknown
+    Jump block7
 
 === After DeadCodeElimination ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block3, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block3
 inline_block0:
-    Jump block8
+    Jump block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block3:v16:int32]
+    Return v13:unknown
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block3:v16:int32]
-    Return v13:unknown
+    Jump block7
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
     Branch v8:boolean, block8, block7
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block0:v16:int32]
+    Return v13:unknown
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block0:v16:int32]
-    Return v13:unknown
+    Jump block7
 
 === After SplitCriticalEdges ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block9, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block9
+inline_merge:
+    v13:unknown = Phi [block8:v9:unknown, block9:v16:int32]
+    Return v13:unknown
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
-inline_merge:
-    v13:unknown = Phi [block7:v9:unknown, block9:v16:int32]
-    Return v13:unknown
+    Jump block7
 split_block0_inline_merge:
-    Jump block8
+    Jump block7
 
 === After SsaDestructionPass ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block9, block7
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block9
+inline_merge:
+    Return v13:unknown
 inline_slow:
     v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
     ParallelCopy [v13:unknown <- v9:unknown]
-    Jump block8
-inline_merge:
-    Return v13:unknown
+    Jump block7
 split_block0_inline_merge:
     ParallelCopy [v13:unknown <- v16:int32]
-    Jump block8
+    Jump block7
 
 === After CopyCoalescing ===
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block9, block7
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block9
 inline_merge:
     Return v13:unknown
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block7
 split_block0_inline_merge:
     ParallelCopy [v13:unknown <- v16:int32]
-    Jump block8
+    Jump block7
 
 function():
 block0:
     v0:unknown = GetGlobal sum4
-    v8:boolean = StrictlyEquals v0:unknown, v7:object
-    Branch v8:boolean, block9, block7
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
-    Jump block8
+    v8:boolean = StrictlyInequals v0:unknown, v7:object
+    Branch v8:boolean, block8, block9
 inline_merge:
     Return v13:unknown
+inline_slow:
+    v9:unknown = Call v0:unknown, undefined, 1, 2, 3, 4
+    Jump block7
 split_block0_inline_merge:
     ParallelCopy [v13:unknown <- v16:int32]
-    Jump block8
+    Jump block7

@@ -119,21 +119,21 @@ block0_split0:
     v1:unknown = GetGlobal arr
     Jump block2
 block0_split1:
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 block0_split2:
     Return v8:unknown
 inline_block0:
     v7:unknown = GetLength v1:unknown
     Jump block5
 inline_block0_split0:
-    Jump block7
+    Jump block6
+inline_merge:
+    v8:unknown = Phi [block7:v6:unknown, block5:v7:unknown]
+    Jump block3
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block7
-inline_merge:
-    v8:unknown = Phi [block6:v6:unknown, block5:v7:unknown]
-    Jump block3
+    Jump block6
 
 === Before optimization ===
 function():
@@ -144,84 +144,84 @@ block0_split0:
     v1:unknown = GetGlobal arr
     Jump block2
 block0_split1:
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 block0_split2:
     Return v8:unknown
 inline_block0:
     v7:unknown = GetLength v1:unknown
     Jump block5
 inline_block0_split0:
-    Jump block7
+    Jump block6
+inline_merge:
+    v8:unknown = Phi [block7:v6:unknown, block5:v7:unknown]
+    Jump block3
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block7
-inline_merge:
-    v8:unknown = Phi [block6:v6:unknown, block5:v7:unknown]
-    Jump block3
+    Jump block6
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetGlobal len
     v1:unknown = GetGlobal arr
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetLength v1:unknown
-    Jump block7
+    Jump block6
+inline_merge:
+    v8:unknown = Phi [block7:v6:unknown, block4:v7:unknown]
+    Return v8:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block7
-inline_merge:
-    v8:unknown = Phi [block6:v6:unknown, block4:v7:unknown]
-    Return v8:unknown
+    Jump block6
 
 === After SsaDestructionPass ===
 function():
 block0:
     v0:unknown = GetGlobal len
     v1:unknown = GetGlobal arr
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetLength v1:unknown
     ParallelCopy [v8:unknown <- v7:unknown]
-    Jump block7
+    Jump block6
+inline_merge:
+    Return v8:unknown
 inline_slow:
     v6:unknown = Call v0:unknown, undefined, v1:unknown
     ParallelCopy [v8:unknown <- v6:unknown]
-    Jump block7
-inline_merge:
-    Return v8:unknown
+    Jump block6
 
 === After CopyCoalescing ===
 function():
 block0:
     v0:unknown = GetGlobal len
     v1:unknown = GetGlobal arr
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetLength v1:unknown
-    Jump block7
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block7
+    Jump block6
 inline_merge:
     Return v8:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block6
 
 function():
 block0:
     v0:unknown = GetGlobal len
     v1:unknown = GetGlobal arr
-    v5:boolean = StrictlyEquals v0:unknown, v4:object
-    Branch v5:boolean, block4, block6
+    v5:boolean = StrictlyInequals v0:unknown, v4:object
+    Branch v5:boolean, block7, block4
 inline_block0:
     v7:unknown = GetLength v1:unknown
-    Jump block7
-inline_slow:
-    v6:unknown = Call v0:unknown, undefined, v1:unknown
-    Jump block7
+    Jump block6
 inline_merge:
     Return v8:unknown
+inline_slow:
+    v6:unknown = Call v0:unknown, undefined, v1:unknown
+    Jump block6

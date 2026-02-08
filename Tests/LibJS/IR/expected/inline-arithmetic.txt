@@ -147,14 +147,14 @@ block0:
     v2:unknown = GetGlobal square
     Jump block1
 block0_split0:
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 block0_split1:
     v5:unknown = GetGlobal square
     Jump block3
 block0_split2:
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
 block0_split3:
     v7:unknown = Add v12:unknown, v17:unknown
     Jump block5
@@ -164,24 +164,24 @@ inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
     Jump block7
 inline_block0_split0:
-    Jump block9
+    Jump block8
+inline_merge:
+    v12:unknown = Phi [block9:v10:unknown, block7:v11:unknown]
+    Jump block2
 inline_slow:
     v10:unknown = Call v2:unknown, undefined, v0:unknown
-    Jump block9
-inline_merge:
-    v12:unknown = Phi [block8:v10:unknown, block7:v11:unknown]
-    Jump block2
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
     Jump block11
 inline_block0_split0:
-    Jump block13
+    Jump block12
+inline_merge:
+    v17:unknown = Phi [block13:v15:unknown, block11:v16:unknown]
+    Jump block4
 inline_slow:
     v15:unknown = Call v5:unknown, undefined, v1:unknown
-    Jump block13
-inline_merge:
-    v17:unknown = Phi [block12:v15:unknown, block11:v16:unknown]
-    Jump block4
+    Jump block12
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
@@ -189,14 +189,14 @@ block0:
     v2:unknown = GetGlobal square
     Jump block1
 block0_split0:
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 block0_split1:
     v5:unknown = GetGlobal square
     Jump block3
 block0_split2:
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
 block0_split3:
     v7:unknown = Add v12:unknown, v17:unknown
     Jump block5
@@ -206,130 +206,130 @@ inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
     Jump block7
 inline_block0_split0:
-    Jump block9
+    Jump block8
+inline_merge:
+    v12:unknown = Phi [block9:v10:unknown, block7:v11:unknown]
+    Jump block2
 inline_slow:
     v10:unknown = Call v2:unknown, undefined, v0:unknown
-    Jump block9
-inline_merge:
-    v12:unknown = Phi [block8:v10:unknown, block7:v11:unknown]
-    Jump block2
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
     Jump block11
 inline_block0_split0:
-    Jump block13
+    Jump block12
+inline_merge:
+    v17:unknown = Phi [block13:v15:unknown, block11:v16:unknown]
+    Jump block4
 inline_slow:
     v15:unknown = Call v5:unknown, undefined, v1:unknown
-    Jump block13
-inline_merge:
-    v17:unknown = Phi [block12:v15:unknown, block11:v16:unknown]
-    Jump block4
+    Jump block12
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
     v2:unknown = GetGlobal square
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
-    Jump block9
+    Jump block8
+inline_merge:
+    v12:unknown = Phi [block9:v10:unknown, block6:v11:unknown]
+    v5:unknown = GetGlobal square
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
 inline_slow:
     v10:unknown = Call v2:unknown, undefined, v0:unknown
-    Jump block9
-inline_merge:
-    v12:unknown = Phi [block8:v10:unknown, block6:v11:unknown]
-    v5:unknown = GetGlobal square
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
-    Jump block13
-inline_slow:
-    v15:unknown = Call v5:unknown, undefined, v1:unknown
-    Jump block13
+    Jump block12
 inline_merge:
-    v17:unknown = Phi [block12:v15:unknown, block10:v16:unknown]
+    v17:unknown = Phi [block13:v15:unknown, block10:v16:unknown]
     v7:unknown = Add v12:unknown, v17:unknown
     Return v7:unknown
+inline_slow:
+    v15:unknown = Call v5:unknown, undefined, v1:unknown
+    Jump block12
 
 === After SsaDestructionPass ===
 function(v0:unknown, v1:unknown):
 block0:
     v2:unknown = GetGlobal square
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
     ParallelCopy [v12:unknown <- v11:unknown]
-    Jump block9
+    Jump block8
+inline_merge:
+    v5:unknown = GetGlobal square
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
 inline_slow:
     v10:unknown = Call v2:unknown, undefined, v0:unknown
     ParallelCopy [v12:unknown <- v10:unknown]
-    Jump block9
-inline_merge:
-    v5:unknown = GetGlobal square
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
     ParallelCopy [v17:unknown <- v16:unknown]
-    Jump block13
-inline_slow:
-    v15:unknown = Call v5:unknown, undefined, v1:unknown
-    ParallelCopy [v17:unknown <- v15:unknown]
-    Jump block13
+    Jump block12
 inline_merge:
     v7:unknown = Add v12:unknown, v17:unknown
     Return v7:unknown
+inline_slow:
+    v15:unknown = Call v5:unknown, undefined, v1:unknown
+    ParallelCopy [v17:unknown <- v15:unknown]
+    Jump block12
 
 === After CopyCoalescing ===
 function(v0:unknown, v1:unknown):
 block0:
     v2:unknown = GetGlobal square
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
-    Jump block9
-inline_slow:
-    v10:unknown = Call v2:unknown, undefined, v0:unknown
-    Jump block9
+    Jump block8
 inline_merge:
     v5:unknown = GetGlobal square
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
+inline_slow:
+    v10:unknown = Call v2:unknown, undefined, v0:unknown
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
-    Jump block13
-inline_slow:
-    v15:unknown = Call v5:unknown, undefined, v1:unknown
-    Jump block13
+    Jump block12
 inline_merge:
     v7:unknown = Add v12:unknown, v17:unknown
     Return v7:unknown
+inline_slow:
+    v15:unknown = Call v5:unknown, undefined, v1:unknown
+    Jump block12
 
 function(v0:unknown, v1:unknown):
 block0:
     v2:unknown = GetGlobal square
-    v9:boolean = StrictlyEquals v2:unknown, v8:object
-    Branch v9:boolean, block6, block8
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block9, block6
 inline_block0:
     v11:unknown = Mul v0:unknown, v0:unknown
-    Jump block9
-inline_slow:
-    v10:unknown = Call v2:unknown, undefined, v0:unknown
-    Jump block9
+    Jump block8
 inline_merge:
     v5:unknown = GetGlobal square
-    v14:boolean = StrictlyEquals v5:unknown, v13:object
-    Branch v14:boolean, block10, block12
+    v14:boolean = StrictlyInequals v5:unknown, v13:object
+    Branch v14:boolean, block13, block10
+inline_slow:
+    v10:unknown = Call v2:unknown, undefined, v0:unknown
+    Jump block8
 inline_block0:
     v16:unknown = Mul v1:unknown, v1:unknown
-    Jump block13
-inline_slow:
-    v15:unknown = Call v5:unknown, undefined, v1:unknown
-    Jump block13
+    Jump block12
 inline_merge:
     v7:unknown = Add v12:unknown, v17:unknown
     Return v7:unknown
+inline_slow:
+    v15:unknown = Call v5:unknown, undefined, v1:unknown
+    Jump block12

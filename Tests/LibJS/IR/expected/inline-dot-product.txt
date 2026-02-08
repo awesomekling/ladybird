@@ -174,8 +174,8 @@ block0_split1:
     v2:unknown = GetGlobal v2
     Jump block3
 block0_split2:
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 block0_split3:
     Return v15:unknown
 inline_block0:
@@ -200,13 +200,13 @@ inline_block0_split5:
     v14:unknown = Add v10:unknown, v13:unknown
     Jump block12
 inline_block0_split6:
-    Jump block14
+    Jump block13
+inline_merge:
+    v15:unknown = Phi [block14:v7:unknown, block12:v14:unknown]
+    Jump block4
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block14
-inline_merge:
-    v15:unknown = Phi [block13:v7:unknown, block12:v14:unknown]
-    Jump block4
+    Jump block13
 
 === Before optimization ===
 function():
@@ -220,8 +220,8 @@ block0_split1:
     v2:unknown = GetGlobal v2
     Jump block3
 block0_split2:
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 block0_split3:
     Return v15:unknown
 inline_block0:
@@ -246,13 +246,13 @@ inline_block0_split5:
     v14:unknown = Add v10:unknown, v13:unknown
     Jump block12
 inline_block0_split6:
-    Jump block14
+    Jump block13
+inline_merge:
+    v15:unknown = Phi [block14:v7:unknown, block12:v14:unknown]
+    Jump block4
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block14
-inline_merge:
-    v15:unknown = Phi [block13:v7:unknown, block12:v14:unknown]
-    Jump block4
+    Jump block13
 
 === After SimplifyCFG ===
 function():
@@ -260,8 +260,8 @@ block0:
     v0:unknown = GetGlobal dot
     v1:unknown = GetGlobal v1
     v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 inline_block0:
     v8:unknown = GetById v1:unknown.x
     v9:unknown = GetById v2:unknown.x
@@ -270,13 +270,13 @@ inline_block0:
     v12:unknown = GetById v2:unknown.y
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
-    Jump block14
+    Jump block13
+inline_merge:
+    v15:unknown = Phi [block14:v7:unknown, block5:v14:unknown]
+    Return v15:unknown
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block14
-inline_merge:
-    v15:unknown = Phi [block13:v7:unknown, block5:v14:unknown]
-    Return v15:unknown
+    Jump block13
 
 === After SsaDestructionPass ===
 function():
@@ -284,8 +284,8 @@ block0:
     v0:unknown = GetGlobal dot
     v1:unknown = GetGlobal v1
     v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 inline_block0:
     v8:unknown = GetById v1:unknown.x
     v9:unknown = GetById v2:unknown.x
@@ -295,13 +295,13 @@ inline_block0:
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
     ParallelCopy [v15:unknown <- v14:unknown]
-    Jump block14
+    Jump block13
+inline_merge:
+    Return v15:unknown
 inline_slow:
     v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
     ParallelCopy [v15:unknown <- v7:unknown]
-    Jump block14
-inline_merge:
-    Return v15:unknown
+    Jump block13
 
 === After CopyCoalescing ===
 function():
@@ -309,8 +309,8 @@ block0:
     v0:unknown = GetGlobal dot
     v1:unknown = GetGlobal v1
     v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 inline_block0:
     v8:unknown = GetById v1:unknown.x
     v9:unknown = GetById v2:unknown.x
@@ -319,20 +319,20 @@ inline_block0:
     v12:unknown = GetById v2:unknown.y
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
-    Jump block14
-inline_slow:
-    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block14
+    Jump block13
 inline_merge:
     Return v15:unknown
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
+    Jump block13
 
 function():
 block0:
     v0:unknown = GetGlobal dot
     v1:unknown = GetGlobal v1
     v2:unknown = GetGlobal v2
-    v6:boolean = StrictlyEquals v0:unknown, v5:object
-    Branch v6:boolean, block5, block13
+    v6:boolean = StrictlyInequals v0:unknown, v5:object
+    Branch v6:boolean, block14, block5
 inline_block0:
     v8:unknown = GetById v1:unknown.x
     v9:unknown = GetById v2:unknown.x
@@ -341,9 +341,9 @@ inline_block0:
     v12:unknown = GetById v2:unknown.y
     v13:unknown = Mul v11:unknown, v12:unknown
     v14:unknown = Add v10:unknown, v13:unknown
-    Jump block14
-inline_slow:
-    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
-    Jump block14
+    Jump block13
 inline_merge:
     Return v15:unknown
+inline_slow:
+    v7:unknown = Call v0:unknown, undefined, v1:unknown, v2:unknown
+    Jump block13

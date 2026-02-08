@@ -922,15 +922,55 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
 void Lowerer::lower_blocks()
 {
-    // Build ordered block list with entry block first.
-    // After optimization passes, the entry block may not be first in the vector,
-    // but bytecode execution always starts at block index 0.
+    // Build ordered block list using trace-based layout.
+    // Starting from the entry block, follow the "fallthrough" successor
+    // (false branch for conditionals, jump target for unconditional jumps)
+    // to build linear chains. This places hot paths as fallthroughs in bytecode.
     Vector<BasicBlock const*> ordered_blocks;
+    HashTable<BasicBlock const*> visited;
+
     auto* entry = m_function.entry_block();
-    if (entry)
-        ordered_blocks.append(entry);
+    if (!entry)
+        return;
+
+    // Follow chains starting from the entry block, then pick up any remaining blocks.
+    Vector<BasicBlock const*> worklist;
+    worklist.append(entry);
+
+    while (!worklist.is_empty()) {
+        auto* block = worklist.take_last();
+        if (visited.contains(block))
+            continue;
+
+        // Follow the fallthrough chain from this block.
+        auto* current = block;
+        while (current && !visited.contains(current)) {
+            visited.set(current);
+            ordered_blocks.append(current);
+
+            auto* terminator = current->terminator();
+            if (!terminator) {
+                current = nullptr;
+            } else if (terminator->opcode() == Opcode::Branch) {
+                // For conditional branches, follow the false (fallthrough) target.
+                // Queue the true target for later placement.
+                auto* true_target = terminator->true_target();
+                auto* false_target = terminator->false_target();
+                if (true_target && !visited.contains(true_target))
+                    worklist.append(true_target);
+                current = false_target;
+            } else if (terminator->opcode() == Opcode::Jump) {
+                current = terminator->true_target();
+            } else {
+                // Return, End, Throw — no successor.
+                current = nullptr;
+            }
+        }
+    }
+
+    // Append any unreachable blocks that weren't visited.
     for (auto const& block : m_function.basic_blocks()) {
-        if (block.ptr() != entry)
+        if (!visited.contains(block.ptr()))
             ordered_blocks.append(block.ptr());
     }
 
