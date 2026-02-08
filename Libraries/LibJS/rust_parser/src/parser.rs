@@ -124,12 +124,26 @@ pub struct ParserError {
     pub column: u32,
 }
 
+/// Function parameter entry for scope analysis.
+struct FunctionParameter {
+    name: Vec<u16>,
+    index: u32, // Parameter index (0, 1, 2, ...)
+}
+
+/// Local variable entry for scope analysis.
+struct LocalVariable {
+    name: Vec<u16>,
+    index: u32, // Local variable index from add_local_variable()
+}
+
 /// A scope in the scope stack. Tracks whether it's function-like (var hoisting target).
 struct ScopeEntry {
     node: NodeHandle,
     is_function_like: bool, // true for Program, FunctionBody
     lexical_names: std::collections::HashSet<Vec<u16>>,
     function_names: std::collections::HashSet<Vec<u16>>,
+    parameters: Vec<FunctionParameter>, // Function parameters (only in function scopes)
+    local_variables: Vec<LocalVariable>, // Optimizable vars/lets
 }
 
 
@@ -424,6 +438,8 @@ impl<'a> Parser<'a> {
             is_function_like,
             lexical_names: std::collections::HashSet::new(),
             function_names: std::collections::HashSet::new(),
+            parameters: Vec::new(),
+            local_variables: Vec::new(),
         });
     }
 
@@ -469,6 +485,86 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Add a local variable (parameter or optimizable var/let/const) to the current scope.
+    /// Calls the C++ ScopeNode::add_local_variable and tracks the result.
+    /// Add a function parameter to the current function scope.
+    /// Parameters use set_argument_index, NOT set_local_variable_index.
+    pub(crate) fn add_parameter(&mut self, name: &[u16], index: u32) {
+        if let Some(entry) = self.scope_stack.last_mut() {
+            entry.parameters.push(FunctionParameter {
+                name: name.to_vec(),
+                index,
+            });
+        }
+    }
+
+    /// Add a local variable (var/let/const) to the current scope.
+    /// Local variables use set_local_variable_index, NOT set_argument_index.
+    pub(crate) fn add_local_variable(&mut self, name: &[u16]) -> u32 {
+        if let Some(entry) = self.scope_stack.last_mut() {
+            // Add to the C++ ScopeNode's local variables list
+            // Declaration kind: 0=Var (for now; will extend for let/const later)
+            let declaration_kind = 0u8; // Var
+            let index = unsafe {
+                crate::ast_bridge::ast_scope_node_add_local_variable(
+                    entry.node,
+                    name.as_ptr(),
+                    name.len(),
+                    declaration_kind,
+                )
+            };
+            // Track in Rust for identifier lookup
+            entry.local_variables.push(LocalVariable {
+                name: name.to_vec(),
+                index,
+            });
+            index
+        } else {
+            0
+        }
+    }
+
+    /// Look up a name in the scope stack.
+    /// Returns Some((index, true)) if it's a parameter (use set_argument_index).
+    /// Returns Some((index, false)) if it's a local variable (use set_local_variable_index).
+    pub(crate) fn lookup_local(&self, name: &[u16]) -> Option<(u32, bool)> {
+        for entry in self.scope_stack.iter().rev() {
+            // Check parameters first
+            for param in &entry.parameters {
+                if param.name == name {
+                    return Some((param.index, true)); // is_parameter = true
+                }
+            }
+            // Then check local variables
+            for local in &entry.local_variables {
+                if local.name == name {
+                    return Some((local.index, false)); // is_parameter = false
+                }
+            }
+            // Only look in the current function scope, not outer functions
+            if entry.is_function_like {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Mark an identifier as a local variable or argument if it matches a local in scope.
+    pub(crate) fn try_mark_identifier_as_local(&self, _identifier: NodeHandle, _name: &[u16]) {
+        // TEMPORARILY DISABLED - scope analysis not ready yet
+        // if let Some((index, is_parameter)) = self.lookup_local(name) {
+        //     unsafe {
+        //         if is_parameter {
+        //             // Parameters use set_argument_index
+        //             crate::ast_bridge::ast_identifier_set_argument_index(identifier, index);
+        //         } else {
+        //             // Local variables use set_local_variable_index
+        //             crate::ast_bridge::ast_identifier_set_local_variable_index(identifier, index);
+        //         }
+        //     }
+        // }
+    }
+
     /// Register a hoisted function declaration (Annex B).
     /// Bubbles through scopes toward the nearest function-like scope,
     /// stopping if any intermediate scope has a conflicting lexical or
@@ -491,6 +587,13 @@ impl<'a> Parser<'a> {
                 return;
             }
         }
+    }
+
+    /// Create an identifier and mark it as local if it matches a local variable in scope.
+    pub(crate) fn create_identifier_with_scope_analysis(&self, span: crate::ast_bridge::Span, name: &[u16]) -> NodeHandle {
+        let identifier = self.builder.create_identifier(span, name);
+        self.try_mark_identifier_as_local(identifier, name);
+        identifier
     }
 
     // === State save/restore for backtracking ===

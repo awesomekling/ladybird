@@ -187,9 +187,9 @@ impl<'a> Parser<'a> {
             NULL_HANDLE
         };
 
-        let (params, function_length) = self.parse_formal_parameters();
+        let (params, function_length, parameter_names) = self.parse_formal_parameters();
 
-        let body = self.parse_function_body(is_async, is_generator);
+        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
 
         let span = self.span_from(start);
         self.builder.create_function_declaration(
@@ -238,9 +238,9 @@ impl<'a> Parser<'a> {
             NULL_HANDLE
         };
 
-        let (params, function_length) = self.parse_formal_parameters();
+        let (params, function_length, parameter_names) = self.parse_formal_parameters();
 
-        let body = self.parse_function_body(is_async, is_generator);
+        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
@@ -439,12 +439,17 @@ impl<'a> Parser<'a> {
 
     // === Function body ===
 
-    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool) -> (NodeHandle, bool) {
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, parameter_names: &[Vec<u16>]) -> (NodeHandle, bool) {
         let start = self.position();
         let body = self.builder.create_function_body(self.span_from(start));
         self.consume_token(TokenType::CurlyOpen);
 
         self.push_scope(body, true);
+
+        // Add parameters for scope analysis (use set_argument_index, not set_local_variable_index)
+        for (index, param_name) in parameter_names.iter().enumerate() {
+            self.add_parameter(param_name, index as u32);
+        }
 
         let in_function_before = self.in_function_context;
         let in_generator_before = self.in_generator_function_context;
@@ -481,7 +486,7 @@ impl<'a> Parser<'a> {
 
     // === Formal parameters ===
 
-    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32) {
+    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32, Vec<Vec<u16>>) {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
         self.consume_token(TokenType::ParenClose);
@@ -490,9 +495,10 @@ impl<'a> Parser<'a> {
 
     /// Parse formal parameters assuming the opening '(' has already been consumed.
     /// Does NOT consume the closing ')'.
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32) {
+    /// Returns (params_node, function_length, parameter_names)
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32, Vec<Vec<u16>>) {
         if self.match_token(TokenType::ParenClose) {
-            return (self.builder.create_function_parameters_empty(), 0);
+            return (self.builder.create_function_parameters_empty(), 0, Vec::new());
         }
 
         let mut bindings = Vec::new();
@@ -501,6 +507,7 @@ impl<'a> Parser<'a> {
         let mut is_pattern = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
+        let mut parameter_names: Vec<Vec<u16>> = Vec::new();
 
         loop {
             let param_start = self.position();
@@ -514,8 +521,10 @@ impl<'a> Parser<'a> {
             let (binding, is_pat) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                parameter_names.push(value.clone());
                 (self.builder.create_identifier(self.span_from(param_start), &value), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                // TODO: Extract names from binding patterns for scope analysis
                 (self.parse_binding_pattern(), true)
             } else {
                 self.expected("parameter name");
@@ -551,7 +560,7 @@ impl<'a> Parser<'a> {
         }
 
         let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest, &is_pattern);
-        (params, function_length)
+        (params, function_length, parameter_names)
     }
 
     // === Binding pattern ===

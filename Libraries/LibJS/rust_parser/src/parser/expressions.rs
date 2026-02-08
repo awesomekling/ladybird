@@ -408,7 +408,7 @@ impl<'a> Parser<'a> {
                     }
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    (self.builder.create_identifier(self.span_from(start), &value), true)
+                    (self.create_identifier_with_scope_analysis(self.span_from(start), &value), true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
@@ -1103,7 +1103,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let (params, function_length);
+        let (params, function_length, parameter_names);
 
         if expect_parens {
             // '(' already consumed (by caller or above for async case).
@@ -1111,6 +1111,7 @@ impl<'a> Parser<'a> {
             let result = self.parse_formal_parameters_without_parens();
             params = result.0;
             function_length = result.1;
+            parameter_names = result.2;
             // If there were new syntax errors during parameter parsing, abort.
             if self.errors.len() > previous_errors {
                 self.load_state();
@@ -1130,6 +1131,7 @@ impl<'a> Parser<'a> {
                 let binding = self.builder.create_identifier(self.span_from(param_start), &value);
                 params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false], &[false]);
                 function_length = 1;
+                parameter_names = vec![value];
             } else {
                 self.load_state();
                 return None;
@@ -1149,7 +1151,7 @@ impl<'a> Parser<'a> {
         let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
 
         if self.match_token(TokenType::CurlyOpen) {
-            let body = self.parse_function_body(is_async, false);
+            let body = self.parse_function_body(is_async, false, &parameter_names);
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
@@ -1188,9 +1190,9 @@ impl<'a> Parser<'a> {
             (false, false) => FunctionKind::Normal as u8,
         };
 
-        let (params, function_length) = self.parse_formal_parameters();
+        let (params, function_length, parameter_names) = self.parse_formal_parameters();
 
-        let body = self.parse_function_body(is_async, is_generator);
+        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(

@@ -99,6 +99,14 @@ ASTNodeHandle ast_create_private_identifier(ASTArenaHandle arena, SourceCodeHand
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     uint16_t const* name, size_t name_len);
 
+// Scope analysis: mark identifiers as local variables or arguments
+void ast_identifier_set_local_variable_index(ASTNodeHandle identifier, uint32_t index);
+void ast_identifier_set_argument_index(ASTNodeHandle identifier, uint32_t index);
+
+// Scope analysis: add local variables to scope nodes
+// declaration_kind: 0=Var, 1=Let, 2=Const, 3=Parameter
+uint32_t ast_scope_node_add_local_variable(ASTNodeHandle scope, uint16_t const* name, size_t name_len, uint8_t declaration_kind);
+
 // === Expressions ===
 ASTNodeHandle ast_create_this_expression(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,

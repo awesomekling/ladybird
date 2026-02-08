@@ -254,6 +254,26 @@ ASTNodeHandle ast_create_private_identifier(ASTArenaHandle arena_handle, SourceC
     return arena_add(arena, create_ast_node<PrivateIdentifier>(range, move(fly)));
 }
 
+void ast_identifier_set_local_variable_index(ASTNodeHandle identifier_handle, u32 index)
+{
+    auto& identifier = static_cast<Identifier&>(*static_cast<ASTNode*>(identifier_handle));
+    identifier.set_local_variable_index(index);
+}
+
+void ast_identifier_set_argument_index(ASTNodeHandle identifier_handle, u32 index)
+{
+    auto& identifier = static_cast<Identifier&>(*static_cast<ASTNode*>(identifier_handle));
+    identifier.set_argument_index(index);
+}
+
+u32 ast_scope_node_add_local_variable(ASTNodeHandle scope_handle, u16 const* name, size_t name_len, u8 declaration_kind)
+{
+    auto& scope_node = static_cast<ScopeNode&>(*static_cast<ASTNode*>(scope_handle));
+    auto fly = Utf16FlyString::from_utf16(make_utf16_view(name, name_len));
+    auto kind = static_cast<LocalVariable::DeclarationKind>(declaration_kind);
+    return scope_node.add_local_variable(move(fly), kind);
+}
+
 // === Expressions ===
 
 ASTNodeHandle ast_create_this_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,

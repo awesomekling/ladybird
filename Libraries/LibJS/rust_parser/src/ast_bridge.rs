@@ -107,6 +107,16 @@ extern "C" {
         name: *const u16, name_len: usize,
     ) -> NodeHandle;
 
+    // Scope analysis
+    pub fn ast_identifier_set_local_variable_index(identifier: NodeHandle, index: u32);
+    pub fn ast_identifier_set_argument_index(identifier: NodeHandle, index: u32);
+    pub fn ast_scope_node_add_local_variable(
+        scope: NodeHandle,
+        name: *const u16,
+        name_len: usize,
+        declaration_kind: u8,
+    ) -> u32;
+
     // Expressions
     pub fn ast_create_this_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
