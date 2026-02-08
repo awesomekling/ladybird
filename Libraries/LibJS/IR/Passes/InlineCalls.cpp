@@ -374,15 +374,19 @@ static void inline_candidate(InlineCandidate& candidate, Function& caller, Bytec
 
     auto* fast_entry_block = block_map.get(callee_function.entry_block()->index()).value();
 
-    // Create slow_block and merge_block
-    auto& slow_block = caller.create_block("inline_slow"_string);
+    // Create merge_block and slow_block.
+    // NB: merge_block is created before slow_block so the fast path
+    //     falls through to merge in the lowered bytecode layout.
     auto& merge_block = caller.create_block("inline_merge"_string);
+    auto& slow_block = caller.create_block("inline_slow"_string);
 
-    // Emit guard in call_block: guard = StrictlyEquals(callee, expected_callee)
+    // Emit guard in call_block: guard = StrictlyInequals(callee, expected_callee)
+    // We use StrictlyInequals so the hot (fast) path is the false branch,
+    // which the lowerer places as the fallthrough in bytecode.
     builder.set_insertion_block(&call_block);
     auto& expected_callee = caller.create_constant(JS::Value(candidate.callee.ptr()));
-    auto& guard_value = builder.build_strictly_equals(*callee_operand, expected_callee);
-    builder.build_branch(guard_value, *fast_entry_block, slow_block);
+    auto& guard_value = builder.build_strictly_inequals(*callee_operand, expected_callee);
+    builder.build_branch(guard_value, slow_block, *fast_entry_block);
 
     // Build slow path: re-emit the original call
     builder.set_insertion_block(&slow_block);
