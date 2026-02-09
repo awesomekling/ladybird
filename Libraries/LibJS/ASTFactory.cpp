@@ -274,6 +274,30 @@ u32 ast_scope_node_add_local_variable(ASTNodeHandle scope_handle, u16 const* nam
     return scope_node.add_local_variable(move(fly), kind);
 }
 
+void ast_identifier_set_is_global(ASTNodeHandle identifier_handle)
+{
+    auto& identifier = static_cast<Identifier&>(*static_cast<ASTNode*>(identifier_handle));
+    identifier.set_is_global();
+}
+
+void ast_identifier_set_is_inside_scope_with_eval(ASTNodeHandle identifier_handle)
+{
+    auto& identifier = static_cast<Identifier&>(*static_cast<ASTNode*>(identifier_handle));
+    identifier.set_is_inside_scope_with_eval();
+}
+
+void ast_identifier_set_declaration_kind(ASTNodeHandle identifier_handle, u8 kind)
+{
+    auto& identifier = static_cast<Identifier&>(*static_cast<ASTNode*>(identifier_handle));
+    identifier.set_declaration_kind(static_cast<DeclarationKind>(kind));
+}
+
+bool ast_identifier_is_local(ASTNodeHandle identifier_handle)
+{
+    auto const& identifier = static_cast<Identifier const&>(*static_cast<ASTNode const*>(identifier_handle));
+    return identifier.is_local();
+}
+
 // === Expressions ===
 
 ASTNodeHandle ast_create_this_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
@@ -923,7 +947,6 @@ ASTNodeHandle ast_create_function_expression(ASTArenaHandle arena_handle, Source
         static_cast<FunctionKind>(kind),
         is_strict_mode,
         insights,
-        Vector<LocalVariable> {},
         is_arrow_function));
 }
 
@@ -958,8 +981,7 @@ ASTNodeHandle ast_create_function_declaration(ASTArenaHandle arena_handle, Sourc
         function_length,
         static_cast<FunctionKind>(kind),
         is_strict_mode,
-        insights,
-        Vector<LocalVariable> {}));
+        insights));
 }
 
 // === Classes ===

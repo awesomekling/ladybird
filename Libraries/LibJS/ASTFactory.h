@@ -102,9 +102,13 @@ ASTNodeHandle ast_create_private_identifier(ASTArenaHandle arena, SourceCodeHand
 // Scope analysis: mark identifiers as local variables or arguments
 void ast_identifier_set_local_variable_index(ASTNodeHandle identifier, uint32_t index);
 void ast_identifier_set_argument_index(ASTNodeHandle identifier, uint32_t index);
+void ast_identifier_set_is_global(ASTNodeHandle identifier);
+void ast_identifier_set_is_inside_scope_with_eval(ASTNodeHandle identifier);
+void ast_identifier_set_declaration_kind(ASTNodeHandle identifier, uint8_t kind);
+bool ast_identifier_is_local(ASTNodeHandle identifier);
 
 // Scope analysis: add local variables to scope nodes
-// declaration_kind: 0=Var, 1=Let, 2=Const, 3=Parameter
+// declaration_kind: 0=Var, 1=LetOrConst, 2=Function, 3=ArgumentsObject, 4=CatchClauseParameter
 uint32_t ast_scope_node_add_local_variable(ASTNodeHandle scope, uint16_t const* name, size_t name_len, uint8_t declaration_kind);
 
 // === Expressions ===
