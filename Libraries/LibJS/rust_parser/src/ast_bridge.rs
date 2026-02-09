@@ -114,6 +114,7 @@ extern "C" {
     pub fn ast_identifier_set_is_inside_scope_with_eval(identifier: NodeHandle);
     pub fn ast_identifier_set_declaration_kind(identifier: NodeHandle, kind: u8);
     pub fn ast_identifier_is_local(identifier: NodeHandle) -> bool;
+    pub fn ast_identifier_is_inside_scope_with_eval(identifier: NodeHandle) -> bool;
     pub fn ast_scope_node_add_local_variable(
         scope: NodeHandle,
         name: *const u16,

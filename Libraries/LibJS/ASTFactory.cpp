@@ -298,6 +298,12 @@ bool ast_identifier_is_local(ASTNodeHandle identifier_handle)
     return identifier.is_local();
 }
 
+bool ast_identifier_is_inside_scope_with_eval(ASTNodeHandle identifier_handle)
+{
+    auto const& identifier = static_cast<Identifier const&>(*static_cast<ASTNode const*>(identifier_handle));
+    return identifier.is_inside_scope_with_eval();
+}
+
 // === Expressions ===
 
 ASTNodeHandle ast_create_this_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,

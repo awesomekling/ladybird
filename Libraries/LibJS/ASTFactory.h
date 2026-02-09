@@ -106,6 +106,7 @@ void ast_identifier_set_is_global(ASTNodeHandle identifier);
 void ast_identifier_set_is_inside_scope_with_eval(ASTNodeHandle identifier);
 void ast_identifier_set_declaration_kind(ASTNodeHandle identifier, uint8_t kind);
 bool ast_identifier_is_local(ASTNodeHandle identifier);
+bool ast_identifier_is_inside_scope_with_eval(ASTNodeHandle identifier);
 
 // Scope analysis: add local variables to scope nodes
 // declaration_kind: 0=Var, 1=LetOrConst, 2=Function, 3=ArgumentsObject, 4=CatchClauseParameter

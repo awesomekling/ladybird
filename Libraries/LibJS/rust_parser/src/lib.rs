@@ -7,6 +7,7 @@
 pub mod ast_bridge;
 pub mod lexer;
 pub mod parser;
+pub mod scope_collector;
 pub mod token;
 
 use ast_bridge::NodeHandle;
