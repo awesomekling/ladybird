@@ -343,6 +343,12 @@ ASTNodeHandle ast_create_template_literal(ASTArenaHandle arena, SourceCodeHandle
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     ASTNodeHandle const* expressions, size_t expression_count);
 
+ASTNodeHandle ast_create_template_literal_with_raw_strings(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle const* expressions, size_t expression_count,
+    ASTNodeHandle const* raw_strings, size_t raw_string_count);
+
 ASTNodeHandle ast_create_tagged_template_literal(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,

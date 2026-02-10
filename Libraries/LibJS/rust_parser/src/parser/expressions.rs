@@ -1033,26 +1033,58 @@ impl<'a> Parser<'a> {
 
     // === Template literal ===
 
-    pub(crate) fn parse_template_literal(&mut self, _is_tagged: bool) -> NodeHandle {
+    pub(crate) fn parse_template_literal(&mut self, is_tagged: bool) -> NodeHandle {
         let start = self.position();
         self.consume_token(TokenType::TemplateLiteralStart);
 
         let mut parts = Vec::new();
+        let mut raw_strings = Vec::new();
+
+        // If we start with an expression or end, insert an empty string part.
+        if is_tagged && !self.match_token(TokenType::TemplateLiteralString) && !self.match_token(TokenType::TemplateLiteralEnd) {
+            // Will be handled by the append_empty_string below
+        }
+
+        let append_empty_string = |parts: &mut Vec<NodeHandle>, raw_strings: &mut Vec<NodeHandle>, builder: &crate::ast_bridge::AstBuilder, span| {
+            let empty = builder.create_string_literal(span, &[]);
+            parts.push(empty);
+            if is_tagged {
+                raw_strings.push(builder.create_string_literal(span, &[]));
+            }
+        };
+
+        if !self.match_token(TokenType::TemplateLiteralString) {
+            append_empty_string(&mut parts, &mut raw_strings, &self.builder, self.span_from(start));
+        }
+
         loop {
             if self.match_token(TokenType::TemplateLiteralEnd) {
                 self.consume();
-                parts.push(self.builder.create_string_literal(self.span_from(start), &[]));
                 break;
             }
             if self.match_token(TokenType::TemplateLiteralString) {
                 let tok = self.consume();
-                let value = self.process_template_string_value(&tok);
-                parts.push(self.builder.create_string_literal(self.span_from(start), &value));
+                let raw = self.token_value(&tok);
+                if is_tagged {
+                    let raw_value = raw_template_value(raw);
+                    raw_strings.push(self.builder.create_string_literal(self.span_from(start), &raw_value));
+                    match self.process_template_escape_sequences(raw) {
+                        Some(cooked) => parts.push(self.builder.create_string_literal(self.span_from(start), &cooked)),
+                        None => parts.push(self.builder.create_null_literal(self.span_from(start))),
+                    }
+                } else {
+                    let value = self.process_escape_sequences(raw);
+                    parts.push(self.builder.create_string_literal(self.span_from(start), &value));
+                }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
                 let expr = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 parts.push(expr);
                 self.consume_token(TokenType::TemplateLiteralExprEnd);
+                // After an expression, if the next token is not a template string, insert empty.
+                if !self.match_token(TokenType::TemplateLiteralString) {
+                    append_empty_string(&mut parts, &mut raw_strings, &self.builder, self.span_from(start));
+                }
             } else if self.done() {
                 self.expected("template literal end");
                 break;
@@ -1061,13 +1093,114 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.builder.create_template_literal(self.span_from(start), &parts)
+        if is_tagged {
+            self.builder.create_template_literal_with_raw_strings(self.span_from(start), &parts, &raw_strings)
+        } else {
+            self.builder.create_template_literal(self.span_from(start), &parts)
+        }
     }
 
-    /// Process a template literal string value — no quote stripping, just escape processing.
-    fn process_template_string_value(&self, token: &Token) -> Vec<u16> {
-        let raw = self.token_value(token);
-        self.process_escape_sequences(raw)
+    /// Process template escape sequences, returning None if escape is invalid
+    /// (for tagged templates where invalid escapes produce undefined cooked values).
+    fn process_template_escape_sequences(&self, raw: &[u16]) -> Option<Vec<u16>> {
+        let mut result = Vec::with_capacity(raw.len());
+        let mut i = 0;
+        while i < raw.len() {
+            if raw[i] == b'\\' as u16 && i + 1 < raw.len() {
+                i += 1;
+                match raw[i] {
+                    c if c == b'n' as u16 => result.push(b'\n' as u16),
+                    c if c == b'r' as u16 => result.push(b'\r' as u16),
+                    c if c == b't' as u16 => result.push(b'\t' as u16),
+                    c if c == b'b' as u16 => result.push(8),
+                    c if c == b'f' as u16 => result.push(12),
+                    c if c == b'v' as u16 => result.push(11),
+                    c if c == b'0' as u16 => {
+                        if i + 1 < raw.len() && is_octal_char(raw[i + 1]) {
+                            return None; // Octal escape in template
+                        }
+                        result.push(0);
+                    }
+                    c if c >= b'1' as u16 && c <= b'9' as u16 => {
+                        return None; // Octal/decimal escape in template
+                    }
+                    c if c == b'x' as u16 => {
+                        if i + 2 < raw.len() {
+                            let hi = hex_digit(raw[i + 1]);
+                            let lo = hex_digit(raw[i + 2]);
+                            if let (Some(h), Some(l)) = (hi, lo) {
+                                result.push(h * 16 + l);
+                                i += 2;
+                            } else {
+                                return None; // Malformed hex escape
+                            }
+                        } else {
+                            return None; // Malformed hex escape
+                        }
+                    }
+                    c if c == b'u' as u16 => {
+                        if i + 1 < raw.len() && raw[i + 1] == b'{' as u16 {
+                            i += 2;
+                            let mut code_point: u32 = 0;
+                            let mut found_close = false;
+                            while i < raw.len() {
+                                if raw[i] == b'}' as u16 {
+                                    found_close = true;
+                                    break;
+                                }
+                                if let Some(d) = hex_digit(raw[i]) {
+                                    code_point = code_point * 16 + d as u32;
+                                } else {
+                                    return None; // Malformed unicode escape
+                                }
+                                i += 1;
+                            }
+                            if !found_close || code_point > 0x10FFFF {
+                                return None; // Malformed or overflow
+                            }
+                            if code_point <= 0xFFFF {
+                                result.push(code_point as u16);
+                            } else {
+                                let cp = code_point - 0x10000;
+                                result.push((0xD800 + (cp >> 10)) as u16);
+                                result.push((0xDC00 + (cp & 0x3FF)) as u16);
+                            }
+                        } else if i + 4 < raw.len() {
+                            let mut code_point: u16 = 0;
+                            for j in 1..=4 {
+                                if let Some(d) = hex_digit(raw[i + j]) {
+                                    code_point = code_point * 16 + d;
+                                } else {
+                                    return None; // Malformed unicode escape
+                                }
+                            }
+                            result.push(code_point);
+                            i += 4;
+                        } else {
+                            return None; // Malformed unicode escape
+                        }
+                    }
+                    c if c == b'\n' as u16 => { /* line continuation */ }
+                    c if c == b'\r' as u16 => {
+                        if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+                            i += 1;
+                        }
+                    }
+                    c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
+                    c => result.push(c),
+                }
+            } else if raw[i] == b'\r' as u16 {
+                // Normalize \r and \r\n to \n in template values
+                result.push(b'\n' as u16);
+                if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+                    i += 1;
+                }
+            } else {
+                result.push(raw[i]);
+            }
+            i += 1;
+        }
+        Some(result)
     }
 
     // === String value parsing ===
@@ -1365,6 +1498,24 @@ fn parse_octal_escape(inner: &[u16], i: usize) -> (u16, usize) {
         }
     }
     (value as u16, consumed)
+}
+
+/// Compute the Template Raw Value: normalize \r\n and \r to \n.
+fn raw_template_value(raw: &[u16]) -> Vec<u16> {
+    let mut result = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'\r' as u16 {
+            result.push(b'\n' as u16);
+            if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+                i += 1;
+            }
+        } else {
+            result.push(raw[i]);
+        }
+        i += 1;
+    }
+    result
 }
 
 fn token_to_binary_op(tt: TokenType) -> u8 {

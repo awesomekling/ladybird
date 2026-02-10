@@ -875,6 +875,25 @@ ASTNodeHandle ast_create_template_literal(ASTArenaHandle arena_handle, SourceCod
     return arena_add(arena, create_ast_node<TemplateLiteral>(range, move(exprs)));
 }
 
+ASTNodeHandle ast_create_template_literal_with_raw_strings(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle const* expressions, size_t expression_count,
+    ASTNodeHandle const* raw_strings, size_t raw_string_count)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Vector<NonnullRefPtr<Expression const>> exprs;
+    exprs.ensure_capacity(expression_count);
+    for (size_t i = 0; i < expression_count; ++i)
+        exprs.unchecked_append(as_ref<Expression>(expressions[i]));
+    Vector<NonnullRefPtr<StringLiteral const>> raws;
+    raws.ensure_capacity(raw_string_count);
+    for (size_t i = 0; i < raw_string_count; ++i)
+        raws.unchecked_append(static_cast<StringLiteral const&>(*static_cast<ASTNode*>(raw_strings[i])));
+    return arena_add(arena, create_ast_node<TemplateLiteral>(range, move(exprs), move(raws)));
+}
+
 ASTNodeHandle ast_create_tagged_template_literal(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
     u32 start_line, u32 start_column, u32 start_offset,
     u32 end_line, u32 end_column, u32 end_offset,

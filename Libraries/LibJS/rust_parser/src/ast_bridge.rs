@@ -413,6 +413,13 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         expressions: *const NodeHandle, expression_count: usize,
     ) -> NodeHandle;
+    pub fn ast_create_template_literal_with_raw_strings(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        expressions: *const NodeHandle, expression_count: usize,
+        raw_strings: *const NodeHandle, raw_string_count: usize,
+    ) -> NodeHandle;
     pub fn ast_create_tagged_template_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -938,6 +945,11 @@ impl AstBuilder {
     pub fn create_template_literal(&self, span: Span, expressions: &[NodeHandle]) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_template_literal(a, sc, sl, scol, so, el, ecol, eo, expressions.as_ptr(), expressions.len()) }
+    }
+
+    pub fn create_template_literal_with_raw_strings(&self, span: Span, expressions: &[NodeHandle], raw_strings: &[NodeHandle]) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_template_literal_with_raw_strings(a, sc, sl, scol, so, el, ecol, eo, expressions.as_ptr(), expressions.len(), raw_strings.as_ptr(), raw_strings.len()) }
     }
 
     pub fn create_tagged_template_literal(&self, span: Span, tag: NodeHandle, template_literal: NodeHandle) -> NodeHandle {
