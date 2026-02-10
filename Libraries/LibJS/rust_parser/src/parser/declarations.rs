@@ -1305,6 +1305,7 @@ impl<'a> Parser<'a> {
             if matches_function != MatchesFunctionDeclaration::No {
                 let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
                 let decl = self.parse_function_declaration_for_export(has_default_name);
+                self.register_function_declaration_with_scope_collector(decl);
                 if !has_default_name {
                     // Function has a name - extract it from the declaration.
                     local_name = Some(self.builder.get_function_name(decl));
