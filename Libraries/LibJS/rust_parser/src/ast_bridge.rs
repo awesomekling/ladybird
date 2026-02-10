@@ -54,63 +54,62 @@ pub struct Span {
     pub end_offset: u32,
 }
 
+// Raw extern "C" declarations. Private to this module — all other code
+// should use AstBuilder methods or the safe free functions below.
 extern "C" {
-    // Arena
-    pub fn ast_arena_create() -> ArenaHandle;
-    pub fn ast_arena_destroy(arena: ArenaHandle);
-    pub fn ast_node_ref(handle: NodeHandle);
+    fn ast_arena_create() -> ArenaHandle;
+    fn ast_arena_destroy(arena: ArenaHandle);
+    fn ast_node_ref(handle: NodeHandle);
 
-    // Program / ScopeNode
-    pub fn ast_create_program(
+    fn ast_create_program(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         program_type: u8,
     ) -> NodeHandle;
-    pub fn ast_create_block_statement(
+    fn ast_create_block_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_function_body(
+    fn ast_create_function_body(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_scope_node_append(scope_node: NodeHandle, statement: NodeHandle);
-    pub fn ast_scope_node_set_strict_mode(scope_node: NodeHandle);
+    fn ast_scope_node_append(scope_node: NodeHandle, statement: NodeHandle);
+    fn ast_scope_node_set_strict_mode(scope_node: NodeHandle);
 
-    // Literals
-    pub fn ast_create_numeric_literal(
+    fn ast_create_numeric_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         value: f64,
     ) -> NodeHandle;
-    pub fn ast_create_string_literal(
+    fn ast_create_string_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         value: *const u16, value_len: usize,
     ) -> NodeHandle;
-    pub fn ast_create_boolean_literal(
+    fn ast_create_boolean_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         value: bool,
     ) -> NodeHandle;
-    pub fn ast_create_null_literal(
+    fn ast_create_null_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_bigint_literal(
+    fn ast_create_bigint_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         value: *const u8, value_len: usize,
     ) -> NodeHandle;
-    pub fn ast_create_regexp_literal(
+    fn ast_create_regexp_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -118,105 +117,98 @@ extern "C" {
         flags: *const u16, flags_len: usize,
     ) -> NodeHandle;
 
-    // Identifiers
-    pub fn ast_create_identifier(
+    fn ast_create_identifier(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         name: *const u16, name_len: usize,
     ) -> NodeHandle;
-    pub fn ast_create_private_identifier(
+    fn ast_create_private_identifier(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         name: *const u16, name_len: usize,
     ) -> NodeHandle;
 
-    // Scope analysis
-    pub fn ast_identifier_set_local_variable_index(identifier: NodeHandle, index: u32);
-    pub fn ast_identifier_set_argument_index(identifier: NodeHandle, index: u32);
-    pub fn ast_identifier_set_is_global(identifier: NodeHandle);
-    pub fn ast_identifier_set_is_inside_scope_with_eval(identifier: NodeHandle);
-    pub fn ast_identifier_set_declaration_kind(identifier: NodeHandle, kind: u8);
-    pub fn ast_identifier_is_local(identifier: NodeHandle) -> bool;
-    pub fn ast_identifier_is_inside_scope_with_eval(identifier: NodeHandle) -> bool;
-    pub fn ast_scope_node_add_local_variable(
-        scope: NodeHandle,
-        name: *const u16,
-        name_len: usize,
-        declaration_kind: u8,
+    fn ast_identifier_set_local_variable_index(identifier: NodeHandle, index: u32);
+    fn ast_identifier_set_argument_index(identifier: NodeHandle, index: u32);
+    fn ast_identifier_set_is_global(identifier: NodeHandle);
+    fn ast_identifier_set_is_inside_scope_with_eval(identifier: NodeHandle);
+    fn ast_identifier_set_declaration_kind(identifier: NodeHandle, kind: u8);
+    fn ast_identifier_is_inside_scope_with_eval(identifier: NodeHandle) -> bool;
+    fn ast_scope_node_add_local_variable(
+        scope: NodeHandle, name: *const u16, name_len: usize, declaration_kind: u8,
     ) -> u32;
 
-    // Expressions
-    pub fn ast_create_this_expression(
+    fn ast_create_this_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_super_expression(
+    fn ast_create_super_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_binary_expression(
-        arena: ArenaHandle, source_code: SourceCodeHandle,
-        start_line: u32, start_column: u32, start_offset: u32,
-        end_line: u32, end_column: u32, end_offset: u32,
-        op: u8, lhs: NodeHandle, rhs: NodeHandle,
-    ) -> NodeHandle;
-    pub fn ast_create_logical_expression(
+    fn ast_create_binary_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, lhs: NodeHandle, rhs: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_unary_expression(
+    fn ast_create_logical_expression(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        op: u8, lhs: NodeHandle, rhs: NodeHandle,
+    ) -> NodeHandle;
+    fn ast_create_unary_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, operand: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_update_expression(
+    fn ast_create_update_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, argument: NodeHandle, prefixed: bool,
     ) -> NodeHandle;
-    pub fn ast_create_assignment_expression(
+    fn ast_create_assignment_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, lhs: NodeHandle, rhs: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_assignment_expression_with_pattern(
+    fn ast_create_assignment_expression_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, pattern: NodeHandle, rhs: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_is_identifier(handle: NodeHandle) -> bool;
-    pub fn ast_is_member_expression(handle: NodeHandle) -> bool;
-    pub fn ast_is_object_expression(handle: NodeHandle) -> bool;
-    pub fn ast_is_array_expression(handle: NodeHandle) -> bool;
-    pub fn ast_create_conditional_expression(
+    fn ast_is_identifier(handle: NodeHandle) -> bool;
+    fn ast_is_member_expression(handle: NodeHandle) -> bool;
+    fn ast_is_object_expression(handle: NodeHandle) -> bool;
+    fn ast_is_array_expression(handle: NodeHandle) -> bool;
+    fn ast_create_conditional_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         test: NodeHandle, consequent: NodeHandle, alternate: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_sequence_expression(
+    fn ast_create_sequence_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         expressions: *const NodeHandle, count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_member_expression(
+    fn ast_create_member_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         object: NodeHandle, property: NodeHandle, computed: bool,
     ) -> NodeHandle;
-    pub fn ast_create_call_expression(
+    fn ast_create_call_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -224,20 +216,20 @@ extern "C" {
         argument_values: *const NodeHandle, argument_is_spread: *const bool,
         argument_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_super_call(
+    fn ast_create_super_call(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         argument_values: *const NodeHandle, argument_is_spread: *const bool,
         argument_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_synthetic_constructor_super_call(
+    fn ast_create_synthetic_constructor_super_call(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         argument_identifier: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_new_expression(
+    fn ast_create_new_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -245,221 +237,216 @@ extern "C" {
         argument_values: *const NodeHandle, argument_is_spread: *const bool,
         argument_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_spread_expression(
+    fn ast_create_spread_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         target: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_yield_expression(
+    fn ast_create_yield_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         argument: NodeHandle, is_yield_from: bool,
     ) -> NodeHandle;
-    pub fn ast_create_await_expression(
+    fn ast_create_await_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         argument: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_import_call(
+    fn ast_create_import_call(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         specifier: NodeHandle, options: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_meta_property(
+    fn ast_create_meta_property(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         meta_type: u8,
     ) -> NodeHandle;
 
-    // Statements
-    pub fn ast_create_expression_statement(
+    fn ast_create_expression_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         expression: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_empty_statement(
+    fn ast_create_empty_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_return_statement(
-        arena: ArenaHandle, source_code: SourceCodeHandle,
-        start_line: u32, start_column: u32, start_offset: u32,
-        end_line: u32, end_column: u32, end_offset: u32,
-        argument: NodeHandle,
-    ) -> NodeHandle;
-    pub fn ast_create_throw_statement(
+    fn ast_create_return_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         argument: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_break_statement(
+    fn ast_create_throw_statement(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        argument: NodeHandle,
+    ) -> NodeHandle;
+    fn ast_create_break_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         label: *const u16, label_len: usize,
     ) -> NodeHandle;
-    pub fn ast_create_continue_statement(
+    fn ast_create_continue_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         label: *const u16, label_len: usize,
     ) -> NodeHandle;
-    pub fn ast_create_debugger_statement(
+    fn ast_create_debugger_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
     ) -> NodeHandle;
-    pub fn ast_create_if_statement(
+    fn ast_create_if_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         predicate: NodeHandle, consequent: NodeHandle, alternate: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_while_statement(
+    fn ast_create_while_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         test: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_do_while_statement(
+    fn ast_create_do_while_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         test: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_statement(
+    fn ast_create_for_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         init: NodeHandle, test: NodeHandle, update: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_in_statement(
+    fn ast_create_for_in_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         lhs: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_of_statement(
+    fn ast_create_for_of_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         lhs: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_await_of_statement(
+    fn ast_create_for_await_of_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         lhs: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_with_statement(
+    fn ast_create_with_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         object: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_labelled_statement(
+    fn ast_create_labelled_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         label: *const u16, label_len: usize, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_switch_statement(
+    fn ast_create_switch_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         discriminant: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_switch_case(
+    fn ast_create_switch_case(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         test: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_switch_statement_add_case(switch_stmt: NodeHandle, switch_case: NodeHandle);
-    pub fn ast_create_try_statement(
+    fn ast_switch_statement_add_case(switch_stmt: NodeHandle, switch_case: NodeHandle);
+    fn ast_create_try_statement(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         block: NodeHandle, handler: NodeHandle, finalizer: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_catch_clause(
+    fn ast_create_catch_clause(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         parameter: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
 
-    // Declarations
-    pub fn ast_create_variable_declaration(
+    fn ast_create_variable_declaration(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         kind: u8, declarators: *const NodeHandle, declarator_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_variable_declarator(
+    fn ast_create_variable_declarator(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         target: NodeHandle, init: NodeHandle,
     ) -> NodeHandle;
 
-    // Object/Array expressions
-    pub fn ast_create_object_expression(
+    fn ast_create_object_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         properties: *const NodeHandle, property_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_object_property(
+    fn ast_create_object_property(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         key: NodeHandle, value: NodeHandle, prop_type: u8, is_method: bool,
     ) -> NodeHandle;
-    pub fn ast_create_array_expression(
+    fn ast_create_array_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         elements: *const NodeHandle, element_count: usize,
     ) -> NodeHandle;
 
-    // Template literals
-    pub fn ast_create_template_literal(
+    fn ast_create_template_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         expressions: *const NodeHandle, expression_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_template_literal_with_raw_strings(
+    fn ast_create_template_literal_with_raw_strings(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         expressions: *const NodeHandle, expression_count: usize,
         raw_strings: *const NodeHandle, raw_string_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_tagged_template_literal(
+    fn ast_create_tagged_template_literal(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         tag: NodeHandle, template_literal: NodeHandle,
     ) -> NodeHandle;
 
-    // Functions
-    pub fn ast_create_function_parameters_empty() -> NodeHandle;
-    pub fn ast_create_function_parameters(
+    fn ast_create_function_parameters_empty() -> NodeHandle;
+    fn ast_create_function_parameters(
         arena: ArenaHandle,
         bindings: *const NodeHandle, default_values: *const NodeHandle,
         is_rest: *const bool, is_pattern: *const bool, count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_function_expression(
+    fn ast_create_function_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -471,7 +458,7 @@ extern "C" {
         uses_this: bool, uses_this_from_environment: bool,
         contains_direct_call_to_eval: bool, might_need_arguments_object: bool,
     ) -> NodeHandle;
-    pub fn ast_create_function_declaration(
+    fn ast_create_function_declaration(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -484,8 +471,7 @@ extern "C" {
         contains_direct_call_to_eval: bool, might_need_arguments_object: bool,
     ) -> NodeHandle;
 
-    // Classes
-    pub fn ast_create_class_expression(
+    fn ast_create_class_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
@@ -494,38 +480,37 @@ extern "C" {
         constructor: NodeHandle, super_class: NodeHandle,
         elements: *const NodeHandle, element_count: usize,
     ) -> NodeHandle;
-    pub fn ast_create_class_declaration(
+    fn ast_create_class_declaration(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         class_expression: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_class_method(
+    fn ast_create_class_method(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         key: NodeHandle, function: NodeHandle, kind: u8, is_static: bool,
     ) -> NodeHandle;
-    pub fn ast_create_class_field(
+    fn ast_create_class_field(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         key: NodeHandle, init: NodeHandle, is_static: bool,
     ) -> NodeHandle;
-    pub fn ast_create_static_initializer(
+    fn ast_create_static_initializer(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         function_body: NodeHandle,
     ) -> NodeHandle;
 
-    // Scope declarations
-    pub fn ast_scope_node_add_var_scoped_declaration(scope_node: NodeHandle, declaration: NodeHandle);
-    pub fn ast_scope_node_add_lexical_declaration(scope_node: NodeHandle, declaration: NodeHandle);
-    pub fn ast_scope_node_add_hoisted_function(scope_node: NodeHandle, function_declaration: NodeHandle);
-    pub fn ast_scope_node_shrink_to_fit(scope_node: NodeHandle);
+    fn ast_scope_node_add_var_scoped_declaration(scope_node: NodeHandle, declaration: NodeHandle);
+    fn ast_scope_node_add_lexical_declaration(scope_node: NodeHandle, declaration: NodeHandle);
+    fn ast_scope_node_add_hoisted_function(scope_node: NodeHandle, function_declaration: NodeHandle);
+    fn ast_scope_node_shrink_to_fit(scope_node: NodeHandle);
 
-    pub fn ast_scope_build_function_scope_data(
+    fn ast_scope_build_function_scope_data(
         scope_node: NodeHandle,
         var_names_data: *const u16,
         var_name_offsets: *const u32,
@@ -536,73 +521,133 @@ extern "C" {
         has_argument_parameter: u8,
     );
 
-    // SwitchCase
-    pub fn ast_switch_case_append(switch_case: NodeHandle, statement: NodeHandle);
+    fn ast_switch_case_append(switch_case: NodeHandle, statement: NodeHandle);
 
-    // BindingPattern
-    pub fn ast_create_binding_pattern(arena: ArenaHandle, kind: u8) -> NodeHandle;
-    pub fn ast_binding_pattern_append_entry(
+    fn ast_create_binding_pattern(arena: ArenaHandle, kind: u8) -> NodeHandle;
+    fn ast_binding_pattern_append_entry(
         pattern: NodeHandle,
         name: NodeHandle, name_type: u8,
         alias: NodeHandle, alias_type: u8,
         initializer: NodeHandle, is_rest: bool,
     );
-    pub fn ast_create_variable_declarator_with_pattern(
+    fn ast_create_variable_declarator_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, init: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_catch_clause_with_pattern(
+    fn ast_create_catch_clause_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_in_statement_with_pattern(
+    fn ast_create_for_in_statement_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_of_statement_with_pattern(
+    fn ast_create_for_of_statement_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
-    pub fn ast_create_for_await_of_statement_with_pattern(
+    fn ast_create_for_await_of_statement_with_pattern(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
 
-    // OptionalChain
-    pub fn ast_create_optional_chain_builder() -> *mut std::ffi::c_void;
-    pub fn ast_optional_chain_builder_append_member(
+    fn ast_create_optional_chain_builder() -> *mut std::ffi::c_void;
+    fn ast_optional_chain_builder_append_member(
         builder: *mut std::ffi::c_void,
         identifier: NodeHandle, is_optional: bool,
     );
-    pub fn ast_optional_chain_builder_append_computed(
+    fn ast_optional_chain_builder_append_computed(
         builder: *mut std::ffi::c_void,
         expression: NodeHandle, is_optional: bool,
     );
-    pub fn ast_optional_chain_builder_append_call(
+    fn ast_optional_chain_builder_append_call(
         builder: *mut std::ffi::c_void,
         argument_values: *const NodeHandle, argument_is_spread: *const bool,
         argument_count: usize, is_optional: bool,
     );
-    pub fn ast_optional_chain_builder_append_private_member(
+    fn ast_optional_chain_builder_append_private_member(
         builder: *mut std::ffi::c_void,
         private_identifier: NodeHandle, is_optional: bool,
     );
-    pub fn ast_create_optional_chain(
+    fn ast_create_optional_chain(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
         end_line: u32, end_column: u32, end_offset: u32,
         base: NodeHandle, builder: *mut std::ffi::c_void,
     ) -> NodeHandle;
+}
+
+// === Safe free functions for scope analysis ===
+//
+// These wrap the raw FFI calls so that scope_collector.rs never needs `unsafe`.
+
+pub fn identifier_set_local_variable_index(identifier: NodeHandle, index: u32) {
+    unsafe { ast_identifier_set_local_variable_index(identifier, index) }
+}
+
+pub fn identifier_set_argument_index(identifier: NodeHandle, index: u32) {
+    unsafe { ast_identifier_set_argument_index(identifier, index) }
+}
+
+pub fn identifier_set_is_global(identifier: NodeHandle) {
+    unsafe { ast_identifier_set_is_global(identifier) }
+}
+
+pub fn identifier_set_is_inside_scope_with_eval(identifier: NodeHandle) {
+    unsafe { ast_identifier_set_is_inside_scope_with_eval(identifier) }
+}
+
+pub fn identifier_set_declaration_kind(identifier: NodeHandle, kind: u8) {
+    unsafe { ast_identifier_set_declaration_kind(identifier, kind) }
+}
+
+pub fn identifier_is_inside_scope_with_eval(identifier: NodeHandle) -> bool {
+    unsafe { ast_identifier_is_inside_scope_with_eval(identifier) }
+}
+
+pub fn scope_node_add_local_variable(scope: NodeHandle, name: &[u16], declaration_kind: u8) -> u32 {
+    unsafe { ast_scope_node_add_local_variable(scope, name.as_ptr(), name.len(), declaration_kind) }
+}
+
+pub fn scope_node_add_var_scoped_declaration(scope_node: NodeHandle, declaration: NodeHandle) {
+    unsafe { ast_scope_node_add_var_scoped_declaration(scope_node, declaration) }
+}
+
+pub fn scope_node_add_lexical_declaration(scope_node: NodeHandle, declaration: NodeHandle) {
+    unsafe { ast_scope_node_add_lexical_declaration(scope_node, declaration) }
+}
+
+pub fn scope_node_add_hoisted_function(scope_node: NodeHandle, function_declaration: NodeHandle) {
+    unsafe { ast_scope_node_add_hoisted_function(scope_node, function_declaration) }
+}
+
+pub fn scope_build_function_scope_data(
+    scope_node: NodeHandle,
+    names_data: &[u16],
+    name_offsets: &[u32],
+    name_lengths: &[u32],
+    identifiers: &[NodeHandle],
+    is_parameter: &[u8],
+    has_argument_parameter: u8,
+) {
+    unsafe {
+        ast_scope_build_function_scope_data(
+            scope_node,
+            names_data.as_ptr(), name_offsets.as_ptr(), name_lengths.as_ptr(),
+            identifiers.as_ptr(), is_parameter.as_ptr(), identifiers.len(),
+            has_argument_parameter,
+        )
+    }
 }
 
 /// Builder wrapping the C++ AST factory with a simpler interface.

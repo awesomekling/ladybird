@@ -177,13 +177,12 @@ fn is_identifier_continue_cp(cp: u32) -> bool {
 
 /// Check if a code point has the Unicode ID_Start property.
 fn unicode_id_start(cp: u32) -> bool {
-    // Use the unicode-ident crate's logic (inlined check)
-    unicode_ident::is_xid_start(unsafe { char::from_u32_unchecked(cp) })
+    char::from_u32(cp).is_some_and(unicode_ident::is_xid_start)
 }
 
 /// Check if a code point has the Unicode ID_Continue property.
 fn unicode_id_continue(cp: u32) -> bool {
-    unicode_ident::is_xid_continue(unsafe { char::from_u32_unchecked(cp) })
+    char::from_u32(cp).is_some_and(unicode_ident::is_xid_continue)
 }
 
 fn keyword_from_str(s: &[u16]) -> Option<TokenType> {

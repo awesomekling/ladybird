@@ -51,7 +51,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast_bridge::{self, NodeHandle, NULL_HANDLE};
+use crate::ast_bridge::{self as ffi, NodeHandle, NULL_HANDLE};
 use crate::ffi_enums;
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
 
@@ -397,7 +397,7 @@ impl ScopeCollector {
         }
 
         let ast_node = self.records[idx].ast_node;
-        unsafe { ast_bridge::ast_scope_node_add_lexical_declaration(ast_node, declaration) };
+        ffi::scope_node_add_lexical_declaration(ast_node, declaration);
     }
 
     pub fn add_var_declaration(
@@ -437,7 +437,7 @@ impl ScopeCollector {
         // Register declaration on top-level scope node once.
         if let Some(top_idx) = self.records[idx].top_level {
             let top_ast_node = self.records[top_idx].ast_node;
-            unsafe { ast_bridge::ast_scope_node_add_var_scoped_declaration(top_ast_node, declaration) };
+            ffi::scope_node_add_var_scoped_declaration(top_ast_node, declaration);
         }
     }
 
@@ -465,7 +465,7 @@ impl ScopeCollector {
             var.var_identifier = name_identifier;
 
             let ast_node = self.records[idx].ast_node;
-            unsafe { ast_bridge::ast_scope_node_add_var_scoped_declaration(ast_node, declaration) };
+            ffi::scope_node_add_var_scoped_declaration(ast_node, declaration);
         } else {
             // Check flags first, then modify. This avoids borrow checker issues
             // since we need to access both variables and functions_to_hoist.
@@ -489,7 +489,7 @@ impl ScopeCollector {
                 }
                 self.records[idx].variables.entry(name.to_vec()).or_default().flags |= FLAG_IS_LEXICAL;
                 let ast_node = self.records[idx].ast_node;
-                unsafe { ast_bridge::ast_scope_node_add_lexical_declaration(ast_node, declaration) };
+                ffi::scope_node_add_lexical_declaration(ast_node, declaration);
                 return;
             }
 
@@ -505,7 +505,7 @@ impl ScopeCollector {
             var.function_declaration = declaration;
 
             let ast_node = self.records[idx].ast_node;
-            unsafe { ast_bridge::ast_scope_node_add_lexical_declaration(ast_node, declaration) };
+            ffi::scope_node_add_lexical_declaration(ast_node, declaration);
         }
     }
 
@@ -777,7 +777,7 @@ impl ScopeCollector {
                     DeclarationKind::Const => DK::CONST,
                 };
                 for &id in &group.identifiers {
-                    unsafe { ast_bridge::ast_identifier_set_declaration_kind(id, ffi_kind) };
+                    ffi::identifier_set_declaration_kind(id, ffi_kind);
                 }
             }
 
@@ -824,7 +824,7 @@ impl ScopeCollector {
                 && (var_flags & FLAG_IS_BOUND) != 0
             {
                 for &id in &group.identifiers {
-                    unsafe { ast_bridge::ast_identifier_set_is_inside_scope_with_eval(id) };
+                    ffi::identifier_set_is_inside_scope_with_eval(id);
                 }
             }
 
@@ -853,9 +853,9 @@ impl ScopeCollector {
                 let can_use_global = !(group.used_inside_with_statement || initiated_by_eval);
                 if can_use_global {
                     for &id in &group.identifiers {
-                        let is_eval_scope = unsafe { ast_bridge::ast_identifier_is_inside_scope_with_eval(id) };
+                        let is_eval_scope = ffi::identifier_is_inside_scope_with_eval(id);
                         if !is_eval_scope {
-                            unsafe { ast_bridge::ast_identifier_set_is_global(id) };
+                            ffi::identifier_set_is_global(id);
                         }
                     }
                 }
@@ -884,27 +884,23 @@ impl ScopeCollector {
                             let arg_index = records[ls].get_parameter_index(&name);
                             if let Some(ai) = arg_index {
                                 for &id in &group.identifiers {
-                                    unsafe { ast_bridge::ast_identifier_set_argument_index(id, ai) };
+                                    ffi::identifier_set_argument_index(id, ai);
                                 }
                             } else {
-                                let lvi = unsafe {
-                                    ast_bridge::ast_scope_node_add_local_variable(
-                                        scope_ast_node, name.as_ptr(), name.len(), LV::VAR,
-                                    )
-                                };
+                                let lvi = ffi::scope_node_add_local_variable(
+                                    scope_ast_node, &name, LV::VAR,
+                                );
                                 for &id in &group.identifiers {
-                                    unsafe { ast_bridge::ast_identifier_set_local_variable_index(id, lvi) };
+                                    ffi::identifier_set_local_variable_index(id, lvi);
                                 }
                             }
                         } else {
                             let kind = local_var_kind.unwrap();
-                            let lvi = unsafe {
-                                ast_bridge::ast_scope_node_add_local_variable(
-                                    scope_ast_node, name.as_ptr(), name.len(), kind,
-                                )
-                            };
+                            let lvi = ffi::scope_node_add_local_variable(
+                                scope_ast_node, &name, kind,
+                            );
                             for &id in &group.identifiers {
-                                unsafe { ast_bridge::ast_identifier_set_local_variable_index(id, lvi) };
+                                ffi::identifier_set_local_variable_index(id, lvi);
                             }
                         }
                     }
@@ -924,7 +920,7 @@ impl ScopeCollector {
 
                 if records[idx].eval_in_current_function {
                     for &id in &group.identifiers {
-                        unsafe { ast_bridge::ast_identifier_set_is_inside_scope_with_eval(id) };
+                        ffi::identifier_set_is_inside_scope_with_eval(id);
                     }
                 }
 
@@ -981,18 +977,15 @@ impl ScopeCollector {
             is_parameter.push(if var.flags & FLAG_IS_FORBIDDEN_LEXICAL != 0 { 1 } else { 0 });
         }
 
-        unsafe {
-            ast_bridge::ast_scope_build_function_scope_data(
-                scope_node,
-                names_data.as_ptr(),
-                name_offsets.as_ptr(),
-                name_lengths.as_ptr(),
-                identifiers.as_ptr(),
-                is_parameter.as_ptr(),
-                identifiers.len(),
-                if has_argument_parameter { 1 } else { 0 },
-            );
-        }
+        ffi::scope_build_function_scope_data(
+            scope_node,
+            &names_data,
+            &name_offsets,
+            &name_lengths,
+            &identifiers,
+            &is_parameter,
+            if has_argument_parameter { 1 } else { 0 },
+        );
     }
 
     /// Annex B function hoisting: in sloppy mode, function declarations inside
@@ -1021,7 +1014,7 @@ impl ScopeCollector {
             if records[idx].is_top_level() {
                 // Reached function/program scope — register the hoisted function.
                 let ast_node = records[idx].ast_node;
-                unsafe { ast_bridge::ast_scope_node_add_hoisted_function(ast_node, func.declaration) };
+                ffi::scope_node_add_hoisted_function(ast_node, func.declaration);
             } else if let Some(parent_idx) = records[idx].parent {
                 // Not yet at top level — keep propagating upward unless blocked.
                 if !records[parent_idx].has_flag(&func.name, FLAG_IS_LEXICAL | FLAG_IS_FUNCTION) {
