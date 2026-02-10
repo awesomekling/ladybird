@@ -725,7 +725,7 @@ impl<'a> Parser<'a> {
             if is_object {
                 if self.allow_member_expressions && is_rest {
                     // Destructuring assignment: rest target can be MemberExpression or Identifier
-                    let expr_start = self.position();
+                    let _expr_start = self.position();
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if self.builder.is_member_expression(expression) {
                         alias = expression;

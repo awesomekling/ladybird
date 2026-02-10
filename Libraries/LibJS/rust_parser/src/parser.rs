@@ -170,6 +170,7 @@ pub struct Parser<'a> {
     pub(crate) allow_super_constructor_call: bool,
     pub(crate) in_function_context: bool,
     pub(crate) initiated_by_eval: bool,
+    #[allow(dead_code)]
     pub(crate) in_eval_function_context: bool,
     pub(crate) in_formal_parameter_context: bool,
     pub(crate) in_generator_function_context: bool,
@@ -298,6 +299,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Consume and re-lex for regex if needed (when `/` or `/=` appears in expression position).
+    #[allow(dead_code)]
     pub(crate) fn consume_and_allow_division(&mut self) -> Token {
         let old = self.current_token.clone();
         self.check_arguments_or_eval(&old);
@@ -326,6 +328,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Consume an identifier token.
+    #[allow(dead_code)]
     pub(crate) fn consume_identifier(&mut self) -> Token {
         if self.match_identifier() {
             return self.consume();
@@ -335,6 +338,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Consume an identifier reference (allows yield/await in some contexts).
+    #[allow(dead_code)]
     pub(crate) fn consume_identifier_reference(&mut self) -> Token {
         if self.match_identifier() {
             return self.consume();
@@ -405,6 +409,7 @@ impl<'a> Parser<'a> {
         self.current_token.offset - self.current_token.trivia_len
     }
 
+    #[allow(dead_code)]
     pub(crate) fn token_span(&self, token: &Token) -> Span {
         Span {
             start_line: token.line_number,
@@ -572,6 +577,7 @@ impl<'a> Parser<'a> {
         true
     }
 
+    #[allow(dead_code)]
     pub(crate) fn match_property_key(&self) -> bool {
         matches!(
             self.current_token_type(),
@@ -599,6 +605,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Extract the trivia of a token as a UTF-16 slice.
+    #[allow(dead_code)]
     pub(crate) fn token_trivia(&self, token: &Token) -> &[u16] {
         let start = token.trivia_start as usize;
         let end = start + token.trivia_len as usize;
