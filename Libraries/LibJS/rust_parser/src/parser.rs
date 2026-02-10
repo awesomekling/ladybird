@@ -833,6 +833,10 @@ impl<'a> Parser<'a> {
             self.parse_module(program);
         }
 
+        if self.program_type == ProgramType::Module && self.scope_collector.contains_await_expression() {
+            self.builder.program_set_has_top_level_await(program);
+        }
+
         self.builder.scope_node_shrink_to_fit(program);
         self.scope_collector.close_scope();
         self.scope_collector.analyze(self.initiated_by_eval);

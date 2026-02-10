@@ -648,6 +648,7 @@ extern "C" {
 
     fn ast_program_append_import(program: NodeHandle, import_stmt: NodeHandle);
     fn ast_program_append_export(program: NodeHandle, export_stmt: NodeHandle);
+    fn ast_program_set_has_top_level_await(program: NodeHandle);
 
     fn ast_get_declaration_export_names(
         declaration: NodeHandle,
@@ -1363,6 +1364,10 @@ impl AstBuilder {
 
     pub fn program_append_export(&self, program: NodeHandle, export_stmt: NodeHandle) {
         unsafe { ast_program_append_export(program, export_stmt) }
+    }
+
+    pub fn program_set_has_top_level_await(&self, program: NodeHandle) {
+        unsafe { ast_program_set_has_top_level_await(program) }
     }
 
     pub fn get_declaration_export_names(&self, declaration: NodeHandle) -> Vec<Vec<u16>> {

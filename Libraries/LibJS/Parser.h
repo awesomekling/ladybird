@@ -55,6 +55,8 @@ public:
 
     NonnullRefPtr<Program> parse_program(bool starts_in_strict_mode = false);
 
+    void set_use_rust_parser() { m_use_rust_parser = true; }
+
     template<typename FunctionNodeType>
     NonnullRefPtr<FunctionNodeType> parse_function_node(u16 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName, Optional<Position> const& function_start = {});
     NonnullRefPtr<FunctionParameters const> parse_formal_parameters(int& function_length, u16 parse_options = 0);
@@ -337,6 +339,7 @@ private:
     Program::Type m_program_type;
     ScopeCollector m_scope_collector;
     ScopeCollector* m_scope_collector_override { nullptr };
+    bool m_use_rust_parser { false };
 };
 
 }

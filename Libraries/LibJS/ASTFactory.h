@@ -23,7 +23,16 @@ class SourceCode;
 
 // High-level entry point: parse a script/module using the Rust parser.
 // Sets out_has_errors to true if the Rust parser detected syntax errors.
-NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode, bool& out_has_errors);
+NonnullRefPtr<Program> rust_parse(
+    NonnullRefPtr<SourceCode const> source_code,
+    Program::Type program_type,
+    bool starts_in_strict_mode,
+    bool initiated_by_eval,
+    bool in_eval_function_context,
+    bool allow_super_property_lookup,
+    bool allow_super_constructor_call,
+    bool in_class_field_initializer,
+    bool& out_has_errors);
 }
 
 extern "C" {
@@ -563,6 +572,9 @@ void ast_export_statement_add_attribute(ASTNodeHandle export_stmt,
 // Append import/export to program (registers in both statement list and import/export list).
 void ast_program_append_import(ASTNodeHandle program, ASTNodeHandle import_stmt);
 void ast_program_append_export(ASTNodeHandle program, ASTNodeHandle export_stmt);
+
+// Mark a program as having top-level await (for modules).
+void ast_program_set_has_top_level_await(ASTNodeHandle program);
 
 // Extract bound names from a declaration node for export.
 // For FunctionDeclaration/ClassDeclaration: returns 1 name.

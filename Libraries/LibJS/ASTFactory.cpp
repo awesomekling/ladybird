@@ -1537,6 +1537,11 @@ void ast_program_append_export(ASTNodeHandle program, ASTNodeHandle export_stmt)
     prog.append_export(as_ref<ExportStatement>(export_stmt));
 }
 
+void ast_program_set_has_top_level_await(ASTNodeHandle program)
+{
+    static_cast<Program&>(*static_cast<ASTNode*>(program)).set_has_top_level_await();
+}
+
 // Buffers for converting Utf16FlyString names to u16 slices for FFI.
 // These are used by the export name extraction functions.
 static thread_local Vector<Vector<u16>> s_name_buffers;
@@ -1640,11 +1645,25 @@ extern "C" ASTNodeHandle rust_parse_program(
     void const* source_code,
     u8 program_type,
     bool starts_in_strict_mode,
+    bool initiated_by_eval,
+    bool in_eval_function_context,
+    bool allow_super_property_lookup,
+    bool allow_super_constructor_call,
+    bool in_class_field_initializer,
     bool* out_has_errors);
 
 namespace JS {
 
-NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, Program::Type program_type, bool starts_in_strict_mode, bool& out_has_errors)
+NonnullRefPtr<Program> rust_parse(
+    NonnullRefPtr<SourceCode const> source_code,
+    Program::Type program_type,
+    bool starts_in_strict_mode,
+    bool initiated_by_eval,
+    bool in_eval_function_context,
+    bool allow_super_property_lookup,
+    bool allow_super_constructor_call,
+    bool in_class_field_initializer,
+    bool& out_has_errors)
 {
     auto const& code_view = source_code->code_view();
     auto length = code_view.length_in_code_units();
@@ -1661,10 +1680,14 @@ NonnullRefPtr<Program> rust_parse(NonnullRefPtr<SourceCode const> source_code, P
         utf16_buf.ensure_capacity(length);
         for (size_t i = 0; i < length; ++i)
             utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-        program = rust_parse_program(utf16_buf.data(), length, source_code.ptr(), pt, starts_in_strict_mode, &out_has_errors);
+        program = rust_parse_program(utf16_buf.data(), length, source_code.ptr(), pt, starts_in_strict_mode,
+            initiated_by_eval, in_eval_function_context, allow_super_property_lookup,
+            allow_super_constructor_call, in_class_field_initializer, &out_has_errors);
     } else {
         auto utf16 = code_view.utf16_span();
-        program = rust_parse_program(reinterpret_cast<u16 const*>(utf16.data()), length, source_code.ptr(), pt, starts_in_strict_mode, &out_has_errors);
+        program = rust_parse_program(reinterpret_cast<u16 const*>(utf16.data()), length, source_code.ptr(), pt, starts_in_strict_mode,
+            initiated_by_eval, in_eval_function_context, allow_super_property_lookup,
+            allow_super_constructor_call, in_class_field_initializer, &out_has_errors);
     }
 
     // The Rust side added an extra ref before dropping the arena.

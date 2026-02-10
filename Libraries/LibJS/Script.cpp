@@ -13,11 +13,6 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Script.h>
 
-#ifdef ENABLE_RUST_PARSER
-#    include <LibJS/ASTFactory.h>
-#    include <stdlib.h>
-#endif
-
 namespace JS {
 
 GC_DEFINE_ALLOCATOR(Script);
@@ -25,20 +20,9 @@ GC_DEFINE_ALLOCATOR(Script);
 // 16.1.5 ParseScript ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parse-script
 Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_text, Realm& realm, StringView filename, HostDefined* host_defined, size_t line_number_offset)
 {
-#ifdef ENABLE_RUST_PARSER
-    static bool const use_rust_parser = !getenv("USE_CPP_PARSER");
-    if (use_rust_parser) {
-        (void)line_number_offset;
-        auto source_code = SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text));
-        bool has_errors = false;
-        auto script = rust_parse(source_code, Program::Type::Script, false, has_errors);
-        if (!has_errors)
-            return realm.heap().allocate<Script>(realm, filename, move(script), host_defined);
-        // Fall through to C++ parser for proper error reporting.
-    }
-#endif
     // 1. Let script be ParseText(sourceText, Script).
     auto parser = Parser(Lexer(SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text)), line_number_offset));
+    parser.set_use_rust_parser();
     auto script = parser.parse_program();
 
     // 2. If script is a List of errors, return body.

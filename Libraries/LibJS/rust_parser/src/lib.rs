@@ -126,6 +126,11 @@ pub unsafe extern "C" fn rust_parse_program(
     source_code: *const c_void,
     program_type: u8,
     starts_in_strict_mode: bool,
+    initiated_by_eval: bool,
+    in_eval_function_context: bool,
+    allow_super_property_lookup: bool,
+    allow_super_constructor_call: bool,
+    in_class_field_initializer: bool,
     out_has_errors: *mut bool,
 ) -> NodeHandle {
     let source_slice = std::slice::from_raw_parts(source, source_len);
@@ -135,6 +140,13 @@ pub unsafe extern "C" fn rust_parse_program(
         ProgramType::Script
     };
     let mut parser = Parser::new(source_slice, source_code, pt);
+    if initiated_by_eval {
+        parser.initiated_by_eval = true;
+        parser.in_eval_function_context = in_eval_function_context;
+        parser.allow_super_property_lookup = allow_super_property_lookup;
+        parser.allow_super_constructor_call = allow_super_constructor_call;
+        parser.in_class_field_initializer = in_class_field_initializer;
+    }
     let program = parser.parse_program(starts_in_strict_mode);
     // Add an extra ref so the program node survives arena destruction.
     // The C++ caller adopts this ref.
