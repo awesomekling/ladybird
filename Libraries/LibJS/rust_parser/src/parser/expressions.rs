@@ -304,7 +304,9 @@ impl<'a> Parser<'a> {
                 // Just an identifier "async"
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                (self.builder.create_identifier(self.span_from(start), &value), true)
+                let id = self.builder.create_identifier(self.span_from(start), &value);
+                self.scope_collector.register_identifier(id, &value, None);
+                (id, true)
             }
 
             TokenType::TemplateLiteralStart => {
