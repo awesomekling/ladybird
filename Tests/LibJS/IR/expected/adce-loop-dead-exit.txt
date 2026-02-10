@@ -1,266 +1,276 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 3
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 3
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 3
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 3
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block1
 block1:
-    v29:number = Phi [block0:v6:int32, block9:v13:number]
-    v27:unknown = Phi [block0:v30:undefined, block9:v9:number]
-    v26:unknown = Phi [block0:v31:undefined, block9:v8:unknown]
-    v25:unknown = Phi [block0:v32:undefined, block9:v7:unknown]
-    v23:unknown = Phi [block0:v33:undefined, block9:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v7:int32, block9:v14:number]
+    v28:unknown = Phi [block0:v31:undefined, block9:v10:number]
+    v27:unknown = Phi [block0:v32:undefined, block9:v9:unknown]
+    v26:unknown = Phi [block0:v33:undefined, block9:v8:unknown]
+    v24:unknown = Phi [block0:v34:undefined, block9:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
-    v15:number = Add v29:number, 100
+    v16:number = Add v30:number, 100
     Jump block10
 block4:
-    v18:number = Mul v16:number, 2
+    v19:number = Mul v17:number, 2
     Jump block11
 block5:
-    v28:unknown = Phi [block10:v3:undefined, block11:v19:number]
-    v24:unknown = Phi [block10:v23:unknown, block11:v18:number]
-    Return v29:number
+    v29:unknown = Phi [block10:v4:undefined, block11:v20:number]
+    v25:unknown = Phi [block10:v24:unknown, block11:v19:number]
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v9:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v10:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
-    v16:number = Move v15:number
-    v22:boolean = GreaterThan v16:number, 200
-    Branch v22:boolean, block4, block5
+    v17:number = Move v16:number
+    v23:boolean = GreaterThan v17:number, 200
+    Branch v23:boolean, block4, block5
 block4_split5:
-    v19:number = Move v18:number
+    v20:number = Move v19:number
     Jump block5
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block9:v13:number]
-    v27:unknown = Phi [block0:v30:undefined, block9:v9:number]
-    v26:unknown = Phi [block0:v31:undefined, block9:v8:unknown]
-    v25:unknown = Phi [block0:v32:undefined, block9:v7:unknown]
-    v23:unknown = Phi [block0:v33:undefined, block9:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v36:int32, block9:v14:number]
+    v28:unknown = Phi [block0:v31:undefined, block9:v10:number]
+    v27:unknown = Phi [block0:v32:undefined, block9:v9:unknown]
+    v26:unknown = Phi [block0:v33:undefined, block9:v8:unknown]
+    v24:unknown = Phi [block0:v34:undefined, block9:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
-    v15:number = Add v29:number, 100
+    v16:number = Add v30:number, 100
     Jump block10
 block4:
-    v18:number = Mul v16:number, 2
+    v19:number = Mul v17:number, 2
     Jump block11
 block5:
-    v28:unknown = Phi [block10:v34:undefined, block11:v19:number]
-    v24:unknown = Phi [block10:v23:unknown, block11:v18:number]
-    Return v29:number
+    v29:unknown = Phi [block10:v35:undefined, block11:v20:number]
+    v25:unknown = Phi [block10:v24:unknown, block11:v19:number]
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v9:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v10:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
-    v16:number = Move v15:number
-    v22:boolean = GreaterThan v16:number, 200
-    Branch v22:boolean, block4, block5
+    v17:number = Move v16:number
+    v23:boolean = GreaterThan v17:number, 200
+    Branch v23:boolean, block4, block5
 block4_split5:
-    v19:number = Move v18:number
+    v20:number = Move v19:number
     Jump block5
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block9:v13:number]
-    v27:unknown = Phi [block0:v30:undefined, block9:v9:number]
-    v26:unknown = Phi [block0:v31:undefined, block9:v8:unknown]
-    v25:unknown = Phi [block0:v32:undefined, block9:v7:unknown]
-    v23:unknown = Phi [block0:v33:undefined, block9:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v36:int32, block9:v14:number]
+    v28:unknown = Phi [block0:v31:undefined, block9:v10:number]
+    v27:unknown = Phi [block0:v32:undefined, block9:v9:unknown]
+    v26:unknown = Phi [block0:v33:undefined, block9:v8:unknown]
+    v24:unknown = Phi [block0:v34:undefined, block9:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
-    v15:number = Add v29:number, 100
+    v16:number = Add v30:number, 100
     Jump block10
 block4:
-    v18:number = Mul v16:number, 2
+    v19:number = Mul v17:number, 2
     Jump block11
 block5:
-    v28:unknown = Phi [block10:v34:undefined, block11:v19:number]
-    v24:unknown = Phi [block10:v23:unknown, block11:v18:number]
-    Return v29:number
+    v29:unknown = Phi [block10:v35:undefined, block11:v20:number]
+    v25:unknown = Phi [block10:v24:unknown, block11:v19:number]
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v9:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v10:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
-    v16:number = Move v15:number
-    v22:boolean = GreaterThan v16:number, 200
-    Branch v22:boolean, block4, block5
+    v17:number = Move v16:number
+    v23:boolean = GreaterThan v17:number, 200
+    Branch v23:boolean, block4, block5
 block4_split5:
-    v19:number = Move v18:number
+    v20:number = Move v19:number
     Jump block5
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block9:v13:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v36:int32, block9:v14:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
-    v15:number = Add v29:number, 100
+    v16:number = Add v30:number, 100
     Jump block10
 block4:
     Jump block11
 block5:
-    Return v29:number
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v9:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v10:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
-    v16:number = Move v15:number
-    v22:boolean = GreaterThan v16:number, 200
-    Branch v22:boolean, block4, block5
+    v17:number = Move v16:number
+    v23:boolean = GreaterThan v17:number, 200
+    Branch v23:boolean, block4, block5
 block4_split5:
     Jump block5
 
 === After AggressiveDeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block9:v13:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v36:int32, block9:v14:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
     Jump block10
 block4:
     Jump block11
 block5:
-    Return v29:number
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v9:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v10:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
     Jump block5
@@ -270,32 +280,33 @@ block4_split5:
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block9:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block3
+    v30:number = Phi [block0:v36:int32, block9:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block3
 block2:
-    v7:unknown = GetGlobal console
+    v8:unknown = GetGlobal console
     Jump block6
 block3:
     Jump block10
 block4:
     Jump block11
 block5:
-    Return v29:number
+    Return v30:number
 block2_split0:
-    v8:unknown = GetById v7:unknown.log
+    v9:unknown = GetById v8:unknown.log
     Jump block7
 block2_split1:
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
     Jump block8
 block2_split2:
-    v12:number = Add v29:number, 1
+    v13:number = Add v30:number, 1
     Jump block9
 block2_split3:
-    v13:number = Move v12:number
+    v14:number = Move v13:number
     Jump block1
 block3_split4:
     Jump block5
@@ -305,89 +316,94 @@ block4_split5:
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block2:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block5
+    v30:number = Phi [block0:v36:int32, block2:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block5
 block2:
-    v7:unknown = GetGlobal console
-    v8:unknown = GetById v7:unknown.log
-    v9:number = Move v29:number
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
-    v12:number = Add v29:number, 1
-    v13:number = Move v12:number
+    v8:unknown = GetGlobal console
+    v9:unknown = GetById v8:unknown.log
+    v10:number = Move v30:number
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
+    v13:number = Add v30:number, 1
+    v14:number = Move v13:number
     Jump block1
 block5:
-    Return v29:number
+    Return v30:number
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v29:number = Phi [block0:v35:int32, block2:v12:number]
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block5
+    v30:number = Phi [block0:v36:int32, block2:v13:number]
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block5
 block2:
-    v7:unknown = GetGlobal console
-    v8:unknown = GetById v7:unknown.log
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
-    v12:number = Add v29:number, 1
+    v8:unknown = GetGlobal console
+    v9:unknown = GetById v8:unknown.log
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
+    v13:number = Add v30:number, 1
     Jump block1
 block5:
-    Return v29:number
+    Return v30:number
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v29:number <- v35:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32]
     Jump block1
 block1:
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block5
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block5
 block2:
-    v7:unknown = GetGlobal console
-    v8:unknown = GetById v7:unknown.log
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
-    v12:number = Add v29:number, 1
-    ParallelCopy [v29:number <- v12:number]
+    v8:unknown = GetGlobal console
+    v9:unknown = GetById v8:unknown.log
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
+    v13:number = Add v30:number, 1
+    ParallelCopy [v30:number <- v13:number]
     Jump block1
 block5:
-    Return v29:number
+    Return v30:number
 
 === After CopyCoalescing ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v29:number <- v35:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32]
     Jump block1
 block1:
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block5
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block5
 block2:
-    v7:unknown = GetGlobal console
-    v8:unknown = GetById v7:unknown.log
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
-    v12:number = Add v29:number, 1
+    v8:unknown = GetGlobal console
+    v9:unknown = GetById v8:unknown.log
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
+    v13:number = Add v30:number, 1
     Jump block1
 block5:
-    Return v29:number
+    Return v30:number
 
 function(v0:unknown):
 block0:
-    ParallelCopy [v29:number <- v35:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32]
     Jump block1
 block1:
-    v20:boolean = LessThan v29:number, v0:unknown
-    Branch v20:boolean, block2, block5
+    v21:boolean = LessThan v30:number, v0:unknown
+    Branch v21:boolean, block2, block5
 block2:
-    v7:unknown = GetGlobal console
-    v8:unknown = GetById v7:unknown.log
-    v10:unknown = Call v8:unknown, v7:unknown, v29:number
-    v12:number = Add v29:number, 1
+    v8:unknown = GetGlobal console
+    v9:unknown = GetById v8:unknown.log
+    v11:unknown = Call v9:unknown, v8:unknown, v30:number
+    v13:number = Add v30:number, 1
     Jump block1
 block5:
-    Return v29:number
+    Return v30:number
 
 0
 1

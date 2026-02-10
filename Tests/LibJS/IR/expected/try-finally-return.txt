@@ -1,130 +1,147 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    EnterUnwindContext block3
-block1:
-    LeaveUnwindContext
-    v3:int32 = Move 1
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    Jump block3
 block2:
-    End undefined
+    v6:int32 = Move 1
+    v12:boolean = StrictlyEquals v10:int32, 0
+    Branch v12:boolean, block4, block5
 block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    Jump block1
+    v8:int32 = Move 42
+    v10:int32 = Move 2
+    Jump block2
+block4:
+    End undefined
+block5:
+    v13:boolean = StrictlyEquals v10:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v8:int32
+block7:
+    Throw v8:int32
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    EnterUnwindContext block3
-block1:
-    LeaveUnwindContext
-    v3:int32 = Move 1
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    Jump block3
 block2:
-    End undefined
+    v6:int32 = Move 1
+    v12:boolean = StrictlyEquals 2, 0
+    Jump block5
 block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    Jump block1
+    v8:int32 = Move 42
+    v10:int32 = Move 2
+    Jump block2
+block5:
+    v13:boolean = StrictlyEquals 2, 2
+    Jump block6
+block6:
+    Return 42
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    EnterUnwindContext block3
-block1:
-    LeaveUnwindContext
-    v3:int32 = Move 1
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    Jump block3
 block2:
-    End undefined
+    v6:int32 = Move 1
+    v12:boolean = StrictlyEquals 2, 0
+    Jump block5
 block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    Jump block1
+    v8:int32 = Move 42
+    v10:int32 = Move 2
+    Jump block2
+block5:
+    v13:boolean = StrictlyEquals 2, 2
+    Jump block6
+block6:
+    Return 42
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block3
-block1:
-    LeaveUnwindContext
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block2:
-    End undefined
+    Jump block5
 block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    Jump block1
+    Jump block2
+block5:
+    Jump block6
+block6:
+    Return 42
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block3
-block2:
-    End undefined
-block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    LeaveUnwindContext
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    Jump block6
+block6:
+    Return 42
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return 42
 
 function():
 block0:
-    EnterUnwindContext block3
-block2:
-    End undefined
-block3:
-    SetSavedReturnValue 42
-    SetException v5:unknown
-    LeaveUnwindContext
-    ContinuePendingUnwind block2
+    v0:unknown = GetLexicalEnvironment
+    Return 42

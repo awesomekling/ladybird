@@ -1,250 +1,268 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal f1
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
     Jump block5
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
+    v8:unknown = GetGlobal f2
     Jump block7
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
-    End v11:undefined
+    End v12:undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block6
 block0_split1:
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    v5:undefined = Move undefined
-    Branch v4:boolean, block1, block2
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
 block2_split2:
-    v8:unknown = Call v7:unknown, undefined
+    v9:unknown = Call v8:unknown, undefined
     Jump block8
 block2_split3:
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    v11:undefined = Move undefined
-    Branch v10:boolean, block3, block4
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    v12:undefined = Move undefined
+    Branch v11:boolean, block3, block4
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal f1
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
     Jump block5
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
+    v8:unknown = GetGlobal f2
     Jump block7
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block6
 block0_split1:
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    v5:undefined = Move undefined
-    Branch v4:boolean, block1, block2
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
 block2_split2:
-    v8:unknown = Call v7:unknown, undefined
+    v9:unknown = Call v8:unknown, undefined
     Jump block8
 block2_split3:
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    v11:undefined = Move undefined
-    Branch v10:boolean, block3, block4
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    v12:undefined = Move undefined
+    Branch v11:boolean, block3, block4
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal f1
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
     Jump block5
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
+    v8:unknown = GetGlobal f2
     Jump block7
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block6
 block0_split1:
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    v5:undefined = Move undefined
-    Branch v4:boolean, block1, block2
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    v6:undefined = Move undefined
+    Branch v5:boolean, block1, block2
 block2_split2:
-    v8:unknown = Call v7:unknown, undefined
+    v9:unknown = Call v8:unknown, undefined
     Jump block8
 block2_split3:
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    v11:undefined = Move undefined
-    Branch v10:boolean, block3, block4
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    v12:undefined = Move undefined
+    Branch v11:boolean, block3, block4
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:unknown = GetGlobal f1
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
     Jump block5
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
+    v8:unknown = GetGlobal f2
     Jump block7
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block6
 block0_split1:
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    Branch v4:boolean, block1, block2
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    Branch v5:boolean, block1, block2
 block2_split2:
-    v8:unknown = Call v7:unknown, undefined
+    v9:unknown = Call v8:unknown, undefined
     Jump block8
 block2_split3:
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    Branch v10:boolean, block3, block4
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    Branch v11:boolean, block3, block4
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal f1
-    v2:unknown = Call v0:unknown, undefined
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    Branch v4:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
+    v3:unknown = Call v1:unknown, undefined
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    Branch v5:boolean, block1, block2
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
-    v8:unknown = Call v7:unknown, undefined
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    Branch v10:boolean, block3, block4
+    v8:unknown = GetGlobal f2
+    v9:unknown = Call v8:unknown, undefined
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    Branch v11:boolean, block3, block4
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
     End undefined
 
 function():
 block0:
-    v0:unknown = GetGlobal f1
-    v2:unknown = Call v0:unknown, undefined
-    v4:boolean = StrictlyInequals v2:unknown, 42
-    Branch v4:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f1
+    v3:unknown = Call v1:unknown, undefined
+    v5:boolean = StrictlyInequals v3:unknown, 42
+    Branch v5:boolean, block1, block2
 block1:
-    Throw v6:string
+    Throw v7:string
 block2:
-    v7:unknown = GetGlobal f2
-    v8:unknown = Call v7:unknown, undefined
-    v10:boolean = StrictlyInequals v8:unknown, 2
-    Branch v10:boolean, block3, block4
+    v8:unknown = GetGlobal f2
+    v9:unknown = Call v8:unknown, undefined
+    v11:boolean = StrictlyInequals v9:unknown, 2
+    Branch v11:boolean, block3, block4
 block3:
-    Throw v12:string
+    Throw v13:string
 block4:
     End undefined
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v2:int32 = Move 42
-    Return v2:int32
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v3:int32 = Move 42
+    Return v3:int32
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v2:int32 = Move 42
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v3:int32 = Move 42
     Return 42
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v2:int32 = Move 42
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v3:int32 = Move 42
     Return 42
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
     Return 42
 
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
     Return 42
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v4:array = Move v3:array
-    v5:unknown = GetLength v4:array
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v5:array = Move v4:array
+    v6:unknown = GetLength v5:array
     Jump block1
 block0_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v4:array = Move v3:array
-    v5:unknown = GetLength v4:array
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v5:array = Move v4:array
+    v6:unknown = GetLength v5:array
     Jump block1
 block0_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v4:array = Move v3:array
-    v5:unknown = GetLength v4:array
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v5:array = Move v4:array
+    v6:unknown = GetLength v5:array
     Jump block1
 block0_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === After CopyPropagation ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v4:array = Move v3:array
-    v5:unknown = GetLength v3:array
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v5:array = Move v4:array
+    v6:unknown = GetLength v4:array
     Jump block1
 block0_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v4:array = Move v3:array
-    v5:unknown = GetLength v3:array
-    Return v5:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v5:array = Move v4:array
+    v6:unknown = GetLength v4:array
+    Return v6:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v5:unknown = GetLength v3:array
-    Return v5:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v6:unknown = GetLength v4:array
+    Return v6:unknown
 
 function():
 block0:
-    v0:unknown = CreateArguments kind:mapped, immutable:false
-    v3:array = NewArray 1, 2
-    v5:unknown = GetLength v3:array
-    Return v5:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateArguments kind:mapped, immutable:false
+    v4:array = NewArray 1, 2
+    v6:unknown = GetLength v4:array
+    Return v6:unknown

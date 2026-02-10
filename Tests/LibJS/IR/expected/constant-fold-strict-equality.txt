@@ -1,53 +1,58 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -59,29 +64,30 @@ block0:
     v10:undefined = Move undefined
     v11:undefined = Move undefined
     v12:undefined = Move undefined
-    v14:number = Move 1.5
-    v16:number = Move 1.5
-    v17:boolean = StrictlyEquals v14:number, v16:number
-    v18:boolean = Move v17:boolean
-    v20:int32 = Move 1
+    v13:undefined = Move undefined
+    v15:number = Move 1.5
+    v17:number = Move 1.5
+    v18:boolean = StrictlyEquals v15:number, v17:number
+    v19:boolean = Move v18:boolean
     v21:int32 = Move 1
-    v22:boolean = StrictlyEquals v20:int32, v21:int32
-    v23:boolean = Move v22:boolean
-    v25:null = Move null
+    v22:int32 = Move 1
+    v23:boolean = StrictlyEquals v21:int32, v22:int32
+    v24:boolean = Move v23:boolean
     v26:null = Move null
-    v27:boolean = StrictlyEquals v25:null, v26:null
-    v28:boolean = Move v27:boolean
-    v29:undefined = Move undefined
-    v30:boolean = StrictlyEquals v29:undefined, v29:undefined
-    v31:boolean = Move v30:boolean
-    v32:boolean = StrictlyInequals v25:null, v29:undefined
-    v33:boolean = Move v32:boolean
-    Return v18:boolean
+    v27:null = Move null
+    v28:boolean = StrictlyEquals v26:null, v27:null
+    v29:boolean = Move v28:boolean
+    v30:undefined = Move undefined
+    v31:boolean = StrictlyEquals v30:undefined, v30:undefined
+    v32:boolean = Move v31:boolean
+    v33:boolean = StrictlyInequals v26:null, v30:undefined
+    v34:boolean = Move v33:boolean
+    Return v19:boolean
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -93,29 +99,30 @@ block0:
     v10:undefined = Move undefined
     v11:undefined = Move undefined
     v12:undefined = Move undefined
-    v14:number = Move 1.5
-    v16:number = Move 1.5
-    v17:boolean = StrictlyEquals 1.5, 1.5
-    v18:boolean = Move true
-    v20:int32 = Move 1
+    v13:undefined = Move undefined
+    v15:number = Move 1.5
+    v17:number = Move 1.5
+    v18:boolean = StrictlyEquals 1.5, 1.5
+    v19:boolean = Move true
     v21:int32 = Move 1
-    v22:boolean = StrictlyEquals 1, 1
-    v23:boolean = Move true
-    v25:null = Move null
+    v22:int32 = Move 1
+    v23:boolean = StrictlyEquals 1, 1
+    v24:boolean = Move true
     v26:null = Move null
-    v27:boolean = StrictlyEquals null, null
-    v28:boolean = Move true
-    v29:undefined = Move undefined
-    v30:boolean = StrictlyEquals undefined, undefined
-    v31:boolean = Move true
-    v32:boolean = StrictlyInequals null, undefined
-    v33:boolean = Move true
+    v27:null = Move null
+    v28:boolean = StrictlyEquals null, null
+    v29:boolean = Move true
+    v30:undefined = Move undefined
+    v31:boolean = StrictlyEquals undefined, undefined
+    v32:boolean = Move true
+    v33:boolean = StrictlyInequals null, undefined
+    v34:boolean = Move true
     Return true
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -127,30 +134,33 @@ block0:
     v10:undefined = Move undefined
     v11:undefined = Move undefined
     v12:undefined = Move undefined
-    v14:number = Move 1.5
-    v16:number = Move 1.5
-    v17:boolean = StrictlyEquals 1.5, 1.5
-    v18:boolean = Move true
-    v20:int32 = Move 1
+    v13:undefined = Move undefined
+    v15:number = Move 1.5
+    v17:number = Move 1.5
+    v18:boolean = StrictlyEquals 1.5, 1.5
+    v19:boolean = Move true
     v21:int32 = Move 1
-    v22:boolean = StrictlyEquals 1, 1
-    v23:boolean = Move true
-    v25:null = Move null
+    v22:int32 = Move 1
+    v23:boolean = StrictlyEquals 1, 1
+    v24:boolean = Move true
     v26:null = Move null
-    v27:boolean = StrictlyEquals null, null
-    v28:boolean = Move true
-    v29:undefined = Move undefined
-    v30:boolean = StrictlyEquals undefined, undefined
-    v31:boolean = Move true
-    v32:boolean = StrictlyInequals null, undefined
-    v33:boolean = Move true
+    v27:null = Move null
+    v28:boolean = StrictlyEquals null, null
+    v29:boolean = Move true
+    v30:undefined = Move undefined
+    v31:boolean = StrictlyEquals undefined, undefined
+    v32:boolean = Move true
+    v33:boolean = StrictlyInequals null, undefined
+    v34:boolean = Move true
     Return true
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true

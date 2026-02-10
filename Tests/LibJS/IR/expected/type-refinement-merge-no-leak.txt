@@ -1,540 +1,556 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block5
 block1:
-    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal Error
     Jump block9
 block2:
-    v12:unknown = GetGlobal go
+    v13:unknown = GetGlobal go
     Jump block13
 block3:
-    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal Error
     Jump block17
 block4:
-    End v18:undefined
+    End v19:undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined, undefined
+    v3:unknown = Call v1:unknown, undefined, undefined
     Jump block6
 block0_split1:
-    SetGlobal result v2:unknown
+    SetGlobal result v3:unknown
     Jump block7
 block0_split2:
-    v3:unknown = GetGlobal result
+    v4:unknown = GetGlobal result
     Jump block8
 block0_split3:
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    v6:undefined = Move undefined
-    Branch v5:boolean, block1, block2
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    v7:undefined = Move undefined
+    Branch v6:boolean, block1, block2
 block1_split4:
-    v8:unknown = GetGlobal result
+    v9:unknown = GetGlobal result
     Jump block10
 block1_split5:
-    v10:unknown = Add v9:string, v8:unknown
+    v11:unknown = Add v10:string, v9:unknown
     Jump block11
 block1_split6:
-    v11:object = Construct v7:unknown, v10:unknown
+    v12:object = Construct v8:unknown, v11:unknown
     Jump block12
 block1_split7:
-    Throw v11:object
+    Throw v12:object
 block2_split8:
-    v14:unknown = Call v12:unknown, undefined, 42
+    v15:unknown = Call v13:unknown, undefined, 42
     Jump block14
 block2_split9:
-    SetGlobal result v14:unknown
+    SetGlobal result v15:unknown
     Jump block15
 block2_split10:
-    v15:unknown = GetGlobal result
+    v16:unknown = GetGlobal result
     Jump block16
 block2_split11:
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    v18:undefined = Move undefined
-    Branch v17:boolean, block3, block4
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    v19:undefined = Move undefined
+    Branch v18:boolean, block3, block4
 block3_split12:
-    v20:unknown = GetGlobal result
+    v21:unknown = GetGlobal result
     Jump block18
 block3_split13:
-    v22:unknown = Add v21:string, v20:unknown
+    v23:unknown = Add v22:string, v21:unknown
     Jump block19
 block3_split14:
-    v23:object = Construct v19:unknown, v22:unknown
+    v24:object = Construct v20:unknown, v23:unknown
     Jump block20
 block3_split15:
-    Throw v23:object
+    Throw v24:object
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block5
 block1:
-    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal Error
     Jump block9
 block2:
-    v12:unknown = GetGlobal go
+    v13:unknown = GetGlobal go
     Jump block13
 block3:
-    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal Error
     Jump block17
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined, undefined
+    v3:unknown = Call v1:unknown, undefined, undefined
     Jump block6
 block0_split1:
-    SetGlobal result v2:unknown
+    SetGlobal result v3:unknown
     Jump block7
 block0_split2:
-    v3:unknown = GetGlobal result
+    v4:unknown = GetGlobal result
     Jump block8
 block0_split3:
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    v6:undefined = Move undefined
-    Branch v5:boolean, block1, block2
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    v7:undefined = Move undefined
+    Branch v6:boolean, block1, block2
 block1_split4:
-    v8:unknown = GetGlobal result
+    v9:unknown = GetGlobal result
     Jump block10
 block1_split5:
-    v10:unknown = Add v9:string, v8:unknown
+    v11:unknown = Add v10:string, v9:unknown
     Jump block11
 block1_split6:
-    v11:object = Construct v7:unknown, v10:unknown
+    v12:object = Construct v8:unknown, v11:unknown
     Jump block12
 block1_split7:
-    Throw v11:object
+    Throw v12:object
 block2_split8:
-    v14:unknown = Call v12:unknown, undefined, 42
+    v15:unknown = Call v13:unknown, undefined, 42
     Jump block14
 block2_split9:
-    SetGlobal result v14:unknown
+    SetGlobal result v15:unknown
     Jump block15
 block2_split10:
-    v15:unknown = GetGlobal result
+    v16:unknown = GetGlobal result
     Jump block16
 block2_split11:
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    v18:undefined = Move undefined
-    Branch v17:boolean, block3, block4
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    v19:undefined = Move undefined
+    Branch v18:boolean, block3, block4
 block3_split12:
-    v20:unknown = GetGlobal result
+    v21:unknown = GetGlobal result
     Jump block18
 block3_split13:
-    v22:unknown = Add v21:string, v20:unknown
+    v23:unknown = Add v22:string, v21:unknown
     Jump block19
 block3_split14:
-    v23:object = Construct v19:unknown, v22:unknown
+    v24:object = Construct v20:unknown, v23:unknown
     Jump block20
 block3_split15:
-    Throw v23:object
+    Throw v24:object
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block5
 block1:
-    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal Error
     Jump block9
 block2:
-    v12:unknown = GetGlobal go
+    v13:unknown = GetGlobal go
     Jump block13
 block3:
-    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal Error
     Jump block17
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined, undefined
+    v3:unknown = Call v1:unknown, undefined, undefined
     Jump block6
 block0_split1:
-    SetGlobal result v2:unknown
+    SetGlobal result v3:unknown
     Jump block7
 block0_split2:
-    v3:unknown = GetGlobal result
+    v4:unknown = GetGlobal result
     Jump block8
 block0_split3:
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    v6:undefined = Move undefined
-    Branch v5:boolean, block1, block2
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    v7:undefined = Move undefined
+    Branch v6:boolean, block1, block2
 block1_split4:
-    v8:unknown = GetGlobal result
+    v9:unknown = GetGlobal result
     Jump block10
 block1_split5:
-    v10:unknown = Add v9:string, v8:unknown
+    v11:unknown = Add v10:string, v9:unknown
     Jump block11
 block1_split6:
-    v11:object = Construct v7:unknown, v10:unknown
+    v12:object = Construct v8:unknown, v11:unknown
     Jump block12
 block1_split7:
-    Throw v11:object
+    Throw v12:object
 block2_split8:
-    v14:unknown = Call v12:unknown, undefined, 42
+    v15:unknown = Call v13:unknown, undefined, 42
     Jump block14
 block2_split9:
-    SetGlobal result v14:unknown
+    SetGlobal result v15:unknown
     Jump block15
 block2_split10:
-    v15:unknown = GetGlobal result
+    v16:unknown = GetGlobal result
     Jump block16
 block2_split11:
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    v18:undefined = Move undefined
-    Branch v17:boolean, block3, block4
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    v19:undefined = Move undefined
+    Branch v18:boolean, block3, block4
 block3_split12:
-    v20:unknown = GetGlobal result
+    v21:unknown = GetGlobal result
     Jump block18
 block3_split13:
-    v22:unknown = Add v21:string, v20:unknown
+    v23:unknown = Add v22:string, v21:unknown
     Jump block19
 block3_split14:
-    v23:object = Construct v19:unknown, v22:unknown
+    v24:object = Construct v20:unknown, v23:unknown
     Jump block20
 block3_split15:
-    Throw v23:object
+    Throw v24:object
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block5
 block1:
-    v7:unknown = GetGlobal Error
+    v8:unknown = GetGlobal Error
     Jump block9
 block2:
-    v12:unknown = GetGlobal go
+    v13:unknown = GetGlobal go
     Jump block13
 block3:
-    v19:unknown = GetGlobal Error
+    v20:unknown = GetGlobal Error
     Jump block17
 block4:
     End undefined
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined, undefined
+    v3:unknown = Call v1:unknown, undefined, undefined
     Jump block6
 block0_split1:
-    SetGlobal result v2:unknown
+    SetGlobal result v3:unknown
     Jump block7
 block0_split2:
-    v3:unknown = GetGlobal result
+    v4:unknown = GetGlobal result
     Jump block8
 block0_split3:
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    Branch v5:boolean, block1, block2
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    Branch v6:boolean, block1, block2
 block1_split4:
-    v8:unknown = GetGlobal result
+    v9:unknown = GetGlobal result
     Jump block10
 block1_split5:
-    v10:unknown = Add v9:string, v8:unknown
+    v11:unknown = Add v10:string, v9:unknown
     Jump block11
 block1_split6:
-    v11:object = Construct v7:unknown, v10:unknown
+    v12:object = Construct v8:unknown, v11:unknown
     Jump block12
 block1_split7:
-    Throw v11:object
+    Throw v12:object
 block2_split8:
-    v14:unknown = Call v12:unknown, undefined, 42
+    v15:unknown = Call v13:unknown, undefined, 42
     Jump block14
 block2_split9:
-    SetGlobal result v14:unknown
+    SetGlobal result v15:unknown
     Jump block15
 block2_split10:
-    v15:unknown = GetGlobal result
+    v16:unknown = GetGlobal result
     Jump block16
 block2_split11:
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    Branch v17:boolean, block3, block4
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    Branch v18:boolean, block3, block4
 block3_split12:
-    v20:unknown = GetGlobal result
+    v21:unknown = GetGlobal result
     Jump block18
 block3_split13:
-    v22:unknown = Add v21:string, v20:unknown
+    v23:unknown = Add v22:string, v21:unknown
     Jump block19
 block3_split14:
-    v23:object = Construct v19:unknown, v22:unknown
+    v24:object = Construct v20:unknown, v23:unknown
     Jump block20
 block3_split15:
-    Throw v23:object
+    Throw v24:object
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined, undefined
-    SetGlobal result v2:unknown
-    v3:unknown = GetGlobal result
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    Branch v5:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined, undefined
+    SetGlobal result v3:unknown
+    v4:unknown = GetGlobal result
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    Branch v6:boolean, block1, block2
 block1:
-    v7:unknown = GetGlobal Error
-    v8:unknown = GetGlobal result
-    v10:unknown = Add v9:string, v8:unknown
-    v11:object = Construct v7:unknown, v10:unknown
-    Throw v11:object
+    v8:unknown = GetGlobal Error
+    v9:unknown = GetGlobal result
+    v11:unknown = Add v10:string, v9:unknown
+    v12:object = Construct v8:unknown, v11:unknown
+    Throw v12:object
 block2:
-    v12:unknown = GetGlobal go
-    v14:unknown = Call v12:unknown, undefined, 42
-    SetGlobal result v14:unknown
-    v15:unknown = GetGlobal result
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    Branch v17:boolean, block3, block4
+    v13:unknown = GetGlobal go
+    v15:unknown = Call v13:unknown, undefined, 42
+    SetGlobal result v15:unknown
+    v16:unknown = GetGlobal result
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    Branch v18:boolean, block3, block4
 block3:
-    v19:unknown = GetGlobal Error
-    v20:unknown = GetGlobal result
-    v22:unknown = Add v21:string, v20:unknown
-    v23:object = Construct v19:unknown, v22:unknown
-    Throw v23:object
+    v20:unknown = GetGlobal Error
+    v21:unknown = GetGlobal result
+    v23:unknown = Add v22:string, v21:unknown
+    v24:object = Construct v20:unknown, v23:unknown
+    Throw v24:object
 block4:
     End undefined
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined, undefined
-    SetGlobal result v2:unknown
-    v3:unknown = GetGlobal result
-    v5:boolean = StrictlyInequals v3:unknown, v4:string
-    Branch v5:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined, undefined
+    SetGlobal result v3:unknown
+    v4:unknown = GetGlobal result
+    v6:boolean = StrictlyInequals v4:unknown, v5:string
+    Branch v6:boolean, block1, block2
 block1:
-    v7:unknown = GetGlobal Error
-    v8:unknown = GetGlobal result
-    v10:unknown = Add v9:string, v8:unknown
-    v11:object = Construct v7:unknown, v10:unknown
-    Throw v11:object
+    v8:unknown = GetGlobal Error
+    v9:unknown = GetGlobal result
+    v11:unknown = Add v10:string, v9:unknown
+    v12:object = Construct v8:unknown, v11:unknown
+    Throw v12:object
 block2:
-    v12:unknown = GetGlobal go
-    v14:unknown = Call v12:unknown, undefined, 42
-    SetGlobal result v14:unknown
-    v15:unknown = GetGlobal result
-    v17:boolean = StrictlyInequals v15:unknown, v16:string
-    Branch v17:boolean, block3, block4
+    v13:unknown = GetGlobal go
+    v15:unknown = Call v13:unknown, undefined, 42
+    SetGlobal result v15:unknown
+    v16:unknown = GetGlobal result
+    v18:boolean = StrictlyInequals v16:unknown, v17:string
+    Branch v18:boolean, block3, block4
 block3:
-    v19:unknown = GetGlobal Error
-    v20:unknown = GetGlobal result
-    v22:unknown = Add v21:string, v20:unknown
-    v23:object = Construct v19:unknown, v22:unknown
-    Throw v23:object
+    v20:unknown = GetGlobal Error
+    v21:unknown = GetGlobal result
+    v23:unknown = Add v22:string, v21:unknown
+    v24:object = Construct v20:unknown, v23:unknown
+    Throw v24:object
 block4:
     End undefined
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block1, block2
 block1:
-    v4:string = Move v3:string
+    v5:string = Move v4:string
     Jump block3
 block2:
-    v6:string = Move v5:string
+    v7:string = Move v6:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v4:string, block2:v6:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v12:boolean, block4, block5
+    v14:string = Phi [block1:v5:string, block2:v7:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v13:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
+    v9:unknown = Add v14:string, v8:string
     Jump block6
 block5:
-    v10:unknown = Add v13:string, v9:string
+    v11:unknown = Add v14:string, v10:string
     Jump block7
 block4_split0:
-    Return v8:unknown
+    Return v9:unknown
 block5_split1:
-    Return v10:unknown
+    Return v11:unknown
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block1, block2
 block1:
-    v4:string = Move v3:string
+    v5:string = Move v4:string
     Jump block3
 block2:
-    v6:string = Move v5:string
+    v7:string = Move v6:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v12:boolean, block4, block5
+    v14:string = Phi [block1:v15:string, block2:v16:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v13:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
+    v9:unknown = Add v14:string, v8:string
     Jump block6
 block5:
-    v10:unknown = Add v13:string, v9:string
+    v11:unknown = Add v14:string, v10:string
     Jump block7
 block4_split0:
-    Return v8:unknown
+    Return v9:unknown
 block5_split1:
-    Return v10:unknown
+    Return v11:unknown
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block1, block2
 block1:
-    v4:string = Move v3:string
+    v5:string = Move v4:string
     Jump block3
 block2:
-    v6:string = Move v5:string
+    v7:string = Move v6:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v12:boolean, block4, block5
+    v14:string = Phi [block1:v15:string, block2:v16:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v13:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
+    v9:unknown = Add v14:string, v8:string
     Jump block6
 block5:
-    v10:unknown = Add v13:string, v9:string
+    v11:unknown = Add v14:string, v10:string
     Jump block7
 block4_split0:
-    Return v8:unknown
+    Return v9:unknown
 block5_split1:
-    Return v10:unknown
+    Return v11:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block1, block2
 block1:
     Jump block3
 block2:
     Jump block3
 block3:
-    v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v12:boolean, block4, block5
+    v14:string = Phi [block1:v15:string, block2:v16:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v13:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
+    v9:unknown = Add v14:string, v8:string
     Jump block6
 block5:
-    v10:unknown = Add v13:string, v9:string
+    v11:unknown = Add v14:string, v10:string
     Jump block7
 block4_split0:
-    Return v8:unknown
+    Return v9:unknown
 block5_split1:
-    Return v10:unknown
+    Return v11:unknown
 
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block1, block2
 block1:
     Jump block3
 block2:
     Jump block3
 block3:
-    v13:string = Phi [block1:v14:string, block2:v15:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block4, block5
+    v14:string = Phi [block1:v15:string, block2:v16:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
+    v9:unknown = Add v14:string, v8:string
     Jump block6
 block5:
-    v10:unknown = Add v13:string, v9:string
+    v11:unknown = Add v14:string, v10:string
     Jump block7
 block4_split0:
-    Return v8:unknown
+    Return v9:unknown
 block5_split1:
-    Return v10:unknown
+    Return v11:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block3, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block3, block2
 block2:
     Jump block3
 block3:
-    v13:string = Phi [block2:v15:string, block0:v14:string]
-    v12:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block4, block5
+    v14:string = Phi [block2:v16:string, block0:v15:string]
+    v13:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
-    Return v8:unknown
+    v9:unknown = Add v14:string, v8:string
+    Return v9:unknown
 block5:
-    v10:unknown = Add v13:string, v9:string
-    Return v10:unknown
+    v11:unknown = Add v14:string, v10:string
+    Return v11:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block3, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block3, block2
 block2:
     Jump block3
 block3:
-    v13:string = Phi [block2:v15:string, block0:v14:string]
-    Branch v11:boolean, block4, block5
+    v14:string = Phi [block2:v16:string, block0:v15:string]
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
-    Return v8:unknown
+    v9:unknown = Add v14:string, v8:string
+    Return v9:unknown
 block5:
-    v10:unknown = Add v13:string, v9:string
-    Return v10:unknown
+    v11:unknown = Add v14:string, v10:string
+    Return v11:unknown
 
 === After SplitCriticalEdges ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block8, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block8, block2
 block2:
     Jump block3
 block3:
-    v13:string = Phi [block2:v15:string, block8:v14:string]
-    Branch v11:boolean, block4, block5
+    v14:string = Phi [block2:v16:string, block8:v15:string]
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
-    Return v8:unknown
+    v9:unknown = Add v14:string, v8:string
+    Return v9:unknown
 block5:
-    v10:unknown = Add v13:string, v9:string
-    Return v10:unknown
+    v11:unknown = Add v14:string, v10:string
+    Return v11:unknown
 split_block0_block3:
     Jump block3
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block8, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block8, block2
 block2:
-    ParallelCopy [v13:string <- v15:string]
+    ParallelCopy [v14:string <- v16:string]
     Jump block3
 block3:
-    Branch v11:boolean, block4, block5
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
-    Return v8:unknown
+    v9:unknown = Add v14:string, v8:string
+    Return v9:unknown
 block5:
-    v10:unknown = Add v13:string, v9:string
-    Return v10:unknown
+    v11:unknown = Add v14:string, v10:string
+    Return v11:unknown
 split_block0_block3:
-    ParallelCopy [v13:string <- v14:string]
+    ParallelCopy [v14:string <- v15:string]
     Jump block3
 
 function(v0:unknown):
 block0:
-    v11:boolean = StrictlyEquals v0:unknown, undefined
-    Branch v11:boolean, block8, block2
+    v1:unknown = GetLexicalEnvironment
+    v12:boolean = StrictlyEquals v0:unknown, undefined
+    Branch v12:boolean, block8, block2
 block2:
-    ParallelCopy [v13:string <- v15:string]
+    ParallelCopy [v14:string <- v16:string]
     Jump block3
 block3:
-    Branch v11:boolean, block4, block5
+    Branch v12:boolean, block4, block5
 block4:
-    v8:unknown = Add v13:string, v7:string
-    Return v8:unknown
+    v9:unknown = Add v14:string, v8:string
+    Return v9:unknown
 block5:
-    v10:unknown = Add v13:string, v9:string
-    Return v10:unknown
+    v11:unknown = Add v14:string, v10:string
+    Return v11:unknown
 split_block0_block3:
-    ParallelCopy [v13:string <- v14:string]
+    ParallelCopy [v14:string <- v15:string]
     Jump block3

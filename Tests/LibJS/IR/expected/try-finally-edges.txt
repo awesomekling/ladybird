@@ -1,160 +1,314 @@
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    Jump block4
-block1:
-    v7:unknown = Phi [block9:v6:int32, block3:v8:undefined]
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    Jump block5
-block2:
-    v4:unknown = GetGlobal result
     Jump block8
-block3: [finalizer: block1]
-    SetGlobal result 1
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:int32 = Move 1
+    Jump block2
+block2:
+    v16:unknown = Phi [block1:v18:undefined, block12:v8:int32]
+    v15:unknown = Phi [block1:v2:unknown, block12:v17:undefined]
+    v14:int32 = Phi [block1:v4:int32, block12:v9:int32]
+    v5:unknown = GetGlobal result
     Jump block9
+block3: [handler: block1]
+    SetGlobal result 1
+    Jump block12
+block4:
+    v10:unknown = GetGlobal result
+    Jump block13
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
 block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v3:unknown = Add v1:unknown, 10
-    Jump block6
-block1_split2:
-    SetGlobal result v3:unknown
-    Jump block7
-block1_split3:
-    ContinuePendingUnwind block2
-block2_split4:
-    End v4:unknown
-block3_split5:
-    v6:int32 = Move 1
-    Jump block1
+    Jump block3
+block2_split1:
+    v7:unknown = Add v5:unknown, 10
+    Jump block10
+block2_split2:
+    SetGlobal result v7:unknown
+    Jump block11
+block2_split3:
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3_split4:
+    v8:int32 = Move 1
+    v9:int32 = Move 0
+    Jump block2
+block4_split5:
+    End v10:unknown
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    Jump block4
-block1:
-    v7:unknown = Phi [block9:v9:int32, block3:v8:undefined]
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    Jump block5
-block2:
-    v4:unknown = GetGlobal result
     Jump block8
-block3: [finalizer: block1]
-    SetGlobal result 1
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:int32 = Move 1
+    Jump block2
+block2:
+    v16:unknown = Phi [block1:v18:undefined, block12:v20:int32]
+    v15:unknown = Phi [block1:v2:unknown, block12:v17:undefined]
+    v14:int32 = Phi [block1:v19:int32, block12:v21:int32]
+    v5:unknown = GetGlobal result
     Jump block9
+block3: [handler: block1]
+    SetGlobal result 1
+    Jump block12
+block4:
+    v10:unknown = GetGlobal result
+    Jump block13
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
 block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v3:unknown = Add v1:unknown, 10
-    Jump block6
-block1_split2:
-    SetGlobal result v3:unknown
-    Jump block7
-block1_split3:
-    ContinuePendingUnwind block2
-block2_split4:
-    End v4:unknown
-block3_split5:
-    v6:int32 = Move 1
-    Jump block1
+    Jump block3
+block2_split1:
+    v7:unknown = Add v5:unknown, 10
+    Jump block10
+block2_split2:
+    SetGlobal result v7:unknown
+    Jump block11
+block2_split3:
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3_split4:
+    v8:int32 = Move 1
+    v9:int32 = Move 0
+    Jump block2
+block4_split5:
+    End v10:unknown
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    Jump block4
-block1:
-    v7:unknown = Phi [block9:v9:int32, block3:v8:undefined]
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    Jump block5
-block2:
-    v4:unknown = GetGlobal result
     Jump block8
-block3: [finalizer: block1]
-    SetGlobal result 1
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:int32 = Move 1
+    Jump block2
+block2:
+    v16:unknown = Phi [block1:v18:undefined, block12:v20:int32]
+    v15:unknown = Phi [block1:v2:unknown, block12:v17:undefined]
+    v14:int32 = Phi [block1:v19:int32, block12:v21:int32]
+    v5:unknown = GetGlobal result
     Jump block9
+block3: [handler: block1]
+    SetGlobal result 1
+    Jump block12
+block4:
+    v10:unknown = GetGlobal result
+    Jump block13
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
 block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v3:unknown = Add v1:unknown, 10
-    Jump block6
-block1_split2:
-    SetGlobal result v3:unknown
-    Jump block7
-block1_split3:
-    ContinuePendingUnwind block2
-block2_split4:
-    End v4:unknown
-block3_split5:
-    v6:int32 = Move 1
-    Jump block1
+    Jump block3
+block2_split1:
+    v7:unknown = Add v5:unknown, 10
+    Jump block10
+block2_split2:
+    SetGlobal result v7:unknown
+    Jump block11
+block2_split3:
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3_split4:
+    v8:int32 = Move 1
+    v9:int32 = Move 0
+    Jump block2
+block4_split5:
+    End v10:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    Jump block4
-block1:
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    Jump block5
-block2:
-    v4:unknown = GetGlobal result
     Jump block8
-block3: [finalizer: block1]
-    SetGlobal result 1
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block2
+block2:
+    v15:unknown = Phi [block1:v2:unknown, block12:v17:undefined]
+    v14:int32 = Phi [block1:v19:int32, block12:v21:int32]
+    v5:unknown = GetGlobal result
     Jump block9
+block3: [handler: block1]
+    SetGlobal result 1
+    Jump block12
+block4:
+    v10:unknown = GetGlobal result
+    Jump block13
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
 block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v3:unknown = Add v1:unknown, 10
-    Jump block6
-block1_split2:
-    SetGlobal result v3:unknown
-    Jump block7
-block1_split3:
-    ContinuePendingUnwind block2
-block2_split4:
-    End v4:unknown
-block3_split5:
-    Jump block1
+    Jump block3
+block2_split1:
+    v7:unknown = Add v5:unknown, 10
+    Jump block10
+block2_split2:
+    SetGlobal result v7:unknown
+    Jump block11
+block2_split3:
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3_split4:
+    Jump block2
+block4_split5:
+    End v10:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    EnterUnwindContext block3
+    Jump block3
 block1:
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    v3:unknown = Add v1:unknown, 10
-    SetGlobal result v3:unknown
-    ContinuePendingUnwind block2
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block2
 block2:
-    v4:unknown = GetGlobal result
-    End v4:unknown
-block3: [finalizer: block1]
+    v15:unknown = Phi [block1:v2:unknown, block3:v17:undefined]
+    v14:int32 = Phi [block1:v19:int32, block3:v21:int32]
+    v5:unknown = GetGlobal result
+    v7:unknown = Add v5:unknown, 10
+    SetGlobal result v7:unknown
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3: [handler: block1]
     SetGlobal result 1
-    Jump block1
+    Jump block2
+block4:
+    v10:unknown = GetGlobal result
+    End v10:unknown
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
+
+=== After SsaDestructionPass ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result 0
+    Jump block3
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    ParallelCopy [v15:unknown <- v2:unknown, v14:int32 <- v19:int32]
+    Jump block2
+block2:
+    v5:unknown = GetGlobal result
+    v7:unknown = Add v5:unknown, 10
+    SetGlobal result v7:unknown
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3: [handler: block1]
+    SetGlobal result 1
+    ParallelCopy [v15:unknown <- v17:undefined, v14:int32 <- v21:int32]
+    Jump block2
+block4:
+    v10:unknown = GetGlobal result
+    End v10:unknown
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
+
+=== After CopyCoalescing ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result 0
+    Jump block3
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    ParallelCopy [v14:int32 <- v19:int32]
+    Jump block2
+block2:
+    v5:unknown = GetGlobal result
+    v7:unknown = Add v5:unknown, 10
+    SetGlobal result v7:unknown
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3: [handler: block1]
+    SetGlobal result 1
+    ParallelCopy [v15:unknown <- v17:undefined, v14:int32 <- v21:int32]
+    Jump block2
+block4:
+    v10:unknown = GetGlobal result
+    End v10:unknown
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     SetGlobal result 0
-    EnterUnwindContext block3
+    Jump block3
 block1:
-    LeaveUnwindContext
-    v1:unknown = GetGlobal result
-    v3:unknown = Add v1:unknown, 10
-    SetGlobal result v3:unknown
-    ContinuePendingUnwind block2
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    ParallelCopy [v14:int32 <- v19:int32]
+    Jump block2
 block2:
-    v4:unknown = GetGlobal result
-    End v4:unknown
-block3: [finalizer: block1]
+    v5:unknown = GetGlobal result
+    v7:unknown = Add v5:unknown, 10
+    SetGlobal result v7:unknown
+    v11:boolean = StrictlyEquals v14:int32, 0
+    Branch v11:boolean, block4, block5
+block3: [handler: block1]
     SetGlobal result 1
-    Jump block1
+    ParallelCopy [v15:unknown <- v17:undefined, v14:int32 <- v21:int32]
+    Jump block2
+block4:
+    v10:unknown = GetGlobal result
+    End v10:unknown
+block5:
+    v13:boolean = StrictlyEquals v14:int32, 2
+    Branch v13:boolean, block6, block7
+block6:
+    Return v15:unknown
+block7:
+    Throw v15:unknown

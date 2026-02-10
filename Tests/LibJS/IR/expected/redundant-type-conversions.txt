@@ -1,159 +1,174 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 3, 4
+    v5:unknown = Call v1:unknown, undefined, 3, 4
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 3, 4
+    v5:unknown = Call v1:unknown, undefined, 3, 4
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 3, 4
+    v5:unknown = Call v1:unknown, undefined, 3, 4
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 3, 4
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 3, 4
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 3, 4
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 3, 4
+    End v5:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
-    v5:int32 = ToInt32 v0:unknown
+    v5:undefined = Move undefined
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    v7:int32 = ToInt32 v6:int32
+    v7:int32 = Move v6:int32
+    v8:int32 = ToInt32 v7:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v7:int32
-    Return v8:int32
+    v9:int32 = Move v8:int32
+    Return v9:int32
 
 === After SCCP ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
-    v5:int32 = ToInt32 v0:unknown
+    v5:undefined = Move undefined
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    v7:int32 = ToInt32 v6:int32
+    v7:int32 = Move v6:int32
+    v8:int32 = ToInt32 v7:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v7:int32
-    Return v8:int32
+    v9:int32 = Move v8:int32
+    Return v9:int32
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
-    v5:int32 = ToInt32 v0:unknown
+    v5:undefined = Move undefined
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    v7:int32 = ToInt32 v6:int32
+    v7:int32 = Move v6:int32
+    v8:int32 = ToInt32 v7:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v7:int32
-    Return v8:int32
+    v9:int32 = Move v8:int32
+    Return v9:int32
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    v7:int32 = ToInt32 v6:int32
+    v7:int32 = Move v6:int32
+    v8:int32 = ToInt32 v7:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v7:int32
-    Return v8:int32
+    v9:int32 = Move v8:int32
+    Return v9:int32
 
 === After CopyPropagation ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
-    v7:int32 = ToInt32 v5:int32
+    v7:int32 = Move v6:int32
+    v8:int32 = ToInt32 v6:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v7:int32
-    Return v7:int32
+    v9:int32 = Move v8:int32
+    Return v8:int32
 
 === After RedundantCheckElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
+    v7:int32 = Move v6:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v5:int32
-    Return v5:int32
+    v9:int32 = Move v6:int32
+    Return v6:int32
 
 === After GlobalValueNumbering ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v6:int32 = Move v5:int32
+    v7:int32 = Move v6:int32
     Jump block2
 block0_split1:
-    v8:int32 = Move v5:int32
-    Return v5:int32
+    v9:int32 = Move v6:int32
+    Return v6:int32
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
-    v6:int32 = Move v5:int32
-    v8:int32 = Move v5:int32
-    Return v5:int32
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
+    v7:int32 = Move v6:int32
+    v9:int32 = Move v6:int32
+    Return v6:int32
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
-    Return v5:int32
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
+    Return v6:int32
 
 function(v0:unknown, v1:unknown):
 block0:
-    v5:int32 = ToInt32 v0:unknown
-    Return v5:int32
+    v2:unknown = GetLexicalEnvironment
+    v6:int32 = ToInt32 v0:unknown
+    Return v6:int32

@@ -1,210 +1,226 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal tag
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal tag
     Jump block1
 block0_split0:
-    v3:array = GetTemplateObject v1:string, v2:string, v1:string, v2:string
-    v6:unknown = Call v0:unknown, undefined, v3:array, 42
+    v4:array = GetTemplateObject v2:string, v3:string, v2:string, v3:string
+    v7:unknown = Call v1:unknown, undefined, v4:array, 42
     Jump block2
 block0_split1:
-    Return v6:unknown
+    Return v7:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal tag
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal tag
     Jump block1
 block0_split0:
-    v3:array = GetTemplateObject v1:string, v2:string, v1:string, v2:string
-    v6:unknown = Call v0:unknown, undefined, v3:array, 42
+    v4:array = GetTemplateObject v2:string, v3:string, v2:string, v3:string
+    v7:unknown = Call v1:unknown, undefined, v4:array, 42
     Jump block2
 block0_split1:
-    Return v6:unknown
+    Return v7:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal tag
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal tag
     Jump block1
 block0_split0:
-    v3:array = GetTemplateObject v1:string, v2:string, v1:string, v2:string
-    v6:unknown = Call v0:unknown, undefined, v3:array, 42
+    v4:array = GetTemplateObject v2:string, v3:string, v2:string, v3:string
+    v7:unknown = Call v1:unknown, undefined, v4:array, 42
     Jump block2
 block0_split1:
-    Return v6:unknown
+    Return v7:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal tag
-    v3:array = GetTemplateObject v1:string, v2:string, v1:string, v2:string
-    v6:unknown = Call v0:unknown, undefined, v3:array, 42
-    Return v6:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal tag
+    v4:array = GetTemplateObject v2:string, v3:string, v2:string, v3:string
+    v7:unknown = Call v1:unknown, undefined, v4:array, 42
+    Return v7:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal tag
-    v3:array = GetTemplateObject v1:string, v2:string, v1:string, v2:string
-    v6:unknown = Call v0:unknown, undefined, v3:array, 42
-    Return v6:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal tag
+    v4:array = GetTemplateObject v2:string, v3:string, v2:string, v3:string
+    v7:unknown = Call v1:unknown, undefined, v4:array, 42
+    Return v7:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v4:int32 = Move 0
-    v5:unknown = GetByValue v0:unknown, 0
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v5:int32 = Move 0
+    v6:unknown = GetByValue v0:unknown, 0
     Jump block1
 block0_split0:
-    v6:int32 = Move 0
-    v7:unknown = GetByValue v2:unknown, 0
+    v7:int32 = Move 0
+    v8:unknown = GetByValue v3:unknown, 0
     Jump block2
 block0_split1:
-    v8:unknown = Add v5:unknown, v7:unknown
+    v9:unknown = Add v6:unknown, v8:unknown
     Jump block3
 block0_split2:
-    v10:int32 = Move 1
-    v11:unknown = GetByValue v0:unknown, 1
+    v11:int32 = Move 1
+    v12:unknown = GetByValue v0:unknown, 1
     Jump block4
 block0_split3:
-    v12:unknown = Add v8:unknown, v11:unknown
+    v13:unknown = Add v9:unknown, v12:unknown
     Jump block5
 block0_split4:
-    Return v12:unknown
+    Return v13:unknown
 
 === After SCCP ===
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v4:int32 = Move 0
-    v5:unknown = GetByValue v0:unknown, 0
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v5:int32 = Move 0
+    v6:unknown = GetByValue v0:unknown, 0
     Jump block1
 block0_split0:
-    v6:int32 = Move 0
-    v7:unknown = GetByValue v2:unknown, 0
+    v7:int32 = Move 0
+    v8:unknown = GetByValue v3:unknown, 0
     Jump block2
 block0_split1:
-    v8:unknown = Add v5:unknown, v7:unknown
+    v9:unknown = Add v6:unknown, v8:unknown
     Jump block3
 block0_split2:
-    v10:int32 = Move 1
-    v11:unknown = GetByValue v0:unknown, 1
+    v11:int32 = Move 1
+    v12:unknown = GetByValue v0:unknown, 1
     Jump block4
 block0_split3:
-    v12:unknown = Add v8:unknown, v11:unknown
+    v13:unknown = Add v9:unknown, v12:unknown
     Jump block5
 block0_split4:
-    Return v12:unknown
+    Return v13:unknown
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v4:int32 = Move 0
-    v5:unknown = GetByValue v0:unknown, 0
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v5:int32 = Move 0
+    v6:unknown = GetByValue v0:unknown, 0
     Jump block1
 block0_split0:
-    v6:int32 = Move 0
-    v7:unknown = GetByValue v2:unknown, 0
+    v7:int32 = Move 0
+    v8:unknown = GetByValue v3:unknown, 0
     Jump block2
 block0_split1:
-    v8:unknown = Add v5:unknown, v7:unknown
+    v9:unknown = Add v6:unknown, v8:unknown
     Jump block3
 block0_split2:
-    v10:int32 = Move 1
-    v11:unknown = GetByValue v0:unknown, 1
+    v11:int32 = Move 1
+    v12:unknown = GetByValue v0:unknown, 1
     Jump block4
 block0_split3:
-    v12:unknown = Add v8:unknown, v11:unknown
+    v13:unknown = Add v9:unknown, v12:unknown
     Jump block5
 block0_split4:
-    Return v12:unknown
+    Return v13:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v5:unknown = GetByValue v0:unknown, 0
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v6:unknown = GetByValue v0:unknown, 0
     Jump block1
 block0_split0:
-    v7:unknown = GetByValue v2:unknown, 0
+    v8:unknown = GetByValue v3:unknown, 0
     Jump block2
 block0_split1:
-    v8:unknown = Add v5:unknown, v7:unknown
+    v9:unknown = Add v6:unknown, v8:unknown
     Jump block3
 block0_split2:
-    v11:unknown = GetByValue v0:unknown, 1
+    v12:unknown = GetByValue v0:unknown, 1
     Jump block4
 block0_split3:
-    v12:unknown = Add v8:unknown, v11:unknown
+    v13:unknown = Add v9:unknown, v12:unknown
     Jump block5
 block0_split4:
-    Return v12:unknown
+    Return v13:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v5:unknown = GetByValue v0:unknown, 0
-    v7:unknown = GetByValue v2:unknown, 0
-    v8:unknown = Add v5:unknown, v7:unknown
-    v11:unknown = GetByValue v0:unknown, 1
-    v12:unknown = Add v8:unknown, v11:unknown
-    Return v12:unknown
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v6:unknown = GetByValue v0:unknown, 0
+    v8:unknown = GetByValue v3:unknown, 0
+    v9:unknown = Add v6:unknown, v8:unknown
+    v12:unknown = GetByValue v0:unknown, 1
+    v13:unknown = Add v9:unknown, v12:unknown
+    Return v13:unknown
 
 function(v0:unknown, v1:unknown):
 block0:
-    v2:unknown = CreateRestParams rest_index:1
-    v5:unknown = GetByValue v0:unknown, 0
-    v7:unknown = GetByValue v2:unknown, 0
-    v8:unknown = Add v5:unknown, v7:unknown
-    v11:unknown = GetByValue v0:unknown, 1
-    v12:unknown = Add v8:unknown, v11:unknown
-    Return v12:unknown
+    v2:unknown = GetLexicalEnvironment
+    v3:unknown = CreateRestParams rest_index:1
+    v6:unknown = GetByValue v0:unknown, 0
+    v8:unknown = GetByValue v3:unknown, 0
+    v9:unknown = Add v6:unknown, v8:unknown
+    v12:unknown = GetByValue v0:unknown, 1
+    v13:unknown = Add v9:unknown, v12:unknown
+    Return v13:unknown

@@ -1,64 +1,85 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block1
+block1:
     End undefined
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block1
+block1:
     End undefined
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block1
+block1:
+    End undefined
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined

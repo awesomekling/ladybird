@@ -1,97 +1,109 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, false
+    v4:unknown = Call v1:unknown, undefined, false
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, false
+    v4:unknown = Call v1:unknown, undefined, false
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, false
+    v4:unknown = Call v1:unknown, undefined, false
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v3:unknown = Call v0:unknown, undefined, false
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v4:unknown = Call v1:unknown, undefined, false
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v3:unknown = Call v0:unknown, undefined, false
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v4:unknown = Call v1:unknown, undefined, false
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    Branch v0:unknown, block0, block1
+    v1:unknown = GetLexicalEnvironment
+    Jump block1
 block1:
+    Branch v0:unknown, block1, block2
+block2:
     End undefined
-entry:
-    Jump block0
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    Branch v0:unknown, block0, block1
+    v1:unknown = GetLexicalEnvironment
+    Jump block1
 block1:
+    Branch v0:unknown, block1, block2
+block2:
     End undefined
-entry:
-    Jump block0
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    Branch v0:unknown, block0, block1
+    v1:unknown = GetLexicalEnvironment
+    Jump block1
 block1:
+    Branch v0:unknown, block1, block2
+block2:
     End undefined
-entry:
-    Jump block0
 
 === After AggressiveDeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
+    Jump block2
+block2:
     End undefined
-entry:
-    Jump block0
 
 === After SimplifyCFG ===
 function(v0:unknown):
-block1:
+block0:
+    v1:unknown = GetLexicalEnvironment
+    Jump block2
+block2:
     End undefined
-entry:
-    Jump block1
 
 === After SimplifyCFG ===
 function(v0:unknown):
-block1:
+block0:
+    v1:unknown = GetLexicalEnvironment
     End undefined
 
 function(v0:unknown):
-block1:
+block0:
+    v1:unknown = GetLexicalEnvironment
     End undefined

@@ -50,8 +50,6 @@ PreservedAnalyses AggressiveDeadCodeElimination::run(Function& function, PassMan
                 case Opcode::Return:
                 case Opcode::End:
                 case Opcode::Throw:
-                case Opcode::ContinuePendingUnwind:
-                case Opcode::EnterUnwindContext:
                     is_live = true;
                     break;
                 default:

@@ -34,7 +34,8 @@ static bool is_unsupported_opcode(Opcode opcode)
     switch (opcode) {
     // Environment ops
     case Opcode::CreateLexicalEnvironment:
-    case Opcode::LeaveLexicalEnvironment:
+    case Opcode::GetLexicalEnvironment:
+    case Opcode::SetLexicalEnvironment:
     case Opcode::CreateVariable:
     case Opcode::GetBinding:
     case Opcode::SetBinding:
@@ -44,18 +45,12 @@ static bool is_unsupported_opcode(Opcode opcode)
     case Opcode::LeavePrivateEnvironment:
     case Opcode::CreateVariableEnvironment:
     // Exception handling ops
-    case Opcode::EnterUnwindContext:
-    case Opcode::LeaveUnwindContext:
     case Opcode::Catch:
-    case Opcode::ScheduleJump:
-    case Opcode::LeaveFinally:
-    case Opcode::RestoreScheduledJump:
     case Opcode::GetException:
     case Opcode::SetException:
     // Generator/async ops
     case Opcode::Yield:
     case Opcode::Await:
-    case Opcode::PrepareYield:
     case Opcode::GetCompletionFields:
     case Opcode::SetCompletionType:
     // Eval
@@ -70,8 +65,6 @@ static bool is_unsupported_opcode(Opcode opcode)
     case Opcode::GetNewTarget:
     // Regex (table remapping not yet supported)
     case Opcode::NewRegExp:
-    // Terminators we can't clone
-    case Opcode::ContinuePendingUnwind:
         return true;
     default:
         return false;

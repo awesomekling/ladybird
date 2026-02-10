@@ -1,677 +1,676 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal test_for_in_tdz
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test_for_in_tdz
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal test_for_in_tdz
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test_for_in_tdz
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal test_for_in_tdz
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test_for_in_tdz
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal test_for_in_tdz
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test_for_in_tdz
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal test_for_in_tdz
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test_for_in_tdz
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
-    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
-    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
-    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
-    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v31:unknown = Phi [block5:v34:unknown, block7:v32:unknown, block9:v11:unknown, block13:v11:unknown, block14:v11:unknown]
+    v29:unknown = Phi [block5:v35:undefined, block7:v17:unknown, block9:v48:undefined, block13:v40:undefined, block14:v44:undefined]
+    v28:unknown = Phi [block5:v36:undefined, block7:v21:unknown, block9:v21:unknown, block13:v41:undefined, block14:v45:undefined]
+    v27:unknown = Phi [block5:v37:undefined, block7:v20:unknown, block9:v20:unknown, block13:v42:undefined, block14:v46:undefined]
+    v26:unknown = Phi [block5:v38:undefined, block7:v19:unknown, block9:v19:unknown, block13:v43:undefined, block14:v47:undefined]
+    v24:unknown = Phi [block5:v9:object, block7:v16:unknown, block9:v9:object, block13:v9:object, block14:v9:object]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    v5:string = Move v4:string
-    Return v5:string
+    v6:string = Move v5:string
+    Return v6:string
 block3:
-    v7:string = Move v6:string
+    v8:string = Move v7:string
     Jump block4
 block4:
-    Return v7:string
+    Return v8:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
-    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
-    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
-    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
-    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v32:unknown = Phi [block10:v22:unknown, block17:v11:unknown]
+    v30:unknown = Phi [block10:v17:unknown, block17:v49:undefined]
+    v25:unknown = Phi [block10:v16:unknown, block17:v9:object]
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v16:unknown = ExtractValue v15:unknown, 0
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
-    v20:unknown = Move v14:unknown
+    v22:unknown = Move v16:unknown
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    v4:boolean = InstanceOf v2:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
+    Branch v23:boolean, block8, block9
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === After SCCP ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
-    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
-    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
-    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
-    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v31:unknown = Phi [block5:v34:unknown, block7:v32:unknown, block9:v11:unknown, block13:v11:unknown, block14:v11:unknown]
+    v29:unknown = Phi [block5:v35:undefined, block7:v17:unknown, block9:v48:undefined, block13:v40:undefined, block14:v44:undefined]
+    v28:unknown = Phi [block5:v36:undefined, block7:v21:unknown, block9:v21:unknown, block13:v41:undefined, block14:v45:undefined]
+    v27:unknown = Phi [block5:v37:undefined, block7:v20:unknown, block9:v20:unknown, block13:v42:undefined, block14:v46:undefined]
+    v26:unknown = Phi [block5:v38:undefined, block7:v19:unknown, block9:v19:unknown, block13:v43:undefined, block14:v47:undefined]
+    v24:unknown = Phi [block5:v9:object, block7:v16:unknown, block9:v9:object, block13:v9:object, block14:v9:object]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    v5:string = Move v4:string
-    Return v58:string
+    v6:string = Move v5:string
+    Return v50:string
 block3:
-    v7:string = Move v6:string
+    v8:string = Move v7:string
     Jump block4
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
-    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
-    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
-    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
-    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v32:unknown = Phi [block10:v22:unknown, block17:v11:unknown]
+    v30:unknown = Phi [block10:v17:unknown, block17:v49:undefined]
+    v25:unknown = Phi [block10:v16:unknown, block17:v9:object]
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v16:unknown = ExtractValue v15:unknown, 0
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
-    v20:unknown = Move v14:unknown
+    v22:unknown = Move v16:unknown
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    v4:boolean = InstanceOf v2:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
+    Branch v23:boolean, block8, block9
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === Before optimization ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v34:unknown = Phi [block5:v38:unknown, block7:v36:unknown, block9:v54:unknown, block13:v44:unknown]
-    v31:unknown = Phi [block5:v39:undefined, block7:v15:unknown, block9:v55:undefined, block13:v45:undefined]
-    v29:unknown = Phi [block5:v40:undefined, block7:v19:unknown, block9:v19:unknown, block13:v46:undefined]
-    v27:unknown = Phi [block5:v41:undefined, block7:v18:unknown, block9:v18:unknown, block13:v47:undefined]
-    v25:unknown = Phi [block5:v42:undefined, block7:v17:unknown, block9:v17:unknown, block13:v48:undefined]
-    v22:unknown = Phi [block5:v8:object, block7:v14:unknown, block9:v8:object, block13:v8:object]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v31:unknown = Phi [block5:v34:unknown, block7:v32:unknown, block9:v11:unknown, block13:v11:unknown, block14:v11:unknown]
+    v29:unknown = Phi [block5:v35:undefined, block7:v17:unknown, block9:v48:undefined, block13:v40:undefined, block14:v44:undefined]
+    v28:unknown = Phi [block5:v36:undefined, block7:v21:unknown, block9:v21:unknown, block13:v41:undefined, block14:v45:undefined]
+    v27:unknown = Phi [block5:v37:undefined, block7:v20:unknown, block9:v20:unknown, block13:v42:undefined, block14:v46:undefined]
+    v26:unknown = Phi [block5:v38:undefined, block7:v19:unknown, block9:v19:unknown, block13:v43:undefined, block14:v47:undefined]
+    v24:unknown = Phi [block5:v9:object, block7:v16:unknown, block9:v9:object, block13:v9:object, block14:v9:object]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    v5:string = Move v4:string
-    Return v58:string
+    v6:string = Move v5:string
+    Return v50:string
 block3:
-    v7:string = Move v6:string
+    v8:string = Move v7:string
     Jump block4
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    v35:unknown = Phi [block8:v49:unknown, block15:v36:unknown]
-    v32:unknown = Phi [block8:v50:undefined, block15:v15:unknown]
-    v30:unknown = Phi [block8:v51:undefined, block15:v19:unknown]
-    v28:unknown = Phi [block8:v52:undefined, block15:v18:unknown]
-    v26:unknown = Phi [block8:v53:undefined, block15:v17:unknown]
-    v23:unknown = Phi [block8:v8:object, block15:v14:unknown]
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v36:unknown = Phi [block10:v20:unknown, block16:v56:unknown]
-    v33:unknown = Phi [block10:v15:unknown, block16:v57:undefined]
-    v24:unknown = Phi [block10:v14:unknown, block16:v8:object]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v32:unknown = Phi [block10:v22:unknown, block17:v11:unknown]
+    v30:unknown = Phi [block10:v17:unknown, block17:v49:undefined]
+    v25:unknown = Phi [block10:v16:unknown, block17:v9:object]
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v16:unknown = ExtractValue v15:unknown, 0
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
-    v20:unknown = Move v14:unknown
+    v22:unknown = Move v16:unknown
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    v4:boolean = InstanceOf v2:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
+    Branch v23:boolean, block8, block9
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    Return v58:string
+    Return v50:string
 block3:
     Jump block4
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v1:unknown, v2:unknown
+    v4:boolean = InstanceOf v2:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
+    Branch v23:boolean, block8, block9
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === After CopyPropagation ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    Return v58:string
+    Return v50:string
 block3:
     Jump block4
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
-    Branch v21:boolean, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
+    Branch v23:boolean, block8, block9
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === After TypeRefinement ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
     Jump block11
 block2:
-    Return v58:string
+    Return v50:string
 block3:
     Jump block4
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
     Jump block13
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block8:
-    Jump block6
-block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
     Jump block16
+block8:
+    Return v13:string
+block9: [handler: block1]
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
+    Jump block17
 block10:
     Jump block7
 block1_split0:
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
     Jump block12
 block1_split1:
-    Branch v3:boolean, block2, block3
+    Branch v4:boolean, block2, block3
 block5_split2: [handler: block1]
-    PutByValue v8:object, v43:unknown, 1
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
     Jump block14
-block5_split3:
-    v21:boolean = IsNullish v8:object
+block5_split3: [handler: block1]
+    PutByValue v9:object, v11:unknown, 1
+    Jump block15
+block5_split4:
+    v23:boolean = IsNullish v9:object
     Branch false, block8, block9
-block7_split4:
-    Branch v15:unknown, block6, block10
-block9_split5:
+block7_split5:
+    Branch v17:unknown, block6, block10
+block9_split6:
     Jump block7
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    Jump block14
-block6:
-    LeaveUnwindContext
-    Return v11:string
-block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
     Jump block15
+block6:
+    Return v13:string
+block7: [handler: block1]
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
 block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
-block5_split3:
-    v21:boolean = IsNullish v8:object
+block5_split4:
+    v23:boolean = IsNullish v9:object
     Jump block9
-block7_split4:
-    Branch v15:unknown, block6, block7
+block7_split5:
+    Branch v17:unknown, block6, block7
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    Jump block14
-block6:
-    LeaveUnwindContext
-    Return v11:string
-block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
     Jump block15
+block6:
+    Return v13:string
+block7: [handler: block1]
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
 block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
-block5_split3:
+block5_split4:
     Jump block9
-block7_split4:
-    Branch v15:unknown, block6, block7
+block7_split5:
+    Branch v17:unknown, block6, block7
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
     Jump block9
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
 block9: [handler: block1]
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
-block7_split4:
-    Branch v15:unknown, block6, block7
+block7_split5:
+    Branch v17:unknown, block6, block7
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block7_split4:
-    Branch v15:unknown, block6, block7
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
+block7_split5:
+    Branch v17:unknown, block6, block7
 
 === After SplitCriticalEdges ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block7_split4:
-    Branch v15:unknown, block6, block17
-split_block7_split4_block7:
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
+block7_split5:
+    Branch v17:unknown, block6, block18
+split_block7_split5_block7:
     Jump block7
 
 === After PostSSACleanup ===
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block7_split4:
-    Branch v15:unknown, block6, block7
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
+block7_split5:
+    Branch v17:unknown, block6, block7
 
 function():
 block0:
-    EnterUnwindContext block5
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = GetGlobal ReferenceError
-    v3:boolean = InstanceOf v0:unknown, v2:unknown
-    Branch v3:boolean, block2, block4
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = GetGlobal ReferenceError
+    v4:boolean = InstanceOf v1:unknown, v3:unknown
+    Branch v4:boolean, block2, block4
 block2:
-    Return v58:string
+    Return v50:string
 block4:
-    Return v59:string
+    Return v51:string
 block5: [handler: block1]
-    v8:object = NewObject
-    ThrowIfTDZ v37:unknown
-    PutByValue v8:object, v43:unknown, 1
-    v16:unknown = GetObjectPropertyIterator v8:object
-    v17:unknown = ExtractValue v16:unknown, 0
-    v18:unknown = ExtractValue v16:unknown, 1
-    v19:unknown = ExtractValue v16:unknown, 2
+    v9:object = NewObject
+    ThrowIfTDZ v33:unknown
+    v11:unknown = ToPrimitiveWithStringHint v39:unknown
+    PutByValue v9:object, v11:unknown, 1
+    v18:unknown = GetObjectPropertyIterator v9:object
+    v19:unknown = ExtractValue v18:unknown, 0
+    v20:unknown = ExtractValue v18:unknown, 1
+    v21:unknown = ExtractValue v18:unknown, 2
     Jump block7
 block6:
-    LeaveUnwindContext
-    Return v11:string
+    Return v13:string
 block7: [handler: block1]
-    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
-    v15:unknown = ExtractValue v13:unknown, 1
-    Jump block15
-block7_split4:
-    Branch v15:unknown, block6, block7
+    v15:unknown = IteratorNextUnpack v19:unknown, v20:unknown, v21:unknown
+    v17:unknown = ExtractValue v15:unknown, 1
+    Jump block16
+block7_split5:
+    Branch v17:unknown, block6, block7

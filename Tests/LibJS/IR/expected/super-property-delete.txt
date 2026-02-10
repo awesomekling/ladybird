@@ -1,674 +1,698 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal test
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal test
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal test
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal test
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal test
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal test
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v27:unknown = Phi [block5:v28:undefined, block16:v23:object]
-    v26:unknown = Phi [block5:v11:object, block16:v24:unknown]
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v28:unknown = Phi [block5:v29:undefined, block16:v24:object]
+    v27:unknown = Phi [block5:v12:object, block16:v25:unknown]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    v18:string = Move v17:string
-    Return v18:string
+    v19:string = Move v18:string
+    Return v19:string
 block3:
-    v20:unknown = Add v19:string, v14:unknown
+    v21:unknown = Add v20:string, v15:unknown
     Jump block15
 block4:
-    Return v21:unknown
+    Return v22:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v12:object.bar
+    v23:unknown = GetById v13:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v5:function
+    ThrowIfTDZ v6:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v5:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v6:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v9:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v10:function
     Jump block11
 block0_split5:
-    v10:function = Move v9:function
-    v11:object = Construct v10:function
+    v11:function = Move v10:function
+    v12:object = Construct v11:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v14:unknown, v15:unknown
+    v17:boolean = InstanceOf v15:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v12:object
-    v24:unknown = Call v22:unknown, v23:object
+    v24:object = Move v13:object
+    v25:unknown = Call v23:unknown, v24:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v27:unknown = Phi [block5:v28:undefined, block16:v23:object]
-    v26:unknown = Phi [block5:v11:object, block16:v24:unknown]
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v28:unknown = Phi [block5:v29:undefined, block16:v24:object]
+    v27:unknown = Phi [block5:v12:object, block16:v25:unknown]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    v18:string = Move v17:string
-    Return v29:string
+    v19:string = Move v18:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v14:unknown
+    v21:unknown = Add v20:string, v15:unknown
     Jump block15
 block4:
-    Return v21:unknown
+    Return v22:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v12:object.bar
+    v23:unknown = GetById v13:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v5:function
+    ThrowIfTDZ v6:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v5:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v6:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v9:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v10:function
     Jump block11
 block0_split5:
-    v10:function = Move v9:function
-    v11:object = Construct v10:function
+    v11:function = Move v10:function
+    v12:object = Construct v11:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v14:unknown, v15:unknown
+    v17:boolean = InstanceOf v15:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v12:object
-    v24:unknown = Call v22:unknown, v23:object
+    v24:object = Move v13:object
+    v25:unknown = Call v23:unknown, v24:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v27:unknown = Phi [block5:v28:undefined, block16:v23:object]
-    v26:unknown = Phi [block5:v11:object, block16:v24:unknown]
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v28:unknown = Phi [block5:v29:undefined, block16:v24:object]
+    v27:unknown = Phi [block5:v12:object, block16:v25:unknown]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    v18:string = Move v17:string
-    Return v29:string
+    v19:string = Move v18:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v14:unknown
+    v21:unknown = Add v20:string, v15:unknown
     Jump block15
 block4:
-    Return v21:unknown
+    Return v22:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v12:object.bar
+    v23:unknown = GetById v13:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v5:function
+    ThrowIfTDZ v6:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v5:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v6:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v9:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v10:function
     Jump block11
 block0_split5:
-    v10:function = Move v9:function
-    v11:object = Construct v10:function
+    v11:function = Move v10:function
+    v12:object = Construct v11:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v14:unknown, v15:unknown
+    v17:boolean = InstanceOf v15:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v12:object
-    v24:unknown = Call v22:unknown, v23:object
+    v24:object = Move v13:object
+    v25:unknown = Call v23:unknown, v24:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v14:unknown
+    v21:unknown = Add v20:string, v15:unknown
     Jump block15
 block4:
-    Return v21:unknown
+    Return v22:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v12:object.bar
+    v23:unknown = GetById v13:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v5:function
+    ThrowIfTDZ v6:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v5:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v6:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v9:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v10:function
     Jump block11
 block0_split5:
-    v10:function = Move v9:function
-    v11:object = Construct v10:function
+    v11:function = Move v10:function
+    v12:object = Construct v11:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v14:unknown, v15:unknown
+    v17:boolean = InstanceOf v15:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v12:object
-    v24:unknown = Call v22:unknown, v23:object
+    v24:object = Move v13:object
+    v25:unknown = Call v23:unknown, v24:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After CopyPropagation ===
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v13:unknown
+    v21:unknown = Add v20:string, v14:unknown
     Jump block15
 block4:
-    Return v20:unknown
+    Return v21:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v11:object.bar
+    v23:unknown = GetById v12:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v4:function
+    ThrowIfTDZ v5:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v4:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v5:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v8:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v9:function
     Jump block11
 block0_split5:
-    v10:function = Move v8:function
-    v11:object = Construct v8:function
+    v11:function = Move v9:function
+    v12:object = Construct v9:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v13:unknown, v15:unknown
+    v17:boolean = InstanceOf v14:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v11:object
-    v24:unknown = Call v22:unknown, v11:object
+    v24:object = Move v12:object
+    v25:unknown = Call v23:unknown, v12:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After GlobalValueNumbering ===
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block6
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
     Jump block13
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v13:unknown
+    v21:unknown = Add v20:string, v14:unknown
     Jump block15
 block4:
-    Return v20:unknown
+    Return v21:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v11:object.bar
+    v23:unknown = GetById v12:object.bar
     Jump block16
 block0_split0:
-    v4:function = NewClass null, v3:string
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
     Jump block7
 block0_split1:
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block8
 block0_split2:
-    ThrowIfTDZ v4:function
+    ThrowIfTDZ v5:function
     Jump block9
 block0_split3:
-    v8:function = NewClass v4:function, v7:string
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v5:function, v7:unknown, v8:string
     Jump block10
 block0_split4:
-    v9:function = Move v8:function
-    ThrowIfTDZ v8:function
+    v10:function = Move v9:function
+    ThrowIfTDZ v9:function
     Jump block11
 block0_split5:
-    v10:function = Move v8:function
-    v11:object = Construct v8:function
+    v11:function = Move v9:function
+    v12:object = Construct v9:function
     Jump block12
 block0_split6:
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    v13:object = Move v12:object
+    Jump block5
 block1_split7:
-    v16:boolean = InstanceOf v13:unknown, v15:unknown
+    v17:boolean = InstanceOf v14:unknown, v16:unknown
     Jump block14
 block1_split8:
-    Branch v16:boolean, block2, block3
+    Branch v17:boolean, block2, block3
 block3_split9:
-    v21:unknown = Move v20:unknown
+    v22:unknown = Move v21:unknown
     Jump block4
 block5_split10: [handler: block1]
-    v23:object = Move v11:object
-    v24:unknown = Call v22:unknown, v11:object
+    v24:object = Move v12:object
+    v25:unknown = Call v23:unknown, v12:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After SimplifyCFG ===
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    v4:function = NewClass null, v3:string
-    v5:function = Move v4:function
-    v6:unknown = CreateLexicalEnvironment
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
+    v6:function = Move v5:function
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    ThrowIfTDZ v4:function
-    v8:function = NewClass v4:function, v7:string
-    v9:function = Move v8:function
-    ThrowIfTDZ v8:function
-    v10:function = Move v8:function
-    v11:object = Construct v8:function
-    v12:object = Move v11:object
-    EnterUnwindContext block5
+    ThrowIfTDZ v5:function
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v5:function, v7:unknown, v8:string
+    v10:function = Move v9:function
+    ThrowIfTDZ v9:function
+    v11:function = Move v9:function
+    v12:object = Construct v9:function
+    v13:object = Move v12:object
+    Jump block5
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v14:unknown = Move v13:unknown
-    v15:unknown = GetGlobal ReferenceError
-    v16:boolean = InstanceOf v13:unknown, v15:unknown
-    Branch v16:boolean, block2, block3
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal ReferenceError
+    v17:boolean = InstanceOf v14:unknown, v16:unknown
+    Branch v17:boolean, block2, block3
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v13:unknown
-    v21:unknown = Move v20:unknown
-    Return v20:unknown
+    v21:unknown = Add v20:string, v14:unknown
+    v22:unknown = Move v21:unknown
+    Return v21:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v11:object.bar
-    v23:object = Move v11:object
-    v24:unknown = Call v22:unknown, v11:object
+    v23:unknown = GetById v12:object.bar
+    v24:object = Move v12:object
+    v25:unknown = Call v23:unknown, v12:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    v4:function = NewClass null, v3:string
-    v6:unknown = CreateLexicalEnvironment
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    ThrowIfTDZ v4:function
-    v8:function = NewClass v4:function, v7:string
-    ThrowIfTDZ v8:function
-    v11:object = Construct v8:function
-    EnterUnwindContext block5
+    ThrowIfTDZ v5:function
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v5:function, v7:unknown, v8:string
+    ThrowIfTDZ v9:function
+    v12:object = Construct v9:function
+    Jump block5
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v15:unknown = GetGlobal ReferenceError
-    v16:boolean = InstanceOf v13:unknown, v15:unknown
-    Branch v16:boolean, block2, block3
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal ReferenceError
+    v17:boolean = InstanceOf v14:unknown, v16:unknown
+    Branch v17:boolean, block2, block3
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v13:unknown
-    Return v20:unknown
+    v21:unknown = Add v20:string, v14:unknown
+    Return v21:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v11:object.bar
-    v24:unknown = Call v22:unknown, v11:object
+    v23:unknown = GetById v12:object.bar
+    v25:unknown = Call v23:unknown, v12:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 function():
 block0:
-    v2:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    v4:function = NewClass null, v3:string
-    v6:unknown = CreateLexicalEnvironment
+    SetLexicalEnvironment v0:unknown
+    v5:function = NewClass null, v3:unknown, v4:string
+    v7:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
-    ThrowIfTDZ v4:function
-    v8:function = NewClass v4:function, v7:string
-    ThrowIfTDZ v8:function
-    v11:object = Construct v8:function
-    EnterUnwindContext block5
+    ThrowIfTDZ v5:function
+    SetLexicalEnvironment v0:unknown
+    v9:function = NewClass v5:function, v7:unknown, v8:string
+    ThrowIfTDZ v9:function
+    v12:object = Construct v9:function
+    Jump block5
 block1:
-    v13:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v15:unknown = GetGlobal ReferenceError
-    v16:boolean = InstanceOf v13:unknown, v15:unknown
-    Branch v16:boolean, block2, block3
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal ReferenceError
+    v17:boolean = InstanceOf v14:unknown, v16:unknown
+    Branch v17:boolean, block2, block3
 block2:
-    Return v29:string
+    Return v30:string
 block3:
-    v20:unknown = Add v19:string, v13:unknown
-    Return v20:unknown
+    v21:unknown = Add v20:string, v14:unknown
+    Return v21:unknown
 block5: [handler: block1]
-    v22:unknown = GetById v11:object.bar
-    v24:unknown = Call v22:unknown, v11:object
+    v23:unknown = GetById v12:object.bar
+    v25:unknown = Call v23:unknown, v12:object
     Jump block17
 block5_split11:
-    LeaveUnwindContext
-    Return v25:string
+    Return v26:string
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     CreateVariable
     Jump block1
 block0_split0:
-    v1:unknown = CreateRestParams rest_index:0
-    InitializeBinding args v1:unknown
+    v2:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v2:unknown
     Jump block2
 block0_split1:
-    v2:unknown = GetBinding args
+    v3:unknown = GetBinding args
     Jump block3
 block0_split2:
-    v3:object = SuperCallWithArgumentArray v2:unknown
+    v4:object = SuperCallWithArgumentArray v3:unknown
     Jump block4
 block0_split3:
-    Return v3:object
+    Return v4:object
 
 === After SCCP ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     CreateVariable
     Jump block1
 block0_split0:
-    v1:unknown = CreateRestParams rest_index:0
-    InitializeBinding args v1:unknown
+    v2:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v2:unknown
     Jump block2
 block0_split1:
-    v2:unknown = GetBinding args
+    v3:unknown = GetBinding args
     Jump block3
 block0_split2:
-    v3:object = SuperCallWithArgumentArray v2:unknown
+    v4:object = SuperCallWithArgumentArray v3:unknown
     Jump block4
 block0_split3:
-    Return v3:object
+    Return v4:object
 
 === Before optimization ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     CreateVariable
     Jump block1
 block0_split0:
-    v1:unknown = CreateRestParams rest_index:0
-    InitializeBinding args v1:unknown
+    v2:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v2:unknown
     Jump block2
 block0_split1:
-    v2:unknown = GetBinding args
+    v3:unknown = GetBinding args
     Jump block3
 block0_split2:
-    v3:object = SuperCallWithArgumentArray v2:unknown
+    v4:object = SuperCallWithArgumentArray v3:unknown
     Jump block4
 block0_split3:
-    Return v3:object
+    Return v4:object
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     CreateVariable
-    v1:unknown = CreateRestParams rest_index:0
-    InitializeBinding args v1:unknown
-    v2:unknown = GetBinding args
-    v3:object = SuperCallWithArgumentArray v2:unknown
-    Return v3:object
+    v2:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v2:unknown
+    v3:unknown = GetBinding args
+    v4:object = SuperCallWithArgumentArray v3:unknown
+    Return v4:object
 
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     CreateVariable
-    v1:unknown = CreateRestParams rest_index:0
-    InitializeBinding args v1:unknown
-    v2:unknown = GetBinding args
-    v3:object = SuperCallWithArgumentArray v2:unknown
-    Return v3:object
+    v2:unknown = CreateRestParams rest_index:0
+    InitializeBinding args v2:unknown
+    v3:unknown = GetBinding args
+    v4:object = SuperCallWithArgumentArray v3:unknown
+    Return v4:object
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     ResolveThisBinding
     Jump block1
 block0_split0:
-    v0:unknown = ResolveSuperBase
+    v1:unknown = ResolveSuperBase
     Jump block2
 block0_split1:
-    v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
+    v3:boolean = DeleteByIdWithThis v1:unknown, v2:unknown.foo
     Jump block3
 block0_split2:
     End undefined
@@ -676,13 +700,14 @@ block0_split2:
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     ResolveThisBinding
     Jump block1
 block0_split0:
-    v0:unknown = ResolveSuperBase
+    v1:unknown = ResolveSuperBase
     Jump block2
 block0_split1:
-    v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
+    v3:boolean = DeleteByIdWithThis v1:unknown, v2:unknown.foo
     Jump block3
 block0_split2:
     End undefined
@@ -690,13 +715,14 @@ block0_split2:
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     ResolveThisBinding
     Jump block1
 block0_split0:
-    v0:unknown = ResolveSuperBase
+    v1:unknown = ResolveSuperBase
     Jump block2
 block0_split1:
-    v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
+    v3:boolean = DeleteByIdWithThis v1:unknown, v2:unknown.foo
     Jump block3
 block0_split2:
     End undefined
@@ -704,14 +730,16 @@ block0_split2:
 === After SimplifyCFG ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     ResolveThisBinding
-    v0:unknown = ResolveSuperBase
-    v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
+    v1:unknown = ResolveSuperBase
+    v3:boolean = DeleteByIdWithThis v1:unknown, v2:unknown.foo
     End undefined
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     ResolveThisBinding
-    v0:unknown = ResolveSuperBase
-    v2:boolean = DeleteByIdWithThis v0:unknown, v1:unknown.foo
+    v1:unknown = ResolveSuperBase
+    v3:boolean = DeleteByIdWithThis v1:unknown, v2:unknown.foo
     End undefined

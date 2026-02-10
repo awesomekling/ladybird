@@ -1,85 +1,92 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:int32 = Move 5
-    v6:number = Negate v5:int32
+    v4:undefined = Move undefined
+    v6:int32 = Move 5
+    v7:number = Negate v6:int32
     Jump block1
 block0_split0:
-    v7:number = Move v6:number
-    v8:number = UnaryPlus v5:int32
+    v8:number = Move v7:number
+    v9:number = UnaryPlus v6:int32
     Jump block2
 block0_split1:
-    v9:number = Move v8:number
-    v10:number = Add v7:number, v9:number
+    v10:number = Move v9:number
+    v11:number = Add v8:number, v10:number
     Jump block3
 block0_split2:
-    Return v10:number
+    Return v11:number
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:int32 = Move 5
-    v6:number = Negate 5
+    v4:undefined = Move undefined
+    v6:int32 = Move 5
+    v7:number = Negate 5
     Jump block1
 block0_split0:
-    v7:number = Move -5
-    v8:number = UnaryPlus 5
+    v8:number = Move -5
+    v9:number = UnaryPlus 5
     Jump block2
 block0_split1:
-    v9:number = Move 5
-    v10:number = Add -5, 5
+    v10:number = Move 5
+    v11:number = Add -5, 5
     Jump block3
 block0_split2:
     Return 0
@@ -87,19 +94,20 @@ block0_split2:
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
-    v5:int32 = Move 5
-    v6:number = Negate 5
+    v4:undefined = Move undefined
+    v6:int32 = Move 5
+    v7:number = Negate 5
     Jump block1
 block0_split0:
-    v7:number = Move -5
-    v8:number = UnaryPlus 5
+    v8:number = Move -5
+    v9:number = UnaryPlus 5
     Jump block2
 block0_split1:
-    v9:number = Move 5
-    v10:number = Add -5, 5
+    v10:number = Move 5
+    v11:number = Add -5, 5
     Jump block3
 block0_split2:
     Return 0
@@ -107,6 +115,7 @@ block0_split2:
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block1
 block0_split0:
     Jump block2
@@ -117,9 +126,19 @@ block0_split2:
 
 === After SimplifyCFG ===
 function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block0_split2:
     Return 0
 
+=== After SimplifyCFG ===
 function():
-block0_split2:
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return 0
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
     Return 0

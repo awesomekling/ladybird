@@ -1,322 +1,216 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 42
-    v2:unknown = GetGlobal getX
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 42
+    v3:unknown = GetGlobal getX
     Jump block1
 block0_split0:
-    InitObjectLiteralProperty v0:object, v2:unknown
-    CacheObjectShape v0:object
-    SetGlobal obj v0:object
+    InitObjectLiteralProperty v1:object, v3:unknown
+    CacheObjectShape v1:object
+    SetGlobal obj v1:object
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    v6:unknown = GetGlobal caller
+    v7:unknown = GetGlobal caller
     Jump block5
 block0_split4:
-    v7:unknown = Call v6:unknown, undefined
+    v8:unknown = Call v7:unknown, undefined
     Jump block6
 block0_split5:
-    End v7:unknown
+    End v8:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 42
-    v2:unknown = GetGlobal getX
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 42
+    v3:unknown = GetGlobal getX
     Jump block1
 block0_split0:
-    InitObjectLiteralProperty v0:object, v2:unknown
-    CacheObjectShape v0:object
-    SetGlobal obj v0:object
+    InitObjectLiteralProperty v1:object, v3:unknown
+    CacheObjectShape v1:object
+    SetGlobal obj v1:object
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    v6:unknown = GetGlobal caller
+    v7:unknown = GetGlobal caller
     Jump block5
 block0_split4:
-    v7:unknown = Call v6:unknown, undefined
+    v8:unknown = Call v7:unknown, undefined
     Jump block6
 block0_split5:
-    End v7:unknown
+    End v8:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 42
-    v2:unknown = GetGlobal getX
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 42
+    v3:unknown = GetGlobal getX
     Jump block1
 block0_split0:
-    InitObjectLiteralProperty v0:object, v2:unknown
-    CacheObjectShape v0:object
-    SetGlobal obj v0:object
+    InitObjectLiteralProperty v1:object, v3:unknown
+    CacheObjectShape v1:object
+    SetGlobal obj v1:object
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    v6:unknown = GetGlobal caller
+    v7:unknown = GetGlobal caller
     Jump block5
 block0_split4:
-    v7:unknown = Call v6:unknown, undefined
+    v8:unknown = Call v7:unknown, undefined
     Jump block6
 block0_split5:
-    End v7:unknown
+    End v8:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 42
-    v2:unknown = GetGlobal getX
-    InitObjectLiteralProperty v0:object, v2:unknown
-    CacheObjectShape v0:object
-    SetGlobal obj v0:object
-    v3:unknown = GetGlobal caller
-    v5:unknown = Call v3:unknown, undefined
-    v6:unknown = GetGlobal caller
-    v7:unknown = Call v6:unknown, undefined
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 42
+    v3:unknown = GetGlobal getX
+    InitObjectLiteralProperty v1:object, v3:unknown
+    CacheObjectShape v1:object
+    SetGlobal obj v1:object
+    v4:unknown = GetGlobal caller
+    v6:unknown = Call v4:unknown, undefined
+    v7:unknown = GetGlobal caller
+    v8:unknown = Call v7:unknown, undefined
+    End v8:unknown
 
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 42
-    v2:unknown = GetGlobal getX
-    InitObjectLiteralProperty v0:object, v2:unknown
-    CacheObjectShape v0:object
-    SetGlobal obj v0:object
-    v3:unknown = GetGlobal caller
-    v5:unknown = Call v3:unknown, undefined
-    v6:unknown = GetGlobal caller
-    v7:unknown = Call v6:unknown, undefined
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 42
+    v3:unknown = GetGlobal getX
+    InitObjectLiteralProperty v1:object, v3:unknown
+    CacheObjectShape v1:object
+    SetGlobal obj v1:object
+    v4:unknown = GetGlobal caller
+    v6:unknown = Call v4:unknown, undefined
+    v7:unknown = GetGlobal caller
+    v8:unknown = Call v7:unknown, undefined
+    End v8:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal obj
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
     Jump block1
 block0_split0:
-    v1:unknown = GetById v0:unknown.getX
+    v2:unknown = GetById v1:unknown.getX
     Jump block2
 block0_split1:
-    v2:unknown = Call v1:unknown, v0:unknown
+    v3:unknown = Call v2:unknown, v1:unknown
     Jump block3
 block0_split2:
+    Return v3:unknown
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    Jump block1
+block0_split0:
+    v2:unknown = GetById v1:unknown.getX
+    Jump block2
+block0_split1:
+    v3:unknown = Call v2:unknown, v1:unknown
+    Jump block3
+block0_split2:
+    Return v3:unknown
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    Jump block1
+block0_split0:
+    v2:unknown = GetById v1:unknown.getX
+    Jump block2
+block0_split1:
+    v3:unknown = Call v2:unknown, v1:unknown
+    Jump block3
+block0_split2:
+    Return v3:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    v2:unknown = GetById v1:unknown.getX
+    v3:unknown = Call v2:unknown, v1:unknown
+    Return v3:unknown
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    v2:unknown = GetById v1:unknown.getX
+    v3:unknown = Call v2:unknown, v1:unknown
+    Return v3:unknown
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v2:unknown = GetById v1:unknown.x
+    Jump block1
+block0_split0:
     Return v2:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal obj
+    v0:unknown = GetLexicalEnvironment
+    v2:unknown = GetById v1:unknown.x
     Jump block1
 block0_split0:
-    v1:unknown = GetById v0:unknown.getX
-    Jump block2
-block0_split1:
-    v2:unknown = Call v1:unknown, v0:unknown
-    Jump block3
-block0_split2:
     Return v2:unknown
-
-=== After InlineCalls ===
-function():
-block0:
-    v0:unknown = GetGlobal obj
-    Jump block1
-block0_split0:
-    v1:unknown = GetById v0:unknown.getX
-    Jump block2
-block0_split1:
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-block0_split2:
-    Return v11:unknown
-inline_block0:
-    v10:unknown = GetById v6:unknown.x
-    Jump block5
-inline_block0_split0:
-    Jump block6
-inline_merge:
-    v11:unknown = Phi [block7:v9:unknown, block5:v10:unknown]
-    Jump block3
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Jump block6
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block9, block10
-inline_this_global:
-    Jump block11
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v6:unknown = Phi [block9:v4:object, block10:v5:object]
-    Jump block4
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal obj
+    v0:unknown = GetLexicalEnvironment
+    v2:unknown = GetById v1:unknown.x
     Jump block1
 block0_split0:
-    v1:unknown = GetById v0:unknown.getX
-    Jump block2
-block0_split1:
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-block0_split2:
-    Return v11:unknown
-inline_block0:
-    v10:unknown = GetById v6:unknown.x
-    Jump block5
-inline_block0_split0:
-    Jump block6
-inline_merge:
-    v11:unknown = Phi [block7:v9:unknown, block5:v10:unknown]
-    Jump block3
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Jump block6
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block9, block10
-inline_this_global:
-    Jump block11
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v6:unknown = Phi [block9:v4:object, block10:v5:object]
-    Jump block4
+    Return v2:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal obj
-    v1:unknown = GetById v0:unknown.getX
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Return v9:unknown
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block11, block10
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v6:unknown = Phi [block10:v5:object, block8:v4:object]
-    v10:unknown = GetById v6:unknown.x
-    Return v10:unknown
-
-=== After SplitCriticalEdges ===
-function():
-block0:
-    v0:unknown = GetGlobal obj
-    v1:unknown = GetById v0:unknown.getX
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Return v9:unknown
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block12, block10
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v6:unknown = Phi [block10:v5:object, block12:v4:object]
-    v10:unknown = GetById v6:unknown.x
-    Return v10:unknown
-split_inline_this_check_inline_this_merge:
-    Jump block11
-
-=== After SsaDestructionPass ===
-function():
-block0:
-    v0:unknown = GetGlobal obj
-    v1:unknown = GetById v0:unknown.getX
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Return v9:unknown
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block12, block10
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    ParallelCopy [v6:unknown <- v5:object]
-    Jump block11
-inline_this_merge:
-    v10:unknown = GetById v6:unknown.x
-    Return v10:unknown
-split_inline_this_check_inline_this_merge:
-    ParallelCopy [v6:unknown <- v4:object]
-    Jump block11
-
-=== After CopyCoalescing ===
-function():
-block0:
-    v0:unknown = GetGlobal obj
-    v1:unknown = GetById v0:unknown.getX
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Return v9:unknown
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block12, block10
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v10:unknown = GetById v6:unknown.x
-    Return v10:unknown
-split_inline_this_check_inline_this_merge:
-    ParallelCopy [v6:unknown <- v4:object]
-    Jump block11
+    v0:unknown = GetLexicalEnvironment
+    v2:unknown = GetById v1:unknown.x
+    Return v2:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal obj
-    v1:unknown = GetById v0:unknown.getX
-    v8:boolean = StrictlyInequals v1:unknown, v7:object
-    Branch v8:boolean, block7, block8
-inline_slow:
-    v9:unknown = Call v1:unknown, v0:unknown
-    Return v9:unknown
-inline_this_check:
-    v3:boolean = IsNullish v0:unknown
-    Branch v3:boolean, block12, block10
-inline_this_object:
-    v5:object = ToObject v0:unknown
-    Jump block11
-inline_this_merge:
-    v10:unknown = GetById v6:unknown.x
-    Return v10:unknown
-split_inline_this_check_inline_this_merge:
-    ParallelCopy [v6:unknown <- v4:object]
-    Jump block11
+    v0:unknown = GetLexicalEnvironment
+    v2:unknown = GetById v1:unknown.x
+    Return v2:unknown

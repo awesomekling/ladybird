@@ -1,346 +1,350 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v45:unknown = Phi [block3:v47:unknown, block14:v46:unknown]
-    v43:unknown = Phi [block3:v48:undefined, block14:v44:unknown]
-    v41:unknown = Phi [block3:v49:undefined, block14:v42:unknown]
-    v39:unknown = Phi [block3:v50:undefined, block14:v40:unknown]
-    v37:unknown = Phi [block3:v51:undefined, block14:v38:unknown]
-    v35:unknown = Phi [block3:v52:undefined, block14:v14:unknown]
-    v33:unknown = Phi [block3:v53:undefined, block14:v13:unknown]
-    v32:unknown = Phi [block3:v54:undefined, block14:v18:unknown]
-    v31:unknown = Phi [block3:v55:undefined, block14:v17:unknown]
-    v30:unknown = Phi [block3:v56:undefined, block14:v16:unknown]
-    v28:unknown = Phi [block3:v5:unknown, block14:v29:unknown]
-    v6:unknown = GetGlobal keys
+    v46:unknown = Phi [block3:v48:unknown, block14:v47:unknown]
+    v44:unknown = Phi [block3:v49:undefined, block14:v45:unknown]
+    v42:unknown = Phi [block3:v50:undefined, block14:v43:unknown]
+    v40:unknown = Phi [block3:v51:undefined, block14:v41:unknown]
+    v38:unknown = Phi [block3:v52:undefined, block14:v39:unknown]
+    v36:unknown = Phi [block3:v53:undefined, block14:v15:unknown]
+    v34:unknown = Phi [block3:v54:undefined, block14:v14:unknown]
+    v33:unknown = Phi [block3:v55:undefined, block14:v19:unknown]
+    v32:unknown = Phi [block3:v56:undefined, block14:v18:unknown]
+    v31:unknown = Phi [block3:v57:undefined, block14:v17:unknown]
+    v29:unknown = Phi [block3:v6:unknown, block14:v30:unknown]
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v46:unknown = Phi [block15:v57:unknown, block19:v21:unknown]
-    v44:unknown = Phi [block15:v58:undefined, block19:v24:unknown]
-    v42:unknown = Phi [block15:v59:undefined, block19:v23:unknown]
-    v40:unknown = Phi [block15:v60:undefined, block19:v22:unknown]
-    v38:unknown = Phi [block15:v61:undefined, block19:v25:unknown]
-    v36:unknown = Phi [block15:v62:undefined, block19:v14:unknown]
-    v34:unknown = Phi [block15:v63:undefined, block19:v13:unknown]
-    v29:unknown = Phi [block15:v20:undefined, block19:v26:unknown]
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v47:unknown = Phi [block15:v58:unknown, block19:v22:unknown]
+    v45:unknown = Phi [block15:v59:undefined, block19:v25:unknown]
+    v43:unknown = Phi [block15:v60:undefined, block19:v24:unknown]
+    v41:unknown = Phi [block15:v61:undefined, block19:v23:unknown]
+    v39:unknown = Phi [block15:v62:undefined, block19:v26:unknown]
+    v37:unknown = Phi [block15:v63:undefined, block19:v15:unknown]
+    v35:unknown = Phi [block15:v64:undefined, block19:v14:unknown]
+    v30:unknown = Phi [block15:v21:undefined, block19:v27:unknown]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
-    v20:undefined = Move undefined
+    v21:undefined = Move undefined
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v21:unknown
+    ThrowIfTDZ v22:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v21:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v24:unknown
+    v25:unknown = Move v22:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v25:unknown
     Jump block19
 block5_split13:
-    v26:unknown = Move v25:unknown
+    v27:unknown = Move v26:unknown
     Jump block2
 
 === After SCCP ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v45:unknown = Phi [block3:v47:unknown, block14:v46:unknown]
-    v43:unknown = Phi [block3:v48:undefined, block14:v44:unknown]
-    v41:unknown = Phi [block3:v49:undefined, block14:v42:unknown]
-    v39:unknown = Phi [block3:v50:undefined, block14:v40:unknown]
-    v37:unknown = Phi [block3:v51:undefined, block14:v38:unknown]
-    v35:unknown = Phi [block3:v52:undefined, block14:v14:unknown]
-    v33:unknown = Phi [block3:v53:undefined, block14:v13:unknown]
-    v32:unknown = Phi [block3:v54:undefined, block14:v18:unknown]
-    v31:unknown = Phi [block3:v55:undefined, block14:v17:unknown]
-    v30:unknown = Phi [block3:v56:undefined, block14:v16:unknown]
-    v28:unknown = Phi [block3:v5:unknown, block14:v29:unknown]
-    v6:unknown = GetGlobal keys
+    v46:unknown = Phi [block3:v48:unknown, block14:v47:unknown]
+    v44:unknown = Phi [block3:v49:undefined, block14:v45:unknown]
+    v42:unknown = Phi [block3:v50:undefined, block14:v43:unknown]
+    v40:unknown = Phi [block3:v51:undefined, block14:v41:unknown]
+    v38:unknown = Phi [block3:v52:undefined, block14:v39:unknown]
+    v36:unknown = Phi [block3:v53:undefined, block14:v15:unknown]
+    v34:unknown = Phi [block3:v54:undefined, block14:v14:unknown]
+    v33:unknown = Phi [block3:v55:undefined, block14:v19:unknown]
+    v32:unknown = Phi [block3:v56:undefined, block14:v18:unknown]
+    v31:unknown = Phi [block3:v57:undefined, block14:v17:unknown]
+    v29:unknown = Phi [block3:v6:unknown, block14:v30:unknown]
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v46:unknown = Phi [block15:v57:unknown, block19:v21:unknown]
-    v44:unknown = Phi [block15:v58:undefined, block19:v24:unknown]
-    v42:unknown = Phi [block15:v59:undefined, block19:v23:unknown]
-    v40:unknown = Phi [block15:v60:undefined, block19:v22:unknown]
-    v38:unknown = Phi [block15:v61:undefined, block19:v25:unknown]
-    v36:unknown = Phi [block15:v62:undefined, block19:v14:unknown]
-    v34:unknown = Phi [block15:v63:undefined, block19:v13:unknown]
-    v29:unknown = Phi [block15:v64:undefined, block19:v26:unknown]
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v47:unknown = Phi [block15:v58:unknown, block19:v22:unknown]
+    v45:unknown = Phi [block15:v59:undefined, block19:v25:unknown]
+    v43:unknown = Phi [block15:v60:undefined, block19:v24:unknown]
+    v41:unknown = Phi [block15:v61:undefined, block19:v23:unknown]
+    v39:unknown = Phi [block15:v62:undefined, block19:v26:unknown]
+    v37:unknown = Phi [block15:v63:undefined, block19:v15:unknown]
+    v35:unknown = Phi [block15:v64:undefined, block19:v14:unknown]
+    v30:unknown = Phi [block15:v65:undefined, block19:v27:unknown]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
-    v20:undefined = Move undefined
+    v21:undefined = Move undefined
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v21:unknown
+    ThrowIfTDZ v22:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v21:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v24:unknown
+    v25:unknown = Move v22:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v25:unknown
     Jump block19
 block5_split13:
-    v26:unknown = Move v25:unknown
+    v27:unknown = Move v26:unknown
     Jump block2
 
 === Before optimization ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v45:unknown = Phi [block3:v47:unknown, block14:v46:unknown]
-    v43:unknown = Phi [block3:v48:undefined, block14:v44:unknown]
-    v41:unknown = Phi [block3:v49:undefined, block14:v42:unknown]
-    v39:unknown = Phi [block3:v50:undefined, block14:v40:unknown]
-    v37:unknown = Phi [block3:v51:undefined, block14:v38:unknown]
-    v35:unknown = Phi [block3:v52:undefined, block14:v14:unknown]
-    v33:unknown = Phi [block3:v53:undefined, block14:v13:unknown]
-    v32:unknown = Phi [block3:v54:undefined, block14:v18:unknown]
-    v31:unknown = Phi [block3:v55:undefined, block14:v17:unknown]
-    v30:unknown = Phi [block3:v56:undefined, block14:v16:unknown]
-    v28:unknown = Phi [block3:v5:unknown, block14:v29:unknown]
-    v6:unknown = GetGlobal keys
+    v46:unknown = Phi [block3:v48:unknown, block14:v47:unknown]
+    v44:unknown = Phi [block3:v49:undefined, block14:v45:unknown]
+    v42:unknown = Phi [block3:v50:undefined, block14:v43:unknown]
+    v40:unknown = Phi [block3:v51:undefined, block14:v41:unknown]
+    v38:unknown = Phi [block3:v52:undefined, block14:v39:unknown]
+    v36:unknown = Phi [block3:v53:undefined, block14:v15:unknown]
+    v34:unknown = Phi [block3:v54:undefined, block14:v14:unknown]
+    v33:unknown = Phi [block3:v55:undefined, block14:v19:unknown]
+    v32:unknown = Phi [block3:v56:undefined, block14:v18:unknown]
+    v31:unknown = Phi [block3:v57:undefined, block14:v17:unknown]
+    v29:unknown = Phi [block3:v6:unknown, block14:v30:unknown]
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v46:unknown = Phi [block15:v57:unknown, block19:v21:unknown]
-    v44:unknown = Phi [block15:v58:undefined, block19:v24:unknown]
-    v42:unknown = Phi [block15:v59:undefined, block19:v23:unknown]
-    v40:unknown = Phi [block15:v60:undefined, block19:v22:unknown]
-    v38:unknown = Phi [block15:v61:undefined, block19:v25:unknown]
-    v36:unknown = Phi [block15:v62:undefined, block19:v14:unknown]
-    v34:unknown = Phi [block15:v63:undefined, block19:v13:unknown]
-    v29:unknown = Phi [block15:v64:undefined, block19:v26:unknown]
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v47:unknown = Phi [block15:v58:unknown, block19:v22:unknown]
+    v45:unknown = Phi [block15:v59:undefined, block19:v25:unknown]
+    v43:unknown = Phi [block15:v60:undefined, block19:v24:unknown]
+    v41:unknown = Phi [block15:v61:undefined, block19:v23:unknown]
+    v39:unknown = Phi [block15:v62:undefined, block19:v26:unknown]
+    v37:unknown = Phi [block15:v63:undefined, block19:v15:unknown]
+    v35:unknown = Phi [block15:v64:undefined, block19:v14:unknown]
+    v30:unknown = Phi [block15:v65:undefined, block19:v27:unknown]
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
-    v20:undefined = Move undefined
+    v21:undefined = Move undefined
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v21:unknown
+    ThrowIfTDZ v22:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v21:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v24:unknown
+    v25:unknown = Move v22:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v25:unknown
     Jump block19
 block5_split13:
-    v26:unknown = Move v25:unknown
+    v27:unknown = Move v26:unknown
     Jump block2
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v6:unknown = GetGlobal keys
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v21:unknown
+    ThrowIfTDZ v22:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v21:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v24:unknown
+    v25:unknown = Move v22:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v25:unknown
     Jump block19
 block5_split13:
     Jump block2
@@ -348,70 +352,71 @@ block5_split13:
 === After CopyPropagation ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v6:unknown = GetGlobal keys
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v13:unknown
+    ThrowIfTDZ v14:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v25:unknown = Move v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block19
 block5_split13:
     Jump block2
@@ -419,70 +424,71 @@ block5_split13:
 === After GlobalValueNumbering ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
     Jump block6
 block1:
-    v6:unknown = GetGlobal keys
+    v7:unknown = GetGlobal keys
     Jump block9
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
     Jump block14
 block3:
     Jump block1
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block15
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
     Jump block16
 block0_split0:
-    v4:array = NewArray
-    InitializeBinding keys v4:array
+    v5:array = NewArray
+    InitializeBinding keys v5:array
     Jump block7
 block0_split1:
-    v5:unknown = GetGlobal obj
+    v6:unknown = GetGlobal obj
     Jump block8
 block0_split2:
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block3, block4
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block3, block4
 block1_split3:
-    v7:unknown = GetById v6:unknown.sort
+    v8:unknown = GetById v7:unknown.sort
     Jump block10
 block1_split4:
-    v8:unknown = Call v7:unknown, v6:unknown
+    v9:unknown = Call v8:unknown, v7:unknown
     Jump block11
 block1_split5:
-    v9:unknown = GetById v8:unknown.join
+    v10:unknown = GetById v9:unknown.join
     Jump block12
 block1_split6:
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
     Jump block13
 block1_split7:
-    End v11:unknown
+    End v12:unknown
 block2_split8:
-    Branch v14:unknown, block1, block5
+    Branch v15:unknown, block1, block5
 block4_split9:
     Jump block2
 block5_split10:
-    v23:unknown = GetById v22:unknown.push
+    v24:unknown = GetById v23:unknown.push
     Jump block17
 block5_split11:
-    ThrowIfTDZ v13:unknown
+    ThrowIfTDZ v14:unknown
     Jump block18
 block5_split12:
-    v24:unknown = Move v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v25:unknown = Move v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block19
 block5_split13:
     Jump block2
@@ -490,120 +496,123 @@ block5_split13:
 === After SimplifyCFG ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    v4:array = NewArray
-    InitializeBinding keys v4:array
-    v5:unknown = GetGlobal obj
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
+    v5:array = NewArray
+    InitializeBinding keys v5:array
+    v6:unknown = GetGlobal obj
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block1, block4
 block1:
-    v6:unknown = GetGlobal keys
-    v7:unknown = GetById v6:unknown.sort
-    v8:unknown = Call v7:unknown, v6:unknown
-    v9:unknown = GetById v8:unknown.join
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    End v11:unknown
+    v7:unknown = GetGlobal keys
+    v8:unknown = GetById v7:unknown.sort
+    v9:unknown = Call v8:unknown, v7:unknown
+    v10:unknown = GetById v9:unknown.join
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
+    End v12:unknown
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block1, block5
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Branch v15:unknown, block1, block5
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block2
 block5:
-    v21:unknown = Move v13:unknown
-    v22:unknown = GetGlobal keys
-    v23:unknown = GetById v22:unknown.push
-    ThrowIfTDZ v13:unknown
-    v24:unknown = Move v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v22:unknown = Move v14:unknown
+    v23:unknown = GetGlobal keys
+    v24:unknown = GetById v23:unknown.push
+    ThrowIfTDZ v14:unknown
+    v25:unknown = Move v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block2
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    v4:array = NewArray
-    InitializeBinding keys v4:array
-    v5:unknown = GetGlobal obj
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
+    v5:array = NewArray
+    InitializeBinding keys v5:array
+    v6:unknown = GetGlobal obj
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block1, block4
 block1:
-    v6:unknown = GetGlobal keys
-    v7:unknown = GetById v6:unknown.sort
-    v8:unknown = Call v7:unknown, v6:unknown
-    v9:unknown = GetById v8:unknown.join
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    End v11:unknown
+    v7:unknown = GetGlobal keys
+    v8:unknown = GetById v7:unknown.sort
+    v9:unknown = Call v8:unknown, v7:unknown
+    v10:unknown = GetById v9:unknown.join
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
+    End v12:unknown
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block1, block5
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Branch v15:unknown, block1, block5
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block2
 block5:
-    v22:unknown = GetGlobal keys
-    v23:unknown = GetById v22:unknown.push
-    ThrowIfTDZ v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v23:unknown = GetGlobal keys
+    v24:unknown = GetById v23:unknown.push
+    ThrowIfTDZ v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block2
 
 === After SplitCriticalEdges ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    v4:array = NewArray
-    InitializeBinding keys v4:array
-    v5:unknown = GetGlobal obj
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block20, block4
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
+    v5:array = NewArray
+    InitializeBinding keys v5:array
+    v6:unknown = GetGlobal obj
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block20, block4
 block1:
-    v6:unknown = GetGlobal keys
-    v7:unknown = GetById v6:unknown.sort
-    v8:unknown = Call v7:unknown, v6:unknown
-    v9:unknown = GetById v8:unknown.join
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    End v11:unknown
+    v7:unknown = GetGlobal keys
+    v8:unknown = GetById v7:unknown.sort
+    v9:unknown = Call v8:unknown, v7:unknown
+    v10:unknown = GetById v9:unknown.join
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
+    End v12:unknown
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block21, block5
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Branch v15:unknown, block21, block5
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block2
 block5:
-    v22:unknown = GetGlobal keys
-    v23:unknown = GetById v22:unknown.push
-    ThrowIfTDZ v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v23:unknown = GetGlobal keys
+    v24:unknown = GetById v23:unknown.push
+    ThrowIfTDZ v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block2
 split_block0_block1:
     Jump block1
@@ -613,76 +622,78 @@ split_block2_block1:
 === After PostSSACleanup ===
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    v4:array = NewArray
-    InitializeBinding keys v4:array
-    v5:unknown = GetGlobal obj
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
+    v5:array = NewArray
+    InitializeBinding keys v5:array
+    v6:unknown = GetGlobal obj
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block1, block4
 block1:
-    v6:unknown = GetGlobal keys
-    v7:unknown = GetById v6:unknown.sort
-    v8:unknown = Call v7:unknown, v6:unknown
-    v9:unknown = GetById v8:unknown.join
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    End v11:unknown
+    v7:unknown = GetGlobal keys
+    v8:unknown = GetById v7:unknown.sort
+    v9:unknown = Call v8:unknown, v7:unknown
+    v10:unknown = GetById v9:unknown.join
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
+    End v12:unknown
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block1, block5
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Branch v15:unknown, block1, block5
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block2
 block5:
-    v22:unknown = GetGlobal keys
-    v23:unknown = GetById v22:unknown.push
-    ThrowIfTDZ v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v23:unknown = GetGlobal keys
+    v24:unknown = GetById v23:unknown.push
+    ThrowIfTDZ v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block2
 
 function():
 block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, 2
-    InitObjectLiteralProperty v0:object, 3
-    CacheObjectShape v0:object
-    InitializeBinding obj v0:object
-    v4:array = NewArray
-    InitializeBinding keys v4:array
-    v5:unknown = GetGlobal obj
-    v27:boolean = IsNullish v5:unknown
-    Branch v27:boolean, block1, block4
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, 2
+    InitObjectLiteralProperty v1:object, 3
+    CacheObjectShape v1:object
+    InitializeBinding obj v1:object
+    v5:array = NewArray
+    InitializeBinding keys v5:array
+    v6:unknown = GetGlobal obj
+    v28:boolean = IsNullish v6:unknown
+    Branch v28:boolean, block1, block4
 block1:
-    v6:unknown = GetGlobal keys
-    v7:unknown = GetById v6:unknown.sort
-    v8:unknown = Call v7:unknown, v6:unknown
-    v9:unknown = GetById v8:unknown.join
-    v11:unknown = Call v9:unknown, v8:unknown, v10:string
-    End v11:unknown
+    v7:unknown = GetGlobal keys
+    v8:unknown = GetById v7:unknown.sort
+    v9:unknown = Call v8:unknown, v7:unknown
+    v10:unknown = GetById v9:unknown.join
+    v12:unknown = Call v10:unknown, v9:unknown, v11:string
+    End v12:unknown
 block2:
-    v12:unknown = IteratorNextUnpack v16:unknown, v17:unknown, v18:unknown
-    v13:unknown = ExtractValue v12:unknown, 0
-    v14:unknown = ExtractValue v12:unknown, 1
-    Branch v14:unknown, block1, block5
+    v13:unknown = IteratorNextUnpack v17:unknown, v18:unknown, v19:unknown
+    v14:unknown = ExtractValue v13:unknown, 0
+    v15:unknown = ExtractValue v13:unknown, 1
+    Branch v15:unknown, block1, block5
 block4:
-    v15:unknown = GetObjectPropertyIterator v5:unknown
-    v16:unknown = ExtractValue v15:unknown, 0
-    v17:unknown = ExtractValue v15:unknown, 1
-    v18:unknown = ExtractValue v15:unknown, 2
+    v16:unknown = GetObjectPropertyIterator v6:unknown
+    v17:unknown = ExtractValue v16:unknown, 0
+    v18:unknown = ExtractValue v16:unknown, 1
+    v19:unknown = ExtractValue v16:unknown, 2
     Jump block2
 block5:
-    v22:unknown = GetGlobal keys
-    v23:unknown = GetById v22:unknown.push
-    ThrowIfTDZ v13:unknown
-    v25:unknown = Call v23:unknown, v22:unknown, v13:unknown
+    v23:unknown = GetGlobal keys
+    v24:unknown = GetById v23:unknown.push
+    ThrowIfTDZ v14:unknown
+    v26:unknown = Call v24:unknown, v23:unknown, v14:unknown
     Jump block2

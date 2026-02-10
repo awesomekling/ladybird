@@ -1,107 +1,118 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 5
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 5
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 5
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 5
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v4:int32 = Move 1
-    Branch v4:int32, block1, block2
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v5:int32 = Move 1
+    Branch v5:int32, block1, block2
 block1:
-    v5:unknown = Add v0:unknown, 1
+    v6:unknown = Add v0:unknown, 1
     Jump block3
 block2:
-    v7:unknown = Add v0:unknown, 2
+    v8:unknown = Add v0:unknown, 2
     Jump block4
 block1_split0:
-    Return v5:unknown
+    Return v6:unknown
 block2_split1:
-    Return v7:unknown
+    Return v8:unknown
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v4:int32 = Move 1
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v5:int32 = Move 1
     Jump block1
 block1:
-    v5:unknown = Add v0:unknown, 1
+    v6:unknown = Add v0:unknown, 1
     Jump block3
 block1_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v4:int32 = Move 1
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v5:int32 = Move 1
     Jump block1
 block1:
-    v5:unknown = Add v0:unknown, 1
+    v6:unknown = Add v0:unknown, 1
     Jump block3
 block1_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
-    v5:unknown = Add v0:unknown, 1
+    v6:unknown = Add v0:unknown, 1
     Jump block3
 block1_split0:
-    Return v5:unknown
+    Return v6:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown):
-block1:
-    v5:unknown = Add v0:unknown, 1
-    Return v5:unknown
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v6:unknown = Add v0:unknown, 1
+    Return v6:unknown
 
 function(v0:unknown):
-block1:
-    v5:unknown = Add v0:unknown, 1
-    Return v5:unknown
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v6:unknown = Add v0:unknown, 1
+    Return v6:unknown

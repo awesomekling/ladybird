@@ -1,308 +1,312 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal ehEdge
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal ehEdge
     Jump block1
 block0_split0:
-    v1:function = NewFunction
     v2:function = NewFunction
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    v3:function = NewFunction
+    v5:unknown = Call v1:unknown, undefined, v2:function, v3:function
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal ehEdge
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal ehEdge
     Jump block1
 block0_split0:
-    v1:function = NewFunction
     v2:function = NewFunction
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    v3:function = NewFunction
+    v5:unknown = Call v1:unknown, undefined, v2:function, v3:function
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal ehEdge
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal ehEdge
     Jump block1
 block0_split0:
-    v1:function = NewFunction
     v2:function = NewFunction
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
+    v3:function = NewFunction
+    v5:unknown = Call v1:unknown, undefined, v2:function, v3:function
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal ehEdge
-    v1:function = NewFunction
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal ehEdge
     v2:function = NewFunction
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
-    End v4:unknown
+    v3:function = NewFunction
+    v5:unknown = Call v1:unknown, undefined, v2:function, v3:function
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal ehEdge
-    v1:function = NewFunction
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal ehEdge
     v2:function = NewFunction
-    v4:unknown = Call v0:unknown, undefined, v1:function, v2:function
-    End v4:unknown
+    v3:function = NewFunction
+    v5:unknown = Call v1:unknown, undefined, v2:function, v3:function
+    End v5:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
-    v5:string = Move v4:string
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    v4:undefined = Move undefined
+    v6:string = Move v5:string
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v5:string, block4:v9:unknown]
-    v12:unknown = Phi [block2:v8:unknown, block4:v10:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v7:unknown = Move v6:unknown
-    Return v13:unknown
+    v14:unknown = Phi [block2:v6:string, block4:v10:unknown]
+    v13:unknown = Phi [block2:v9:unknown, block4:v11:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    v8:unknown = Move v7:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block3:
-    Return v11:unknown
+    Return v12:unknown
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
+    v12:unknown = Move v11:unknown
     Jump block3
 
 === After SCCP ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
-    v5:string = Move v4:string
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    v4:undefined = Move undefined
+    v6:string = Move v5:string
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v9:unknown]
-    v12:unknown = Phi [block2:v8:unknown, block4:v10:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v7:unknown = Move v6:unknown
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v10:unknown]
+    v13:unknown = Phi [block2:v9:unknown, block4:v11:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    v8:unknown = Move v7:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block3:
-    Return v11:unknown
+    Return v12:unknown
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
+    v12:unknown = Move v11:unknown
     Jump block3
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
-    v5:string = Move v4:string
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    v4:undefined = Move undefined
+    v6:string = Move v5:string
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v9:unknown]
-    v12:unknown = Phi [block2:v8:unknown, block4:v10:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v7:unknown = Move v6:unknown
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v10:unknown]
+    v13:unknown = Phi [block2:v9:unknown, block4:v11:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    v8:unknown = Move v7:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block3:
-    Return v11:unknown
+    Return v12:unknown
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
+    v12:unknown = Move v11:unknown
     Jump block3
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v9:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v10:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block3:
-    Return v11:unknown
+    Return v12:unknown
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
+    v12:unknown = Move v11:unknown
     Jump block3
 
 === After CopyPropagation ===
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v8:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v9:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block3:
-    Return v10:unknown
+    Return v11:unknown
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
+    v12:unknown = Move v11:unknown
     Jump block3
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v8:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v9:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block2_split0: [handler: block1]
-    v9:unknown = Move v8:unknown
-    v10:unknown = Call v1:unknown, undefined
+    v10:unknown = Move v9:unknown
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    v11:unknown = Move v10:unknown
-    LeaveUnwindContext
-    Return v10:unknown
+    v12:unknown = Move v11:unknown
+    Return v11:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v13:unknown = Phi [block2:v14:string, block4:v8:unknown]
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v14:unknown = Phi [block2:v15:string, block4:v9:unknown]
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    v8:unknown = Call v0:unknown, undefined
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block2_split0: [handler: block1]
-    v10:unknown = Call v1:unknown, undefined
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    LeaveUnwindContext
-    Return v10:unknown
+    Return v11:unknown
 
 === After SsaDestructionPass ===
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    ParallelCopy [v13:unknown <- v14:string]
-    v8:unknown = Call v0:unknown, undefined
+    ParallelCopy [v14:unknown <- v15:string]
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block2_split0: [handler: block1]
-    ParallelCopy [v13:unknown <- v8:unknown]
-    v10:unknown = Call v1:unknown, undefined
+    ParallelCopy [v14:unknown <- v9:unknown]
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    LeaveUnwindContext
-    Return v10:unknown
+    Return v11:unknown
 
 function(v0:unknown, v1:unknown):
 block0:
-    EnterUnwindContext block2
+    v2:unknown = GetLexicalEnvironment
+    Jump block2
 block1:
-    v6:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    Return v13:unknown
+    v7:unknown = Catch
+    SetLexicalEnvironment v2:unknown
+    Return v14:unknown
 block2: [handler: block1]
-    ParallelCopy [v13:unknown <- v14:string]
-    v8:unknown = Call v0:unknown, undefined
+    ParallelCopy [v14:unknown <- v15:string]
+    v9:unknown = Call v0:unknown, undefined
     Jump block4
 block2_split0: [handler: block1]
-    ParallelCopy [v13:unknown <- v8:unknown]
-    v10:unknown = Call v1:unknown, undefined
+    ParallelCopy [v14:unknown <- v9:unknown]
+    v11:unknown = Call v1:unknown, undefined
     Jump block5
 block2_split1:
-    LeaveUnwindContext
-    Return v10:unknown
+    Return v11:unknown
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 2
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 2
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 2
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 2

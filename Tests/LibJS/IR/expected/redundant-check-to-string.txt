@@ -1,91 +1,102 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
-    v2:string = ToString v1:string
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
+    v3:string = ToString v2:string
     Jump block1
 block0_split0:
-    Return v2:string
+    Return v3:string
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
-    v2:string = ToString v1:string
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
+    v3:string = ToString v2:string
     Jump block1
 block0_split0:
-    Return v2:string
+    Return v3:string
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
-    v2:string = ToString v1:string
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
+    v3:string = ToString v2:string
     Jump block1
 block0_split0:
-    Return v2:string
+    Return v3:string
 
 === After RedundantCheckElimination ===
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
     Jump block1
 block0_split0:
-    Return v1:string
+    Return v2:string
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
-    Return v1:string
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
+    Return v2:string
 
 function(v0:unknown):
 block0:
-    v1:string = Typeof v0:unknown
-    Return v1:string
+    v1:unknown = GetLexicalEnvironment
+    v2:string = Typeof v0:unknown
+    Return v2:string

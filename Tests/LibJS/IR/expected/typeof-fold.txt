@@ -1,189 +1,201 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v8:int32
-    v11:boolean = StrictlyEquals v9:string, v10:string
-    v12:boolean = Move v11:boolean
-    v13:string = Typeof v8:int32
-    v15:boolean = StrictlyEquals v13:string, v14:string
-    v16:boolean = Move v15:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v9:int32
+    v12:boolean = StrictlyEquals v10:string, v11:string
+    v13:boolean = Move v12:boolean
+    v14:string = Typeof v9:int32
+    v16:boolean = StrictlyEquals v14:string, v15:string
+    v17:boolean = Move v16:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    v19:boolean = StrictlyEquals v17:string, v18:string
-    v20:boolean = Move v19:boolean
-    v22:string = Typeof true
-    v24:boolean = StrictlyEquals v22:string, v23:string
-    v25:boolean = Move v24:boolean
-    Return v12:boolean
+    v20:boolean = StrictlyEquals v18:string, v19:string
+    v21:boolean = Move v20:boolean
+    v23:string = Typeof true
+    v25:boolean = StrictlyEquals v23:string, v24:string
+    v26:boolean = Move v25:boolean
+    Return v13:boolean
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v8:int32
-    v11:boolean = StrictlyEquals v9:string, v10:string
-    v12:boolean = Move v11:boolean
-    v13:string = Typeof v8:int32
-    v15:boolean = StrictlyEquals v13:string, v14:string
-    v16:boolean = Move v15:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v9:int32
+    v12:boolean = StrictlyEquals v10:string, v11:string
+    v13:boolean = Move v12:boolean
+    v14:string = Typeof v9:int32
+    v16:boolean = StrictlyEquals v14:string, v15:string
+    v17:boolean = Move v16:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    v19:boolean = StrictlyEquals v17:string, v18:string
-    v20:boolean = Move v19:boolean
-    v22:string = Typeof true
-    v24:boolean = StrictlyEquals v22:string, v23:string
-    v25:boolean = Move v24:boolean
-    Return v12:boolean
+    v20:boolean = StrictlyEquals v18:string, v19:string
+    v21:boolean = Move v20:boolean
+    v23:string = Typeof true
+    v25:boolean = StrictlyEquals v23:string, v24:string
+    v26:boolean = Move v25:boolean
+    Return v13:boolean
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v8:int32
-    v11:boolean = StrictlyEquals v9:string, v10:string
-    v12:boolean = Move v11:boolean
-    v13:string = Typeof v8:int32
-    v15:boolean = StrictlyEquals v13:string, v14:string
-    v16:boolean = Move v15:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v9:int32
+    v12:boolean = StrictlyEquals v10:string, v11:string
+    v13:boolean = Move v12:boolean
+    v14:string = Typeof v9:int32
+    v16:boolean = StrictlyEquals v14:string, v15:string
+    v17:boolean = Move v16:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    v19:boolean = StrictlyEquals v17:string, v18:string
-    v20:boolean = Move v19:boolean
-    v22:string = Typeof true
-    v24:boolean = StrictlyEquals v22:string, v23:string
-    v25:boolean = Move v24:boolean
-    Return v12:boolean
+    v20:boolean = StrictlyEquals v18:string, v19:string
+    v21:boolean = Move v20:boolean
+    v23:string = Typeof true
+    v25:boolean = StrictlyEquals v23:string, v24:string
+    v26:boolean = Move v25:boolean
+    Return v13:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v8:int32
-    v11:boolean = StrictlyEquals v9:string, v10:string
-    v12:boolean = Move v11:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v9:int32
+    v12:boolean = StrictlyEquals v10:string, v11:string
+    v13:boolean = Move v12:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    Return v12:boolean
+    Return v13:boolean
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v7:int32
-    v11:boolean = StrictlyEquals v9:string, v10:string
-    v12:boolean = Move v11:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v8:int32
+    v12:boolean = StrictlyEquals v10:string, v11:string
+    v13:boolean = Move v12:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    Return v11:boolean
+    Return v12:boolean
 
 === After TypeRefinement ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v7:int32
-    v11:boolean = StrictlyEquals v26:string, v10:string
-    v12:boolean = Move v11:boolean
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v8:int32
+    v12:boolean = StrictlyEquals v27:string, v11:string
+    v13:boolean = Move v12:boolean
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
-    Return v11:boolean
+    Return v12:boolean
 
 === After InstCombine ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v7:int32
-    v11:boolean = StrictlyEquals v26:string, v10:string
-    v12:boolean = Move true
-    v17:string = TypeofBinding
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v8:int32
+    v12:boolean = StrictlyEquals v27:string, v11:string
+    v13:boolean = Move true
+    v18:string = TypeofBinding
     Jump block2
 block0_split1:
     Return true
@@ -191,23 +203,26 @@ block0_split1:
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
-    v8:int32 = Move v7:int32
-    v9:string = Typeof v7:int32
-    v11:boolean = StrictlyEquals v26:string, v10:string
-    v12:boolean = Move true
-    v17:string = TypeofBinding
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
+    v9:int32 = Move v8:int32
+    v10:string = Typeof v8:int32
+    v12:boolean = StrictlyEquals v27:string, v11:string
+    v13:boolean = Move true
+    v18:string = TypeofBinding
     Return true
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
-    v17:string = TypeofBinding
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
+    v18:string = TypeofBinding
     Return true
 
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
-    v17:string = TypeofBinding
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
+    v18:string = TypeofBinding
     Return true

@@ -1,202 +1,211 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal gen
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal gen
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    SetGlobal it v3:unknown
+    SetGlobal it v4:unknown
     Jump block3
 block0_split2:
-    v4:unknown = GetGlobal it
+    v5:unknown = GetGlobal it
     Jump block4
 block0_split3:
-    v5:unknown = GetById v4:unknown.next
+    v6:unknown = GetById v5:unknown.next
     Jump block5
 block0_split4:
-    v6:unknown = Call v5:unknown, v4:unknown
+    v7:unknown = Call v6:unknown, v5:unknown
     Jump block6
 block0_split5:
-    End v6:unknown
+    End v7:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal gen
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal gen
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    SetGlobal it v3:unknown
+    SetGlobal it v4:unknown
     Jump block3
 block0_split2:
-    v4:unknown = GetGlobal it
+    v5:unknown = GetGlobal it
     Jump block4
 block0_split3:
-    v5:unknown = GetById v4:unknown.next
+    v6:unknown = GetById v5:unknown.next
     Jump block5
 block0_split4:
-    v6:unknown = Call v5:unknown, v4:unknown
+    v7:unknown = Call v6:unknown, v5:unknown
     Jump block6
 block0_split5:
-    End v6:unknown
+    End v7:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal gen
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal gen
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    SetGlobal it v3:unknown
+    SetGlobal it v4:unknown
     Jump block3
 block0_split2:
-    v4:unknown = GetGlobal it
+    v5:unknown = GetGlobal it
     Jump block4
 block0_split3:
-    v5:unknown = GetById v4:unknown.next
+    v6:unknown = GetById v5:unknown.next
     Jump block5
 block0_split4:
-    v6:unknown = Call v5:unknown, v4:unknown
+    v7:unknown = Call v6:unknown, v5:unknown
     Jump block6
 block0_split5:
-    End v6:unknown
+    End v7:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal gen
-    v3:unknown = Call v0:unknown, undefined, true
-    SetGlobal it v3:unknown
-    v4:unknown = GetGlobal it
-    v5:unknown = GetById v4:unknown.next
-    v6:unknown = Call v5:unknown, v4:unknown
-    End v6:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal gen
+    v4:unknown = Call v1:unknown, undefined, true
+    SetGlobal it v4:unknown
+    v5:unknown = GetGlobal it
+    v6:unknown = GetById v5:unknown.next
+    v7:unknown = Call v6:unknown, v5:unknown
+    End v7:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal gen
-    v3:unknown = Call v0:unknown, undefined, true
-    SetGlobal it v3:unknown
-    v4:unknown = GetGlobal it
-    v5:unknown = GetById v4:unknown.next
-    v6:unknown = Call v5:unknown, v4:unknown
-    End v6:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal gen
+    v4:unknown = Call v1:unknown, undefined, true
+    SetGlobal it v4:unknown
+    v5:unknown = GetGlobal it
+    v6:unknown = GetById v5:unknown.next
+    v7:unknown = Call v6:unknown, v5:unknown
+    End v7:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Branch v0:unknown, block2, block3
 block2:
-    v4:int32 = Move 1
+    v5:int32 = Move 1
     Jump block4
 block3:
-    v6:int32 = Move 2
+    v7:int32 = Move 2
     Jump block4
 block4:
-    v20:int32 = Phi [block2:v4:int32, block3:v6:int32]
-    v14:unknown = Yield 42, continuation: block5
+    v21:int32 = Phi [block2:v5:int32, block3:v7:int32]
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v8:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Branch v0:unknown, block2, block3
 block2:
-    v4:int32 = Move 1
+    v5:int32 = Move 1
     Jump block4
 block3:
-    v6:int32 = Move 2
+    v7:int32 = Move 2
     Jump block4
 block4:
-    v20:int32 = Phi [block2:v21:int32, block3:v22:int32]
-    v14:unknown = Yield 42, continuation: block5
+    v21:int32 = Phi [block2:v22:int32, block3:v23:int32]
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v8:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Branch v0:unknown, block2, block3
 block2:
-    v4:int32 = Move 1
+    v5:int32 = Move 1
     Jump block4
 block3:
-    v6:int32 = Move 2
+    v7:int32 = Move 2
     Jump block4
 block4:
-    v20:int32 = Phi [block2:v21:int32, block3:v22:int32]
-    v14:unknown = Yield 42, continuation: block5
+    v21:int32 = Phi [block2:v22:int32, block3:v23:int32]
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v8:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Branch v0:unknown, block2, block3
 block2:
@@ -204,30 +213,31 @@ block2:
 block3:
     Jump block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v8:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === After AggressiveDeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Jump block2
 block2:
@@ -235,30 +245,31 @@ block2:
 block3:
     Jump block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v8:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v9:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block1
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block1
 block1:
     Jump block2
 block2:
@@ -266,88 +277,91 @@ block2:
 block3:
     Jump block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v14:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v15:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
     Jump block10
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 block5_split0:
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block4
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v8:unknown = Move v14:unknown
-    v9:unknown = GetCompletionFields v14:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v9:unknown = Move v15:unknown
+    v10:unknown = GetCompletionFields v15:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block4
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v9:unknown = GetCompletionFields v14:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v10:unknown = GetCompletionFields v15:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown
 
 function(v0:unknown):
 block0:
-    v12:unknown = Yield undefined, continuation: block4
+    v1:unknown = GetLexicalEnvironment
+    v13:unknown = Yield undefined, continuation: block4
 block4:
-    v14:unknown = Yield 42, continuation: block5
+    v15:unknown = Yield 42, continuation: block5
 block5:
-    v9:unknown = GetCompletionFields v14:unknown
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v15:boolean = StrictlyEquals v10:unknown, 1
-    Branch v15:boolean, block6, block7
+    v10:unknown = GetCompletionFields v15:unknown
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v16:boolean = StrictlyEquals v11:unknown, 1
+    Branch v16:boolean, block6, block7
 block6:
-    v16:unknown = Yield undefined
+    v17:unknown = Yield undefined
 block7:
-    v18:boolean = StrictlyEquals v10:unknown, 5
-    Branch v18:boolean, block8, block9
+    v19:boolean = StrictlyEquals v11:unknown, 5
+    Branch v19:boolean, block8, block9
 block8:
-    Throw v11:unknown
+    Throw v12:unknown
 block9:
-    v19:unknown = Yield v11:unknown
+    v20:unknown = Yield v12:unknown

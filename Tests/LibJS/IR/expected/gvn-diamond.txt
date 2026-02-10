@@ -1,176 +1,189 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 1, true
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 1, true
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 1, true
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 1, true
+    End v5:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v6:undefined = Move undefined
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:boolean = StrictlyEquals v7:string, v9:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:boolean = StrictlyEquals v8:string, v10:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v11:string
-    v13:boolean = StrictlyEquals v7:string, v12:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v12:string
+    v14:boolean = StrictlyEquals v8:string, v13:string
+    Return v14:boolean
 
 === After SCCP ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v6:undefined = Move undefined
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:boolean = StrictlyEquals v7:string, v9:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:boolean = StrictlyEquals v8:string, v10:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v11:string
-    v13:boolean = StrictlyEquals v7:string, v12:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v12:string
+    v14:boolean = StrictlyEquals v8:string, v13:string
+    Return v14:boolean
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v6:undefined = Move undefined
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:boolean = StrictlyEquals v7:string, v9:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:boolean = StrictlyEquals v8:string, v10:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v11:string
-    v13:boolean = StrictlyEquals v7:string, v12:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v12:string
+    v14:boolean = StrictlyEquals v8:string, v13:string
+    Return v14:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v2:unknown = GetLexicalEnvironment
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:boolean = StrictlyEquals v7:string, v9:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:boolean = StrictlyEquals v8:string, v10:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v11:string
-    v13:boolean = StrictlyEquals v7:string, v12:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v12:string
+    v14:boolean = StrictlyEquals v8:string, v13:string
+    Return v14:boolean
 
 === After CopyPropagation ===
 function(v0:unknown, v1:unknown):
 block0:
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v2:unknown = GetLexicalEnvironment
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:boolean = StrictlyEquals v6:string, v8:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:boolean = StrictlyEquals v7:string, v9:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v11:string
-    v13:boolean = StrictlyEquals v6:string, v11:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v12:string
+    v14:boolean = StrictlyEquals v7:string, v12:string
+    Return v14:boolean
 
 === After GlobalValueNumbering ===
 function(v0:unknown, v1:unknown):
 block0:
-    v6:string = Typeof v0:unknown
-    v7:string = Move v6:string
+    v2:unknown = GetLexicalEnvironment
+    v7:string = Typeof v0:unknown
+    v8:string = Move v7:string
     Branch v1:unknown, block1, block2
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v6:string
-    v10:boolean = StrictlyEquals v6:string, v6:string
-    Return v10:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v7:string
+    v11:boolean = StrictlyEquals v7:string, v7:string
+    Return v11:boolean
 block2:
-    v11:string = Typeof v0:unknown
-    v12:string = Move v6:string
-    v13:boolean = StrictlyEquals v6:string, v6:string
-    Return v13:boolean
+    v12:string = Typeof v0:unknown
+    v13:string = Move v7:string
+    v14:boolean = StrictlyEquals v7:string, v7:string
+    Return v14:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
-    v6:string = Typeof v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v7:string = Typeof v0:unknown
     Branch v1:unknown, block1, block2
 block1:
-    v10:boolean = StrictlyEquals v6:string, v6:string
-    Return v10:boolean
+    v11:boolean = StrictlyEquals v7:string, v7:string
+    Return v11:boolean
 block2:
-    v13:boolean = StrictlyEquals v6:string, v6:string
-    Return v13:boolean
+    v14:boolean = StrictlyEquals v7:string, v7:string
+    Return v14:boolean
 
 === After InstCombine ===
 function(v0:unknown, v1:unknown):
 block0:
-    v6:string = Typeof v0:unknown
+    v2:unknown = GetLexicalEnvironment
+    v7:string = Typeof v0:unknown
     Branch v1:unknown, block1, block2
 block1:
     Return true
@@ -180,6 +193,7 @@ block2:
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
     Return true
@@ -188,6 +202,7 @@ block2:
 
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
     Return true

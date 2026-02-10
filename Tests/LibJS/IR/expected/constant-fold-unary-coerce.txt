@@ -1,113 +1,120 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
     v7:undefined = Move undefined
-    v9:boolean = Move true
-    v10:number = UnaryPlus v9:boolean
+    v8:undefined = Move undefined
+    v10:boolean = Move true
+    v11:number = UnaryPlus v10:boolean
     Jump block1
 block0_split0:
-    v11:number = Move v10:number
-    v12:number = Negate v9:boolean
+    v12:number = Move v11:number
+    v13:number = Negate v10:boolean
     Jump block2
 block0_split1:
-    v13:number = Move v12:number
-    v15:null = Move null
-    v16:number = UnaryPlus v15:null
+    v14:number = Move v13:number
+    v16:null = Move null
+    v17:number = UnaryPlus v16:null
     Jump block3
 block0_split2:
-    v17:number = Move v16:number
-    v18:undefined = Move undefined
-    v19:number = UnaryPlus v18:undefined
+    v18:number = Move v17:number
+    v19:undefined = Move undefined
+    v20:number = UnaryPlus v19:undefined
     Jump block4
 block0_split3:
-    v20:number = Move v19:number
-    v21:number = Add v11:number, v13:number
+    v21:number = Move v20:number
+    v22:number = Add v12:number, v14:number
     Jump block5
 block0_split4:
-    Return v21:number
+    Return v22:number
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
     v7:undefined = Move undefined
-    v9:boolean = Move true
-    v10:number = UnaryPlus true
+    v8:undefined = Move undefined
+    v10:boolean = Move true
+    v11:number = UnaryPlus true
     Jump block1
 block0_split0:
-    v11:number = Move 1
-    v12:number = Negate true
+    v12:number = Move 1
+    v13:number = Negate true
     Jump block2
 block0_split1:
-    v13:number = Move -1
-    v15:null = Move null
-    v16:number = UnaryPlus null
+    v14:number = Move -1
+    v16:null = Move null
+    v17:number = UnaryPlus null
     Jump block3
 block0_split2:
-    v17:number = Move 0
-    v18:undefined = Move undefined
-    v19:number = UnaryPlus undefined
+    v18:number = Move 0
+    v19:undefined = Move undefined
+    v20:number = UnaryPlus undefined
     Jump block4
 block0_split3:
-    v20:number = Move nan
-    v21:number = Add 1, -1
+    v21:number = Move nan
+    v22:number = Add 1, -1
     Jump block5
 block0_split4:
     Return 0
@@ -115,33 +122,34 @@ block0_split4:
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
     v7:undefined = Move undefined
-    v9:boolean = Move true
-    v10:number = UnaryPlus true
+    v8:undefined = Move undefined
+    v10:boolean = Move true
+    v11:number = UnaryPlus true
     Jump block1
 block0_split0:
-    v11:number = Move 1
-    v12:number = Negate true
+    v12:number = Move 1
+    v13:number = Negate true
     Jump block2
 block0_split1:
-    v13:number = Move -1
-    v15:null = Move null
-    v16:number = UnaryPlus null
+    v14:number = Move -1
+    v16:null = Move null
+    v17:number = UnaryPlus null
     Jump block3
 block0_split2:
-    v17:number = Move 0
-    v18:undefined = Move undefined
-    v19:number = UnaryPlus undefined
+    v18:number = Move 0
+    v19:undefined = Move undefined
+    v20:number = UnaryPlus undefined
     Jump block4
 block0_split3:
-    v20:number = Move nan
-    v21:number = Add 1, -1
+    v21:number = Move nan
+    v22:number = Add 1, -1
     Jump block5
 block0_split4:
     Return 0
@@ -149,6 +157,7 @@ block0_split4:
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block1
 block0_split0:
     Jump block2
@@ -163,9 +172,19 @@ block0_split4:
 
 === After SimplifyCFG ===
 function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block5
 block0_split4:
     Return 0
 
+=== After SimplifyCFG ===
 function():
-block0_split4:
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return 0
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
     Return 0

@@ -1,325 +1,341 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal test
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal test
+    v4:unknown = GetGlobal test
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal test
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal test
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal test
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal test
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal test
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal test
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal test
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v15:boolean = IsNullish v14:string
-    Branch v15:boolean, block3, block4
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v16:boolean = IsNullish v15:string
+    Branch v16:boolean, block3, block4
 block1:
-    Return v18:unknown
+    Return v19:unknown
 block2:
-    v18:unknown = Phi [block5:v13:unknown, block7:v1:undefined]
-    v17:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v19:unknown = Phi [block5:v14:unknown, block7:v2:undefined]
+    v18:unknown = Phi [block5:v8:unknown, block7:v20:undefined]
+    v17:unknown = Phi [block5:v7:unknown, block7:v21:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
     Jump block6
 block3:
-    Return v1:undefined
+    Return v2:undefined
 block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block7
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 block2_split0:
-    Branch v7:unknown, block1, block5
+    Branch v8:unknown, block1, block5
 block4_split1:
     Jump block2
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v15:boolean = IsNullish v14:string
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v16:boolean = IsNullish v15:string
     Jump block4
 block1:
-    Return v18:unknown
+    Return v19:unknown
 block2:
-    v18:unknown = Phi [block5:v13:unknown, block7:v21:undefined]
-    v17:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v19:unknown = Phi [block5:v14:unknown, block7:v22:undefined]
+    v18:unknown = Phi [block5:v8:unknown, block7:v20:undefined]
+    v17:unknown = Phi [block5:v7:unknown, block7:v21:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
     Jump block6
 block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block7
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 block2_split0:
-    Branch v7:unknown, block1, block5
+    Branch v8:unknown, block1, block5
 block4_split1:
     Jump block2
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v15:boolean = IsNullish v14:string
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v16:boolean = IsNullish v15:string
     Jump block4
 block1:
-    Return v18:unknown
+    Return v19:unknown
 block2:
-    v18:unknown = Phi [block5:v13:unknown, block7:v21:undefined]
-    v17:unknown = Phi [block5:v7:unknown, block7:v19:undefined]
-    v16:unknown = Phi [block5:v6:unknown, block7:v20:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v19:unknown = Phi [block5:v14:unknown, block7:v22:undefined]
+    v18:unknown = Phi [block5:v8:unknown, block7:v20:undefined]
+    v17:unknown = Phi [block5:v7:unknown, block7:v21:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
     Jump block6
 block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block7
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 block2_split0:
-    Branch v7:unknown, block1, block5
+    Branch v8:unknown, block1, block5
 block4_split1:
     Jump block2
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block4
 block1:
-    Return v18:unknown
+    Return v19:unknown
 block2:
-    v18:unknown = Phi [block5:v13:unknown, block7:v21:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v19:unknown = Phi [block5:v14:unknown, block7:v22:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
     Jump block6
 block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block7
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 block2_split0:
-    Branch v7:unknown, block1, block5
+    Branch v8:unknown, block1, block5
 block4_split1:
     Jump block2
 
 === After CopyPropagation ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block4
 block1:
-    Return v18:unknown
+    Return v19:unknown
 block2:
-    v18:unknown = Phi [block5:v6:unknown, block7:v21:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
+    v19:unknown = Phi [block5:v7:unknown, block7:v22:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
     Jump block6
 block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block7
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 block2_split0:
-    Branch v7:unknown, block1, block5
+    Branch v8:unknown, block1, block5
 block4_split1:
     Jump block2
 
 === After SimplifyCFG ===
 function():
-block1:
-    Return v18:unknown
-block2:
-    v18:unknown = Phi [block5:v6:unknown, block4:v21:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block5
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v19:unknown = Phi [block5:v7:unknown, block0:v22:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block5
 block5:
-    v13:unknown = Move v6:unknown
+    v14:unknown = Move v7:unknown
     Jump block2
 
 === After DeadCodeElimination ===
 function():
-block1:
-    Return v18:unknown
-block2:
-    v18:unknown = Phi [block5:v6:unknown, block4:v21:undefined]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block5
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v19:unknown = Phi [block5:v7:unknown, block0:v22:undefined]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block5
 block5:
     Jump block2
 
 === After SimplifyCFG ===
 function():
-block1:
-    Return v18:unknown
-block2:
-    v18:unknown = Phi [block4:v21:undefined, block2:v6:unknown]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block2
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v19:unknown = Phi [block0:v22:undefined, block2:v7:unknown]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block2
 
 === After SplitCriticalEdges ===
 function():
-block1:
-    Return v18:unknown
-block2:
-    v18:unknown = Phi [block4:v21:undefined, block8:v6:unknown]
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block8
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v19:unknown = Phi [block0:v22:undefined, block8:v7:unknown]
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block8
 split_block2_block2:
     Jump block2
 
 === After SsaDestructionPass ===
 function():
-block1:
-    Return v18:unknown
-block2:
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block8
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
-    ParallelCopy [v18:unknown <- v21:undefined]
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
+    ParallelCopy [v19:unknown <- v22:undefined]
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block8
 split_block2_block2:
-    ParallelCopy [v18:unknown <- v6:unknown]
+    ParallelCopy [v19:unknown <- v7:unknown]
     Jump block2
 
 function():
-block1:
-    Return v18:unknown
-block2:
-    v5:unknown = IteratorNextUnpack v10:unknown, v11:unknown, v12:unknown
-    v6:unknown = ExtractValue v5:unknown, 0
-    v7:unknown = ExtractValue v5:unknown, 1
-    Branch v7:unknown, block1, block8
-block4:
-    v9:unknown = GetObjectPropertyIterator v8:string
-    v10:unknown = ExtractValue v9:unknown, 0
-    v11:unknown = ExtractValue v9:unknown, 1
-    v12:unknown = ExtractValue v9:unknown, 2
-    ParallelCopy [v18:unknown <- v21:undefined]
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v10:unknown = GetObjectPropertyIterator v9:string
+    v11:unknown = ExtractValue v10:unknown, 0
+    v12:unknown = ExtractValue v10:unknown, 1
+    v13:unknown = ExtractValue v10:unknown, 2
+    ParallelCopy [v19:unknown <- v22:undefined]
     Jump block2
+block1:
+    Return v19:unknown
+block2:
+    v6:unknown = IteratorNextUnpack v11:unknown, v12:unknown, v13:unknown
+    v7:unknown = ExtractValue v6:unknown, 0
+    v8:unknown = ExtractValue v6:unknown, 1
+    Branch v8:unknown, block1, block8
 split_block2_block2:
-    ParallelCopy [v18:unknown <- v6:unknown]
+    ParallelCopy [v19:unknown <- v7:unknown]
     Jump block2

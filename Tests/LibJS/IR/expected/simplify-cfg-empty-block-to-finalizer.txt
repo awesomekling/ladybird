@@ -1,13 +1,14 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal f
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    SetGlobal result v3:unknown
+    SetGlobal result v4:unknown
     Jump block3
 block0_split2:
     End undefined
@@ -15,13 +16,14 @@ block0_split2:
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal f
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    SetGlobal result v3:unknown
+    SetGlobal result v4:unknown
     Jump block3
 block0_split2:
     End undefined
@@ -29,13 +31,14 @@ block0_split2:
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal f
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    SetGlobal result v3:unknown
+    SetGlobal result v4:unknown
     Jump block3
 block0_split2:
     End undefined
@@ -43,907 +46,1183 @@ block0_split2:
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal f
-    v3:unknown = Call v0:unknown, undefined, 5
-    SetGlobal result v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f
+    v4:unknown = Call v1:unknown, undefined, 5
+    SetGlobal result v4:unknown
     End undefined
 
 function():
 block0:
-    v0:unknown = GetGlobal f
-    v3:unknown = Call v0:unknown, undefined, 5
-    SetGlobal result v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal f
+    v4:unknown = Call v1:unknown, undefined, 5
+    SetGlobal result v4:unknown
     End undefined
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
     v8:int32 = Move 0
+    v9:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v9:number = ToNumeric v43:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v56:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v7:int32, block2:v16:number]
-    v44:unknown = Phi [block0:v4:undefined, block2:v45:unknown]
-    v43:number = Phi [block0:v8:int32, block2:v10:number]
-    v40:unknown = Phi [block0:v3:undefined, block2:v41:unknown]
-    v36:unknown = Phi [block0:v51:undefined, block2:v13:number]
-    v32:unknown = Phi [block0:v52:undefined, block2:v9:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v8:int32, block2:v19:number]
+    v57:unknown = Phi [block0:v5:undefined, block2:v59:unknown]
+    v56:number = Phi [block0:v9:int32, block2:v11:number]
+    v52:unknown = Phi [block0:v4:undefined, block2:v54:unknown]
+    v47:unknown = Phi [block0:v66:undefined, block2:v18:number]
+    v42:unknown = Phi [block0:v67:undefined, block2:v16:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v38:unknown = Phi [block0:v69:undefined, block2:v10:number]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    v45:unknown = Phi [block11:v46:unknown, block8:v46:unknown, block9:v20:unknown, block10:v46:unknown, block13:v20:unknown, block17:v46:unknown, block18:v20:unknown, block20:v20:unknown]
-    v41:unknown = Phi [block11:v42:number, block8:v42:number, block9:v24:number, block10:v42:number, block13:v42:number, block17:v42:number, block18:v42:number, block20:v42:number]
-    v37:unknown = Phi [block11:v39:unknown, block8:v39:unknown, block9:v38:unknown, block10:v39:unknown, block13:v22:unknown, block17:v19:unknown, block18:v22:unknown, block20:v26:unknown]
-    v33:unknown = Phi [block11:v35:unknown, block8:v18:unknown, block9:v23:number, block10:v35:unknown, block13:v25:unknown, block17:v18:unknown, block18:v18:unknown, block20:v25:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v58:unknown = Phi [block8:v60:unknown, block9:v23:unknown, block10:v60:unknown, block13:v23:unknown, block21:v60:unknown, block22:v23:unknown, block24:v23:unknown]
+    v53:unknown = Phi [block8:v55:number, block9:v27:number, block10:v55:number, block13:v55:number, block21:v55:number, block22:v55:number, block24:v55:number]
+    v48:unknown = Phi [block8:v51:unknown, block9:v50:unknown, block10:v51:unknown, block13:v25:unknown, block21:v22:unknown, block22:v25:unknown, block24:v30:unknown]
+    v43:unknown = Phi [block8:v21:unknown, block9:v26:number, block10:v46:unknown, block13:v29:unknown, block21:v21:unknown, block22:v21:unknown, block24:v29:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    v14:int32 = Move 1
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v59:unknown = Phi [block5:v58:unknown, block11:v60:unknown]
+    v54:unknown = Phi [block5:v53:unknown, block11:v55:number]
+    v49:unknown = Phi [block5:v48:unknown, block11:v51:unknown]
+    v44:unknown = Phi [block5:v43:unknown, block11:v46:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v14:int32, block11:v28:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
-    v17:int32 = Move 0
+    v20:int32 = Move 0
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v27:unknown]
-    v38:unknown = Phi [block12:v22:unknown, block21:v26:unknown]
-    v34:unknown = Phi [block12:v18:unknown, block21:v25:unknown]
-    v23:number = ToNumeric v42:number
-    v24:number = Increment v23:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v31:unknown]
+    v50:unknown = Phi [block12:v25:unknown, block25:v30:unknown]
+    v45:unknown = Phi [block12:v21:unknown, block25:v29:unknown]
+    v26:number = ToNumeric v55:number
+    v27:number = Increment v26:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v46:unknown = Phi [block7:v44:unknown, block9:v20:unknown]
-    v42:number = Phi [block7:v17:int32, block9:v24:number]
-    v39:unknown = Phi [block7:v36:unknown, block9:v38:unknown]
-    v35:unknown = Phi [block7:v32:unknown, block9:v23:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v60:unknown = Phi [block7:v57:unknown, block9:v23:unknown]
+    v55:number = Phi [block7:v20:int32, block9:v27:number]
+    v51:unknown = Phi [block7:v47:unknown, block9:v50:unknown]
+    v46:unknown = Phi [block7:v42:unknown, block9:v26:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    v28:int32 = Move 0
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v20:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v20:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v23:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v23:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
     v8:int32 = Move 0
+    v9:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v9:number = ToNumeric v43:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v56:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v16:number]
-    v44:unknown = Phi [block0:v54:undefined, block2:v45:unknown]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v40:unknown = Phi [block0:v53:undefined, block2:v41:unknown]
-    v36:unknown = Phi [block0:v51:undefined, block2:v13:number]
-    v32:unknown = Phi [block0:v52:undefined, block2:v9:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v19:number]
+    v57:unknown = Phi [block0:v71:undefined, block2:v59:unknown]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v52:unknown = Phi [block0:v70:undefined, block2:v54:unknown]
+    v47:unknown = Phi [block0:v66:undefined, block2:v18:number]
+    v42:unknown = Phi [block0:v67:undefined, block2:v16:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v38:unknown = Phi [block0:v69:undefined, block2:v10:number]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    v45:unknown = Phi [block11:v46:unknown, block8:v46:unknown, block9:v20:unknown, block10:v46:unknown, block13:v20:unknown, block17:v46:unknown, block18:v20:unknown, block20:v20:unknown]
-    v41:unknown = Phi [block11:v42:number, block8:v42:number, block9:v24:number, block10:v42:number, block13:v42:number, block17:v42:number, block18:v42:number, block20:v42:number]
-    v37:unknown = Phi [block11:v39:unknown, block8:v39:unknown, block9:v38:unknown, block10:v39:unknown, block13:v22:unknown, block17:v19:unknown, block18:v22:unknown, block20:v26:unknown]
-    v33:unknown = Phi [block11:v35:unknown, block8:v18:unknown, block9:v23:number, block10:v35:unknown, block13:v25:unknown, block17:v18:unknown, block18:v18:unknown, block20:v25:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v58:unknown = Phi [block8:v60:unknown, block9:v23:unknown, block10:v60:unknown, block13:v23:unknown, block21:v60:unknown, block22:v23:unknown, block24:v23:unknown]
+    v53:unknown = Phi [block8:v55:number, block9:v27:number, block10:v55:number, block13:v55:number, block21:v55:number, block22:v55:number, block24:v55:number]
+    v48:unknown = Phi [block8:v51:unknown, block9:v50:unknown, block10:v51:unknown, block13:v25:unknown, block21:v22:unknown, block22:v25:unknown, block24:v30:unknown]
+    v43:unknown = Phi [block8:v21:unknown, block9:v26:number, block10:v46:unknown, block13:v29:unknown, block21:v21:unknown, block22:v21:unknown, block24:v29:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    v14:int32 = Move 1
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v59:unknown = Phi [block5:v58:unknown, block11:v60:unknown]
+    v54:unknown = Phi [block5:v53:unknown, block11:v55:number]
+    v49:unknown = Phi [block5:v48:unknown, block11:v51:unknown]
+    v44:unknown = Phi [block5:v43:unknown, block11:v46:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block11:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
-    v17:int32 = Move 0
+    v20:int32 = Move 0
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v27:unknown]
-    v38:unknown = Phi [block12:v22:unknown, block21:v26:unknown]
-    v34:unknown = Phi [block12:v18:unknown, block21:v25:unknown]
-    v23:number = ToNumeric v42:number
-    v24:number = Increment v23:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v31:unknown]
+    v50:unknown = Phi [block12:v25:unknown, block25:v30:unknown]
+    v45:unknown = Phi [block12:v21:unknown, block25:v29:unknown]
+    v26:number = ToNumeric v55:number
+    v27:number = Increment v26:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v46:unknown = Phi [block7:v44:unknown, block9:v20:unknown]
-    v42:number = Phi [block7:v57:int32, block9:v24:number]
-    v39:unknown = Phi [block7:v36:unknown, block9:v38:unknown]
-    v35:unknown = Phi [block7:v32:unknown, block9:v23:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v60:unknown = Phi [block7:v57:unknown, block9:v23:unknown]
+    v55:number = Phi [block7:v75:int32, block9:v27:number]
+    v51:unknown = Phi [block7:v47:unknown, block9:v50:unknown]
+    v46:unknown = Phi [block7:v42:unknown, block9:v26:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    v28:int32 = Move 0
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v20:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v20:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v23:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v23:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
     v8:int32 = Move 0
+    v9:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v9:number = ToNumeric v43:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v56:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v16:number]
-    v44:unknown = Phi [block0:v54:undefined, block2:v45:unknown]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v40:unknown = Phi [block0:v53:undefined, block2:v41:unknown]
-    v36:unknown = Phi [block0:v51:undefined, block2:v13:number]
-    v32:unknown = Phi [block0:v52:undefined, block2:v9:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v19:number]
+    v57:unknown = Phi [block0:v71:undefined, block2:v59:unknown]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v52:unknown = Phi [block0:v70:undefined, block2:v54:unknown]
+    v47:unknown = Phi [block0:v66:undefined, block2:v18:number]
+    v42:unknown = Phi [block0:v67:undefined, block2:v16:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v38:unknown = Phi [block0:v69:undefined, block2:v10:number]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    v45:unknown = Phi [block11:v46:unknown, block8:v46:unknown, block9:v20:unknown, block10:v46:unknown, block13:v20:unknown, block17:v46:unknown, block18:v20:unknown, block20:v20:unknown]
-    v41:unknown = Phi [block11:v42:number, block8:v42:number, block9:v24:number, block10:v42:number, block13:v42:number, block17:v42:number, block18:v42:number, block20:v42:number]
-    v37:unknown = Phi [block11:v39:unknown, block8:v39:unknown, block9:v38:unknown, block10:v39:unknown, block13:v22:unknown, block17:v19:unknown, block18:v22:unknown, block20:v26:unknown]
-    v33:unknown = Phi [block11:v35:unknown, block8:v18:unknown, block9:v23:number, block10:v35:unknown, block13:v25:unknown, block17:v18:unknown, block18:v18:unknown, block20:v25:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v58:unknown = Phi [block8:v60:unknown, block9:v23:unknown, block10:v60:unknown, block13:v23:unknown, block21:v60:unknown, block22:v23:unknown, block24:v23:unknown]
+    v53:unknown = Phi [block8:v55:number, block9:v27:number, block10:v55:number, block13:v55:number, block21:v55:number, block22:v55:number, block24:v55:number]
+    v48:unknown = Phi [block8:v51:unknown, block9:v50:unknown, block10:v51:unknown, block13:v25:unknown, block21:v22:unknown, block22:v25:unknown, block24:v30:unknown]
+    v43:unknown = Phi [block8:v21:unknown, block9:v26:number, block10:v46:unknown, block13:v29:unknown, block21:v21:unknown, block22:v21:unknown, block24:v29:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    v14:int32 = Move 1
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v59:unknown = Phi [block5:v58:unknown, block11:v60:unknown]
+    v54:unknown = Phi [block5:v53:unknown, block11:v55:number]
+    v49:unknown = Phi [block5:v48:unknown, block11:v51:unknown]
+    v44:unknown = Phi [block5:v43:unknown, block11:v46:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block11:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
-    v17:int32 = Move 0
+    v20:int32 = Move 0
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v27:unknown]
-    v38:unknown = Phi [block12:v22:unknown, block21:v26:unknown]
-    v34:unknown = Phi [block12:v18:unknown, block21:v25:unknown]
-    v23:number = ToNumeric v42:number
-    v24:number = Increment v23:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v31:unknown]
+    v50:unknown = Phi [block12:v25:unknown, block25:v30:unknown]
+    v45:unknown = Phi [block12:v21:unknown, block25:v29:unknown]
+    v26:number = ToNumeric v55:number
+    v27:number = Increment v26:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v46:unknown = Phi [block7:v44:unknown, block9:v20:unknown]
-    v42:number = Phi [block7:v57:int32, block9:v24:number]
-    v39:unknown = Phi [block7:v36:unknown, block9:v38:unknown]
-    v35:unknown = Phi [block7:v32:unknown, block9:v23:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v60:unknown = Phi [block7:v57:unknown, block9:v23:unknown]
+    v55:number = Phi [block7:v75:int32, block9:v27:number]
+    v51:unknown = Phi [block7:v47:unknown, block9:v50:unknown]
+    v46:unknown = Phi [block7:v42:unknown, block9:v26:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    v28:int32 = Move 0
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v20:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v20:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v23:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v23:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v9:number = ToNumeric v43:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v56:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v16:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v19:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block11:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v27:unknown]
-    v23:number = ToNumeric v42:number
-    v24:number = Increment v23:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v31:unknown]
+    v26:number = ToNumeric v55:number
+    v27:number = Increment v26:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v42:number = Phi [block7:v57:int32, block9:v24:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v55:number = Phi [block7:v75:int32, block9:v27:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v20:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v20:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v23:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v23:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v9:number = ToNumeric v43:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v56:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block11:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v26:unknown]
-    v23:number = ToNumeric v42:number
-    v24:number = Increment v23:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v30:unknown]
+    v26:number = ToNumeric v55:number
+    v27:number = Increment v26:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v42:number = Phi [block7:v57:int32, block9:v24:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v55:number = Phi [block7:v75:int32, block9:v27:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v19:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After RedundantCheckElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block1, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    Jump block14
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
 block6:
-    Jump block2
+    v63:unknown = Phi [block5:v62:unknown, block11:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block11:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block11:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    Jump block18
 block7:
     Jump block10
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block12:v50:unknown, block21:v26:unknown]
-    v24:number = Increment v42:number
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block12:v65:unknown, block25:v30:unknown]
+    v27:number = Increment v55:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block7:v47:number, block9:v49:unknown]
-    v42:number = Phi [block7:v57:int32, block9:v24:number]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
+block10: [handler: block5]
+    v65:unknown = Phi [block7:v61:number, block9:v64:unknown]
+    v55:number = Phi [block7:v75:int32, block9:v27:number]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block11
 block11:
-    Jump block5
+    Jump block6
 block12:
     Jump block9
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block5_split0:
-    v13:number = Add v11:unknown, 1
-    Jump block15
-block5_split1:
-    v15:number = Mul v13:number, 2
-    Jump block16
-block5_split2:
-    v16:number = Move v15:number
-    ContinuePendingUnwind block6
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v19:unknown, 3
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block14:
+    Jump block2
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block6_split0:
+    v16:number = Add v15:unknown, 1
     Jump block19
+block6_split1:
+    v18:number = Mul v16:number, 2
+    Jump block20
+block6_split2:
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block14, block15
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block12, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    Jump block21
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block12, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block10, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    v16:number = Move v15:number
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block21:v26:unknown, block19:v50:unknown]
-    v24:number = Increment v42:number
-    Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block9:v49:unknown, block1:v47:number]
-    v42:number = Phi [block9:v24:number, block1:v57:int32]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
-block11:
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v20:unknown = Move v19:unknown
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    Jump block19
-block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block9, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
+block6:
+    v63:unknown = Phi [block5:v62:unknown, block10:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block10:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block10:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v19:number = Move v18:number
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
     Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block25:v30:unknown, block23:v65:unknown]
+    v27:number = Increment v55:number
+    Jump block10
+block10: [handler: block5]
+    v65:unknown = Phi [block9:v64:unknown, block3:v61:number]
+    v55:number = Phi [block9:v27:number, block3:v75:int32]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block6
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v23:unknown = Move v22:unknown
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
+block8_split5:
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block9, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
-    v27:unknown = Move v26:unknown
+    v31:unknown = Move v30:unknown
     Jump block9
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block10, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block21:v26:unknown, block19:v50:unknown]
-    v24:number = Increment v42:number
-    Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block9:v49:unknown, block1:v47:number]
-    v42:number = Phi [block9:v24:number, block1:v57:int32]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
-block11:
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    Jump block19
-block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block9, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
+block6:
+    v63:unknown = Phi [block5:v62:unknown, block10:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block10:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block10:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
     Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block25:v30:unknown, block23:v65:unknown]
+    v27:number = Increment v55:number
+    Jump block10
+block10: [handler: block5]
+    v65:unknown = Phi [block9:v64:unknown, block3:v61:number]
+    v55:number = Phi [block9:v27:number, block3:v75:int32]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block6
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
+block8_split5:
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block9, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block25
 block13_split7:
     Jump block9
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block10, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block19:v50:unknown, block20:v26:unknown]
-    v24:number = Increment v42:number
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
+block6:
+    v63:unknown = Phi [block5:v62:unknown, block10:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block10:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block10:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block23:v65:unknown, block24:v30:unknown]
+    v27:number = Increment v55:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block9:v49:unknown, block1:v47:number]
-    v42:number = Phi [block9:v24:number, block1:v57:int32]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
-block11:
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    Jump block19
+block10: [handler: block5]
+    v65:unknown = Phi [block9:v64:unknown, block3:v61:number]
+    v55:number = Phi [block9:v27:number, block3:v75:int32]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block6
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block9, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block9, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
     Jump block9
 
 === After SplitCriticalEdges ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v47:number = Phi [block0:v55:int32, block2:v15:number]
-    v43:number = Phi [block0:v56:int32, block2:v10:number]
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v61:number = Phi [block0:v72:int32, block2:v18:number]
+    v56:number = Phi [block0:v73:int32, block2:v11:number]
+    v40:unknown = Phi [block0:v68:undefined, block2:v41:unknown]
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block26, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    v48:unknown = Phi [block11:v50:unknown, block8:v50:unknown, block9:v49:unknown, block10:v50:unknown, block13:v50:unknown, block17:v50:unknown, block18:v50:unknown, block20:v50:unknown]
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    Jump block17
-block9: [finalizer: block5]
-    v49:unknown = Phi [block20:v26:unknown, block22:v50:unknown]
-    v24:number = Increment v42:number
+    v62:unknown = Phi [block8:v65:unknown, block9:v64:unknown, block10:v65:unknown, block13:v65:unknown, block21:v65:unknown, block22:v65:unknown, block24:v65:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    Jump block6
+block6:
+    v63:unknown = Phi [block5:v62:unknown, block27:v65:unknown]
+    v41:unknown = Phi [block5:v12:unknown, block27:v40:unknown]
+    v39:int32 = Phi [block5:v74:int32, block27:v76:int32]
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    v64:unknown = Phi [block24:v30:unknown, block28:v65:unknown]
+    v27:number = Increment v55:number
     Jump block10
-block10: [finalizer: block5]
-    v50:unknown = Phi [block9:v49:unknown, block1:v47:number]
-    v42:number = Phi [block9:v24:number, block1:v57:int32]
-    v31:boolean = LessThan v42:number, 3
-    Branch v31:boolean, block8, block11
-block11:
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    Jump block19
+block10: [handler: block5]
+    v65:unknown = Phi [block9:v64:unknown, block26:v61:number]
+    v55:number = Phi [block9:v27:number, block26:v75:int32]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block27
+block13: [handler: block5]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block22, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block28, block13
+block13_split6: [handler: block5]
+    v30:unknown = Sub v29:unknown, v55:number
     Jump block9
+split_block3_block10:
+    Jump block10
+split_block10_block6:
+    Jump block6
 split_block8_split5_block9:
     Jump block9
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v47:number <- v55:int32, v43:number <- v56:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v61:number <- v72:int32, v56:number <- v73:int32, v40:unknown <- v68:undefined]
     Jump block3
-block1:
-    ParallelCopy [v50:unknown <- v47:number, v42:number <- v57:int32]
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
-    ParallelCopy [v47:number <- v15:number, v43:number <- v10:number]
+    v11:number = Increment v56:number
+    ParallelCopy [v61:number <- v18:number, v56:number <- v11:number, v40:unknown <- v41:unknown]
     Jump block3
 block3:
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block26, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block17
-block9: [finalizer: block5]
-    v24:number = Increment v42:number
-    ParallelCopy [v50:unknown <- v49:unknown, v42:number <- v24:number]
-    ParallelCopy [v48:unknown <- v49:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    ParallelCopy [v63:unknown <- v62:unknown, v41:unknown <- v12:unknown, v39:int32 <- v74:int32]
+    Jump block6
+block6:
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    ParallelCopy [v62:unknown <- v64:unknown]
+    v27:number = Increment v55:number
+    ParallelCopy [v65:unknown <- v64:unknown, v55:number <- v27:number]
     Jump block10
-block10: [finalizer: block5]
-    v31:boolean = LessThan v42:number, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Branch v31:boolean, block8, block11
-block11:
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block19
+block10: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block27
+block13: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block22, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    ParallelCopy [v49:unknown <- v26:unknown]
-    ParallelCopy [v48:unknown <- v50:unknown]
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block28, block13
+block13_split6: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v30:unknown = Sub v29:unknown, v55:number
+    ParallelCopy [v64:unknown <- v30:unknown]
     Jump block9
+split_block3_block10:
+    ParallelCopy [v65:unknown <- v61:number, v55:number <- v75:int32]
+    Jump block10
+split_block10_block6:
+    ParallelCopy [v63:unknown <- v65:unknown, v41:unknown <- v40:unknown, v39:int32 <- v76:int32]
+    Jump block6
 split_block8_split5_block9:
-    ParallelCopy [v49:unknown <- v50:unknown]
+    ParallelCopy [v64:unknown <- v65:unknown]
     Jump block9
 
 === After CopyCoalescing ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v47:number <- v55:int32, v43:number <- v56:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v61:number <- v72:int32, v56:number <- v73:int32, v40:unknown <- v68:undefined]
     Jump block3
-block1:
-    ParallelCopy [v42:number <- v57:int32]
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block26, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block17
-block9: [finalizer: block5]
-    v24:number = Increment v42:number
-    ParallelCopy [v50:unknown <- v49:unknown, v48:unknown <- v49:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    ParallelCopy [v39:int32 <- v74:int32]
+    Jump block6
+block6:
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    ParallelCopy [v62:unknown <- v64:unknown]
+    v27:number = Increment v55:number
     Jump block10
-block10: [finalizer: block5]
-    v31:boolean = LessThan v42:number, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Branch v31:boolean, block8, block11
-block11:
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block19
+block10: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block27
+block13: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block22, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    ParallelCopy [v48:unknown <- v50:unknown]
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block28, block13
+block13_split6: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v30:unknown = Sub v29:unknown, v55:number
     Jump block9
+split_block3_block10:
+    ParallelCopy [v55:number <- v75:int32]
+    Jump block10
+split_block10_block6:
+    ParallelCopy [v63:unknown <- v65:unknown, v39:int32 <- v76:int32]
+    Jump block6
 split_block8_split5_block9:
-    ParallelCopy [v49:unknown <- v50:unknown]
     Jump block9
+
+=== After PostSSACleanup ===
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v61:number <- v72:int32, v56:number <- v73:int32, v40:unknown <- v68:undefined]
+    Jump block3
+block2:
+    v11:number = Increment v56:number
+    Jump block3
+block3:
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block26, block4
+block4:
+    Return v61:number
+block5:
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    ParallelCopy [v39:int32 <- v74:int32]
+    Jump block6
+block6:
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    ParallelCopy [v62:unknown <- v64:unknown]
+    v27:number = Increment v55:number
+    Jump block10
+block10: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block27
+block13: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
+block8_split5:
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block9, block13
+block13_split6: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v30:unknown = Sub v29:unknown, v55:number
+    Jump block9
+split_block3_block10:
+    ParallelCopy [v55:number <- v75:int32]
+    Jump block10
+split_block10_block6:
+    ParallelCopy [v63:unknown <- v65:unknown, v39:int32 <- v76:int32]
+    Jump block6
 
 function(v0:unknown):
 block0:
-    ParallelCopy [v47:number <- v55:int32, v43:number <- v56:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v61:number <- v72:int32, v56:number <- v73:int32, v40:unknown <- v68:undefined]
     Jump block3
-block1:
-    ParallelCopy [v42:number <- v57:int32]
-    EnterUnwindContext block10
 block2:
-    v10:number = Increment v43:number
+    v11:number = Increment v56:number
     Jump block3
 block3:
-    v29:boolean = LessThan v43:number, 2
-    Branch v29:boolean, block1, block4
+    v33:boolean = LessThan v56:number, 2
+    Branch v33:boolean, block26, block4
 block4:
-    Return v47:number
+    Return v61:number
 block5:
-    LeaveUnwindContext
-    v11:unknown = Add v48:unknown, v43:number
-    v13:number = Add v11:unknown, 1
-    v15:number = Mul v13:number, 2
-    ContinuePendingUnwind block2
-block8: [finalizer: block5]
-    v18:unknown = Add v0:unknown, v43:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block17
-block9: [finalizer: block5]
-    v24:number = Increment v42:number
-    ParallelCopy [v50:unknown <- v49:unknown, v48:unknown <- v49:unknown]
+    v12:unknown = Catch
+    SetLexicalEnvironment v1:unknown
+    ParallelCopy [v39:int32 <- v74:int32]
+    Jump block6
+block6:
+    v15:unknown = Add v63:unknown, v56:number
+    v16:number = Add v15:unknown, 1
+    v18:number = Mul v16:number, 2
+    v34:boolean = StrictlyEquals v39:int32, 0
+    Branch v34:boolean, block2, block15
+block8: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v21:unknown = Add v0:unknown, v56:number
+    Jump block21
+block9: [handler: block5]
+    ParallelCopy [v62:unknown <- v64:unknown]
+    v27:number = Increment v55:number
     Jump block10
-block10: [finalizer: block5]
-    v31:boolean = LessThan v42:number, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Branch v31:boolean, block8, block11
-block11:
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block5
-block13: [finalizer: block5]
-    v25:unknown = Add v50:unknown, v19:unknown
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block20
-block8_split3: [finalizer: block5]
-    v19:unknown = Add v18:unknown, v42:number
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block18
-block8_split4: [finalizer: block5]
-    v22:unknown = BitwiseAnd v19:unknown, 3
-    ParallelCopy [v48:unknown <- v50:unknown]
-    Jump block19
+block10: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v36:boolean = LessThan v55:number, 3
+    Branch v36:boolean, block8, block27
+block13: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v29:unknown = Add v65:unknown, v22:unknown
+    Jump block24
+block15:
+    v37:boolean = StrictlyEquals v39:int32, 2
+    Branch v37:boolean, block16, block17
+block16:
+    Return v41:unknown
+block17:
+    Throw v41:unknown
+block8_split3: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v22:unknown = Add v21:unknown, v55:number
+    Jump block22
+block8_split4: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v25:unknown = BitwiseAnd v22:unknown, 3
+    Jump block23
 block8_split5:
-    v30:boolean = StrictlyEquals v22:unknown, 1
-    Branch v30:boolean, block22, block13
-block13_split6: [finalizer: block5]
-    v26:unknown = Sub v25:unknown, v42:number
-    ParallelCopy [v48:unknown <- v50:unknown]
+    v35:boolean = StrictlyEquals v25:unknown, 1
+    Branch v35:boolean, block9, block13
+block13_split6: [handler: block5]
+    ParallelCopy [v62:unknown <- v65:unknown]
+    v30:unknown = Sub v29:unknown, v55:number
     Jump block9
-split_block8_split5_block9:
-    ParallelCopy [v49:unknown <- v50:unknown]
-    Jump block9
+split_block3_block10:
+    ParallelCopy [v55:number <- v75:int32]
+    Jump block10
+split_block10_block6:
+    ParallelCopy [v63:unknown <- v65:unknown, v39:int32 <- v76:int32]
+    Jump block6

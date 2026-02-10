@@ -1,138 +1,151 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:string = Move v7:string
-    v10:string = Move v9:string
-    v11:boolean = Not v8:string
-    v12:boolean = Move v11:boolean
-    v13:boolean = Not v10:string
-    v14:boolean = Move v13:boolean
-    v15:boolean = ToBoolean v8:string
-    v16:boolean = Move v15:boolean
-    v17:boolean = ToBoolean v10:string
-    v18:boolean = Move v17:boolean
-    Return v12:boolean
+    v7:undefined = Move undefined
+    v9:string = Move v8:string
+    v11:string = Move v10:string
+    v12:boolean = Not v9:string
+    v13:boolean = Move v12:boolean
+    v14:boolean = Not v11:string
+    v15:boolean = Move v14:boolean
+    v16:boolean = ToBoolean v9:string
+    v17:boolean = Move v16:boolean
+    v18:boolean = ToBoolean v11:string
+    v19:boolean = Move v18:boolean
+    Return v13:boolean
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:string = Move v7:string
-    v10:string = Move v9:string
-    v11:boolean = Not v19:string
-    v12:boolean = Move v11:boolean
-    v13:boolean = Not v20:string
-    v14:boolean = Move v13:boolean
-    v15:boolean = ToBoolean v19:string
-    v16:boolean = Move v15:boolean
-    v17:boolean = ToBoolean v20:string
-    v18:boolean = Move v17:boolean
-    Return v12:boolean
+    v7:undefined = Move undefined
+    v9:string = Move v8:string
+    v11:string = Move v10:string
+    v12:boolean = Not v20:string
+    v13:boolean = Move v12:boolean
+    v14:boolean = Not v21:string
+    v15:boolean = Move v14:boolean
+    v16:boolean = ToBoolean v20:string
+    v17:boolean = Move v16:boolean
+    v18:boolean = ToBoolean v21:string
+    v19:boolean = Move v18:boolean
+    Return v13:boolean
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:string = Move v7:string
-    v10:string = Move v9:string
-    v11:boolean = Not v19:string
-    v12:boolean = Move v11:boolean
-    v13:boolean = Not v20:string
-    v14:boolean = Move v13:boolean
-    v15:boolean = ToBoolean v19:string
-    v16:boolean = Move v15:boolean
-    v17:boolean = ToBoolean v20:string
-    v18:boolean = Move v17:boolean
-    Return v12:boolean
+    v7:undefined = Move undefined
+    v9:string = Move v8:string
+    v11:string = Move v10:string
+    v12:boolean = Not v20:string
+    v13:boolean = Move v12:boolean
+    v14:boolean = Not v21:string
+    v15:boolean = Move v14:boolean
+    v16:boolean = ToBoolean v20:string
+    v17:boolean = Move v16:boolean
+    v18:boolean = ToBoolean v21:string
+    v19:boolean = Move v18:boolean
+    Return v13:boolean
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v11:boolean = Not v19:string
-    v12:boolean = Move v11:boolean
-    Return v12:boolean
+    v0:unknown = GetLexicalEnvironment
+    v12:boolean = Not v20:string
+    v13:boolean = Move v12:boolean
+    Return v13:boolean
 
 === After CopyPropagation ===
 function():
 block0:
-    v11:boolean = Not v19:string
-    v12:boolean = Move v11:boolean
-    Return v11:boolean
+    v0:unknown = GetLexicalEnvironment
+    v12:boolean = Not v20:string
+    v13:boolean = Move v12:boolean
+    Return v12:boolean
 
 === After InstCombine ===
 function():
 block0:
-    v11:boolean = Not v19:string
-    v12:boolean = Move true
+    v0:unknown = GetLexicalEnvironment
+    v12:boolean = Not v20:string
+    v13:boolean = Move true
     Return true
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true

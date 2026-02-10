@@ -1,198 +1,216 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = GetGlobal Array
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = GetGlobal Array
     Jump block1
 block0_split0:
-    v3:unknown = GetById v2:unknown.fromAsync
+    v4:unknown = GetById v3:unknown.fromAsync
     Jump block2
 block0_split1:
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
     Jump block3
 block0_split2:
-    v10:unknown = Move v9:unknown
-    Return v10:unknown
+    v11:unknown = Move v10:unknown
+    Return v11:unknown
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = GetGlobal Array
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = GetGlobal Array
     Jump block1
 block0_split0:
-    v3:unknown = GetById v2:unknown.fromAsync
+    v4:unknown = GetById v3:unknown.fromAsync
     Jump block2
 block0_split1:
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
     Jump block3
 block0_split2:
-    v10:unknown = Move v9:unknown
-    Return v10:unknown
+    v11:unknown = Move v10:unknown
+    Return v11:unknown
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:unknown = GetGlobal Array
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:unknown = GetGlobal Array
     Jump block1
 block0_split0:
-    v3:unknown = GetById v2:unknown.fromAsync
+    v4:unknown = GetById v3:unknown.fromAsync
     Jump block2
 block0_split1:
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
     Jump block3
 block0_split2:
-    v10:unknown = Move v9:unknown
-    Return v10:unknown
+    v11:unknown = Move v10:unknown
+    Return v11:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:unknown = GetGlobal Array
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = GetGlobal Array
     Jump block1
 block0_split0:
-    v3:unknown = GetById v2:unknown.fromAsync
+    v4:unknown = GetById v3:unknown.fromAsync
     Jump block2
 block0_split1:
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
     Jump block3
 block0_split2:
-    v10:unknown = Move v9:unknown
-    Return v10:unknown
+    v11:unknown = Move v10:unknown
+    Return v11:unknown
 
 === After CopyPropagation ===
 function():
 block0:
-    v2:unknown = GetGlobal Array
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = GetGlobal Array
     Jump block1
 block0_split0:
-    v3:unknown = GetById v2:unknown.fromAsync
+    v4:unknown = GetById v3:unknown.fromAsync
     Jump block2
 block0_split1:
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
     Jump block3
 block0_split2:
-    v10:unknown = Move v9:unknown
-    Return v9:unknown
+    v11:unknown = Move v10:unknown
+    Return v10:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v2:unknown = GetGlobal Array
-    v3:unknown = GetById v2:unknown.fromAsync
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
-    v10:unknown = Move v9:unknown
-    Return v9:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = GetGlobal Array
+    v4:unknown = GetById v3:unknown.fromAsync
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
+    v11:unknown = Move v10:unknown
+    Return v10:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:unknown = GetGlobal Array
-    v3:unknown = GetById v2:unknown.fromAsync
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
-    Return v9:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = GetGlobal Array
+    v4:unknown = GetById v3:unknown.fromAsync
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
+    Return v10:unknown
 
 function():
 block0:
-    v2:unknown = GetGlobal Array
-    v3:unknown = GetById v2:unknown.fromAsync
-    v7:array = NewArray 1, 2, 3
-    v8:function = NewFunction
-    v9:unknown = Call v3:unknown, v2:unknown, v7:array, v8:function
-    Return v9:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:unknown = GetGlobal Array
+    v4:unknown = GetById v3:unknown.fromAsync
+    v8:array = NewArray 1, 2, 3
+    v9:function = NewFunction
+    v10:unknown = Call v4:unknown, v3:unknown, v8:array, v9:function
+    Return v10:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:unknown = Mul v0:unknown, 2
+    v1:unknown = GetLexicalEnvironment
+    v3:unknown = Mul v0:unknown, 2
     Jump block1
 block0_split0:
-    Return v2:unknown
+    Return v3:unknown
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:unknown = Mul v0:unknown, 2
+    v1:unknown = GetLexicalEnvironment
+    v3:unknown = Mul v0:unknown, 2
     Jump block1
 block0_split0:
-    Return v2:unknown
+    Return v3:unknown
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:unknown = Mul v0:unknown, 2
+    v1:unknown = GetLexicalEnvironment
+    v3:unknown = Mul v0:unknown, 2
     Jump block1
 block0_split0:
-    Return v2:unknown
+    Return v3:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v2:unknown = Mul v0:unknown, 2
-    Return v2:unknown
+    v1:unknown = GetLexicalEnvironment
+    v3:unknown = Mul v0:unknown, 2
+    Return v3:unknown
 
 function(v0:unknown):
 block0:
-    v2:unknown = Mul v0:unknown, 2
-    Return v2:unknown
+    v1:unknown = GetLexicalEnvironment
+    v3:unknown = Mul v0:unknown, 2
+    Return v3:unknown

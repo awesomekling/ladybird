@@ -1,381 +1,398 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal cycle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal cycle
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal cycle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal cycle
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal cycle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal cycle
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal cycle
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal cycle
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal cycle
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal cycle
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:int32 = Move 1
-    v10:int32 = Move 2
-    v12:int32 = Move 0
+    v7:undefined = Move undefined
+    v9:int32 = Move 1
+    v11:int32 = Move 2
+    v13:int32 = Move 0
     Jump block3
 block1:
-    v13:int32 = ToInt32 v24:int32
+    v14:int32 = ToInt32 v25:int32
     Jump block5
 block2:
-    v19:number = ToNumeric v28:number
-    v20:number = Increment v19:number
+    v20:number = ToNumeric v29:number
+    v21:number = Increment v20:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v12:int32, block2:v20:number]
-    v27:unknown = Phi [block0:v5:undefined, block2:v14:int32]
-    v26:unknown = Phi [block0:v4:undefined, block2:v16:int32]
-    v25:int32 = Phi [block0:v10:int32, block2:v18:int32]
-    v24:int32 = Phi [block0:v8:int32, block2:v17:int32]
-    v23:unknown = Phi [block0:v29:undefined, block2:v19:number]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v29:number = Phi [block0:v13:int32, block2:v21:number]
+    v28:unknown = Phi [block0:v6:undefined, block2:v15:int32]
+    v27:unknown = Phi [block0:v5:undefined, block2:v17:int32]
+    v26:int32 = Phi [block0:v11:int32, block2:v19:int32]
+    v25:int32 = Phi [block0:v9:int32, block2:v18:int32]
+    v24:unknown = Phi [block0:v30:undefined, block2:v20:number]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v13:int32
-    v15:int32 = ToInt32 v25:int32
+    v15:int32 = Move v14:int32
+    v16:int32 = ToInt32 v26:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v15:int32
     v17:int32 = Move v16:int32
-    v18:int32 = Move v14:int32
+    v18:int32 = Move v17:int32
+    v19:int32 = Move v15:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:int32 = Move 1
-    v10:int32 = Move 2
-    v12:int32 = Move 0
+    v7:undefined = Move undefined
+    v9:int32 = Move 1
+    v11:int32 = Move 2
+    v13:int32 = Move 0
     Jump block3
 block1:
-    v13:int32 = ToInt32 v24:int32
+    v14:int32 = ToInt32 v25:int32
     Jump block5
 block2:
-    v19:number = ToNumeric v28:number
-    v20:number = Increment v19:number
+    v20:number = ToNumeric v29:number
+    v21:number = Increment v20:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
-    v27:unknown = Phi [block0:v31:undefined, block2:v14:int32]
-    v26:unknown = Phi [block0:v30:undefined, block2:v16:int32]
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v28:unknown = Phi [block0:v32:undefined, block2:v15:int32]
+    v27:unknown = Phi [block0:v31:undefined, block2:v17:int32]
+    v26:int32 = Phi [block0:v34:int32, block2:v19:int32]
     v25:int32 = Phi [block0:v33:int32, block2:v18:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v17:int32]
-    v23:unknown = Phi [block0:v29:undefined, block2:v19:number]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v24:unknown = Phi [block0:v30:undefined, block2:v20:number]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v13:int32
-    v15:int32 = ToInt32 v25:int32
+    v15:int32 = Move v14:int32
+    v16:int32 = ToInt32 v26:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v15:int32
     v17:int32 = Move v16:int32
-    v18:int32 = Move v14:int32
+    v18:int32 = Move v17:int32
+    v19:int32 = Move v15:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v8:int32 = Move 1
-    v10:int32 = Move 2
-    v12:int32 = Move 0
+    v7:undefined = Move undefined
+    v9:int32 = Move 1
+    v11:int32 = Move 2
+    v13:int32 = Move 0
     Jump block3
 block1:
-    v13:int32 = ToInt32 v24:int32
+    v14:int32 = ToInt32 v25:int32
     Jump block5
 block2:
-    v19:number = ToNumeric v28:number
-    v20:number = Increment v19:number
+    v20:number = ToNumeric v29:number
+    v21:number = Increment v20:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
-    v27:unknown = Phi [block0:v31:undefined, block2:v14:int32]
-    v26:unknown = Phi [block0:v30:undefined, block2:v16:int32]
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v28:unknown = Phi [block0:v32:undefined, block2:v15:int32]
+    v27:unknown = Phi [block0:v31:undefined, block2:v17:int32]
+    v26:int32 = Phi [block0:v34:int32, block2:v19:int32]
     v25:int32 = Phi [block0:v33:int32, block2:v18:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v17:int32]
-    v23:unknown = Phi [block0:v29:undefined, block2:v19:number]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v24:unknown = Phi [block0:v30:undefined, block2:v20:number]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v13:int32
-    v15:int32 = ToInt32 v25:int32
+    v15:int32 = Move v14:int32
+    v16:int32 = ToInt32 v26:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v15:int32
     v17:int32 = Move v16:int32
-    v18:int32 = Move v14:int32
+    v18:int32 = Move v17:int32
+    v19:int32 = Move v15:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v13:int32 = ToInt32 v24:int32
+    v14:int32 = ToInt32 v25:int32
     Jump block5
 block2:
-    v19:number = ToNumeric v28:number
-    v20:number = Increment v19:number
+    v20:number = ToNumeric v29:number
+    v21:number = Increment v20:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block2:v19:int32]
     v25:int32 = Phi [block0:v33:int32, block2:v18:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v17:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v13:int32
-    v15:int32 = ToInt32 v25:int32
+    v15:int32 = Move v14:int32
+    v16:int32 = ToInt32 v26:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v15:int32
     v17:int32 = Move v16:int32
-    v18:int32 = Move v14:int32
+    v18:int32 = Move v17:int32
+    v19:int32 = Move v15:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v13:int32 = ToInt32 v24:int32
+    v14:int32 = ToInt32 v25:int32
     Jump block5
 block2:
-    v19:number = ToNumeric v28:number
-    v20:number = Increment v19:number
+    v20:number = ToNumeric v29:number
+    v21:number = Increment v20:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
-    v25:int32 = Phi [block0:v33:int32, block2:v13:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v15:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block2:v14:int32]
+    v25:int32 = Phi [block0:v33:int32, block2:v16:int32]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v13:int32
-    v15:int32 = ToInt32 v25:int32
+    v15:int32 = Move v14:int32
+    v16:int32 = ToInt32 v26:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v15:int32
-    v17:int32 = Move v15:int32
-    v18:int32 = Move v13:int32
+    v17:int32 = Move v16:int32
+    v18:int32 = Move v16:int32
+    v19:int32 = Move v14:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After RedundantCheckElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
     Jump block5
 block2:
-    v20:number = Increment v28:number
+    v21:number = Increment v29:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
-    v25:int32 = Phi [block0:v33:int32, block2:v24:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v25:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block2:v25:int32]
+    v25:int32 = Phi [block0:v33:int32, block2:v26:int32]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v24:int32
+    v15:int32 = Move v25:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v25:int32
-    v17:int32 = Move v25:int32
-    v18:int32 = Move v24:int32
+    v17:int32 = Move v26:int32
+    v18:int32 = Move v26:int32
+    v19:int32 = Move v25:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
     Jump block5
 block2:
-    v20:number = Increment v28:number
+    v21:number = Increment v29:number
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block2:v20:number]
-    v25:int32 = Phi [block0:v33:int32, block2:v24:int32]
-    v24:int32 = Phi [block0:v32:int32, block2:v25:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block1, block4
+    v29:number = Phi [block0:v35:int32, block2:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block2:v25:int32]
+    v25:int32 = Phi [block0:v33:int32, block2:v26:int32]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block1, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
+    v22:number = Add v25:int32, v26:int32
     Jump block7
 block1_split0:
-    v14:int32 = Move v24:int32
+    v15:int32 = Move v25:int32
     Jump block6
 block1_split1:
-    v16:int32 = Move v25:int32
-    v17:int32 = Move v25:int32
-    v18:int32 = Move v24:int32
+    v17:int32 = Move v26:int32
+    v18:int32 = Move v26:int32
+    v19:int32 = Move v25:int32
     Jump block2
 block4_split2:
-    Return v21:number
+    Return v22:number
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block5:v20:number]
-    v25:int32 = Phi [block0:v33:int32, block5:v24:int32]
-    v24:int32 = Phi [block0:v32:int32, block5:v25:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block5, block4
+    v29:number = Phi [block0:v35:int32, block5:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block5:v25:int32]
+    v25:int32 = Phi [block0:v33:int32, block5:v26:int32]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block5, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
-    Return v21:number
+    v22:number = Add v25:int32, v26:int32
+    Return v22:number
 block1_split0:
-    v14:int32 = Move v24:int32
-    v16:int32 = Move v25:int32
-    v17:int32 = Move v25:int32
-    v18:int32 = Move v24:int32
-    v20:number = Increment v28:number
+    v15:int32 = Move v25:int32
+    v17:int32 = Move v26:int32
+    v18:int32 = Move v26:int32
+    v19:int32 = Move v25:int32
+    v21:number = Increment v29:number
     Jump block3
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block3:
-    v28:number = Phi [block0:v34:int32, block5:v20:number]
-    v25:int32 = Phi [block0:v33:int32, block5:v24:int32]
-    v24:int32 = Phi [block0:v32:int32, block5:v25:int32]
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block5, block4
+    v29:number = Phi [block0:v35:int32, block5:v21:number]
+    v26:int32 = Phi [block0:v34:int32, block5:v25:int32]
+    v25:int32 = Phi [block0:v33:int32, block5:v26:int32]
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block5, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
-    Return v21:number
+    v22:number = Add v25:int32, v26:int32
+    Return v22:number
 block1_split0:
-    v20:number = Increment v28:number
+    v21:number = Increment v29:number
     Jump block3
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v28:number <- v34:int32, v25:int32 <- v33:int32, v24:int32 <- v32:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v29:number <- v35:int32, v26:int32 <- v34:int32, v25:int32 <- v33:int32]
     Jump block3
 block3:
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block5, block4
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block5, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
-    Return v21:number
+    v22:number = Add v25:int32, v26:int32
+    Return v22:number
 block1_split0:
-    v20:number = Increment v28:number
-    ParallelCopy [v28:number <- v20:number, v25:int32 <- v24:int32, v24:int32 <- v25:int32]
+    v21:number = Increment v29:number
+    ParallelCopy [v29:number <- v21:number, v26:int32 <- v25:int32, v25:int32 <- v26:int32]
     Jump block3
 
 === After CopyCoalescing ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v28:number <- v34:int32, v25:int32 <- v33:int32, v24:int32 <- v32:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v29:number <- v35:int32, v26:int32 <- v34:int32, v25:int32 <- v33:int32]
     Jump block3
 block3:
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block5, block4
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block5, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
-    Return v21:number
+    v22:number = Add v25:int32, v26:int32
+    Return v22:number
 block1_split0:
-    v20:number = Increment v28:number
-    ParallelCopy [v25:int32 <- v24:int32, v24:int32 <- v25:int32]
+    v21:number = Increment v29:number
+    ParallelCopy [v26:int32 <- v25:int32, v25:int32 <- v26:int32]
     Jump block3
 
 function(v0:unknown):
 block0:
-    ParallelCopy [v28:number <- v34:int32, v25:int32 <- v33:int32, v24:int32 <- v32:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v29:number <- v35:int32, v26:int32 <- v34:int32, v25:int32 <- v33:int32]
     Jump block3
 block3:
-    v22:boolean = LessThan v28:number, v0:unknown
-    Branch v22:boolean, block5, block4
+    v23:boolean = LessThan v29:number, v0:unknown
+    Branch v23:boolean, block5, block4
 block4:
-    v21:number = Add v24:int32, v25:int32
-    Return v21:number
+    v22:number = Add v25:int32, v26:int32
+    Return v22:number
 block1_split0:
-    v20:number = Increment v28:number
-    ParallelCopy [v25:int32 <- v24:int32, v24:int32 <- v25:int32]
+    v21:number = Increment v29:number
+    ParallelCopy [v26:int32 <- v25:int32, v25:int32 <- v26:int32]
     Jump block3

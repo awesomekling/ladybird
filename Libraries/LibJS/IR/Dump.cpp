@@ -61,21 +61,10 @@ static void dump_instruction(Instruction const& instruction, StringBuilder& buil
 
     // Handle special opcodes
     switch (instruction.opcode()) {
-    case Opcode::Jump:
-    case Opcode::ContinuePendingUnwind:
-    case Opcode::EnterUnwindContext: {
+    case Opcode::Jump: {
         auto const& jump = static_cast<TerminatorInstruction const&>(instruction);
         if (auto target = jump.true_target_index(); target.has_value())
             builder.appendff(" block{}", *target);
-        break;
-    }
-
-    case Opcode::ScheduleJump: {
-        auto const& term = static_cast<TerminatorInstruction const&>(instruction);
-        if (auto target = term.true_target_index(); target.has_value())
-            builder.appendff(" finalizer: block{}", *target);
-        if (auto target = term.false_target_index(); target.has_value())
-            builder.appendff(", target: block{}", *target);
         break;
     }
 

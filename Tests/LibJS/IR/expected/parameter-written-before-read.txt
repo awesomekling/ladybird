@@ -1,267 +1,284 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v1:object = NewObject
-    InitObjectLiteralProperty v1:object, 10
-    InitObjectLiteralProperty v1:object, 20
-    CacheObjectShape v1:object
-    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    v2:object = NewObject
+    InitObjectLiteralProperty v2:object, 10
+    InitObjectLiteralProperty v2:object, 20
+    CacheObjectShape v2:object
+    v8:unknown = Call v1:unknown, undefined, false, v2:object, 0
     Jump block2
 block0_split1:
-    End v7:unknown
+    End v8:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v1:object = NewObject
-    InitObjectLiteralProperty v1:object, 10
-    InitObjectLiteralProperty v1:object, 20
-    CacheObjectShape v1:object
-    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    v2:object = NewObject
+    InitObjectLiteralProperty v2:object, 10
+    InitObjectLiteralProperty v2:object, 20
+    CacheObjectShape v2:object
+    v8:unknown = Call v1:unknown, undefined, false, v2:object, 0
     Jump block2
 block0_split1:
-    End v7:unknown
+    End v8:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v1:object = NewObject
-    InitObjectLiteralProperty v1:object, 10
-    InitObjectLiteralProperty v1:object, 20
-    CacheObjectShape v1:object
-    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
+    v2:object = NewObject
+    InitObjectLiteralProperty v2:object, 10
+    InitObjectLiteralProperty v2:object, 20
+    CacheObjectShape v2:object
+    v8:unknown = Call v1:unknown, undefined, false, v2:object, 0
     Jump block2
 block0_split1:
-    End v7:unknown
+    End v8:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v1:object = NewObject
-    InitObjectLiteralProperty v1:object, 10
-    InitObjectLiteralProperty v1:object, 20
-    CacheObjectShape v1:object
-    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v2:object = NewObject
+    InitObjectLiteralProperty v2:object, 10
+    InitObjectLiteralProperty v2:object, 20
+    CacheObjectShape v2:object
+    v8:unknown = Call v1:unknown, undefined, false, v2:object, 0
+    End v8:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v1:object = NewObject
-    InitObjectLiteralProperty v1:object, 10
-    InitObjectLiteralProperty v1:object, 20
-    CacheObjectShape v1:object
-    v7:unknown = Call v0:unknown, undefined, false, v1:object, 0
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v2:object = NewObject
+    InitObjectLiteralProperty v2:object, 10
+    InitObjectLiteralProperty v2:object, 20
+    CacheObjectShape v2:object
+    v8:unknown = Call v1:unknown, undefined, false, v2:object, 0
+    End v8:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
-    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
+    v10:unknown = Phi [block0:v1:unknown, block1:v7:object]
+    v9:unknown = Phi [block0:v11:undefined, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
     Jump block3
 block2_split0:
-    Return v7:unknown
+    Return v8:unknown
 
 === After SCCP ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
-    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
+    v10:unknown = Phi [block0:v1:unknown, block1:v7:object]
+    v9:unknown = Phi [block0:v11:undefined, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
     Jump block3
 block2_split0:
-    Return v7:unknown
+    Return v8:unknown
 
 === Before optimization ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
-    v8:unknown = Phi [block0:v10:undefined, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
+    v10:unknown = Phi [block0:v1:unknown, block1:v7:object]
+    v9:unknown = Phi [block0:v11:undefined, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
     Jump block3
 block2_split0:
-    Return v7:unknown
+    Return v8:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v6:object]
-    v7:unknown = GetById v9:unknown.x
+    v10:unknown = Phi [block0:v1:unknown, block1:v7:object]
+    v8:unknown = GetById v10:unknown.x
     Jump block3
 block2_split0:
-    Return v7:unknown
+    Return v8:unknown
 
 === After CopyPropagation ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
+    v10:unknown = Phi [block0:v1:unknown, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
     Jump block3
 block2_split0:
-    Return v7:unknown
+    Return v8:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    v6:object = Move v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    v7:object = Move v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v10:unknown = Phi [block0:v1:unknown, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block0:v1:unknown, block1:v3:object]
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v10:unknown = Phi [block0:v1:unknown, block1:v4:object]
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 
 === After SplitCriticalEdges ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block4
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
     Jump block2
 block2:
-    v9:unknown = Phi [block1:v3:object, block4:v1:unknown]
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v10:unknown = Phi [block1:v4:object, block4:v1:unknown]
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 split_block0_block2:
     Jump block2
 
 === After SsaDestructionPass ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block4
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
-    ParallelCopy [v9:unknown <- v3:object]
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
+    ParallelCopy [v10:unknown <- v4:object]
     Jump block2
 block2:
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 split_block0_block2:
-    ParallelCopy [v9:unknown <- v1:unknown]
+    ParallelCopy [v10:unknown <- v1:unknown]
     Jump block2
 
 === After CopyCoalescing ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block4
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
     Jump block2
 block2:
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 split_block0_block2:
     Jump block2
 
 === After PostSSACleanup ===
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
     Jump block2
 block2:
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown
 
 function(v0:unknown, v1:unknown, v2:unknown):
 block0:
+    v3:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    InitObjectLiteralProperty v3:object, 2
-    CacheObjectShape v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    InitObjectLiteralProperty v4:object, 2
+    CacheObjectShape v4:object
     Jump block2
 block2:
-    v7:unknown = GetById v9:unknown.x
-    Return v7:unknown
+    v8:unknown = GetById v10:unknown.x
+    Return v8:unknown

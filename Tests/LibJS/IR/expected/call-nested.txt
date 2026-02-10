@@ -1,178 +1,197 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal outer
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal outer
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal outer
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal outer
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal outer
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal outer
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal outer
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal outer
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal outer
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal outer
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal middle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal middle
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal middle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal middle
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal middle
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal middle
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal middle
-    v2:unknown = Call v0:unknown, undefined
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal middle
+    v3:unknown = Call v1:unknown, undefined
+    v5:unknown = Add v3:unknown, 1
+    Return v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal middle
-    v2:unknown = Call v0:unknown, undefined
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal middle
+    v3:unknown = Call v1:unknown, undefined
+    v5:unknown = Add v3:unknown, 1
+    Return v5:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal inner
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal inner
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal inner
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal inner
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal inner
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal inner
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v4:unknown = Add v2:unknown, 1
+    v5:unknown = Add v3:unknown, 1
     Jump block3
 block0_split2:
-    Return v4:unknown
+    Return v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal inner
-    v2:unknown = Call v0:unknown, undefined
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal inner
+    v3:unknown = Call v1:unknown, undefined
+    v5:unknown = Add v3:unknown, 1
+    Return v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal inner
-    v2:unknown = Call v0:unknown, undefined
-    v4:unknown = Add v2:unknown, 1
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal inner
+    v3:unknown = Call v1:unknown, undefined
+    v5:unknown = Add v3:unknown, 1
+    Return v5:unknown
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return 1

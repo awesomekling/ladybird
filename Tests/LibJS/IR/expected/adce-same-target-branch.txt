@@ -1,100 +1,109 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, true
+    v4:unknown = Call v1:unknown, undefined, true
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, true
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, true
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, true
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, true
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
     Branch v0:unknown, block1, block2
 block1:
-    v4:int32 = Move 1
-    Jump block3
-block2:
     v5:int32 = Move 1
     Jump block3
+block2:
+    v6:int32 = Move 1
+    Jump block3
 block3:
-    v7:int32 = Phi [block1:v4:int32, block2:v5:int32]
-    v6:int32 = Move v7:int32
-    Return v6:int32
+    v8:int32 = Phi [block1:v5:int32, block2:v6:int32]
+    v7:int32 = Move v8:int32
+    Return v7:int32
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
     Branch v0:unknown, block1, block2
 block1:
-    v4:int32 = Move 1
-    Jump block3
-block2:
     v5:int32 = Move 1
     Jump block3
-block3:
-    v7:int32 = Phi [block1:v8:int32, block2:v9:int32]
+block2:
     v6:int32 = Move 1
+    Jump block3
+block3:
+    v8:int32 = Phi [block1:v9:int32, block2:v10:int32]
+    v7:int32 = Move 1
     Return 1
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
+    v3:undefined = Move undefined
     Branch v0:unknown, block1, block2
 block1:
-    v4:int32 = Move 1
-    Jump block3
-block2:
     v5:int32 = Move 1
     Jump block3
-block3:
-    v7:int32 = Phi [block1:v8:int32, block2:v9:int32]
+block2:
     v6:int32 = Move 1
+    Jump block3
+block3:
+    v8:int32 = Phi [block1:v9:int32, block2:v10:int32]
+    v7:int32 = Move 1
     Return 1
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Branch v0:unknown, block1, block2
 block1:
     Jump block3
@@ -106,6 +115,7 @@ block3:
 === After AggressiveDeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block1
 block1:
     Jump block3
@@ -116,16 +126,19 @@ block3:
 
 === After SimplifyCFG ===
 function(v0:unknown):
-block1:
+block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block3:
     Return 1
 
 === After SimplifyCFG ===
 function(v0:unknown):
-block3:
+block0:
+    v1:unknown = GetLexicalEnvironment
     Return 1
 
 function(v0:unknown):
-block3:
+block0:
+    v1:unknown = GetLexicalEnvironment
     Return 1

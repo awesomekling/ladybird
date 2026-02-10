@@ -1,53 +1,58 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -57,37 +62,38 @@ block0:
     v8:undefined = Move undefined
     v9:undefined = Move undefined
     v10:undefined = Move undefined
-    v12:boolean = Move true
-    v14:boolean = Move false
-    v16:null = Move null
-    v17:undefined = Move undefined
-    v19:string = Move v18:string
-    v20:string = ToString v12:boolean
+    v11:undefined = Move undefined
+    v13:boolean = Move true
+    v15:boolean = Move false
+    v17:null = Move null
+    v18:undefined = Move undefined
+    v20:string = Move v19:string
+    v21:string = ToString v13:boolean
     Jump block1
 block0_split0:
-    v21:string = Move v20:string
-    v22:string = ToString v14:boolean
+    v22:string = Move v21:string
+    v23:string = ToString v15:boolean
     Jump block2
 block0_split1:
-    v23:string = Move v22:string
-    v24:string = ToString v16:null
+    v24:string = Move v23:string
+    v25:string = ToString v17:null
     Jump block3
 block0_split2:
-    v25:string = Move v24:string
-    v26:string = ToString v17:undefined
+    v26:string = Move v25:string
+    v27:string = ToString v18:undefined
     Jump block4
 block0_split3:
-    v27:string = Move v26:string
-    v28:string = ToString v19:string
+    v28:string = Move v27:string
+    v29:string = ToString v20:string
     Jump block5
 block0_split4:
-    v29:string = Move v28:string
-    Return v21:string
+    v30:string = Move v29:string
+    Return v22:string
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -97,37 +103,38 @@ block0:
     v8:undefined = Move undefined
     v9:undefined = Move undefined
     v10:undefined = Move undefined
-    v12:boolean = Move true
-    v14:boolean = Move false
-    v16:null = Move null
-    v17:undefined = Move undefined
-    v19:string = Move v18:string
-    v20:string = ToString true
+    v11:undefined = Move undefined
+    v13:boolean = Move true
+    v15:boolean = Move false
+    v17:null = Move null
+    v18:undefined = Move undefined
+    v20:string = Move v19:string
+    v21:string = ToString true
     Jump block1
 block0_split0:
-    v21:string = Move v20:string
-    v22:string = ToString false
+    v22:string = Move v21:string
+    v23:string = ToString false
     Jump block2
 block0_split1:
-    v23:string = Move v22:string
-    v24:string = ToString null
+    v24:string = Move v23:string
+    v25:string = ToString null
     Jump block3
 block0_split2:
-    v25:string = Move v24:string
-    v26:string = ToString undefined
+    v26:string = Move v25:string
+    v27:string = ToString undefined
     Jump block4
 block0_split3:
-    v27:string = Move v26:string
-    v28:string = ToString v34:string
+    v28:string = Move v27:string
+    v29:string = ToString v35:string
     Jump block5
 block0_split4:
-    v29:string = Move v28:string
-    Return v21:string
+    v30:string = Move v29:string
+    Return v22:string
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
@@ -137,40 +144,42 @@ block0:
     v8:undefined = Move undefined
     v9:undefined = Move undefined
     v10:undefined = Move undefined
-    v12:boolean = Move true
-    v14:boolean = Move false
-    v16:null = Move null
-    v17:undefined = Move undefined
-    v19:string = Move v18:string
-    v20:string = ToString true
+    v11:undefined = Move undefined
+    v13:boolean = Move true
+    v15:boolean = Move false
+    v17:null = Move null
+    v18:undefined = Move undefined
+    v20:string = Move v19:string
+    v21:string = ToString true
     Jump block1
 block0_split0:
-    v21:string = Move v20:string
-    v22:string = ToString false
+    v22:string = Move v21:string
+    v23:string = ToString false
     Jump block2
 block0_split1:
-    v23:string = Move v22:string
-    v24:string = ToString null
+    v24:string = Move v23:string
+    v25:string = ToString null
     Jump block3
 block0_split2:
-    v25:string = Move v24:string
-    v26:string = ToString undefined
+    v26:string = Move v25:string
+    v27:string = ToString undefined
     Jump block4
 block0_split3:
-    v27:string = Move v26:string
-    v28:string = ToString v34:string
+    v28:string = Move v27:string
+    v29:string = ToString v35:string
     Jump block5
 block0_split4:
-    v29:string = Move v28:string
-    Return v21:string
+    v30:string = Move v29:string
+    Return v22:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v20:string = ToString true
+    v0:unknown = GetLexicalEnvironment
+    v21:string = ToString true
     Jump block1
 block0_split0:
-    v21:string = Move v20:string
+    v22:string = Move v21:string
     Jump block2
 block0_split1:
     Jump block3
@@ -179,15 +188,16 @@ block0_split2:
 block0_split3:
     Jump block5
 block0_split4:
-    Return v21:string
+    Return v22:string
 
 === After CopyPropagation ===
 function():
 block0:
-    v20:string = ToString true
+    v0:unknown = GetLexicalEnvironment
+    v21:string = ToString true
     Jump block1
 block0_split0:
-    v21:string = Move v20:string
+    v22:string = Move v21:string
     Jump block2
 block0_split1:
     Jump block3
@@ -196,15 +206,16 @@ block0_split2:
 block0_split3:
     Jump block5
 block0_split4:
-    Return v20:string
+    Return v21:string
 
 === After InstCombine ===
 function():
 block0:
-    v20:string = ToString true
+    v0:unknown = GetLexicalEnvironment
+    v21:string = ToString true
     Jump block1
 block0_split0:
-    v21:string = Move v35:string
+    v22:string = Move v36:string
     Jump block2
 block0_split1:
     Jump block3
@@ -213,29 +224,33 @@ block0_split2:
 block0_split3:
     Jump block5
 block0_split4:
-    Return v35:string
+    Return v36:string
 
 === After SimplifyCFG ===
 function():
 block0:
-    v20:string = ToString true
-    v21:string = Move v35:string
+    v0:unknown = GetLexicalEnvironment
+    v21:string = ToString true
+    v22:string = Move v36:string
     Jump block5
 block0_split4:
-    Return v35:string
+    Return v36:string
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block5
 block0_split4:
-    Return v35:string
+    Return v36:string
 
 === After SimplifyCFG ===
 function():
-block0_split4:
-    Return v35:string
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return v36:string
 
 function():
-block0_split4:
-    Return v35:string
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return v36:string

@@ -1,118 +1,127 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:boolean = StrictlyEquals v5:undefined, undefined
-    v7:boolean = Move v6:boolean
-    v9:null = Move null
-    v10:null = Move v9:null
-    v14:boolean = IsNullish v9:null
-    Branch v14:boolean, block1, block2
+    v6:undefined = Move undefined
+    v7:boolean = StrictlyEquals v6:undefined, undefined
+    v8:boolean = Move v7:boolean
+    v10:null = Move null
+    v11:null = Move v10:null
+    v15:boolean = IsNullish v10:null
+    Branch v15:boolean, block1, block2
 block1:
-    v12:int32 = Move 42
+    v13:int32 = Move 42
     Jump block2
 block2:
-    v15:unknown = Phi [block0:v10:null, block1:v12:int32]
-    v13:unknown = Move v15:unknown
-    Return v7:boolean
+    v16:unknown = Phi [block0:v11:null, block1:v13:int32]
+    v14:unknown = Move v16:unknown
+    Return v8:boolean
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:boolean = StrictlyEquals undefined, undefined
-    v7:boolean = Move true
-    v9:null = Move null
+    v6:undefined = Move undefined
+    v7:boolean = StrictlyEquals undefined, undefined
+    v8:boolean = Move true
     v10:null = Move null
-    v14:boolean = IsNullish null
+    v11:null = Move null
+    v15:boolean = IsNullish null
     Jump block1
 block1:
-    v12:int32 = Move 42
+    v13:int32 = Move 42
     Jump block2
 block2:
-    v15:unknown = Phi [block1:v21:int32]
-    v13:unknown = Move 42
+    v16:unknown = Phi [block1:v22:int32]
+    v14:unknown = Move 42
     Return true
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v6:boolean = StrictlyEquals undefined, undefined
-    v7:boolean = Move true
-    v9:null = Move null
+    v6:undefined = Move undefined
+    v7:boolean = StrictlyEquals undefined, undefined
+    v8:boolean = Move true
     v10:null = Move null
-    v14:boolean = IsNullish null
+    v11:null = Move null
+    v15:boolean = IsNullish null
     Jump block1
 block1:
-    v12:int32 = Move 42
+    v13:int32 = Move 42
     Jump block2
 block2:
-    v15:unknown = Phi [block1:v21:int32]
-    v13:unknown = Move 42
+    v16:unknown = Phi [block1:v22:int32]
+    v14:unknown = Move 42
     Return true
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block1
 block1:
     Jump block2
@@ -121,9 +130,19 @@ block2:
 
 === After SimplifyCFG ===
 function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Jump block2
 block2:
     Return true
 
+=== After SimplifyCFG ===
 function():
-block2:
+block0:
+    v0:unknown = GetLexicalEnvironment
+    Return true
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
     Return true

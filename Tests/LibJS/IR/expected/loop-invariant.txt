@@ -1,24 +1,25 @@
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     Jump block5
 block1:
-    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumeric v17:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v18:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v17:number = Phi [block2:v10:number, block7:v3:int32]
-    v16:unknown = Phi [block2:v7:unknown, block7:v18:undefined]
-    v15:unknown = Phi [block2:v9:number, block7:v19:undefined]
-    v14:unknown = Phi [block2:v8:unknown, block7:v20:undefined]
-    v11:unknown = GetGlobal n
+    v18:number = Phi [block2:v11:number, block7:v4:int32]
+    v17:unknown = Phi [block2:v8:unknown, block7:v19:undefined]
+    v16:unknown = Phi [block2:v10:number, block7:v20:undefined]
+    v15:unknown = Phi [block2:v9:unknown, block7:v21:undefined]
+    v12:unknown = GetGlobal n
     Jump block12
 block4:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block13
 block0_split0:
     InitializeBinding sum 0
@@ -27,47 +28,48 @@ block0_split1:
     InitializeBinding n 5
     Jump block7
 block0_split2:
-    v3:int32 = Move 0
+    v4:int32 = Move 0
     Jump block3
 block1_split3:
-    v5:unknown = GetGlobal x
+    v6:unknown = GetGlobal x
     Jump block9
 block1_split4:
-    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Mul v6:unknown, 2
     Jump block10
 block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
+    v9:unknown = Add v5:unknown, v8:unknown
     Jump block11
 block1_split6:
-    SetGlobal sum v8:unknown
+    SetGlobal sum v9:unknown
     Jump block2
 block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4_split8:
-    End v12:unknown
+    End v13:unknown
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     Jump block5
 block1:
-    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumeric v17:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v18:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v17:number = Phi [block2:v10:number, block7:v21:int32]
-    v16:unknown = Phi [block2:v7:unknown, block7:v18:undefined]
-    v15:unknown = Phi [block2:v9:number, block7:v19:undefined]
-    v14:unknown = Phi [block2:v8:unknown, block7:v20:undefined]
-    v11:unknown = GetGlobal n
+    v18:number = Phi [block2:v11:number, block7:v22:int32]
+    v17:unknown = Phi [block2:v8:unknown, block7:v19:undefined]
+    v16:unknown = Phi [block2:v10:number, block7:v20:undefined]
+    v15:unknown = Phi [block2:v9:unknown, block7:v21:undefined]
+    v12:unknown = GetGlobal n
     Jump block12
 block4:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block13
 block0_split0:
     InitializeBinding sum 0
@@ -76,47 +78,48 @@ block0_split1:
     InitializeBinding n 5
     Jump block7
 block0_split2:
-    v3:int32 = Move 0
+    v4:int32 = Move 0
     Jump block3
 block1_split3:
-    v5:unknown = GetGlobal x
+    v6:unknown = GetGlobal x
     Jump block9
 block1_split4:
-    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Mul v6:unknown, 2
     Jump block10
 block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
+    v9:unknown = Add v5:unknown, v8:unknown
     Jump block11
 block1_split6:
-    SetGlobal sum v8:unknown
+    SetGlobal sum v9:unknown
     Jump block2
 block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4_split8:
-    End v12:unknown
+    End v13:unknown
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     Jump block5
 block1:
-    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumeric v17:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v18:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v17:number = Phi [block2:v10:number, block7:v21:int32]
-    v16:unknown = Phi [block2:v7:unknown, block7:v18:undefined]
-    v15:unknown = Phi [block2:v9:number, block7:v19:undefined]
-    v14:unknown = Phi [block2:v8:unknown, block7:v20:undefined]
-    v11:unknown = GetGlobal n
+    v18:number = Phi [block2:v11:number, block7:v22:int32]
+    v17:unknown = Phi [block2:v8:unknown, block7:v19:undefined]
+    v16:unknown = Phi [block2:v10:number, block7:v20:undefined]
+    v15:unknown = Phi [block2:v9:unknown, block7:v21:undefined]
+    v12:unknown = GetGlobal n
     Jump block12
 block4:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block13
 block0_split0:
     InitializeBinding sum 0
@@ -125,44 +128,45 @@ block0_split1:
     InitializeBinding n 5
     Jump block7
 block0_split2:
-    v3:int32 = Move 0
+    v4:int32 = Move 0
     Jump block3
 block1_split3:
-    v5:unknown = GetGlobal x
+    v6:unknown = GetGlobal x
     Jump block9
 block1_split4:
-    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Mul v6:unknown, 2
     Jump block10
 block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
+    v9:unknown = Add v5:unknown, v8:unknown
     Jump block11
 block1_split6:
-    SetGlobal sum v8:unknown
+    SetGlobal sum v9:unknown
     Jump block2
 block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4_split8:
-    End v12:unknown
+    End v13:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     Jump block5
 block1:
-    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal sum
     Jump block8
 block2:
-    v9:number = ToNumeric v17:number
-    v10:number = Increment v9:number
+    v10:number = ToNumeric v18:number
+    v11:number = Increment v10:number
     Jump block3
 block3:
-    v17:number = Phi [block2:v10:number, block7:v21:int32]
-    v11:unknown = GetGlobal n
+    v18:number = Phi [block2:v11:number, block7:v22:int32]
+    v12:unknown = GetGlobal n
     Jump block12
 block4:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block13
 block0_split0:
     InitializeBinding sum 0
@@ -173,40 +177,41 @@ block0_split1:
 block0_split2:
     Jump block3
 block1_split3:
-    v5:unknown = GetGlobal x
+    v6:unknown = GetGlobal x
     Jump block9
 block1_split4:
-    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Mul v6:unknown, 2
     Jump block10
 block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
+    v9:unknown = Add v5:unknown, v8:unknown
     Jump block11
 block1_split6:
-    SetGlobal sum v8:unknown
+    SetGlobal sum v9:unknown
     Jump block2
 block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4_split8:
-    End v12:unknown
+    End v13:unknown
 
 === After RedundantCheckElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     Jump block5
 block1:
-    v4:unknown = GetGlobal sum
+    v5:unknown = GetGlobal sum
     Jump block8
 block2:
-    v10:number = Increment v17:number
+    v11:number = Increment v18:number
     Jump block3
 block3:
-    v17:number = Phi [block2:v10:number, block7:v21:int32]
-    v11:unknown = GetGlobal n
+    v18:number = Phi [block2:v11:number, block7:v22:int32]
+    v12:unknown = GetGlobal n
     Jump block12
 block4:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block13
 block0_split0:
     InitializeBinding sum 0
@@ -217,115 +222,119 @@ block0_split1:
 block0_split2:
     Jump block3
 block1_split3:
-    v5:unknown = GetGlobal x
+    v6:unknown = GetGlobal x
     Jump block9
 block1_split4:
-    v7:unknown = Mul v5:unknown, 2
+    v8:unknown = Mul v6:unknown, 2
     Jump block10
 block1_split5:
-    v8:unknown = Add v4:unknown, v7:unknown
+    v9:unknown = Add v5:unknown, v8:unknown
     Jump block11
 block1_split6:
-    SetGlobal sum v8:unknown
+    SetGlobal sum v9:unknown
     Jump block2
 block3_split7:
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4_split8:
-    End v12:unknown
+    End v13:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     InitializeBinding sum 0
     InitializeBinding n 5
     Jump block3
 block1:
-    v4:unknown = GetGlobal sum
-    v5:unknown = GetGlobal x
-    v7:unknown = Mul v5:unknown, 2
-    v8:unknown = Add v4:unknown, v7:unknown
-    SetGlobal sum v8:unknown
-    v10:number = Increment v17:number
+    v5:unknown = GetGlobal sum
+    v6:unknown = GetGlobal x
+    v8:unknown = Mul v6:unknown, 2
+    v9:unknown = Add v5:unknown, v8:unknown
+    SetGlobal sum v9:unknown
+    v11:number = Increment v18:number
     Jump block3
 block3:
-    v17:number = Phi [block1:v10:number, block0:v21:int32]
-    v11:unknown = GetGlobal n
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v18:number = Phi [block1:v11:number, block0:v22:int32]
+    v12:unknown = GetGlobal n
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 
 === After SsaDestructionPass ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     InitializeBinding sum 0
     InitializeBinding n 5
-    ParallelCopy [v17:number <- v21:int32]
+    ParallelCopy [v18:number <- v22:int32]
     Jump block3
 block1:
-    v4:unknown = GetGlobal sum
-    v5:unknown = GetGlobal x
-    v7:unknown = Mul v5:unknown, 2
-    v8:unknown = Add v4:unknown, v7:unknown
-    SetGlobal sum v8:unknown
-    v10:number = Increment v17:number
-    ParallelCopy [v17:number <- v10:number]
+    v5:unknown = GetGlobal sum
+    v6:unknown = GetGlobal x
+    v8:unknown = Mul v6:unknown, 2
+    v9:unknown = Add v5:unknown, v8:unknown
+    SetGlobal sum v9:unknown
+    v11:number = Increment v18:number
+    ParallelCopy [v18:number <- v11:number]
     Jump block3
 block3:
-    v11:unknown = GetGlobal n
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v12:unknown = GetGlobal n
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 
 === After CopyCoalescing ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     InitializeBinding sum 0
     InitializeBinding n 5
-    ParallelCopy [v17:number <- v21:int32]
+    ParallelCopy [v18:number <- v22:int32]
     Jump block3
 block1:
-    v4:unknown = GetGlobal sum
-    v5:unknown = GetGlobal x
-    v7:unknown = Mul v5:unknown, 2
-    v8:unknown = Add v4:unknown, v7:unknown
-    SetGlobal sum v8:unknown
-    v10:number = Increment v17:number
+    v5:unknown = GetGlobal sum
+    v6:unknown = GetGlobal x
+    v8:unknown = Mul v6:unknown, 2
+    v9:unknown = Add v5:unknown, v8:unknown
+    SetGlobal sum v9:unknown
+    v11:number = Increment v18:number
     Jump block3
 block3:
-    v11:unknown = GetGlobal n
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v12:unknown = GetGlobal n
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     InitializeBinding x 10
     InitializeBinding sum 0
     InitializeBinding n 5
-    ParallelCopy [v17:number <- v21:int32]
+    ParallelCopy [v18:number <- v22:int32]
     Jump block3
 block1:
-    v4:unknown = GetGlobal sum
-    v5:unknown = GetGlobal x
-    v7:unknown = Mul v5:unknown, 2
-    v8:unknown = Add v4:unknown, v7:unknown
-    SetGlobal sum v8:unknown
-    v10:number = Increment v17:number
+    v5:unknown = GetGlobal sum
+    v6:unknown = GetGlobal x
+    v8:unknown = Mul v6:unknown, 2
+    v9:unknown = Add v5:unknown, v8:unknown
+    SetGlobal sum v9:unknown
+    v11:number = Increment v18:number
     Jump block3
 block3:
-    v11:unknown = GetGlobal n
-    v13:boolean = LessThan v17:number, v11:unknown
-    Branch v13:boolean, block1, block4
+    v12:unknown = GetGlobal n
+    v14:boolean = LessThan v18:number, v12:unknown
+    Branch v14:boolean, block1, block4
 block4:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown

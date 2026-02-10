@@ -1,88 +1,93 @@
 === After SSAConstruction ===
 function():
 block0:
-    v2:array = NewArray 1, 2
-    SetGlobal arr v2:array
+    v0:unknown = GetLexicalEnvironment
+    v3:array = NewArray 1, 2
+    SetGlobal arr v3:array
     Jump block1
 block0_split0:
-    v3:unknown = GetGlobal eval
+    v4:unknown = GetGlobal eval
     Jump block2
 block0_split1:
-    v4:array = NewArray
-    v5:unknown = GetGlobal arr
+    v5:array = NewArray
+    v6:unknown = GetGlobal arr
     Jump block3
 block0_split2:
-    ArrayAppend v4:array, v5:unknown, is_spread:true
+    ArrayAppend v5:array, v6:unknown, is_spread:true
     Jump block4
 block0_split3:
-    v7:unknown = CallDirectEvalWithArgumentArray v3:unknown, undefined, v4:array
+    v8:unknown = CallDirectEvalWithArgumentArray v4:unknown, undefined, v5:array
     Jump block5
 block0_split4:
-    End v7:unknown
+    End v8:unknown
 
 === After SCCP ===
 function():
 block0:
-    v2:array = NewArray 1, 2
-    SetGlobal arr v2:array
+    v0:unknown = GetLexicalEnvironment
+    v3:array = NewArray 1, 2
+    SetGlobal arr v3:array
     Jump block1
 block0_split0:
-    v3:unknown = GetGlobal eval
+    v4:unknown = GetGlobal eval
     Jump block2
 block0_split1:
-    v4:array = NewArray
-    v5:unknown = GetGlobal arr
+    v5:array = NewArray
+    v6:unknown = GetGlobal arr
     Jump block3
 block0_split2:
-    ArrayAppend v4:array, v5:unknown, is_spread:true
+    ArrayAppend v5:array, v6:unknown, is_spread:true
     Jump block4
 block0_split3:
-    v7:unknown = CallDirectEvalWithArgumentArray v3:unknown, undefined, v4:array
+    v8:unknown = CallDirectEvalWithArgumentArray v4:unknown, undefined, v5:array
     Jump block5
 block0_split4:
-    End v7:unknown
+    End v8:unknown
 
 === Before optimization ===
 function():
 block0:
-    v2:array = NewArray 1, 2
-    SetGlobal arr v2:array
+    v0:unknown = GetLexicalEnvironment
+    v3:array = NewArray 1, 2
+    SetGlobal arr v3:array
     Jump block1
 block0_split0:
-    v3:unknown = GetGlobal eval
+    v4:unknown = GetGlobal eval
     Jump block2
 block0_split1:
-    v4:array = NewArray
-    v5:unknown = GetGlobal arr
+    v5:array = NewArray
+    v6:unknown = GetGlobal arr
     Jump block3
 block0_split2:
-    ArrayAppend v4:array, v5:unknown, is_spread:true
+    ArrayAppend v5:array, v6:unknown, is_spread:true
     Jump block4
 block0_split3:
-    v7:unknown = CallDirectEvalWithArgumentArray v3:unknown, undefined, v4:array
+    v8:unknown = CallDirectEvalWithArgumentArray v4:unknown, undefined, v5:array
     Jump block5
 block0_split4:
-    End v7:unknown
+    End v8:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v2:array = NewArray 1, 2
-    SetGlobal arr v2:array
-    v3:unknown = GetGlobal eval
-    v4:array = NewArray
-    v5:unknown = GetGlobal arr
-    ArrayAppend v4:array, v5:unknown, is_spread:true
-    v7:unknown = CallDirectEvalWithArgumentArray v3:unknown, undefined, v4:array
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:array = NewArray 1, 2
+    SetGlobal arr v3:array
+    v4:unknown = GetGlobal eval
+    v5:array = NewArray
+    v6:unknown = GetGlobal arr
+    ArrayAppend v5:array, v6:unknown, is_spread:true
+    v8:unknown = CallDirectEvalWithArgumentArray v4:unknown, undefined, v5:array
+    End v8:unknown
 
 function():
 block0:
-    v2:array = NewArray 1, 2
-    SetGlobal arr v2:array
-    v3:unknown = GetGlobal eval
-    v4:array = NewArray
-    v5:unknown = GetGlobal arr
-    ArrayAppend v4:array, v5:unknown, is_spread:true
-    v7:unknown = CallDirectEvalWithArgumentArray v3:unknown, undefined, v4:array
-    End v7:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:array = NewArray 1, 2
+    SetGlobal arr v3:array
+    v4:unknown = GetGlobal eval
+    v5:array = NewArray
+    v6:unknown = GetGlobal arr
+    ArrayAppend v5:array, v6:unknown, is_spread:true
+    v8:unknown = CallDirectEvalWithArgumentArray v4:unknown, undefined, v5:array
+    End v8:unknown

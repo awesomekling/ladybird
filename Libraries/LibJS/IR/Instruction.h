@@ -194,8 +194,6 @@ constexpr bool requires_specialized_instruction(Opcode opcode)
     switch (opcode) {
     // Use JumpInstruction::create() or BranchInstruction::create()
     case Opcode::Jump:
-    case Opcode::ContinuePendingUnwind:
-    case Opcode::EnterUnwindContext:
     case Opcode::Branch:
     // Use PhiInstruction::create()
     case Opcode::Phi:
@@ -504,15 +502,13 @@ private:
 };
 
 // JumpInstruction: Unconditional jump to a single target.
-// Also used for ContinuePendingUnwind and EnterUnwindContext (same structure: no operands, one target).
+// Unconditional jump to a single target.
 // Operands: none
 // Target: exactly one (true_target)
 class JS_API JumpInstruction final : public TerminatorInstruction {
 public:
     // Target is required at construction for compile-time safety.
     [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create(BasicBlock& target);
-    [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create_continue_pending_unwind(BasicBlock& resume_target);
-    [[nodiscard]] static NonnullOwnPtr<JumpInstruction> create_enter_unwind_context(BasicBlock& entry_point);
 
     BasicBlock& target() const
     {

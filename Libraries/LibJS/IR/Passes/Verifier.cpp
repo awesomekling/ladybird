@@ -839,8 +839,6 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
         if (auto* term = block->terminator()) {
             switch (term->opcode()) {
             case Opcode::Jump:
-            case Opcode::ContinuePendingUnwind:
-            case Opcode::EnterUnwindContext:
                 if (!term->true_target_index().has_value()) {
                     report_error(ByteString::formatted(
                         "{} in block{} has no target",
@@ -850,33 +848,6 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                     report_error(ByteString::formatted(
                         "{} in block{} has false_target (should be null)",
                         opcode_to_string(term->opcode()), block->index()));
-                }
-                break;
-            case Opcode::ScheduleJump:
-                if (!term->true_target_index().has_value() || !term->false_target_index().has_value()) {
-                    report_error(ByteString::formatted(
-                        "ScheduleJump in block{} missing true_target or false_target",
-                        block->index()));
-                }
-                // ScheduleJump requires the block to have a finalizer
-                if (!block->finalizer_index().has_value()) {
-                    report_error(ByteString::formatted(
-                        "ScheduleJump in block{} but block has no finalizer",
-                        block->index()));
-                }
-                // ScheduleJump's true_target must be the block's finalizer
-                if (term->true_target_index().has_value() && block->finalizer_index().has_value()
-                    && *term->true_target_index() != *block->finalizer_index()) {
-                    report_error(ByteString::formatted(
-                        "ScheduleJump in block{} true_target (block{}) does not match finalizer (block{})",
-                        block->index(), *term->true_target_index(), *block->finalizer_index()));
-                }
-                // ScheduleJump's false_target (continuation) must differ from true_target (finalizer)
-                if (term->true_target_index().has_value() && term->false_target_index().has_value()
-                    && *term->true_target_index() == *term->false_target_index()) {
-                    report_error(ByteString::formatted(
-                        "ScheduleJump in block{} has same true_target and false_target (block{})",
-                        block->index(), *term->true_target_index()));
                 }
                 break;
             case Opcode::Branch:
@@ -954,12 +925,11 @@ bool Verifier::verify(Function& function, VerifierMode mode, bool crash_on_error
                 // nodes. A phi can only hold one entry per predecessor, but the two
                 // paths (normal vs exception) may need different values. Intermediate
                 // split blocks should keep these paths separate.
-                // ScheduleJump is excluded since it intentionally targets the finalizer.
-                if (term->opcode() != Opcode::ScheduleJump) {
+                {
                     auto check_eh_overlap = [&](BasicBlock* target) {
                         if (!target)
                             return;
-                        bool overlaps_eh = (target == block->exception_handler() || target == block->finalizer());
+                        bool overlaps_eh = (target == block->exception_handler());
                         if (!overlaps_eh)
                             return;
                         bool target_has_phis = !target->instructions().is_empty()

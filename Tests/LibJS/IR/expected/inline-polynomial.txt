@@ -1,261 +1,240 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal caller
+    v4:unknown = GetGlobal caller
     Jump block3
 block0_split2:
-    v4:unknown = Call v3:unknown, undefined
+    v5:unknown = Call v4:unknown, undefined
     Jump block4
 block0_split3:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal caller
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal caller
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = GetGlobal caller
-    v4:unknown = Call v3:unknown, undefined
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = GetGlobal caller
+    v5:unknown = Call v4:unknown, undefined
+    End v5:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal poly
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal poly
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    Return v3:unknown
+    Return v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal poly
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal poly
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 5
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
 block0_split1:
-    Return v3:unknown
-
-=== After InlineCalls ===
-function():
-block0:
-    v0:unknown = GetGlobal poly
-    Jump block1
-block0_split0:
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
-block0_split1:
-    Return v18:unknown
-inline_block0:
-    v10:number = Mul 5, 5
-    Jump block4
-inline_block0_split0:
-    v11:number = Mul v10:number, 5
-    Jump block5
-inline_block0_split1:
-    v12:number = Mul 2, 5
-    Jump block6
-inline_block0_split2:
-    v13:number = Mul v12:number, 5
-    Jump block7
-inline_block0_split3:
-    v14:number = Add v11:number, v13:number
-    Jump block8
-inline_block0_split4:
-    v15:number = Mul 3, 5
-    Jump block9
-inline_block0_split5:
-    v16:number = Add v14:number, v15:number
-    Jump block10
-inline_block0_split6:
-    v17:number = Add v16:number, 4
-    Jump block11
-inline_block0_split7:
-    Jump block12
-inline_merge:
-    v18:unknown = Phi [block13:v9:unknown, block11:v17:number]
-    Jump block2
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Jump block12
+    Return v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal poly
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal poly
     Jump block1
 block0_split0:
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
-block0_split1:
-    Return v18:unknown
-inline_block0:
-    v10:number = Mul 5, 5
-    Jump block4
-inline_block0_split0:
-    v11:number = Mul v10:number, 5
-    Jump block5
-inline_block0_split1:
-    v12:number = Mul 2, 5
-    Jump block6
-inline_block0_split2:
-    v13:number = Mul v12:number, 5
-    Jump block7
-inline_block0_split3:
-    v14:number = Add v11:number, v13:number
-    Jump block8
-inline_block0_split4:
-    v15:number = Mul 3, 5
-    Jump block9
-inline_block0_split5:
-    v16:number = Add v14:number, v15:number
-    Jump block10
-inline_block0_split6:
-    v17:number = Add v16:number, 4
-    Jump block11
-inline_block0_split7:
-    Jump block12
-inline_merge:
-    v18:unknown = Phi [block13:v9:unknown, block11:v17:number]
+    v4:unknown = Call v1:unknown, undefined, 5
     Jump block2
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Jump block12
-
-=== After InstCombine ===
-function():
-block0:
-    v0:unknown = GetGlobal poly
-    Jump block1
-block0_split0:
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
 block0_split1:
-    Return v18:unknown
-inline_block0:
-    v10:number = Mul 5, 5
-    Jump block4
-inline_block0_split0:
-    v11:number = Mul 25, 5
-    Jump block5
-inline_block0_split1:
-    v12:number = Mul 2, 5
-    Jump block6
-inline_block0_split2:
-    v13:number = Mul 10, 5
-    Jump block7
-inline_block0_split3:
-    v14:number = Add 125, 50
-    Jump block8
-inline_block0_split4:
-    v15:number = Mul 3, 5
-    Jump block9
-inline_block0_split5:
-    v16:number = Add 175, 15
-    Jump block10
-inline_block0_split6:
-    v17:number = Add 190, 4
-    Jump block11
-inline_block0_split7:
-    Jump block12
-inline_merge:
-    v18:unknown = Phi [block13:v9:unknown, block11:v26:int32]
-    Jump block2
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Jump block12
+    Return v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal poly
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
-inline_block0:
-    v10:number = Mul 5, 5
-    v11:number = Mul 25, 5
-    v12:number = Mul 2, 5
-    v13:number = Mul 10, 5
-    v14:number = Add 125, 50
-    v15:number = Mul 3, 5
-    v16:number = Add 175, 15
-    v17:number = Add 190, 4
-    Return 194
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Return v9:unknown
-
-=== After DeadCodeElimination ===
-function():
-block0:
-    v0:unknown = GetGlobal poly
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
-inline_block0:
-    Return 194
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Return v9:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal poly
+    v4:unknown = Call v1:unknown, undefined, 5
+    Return v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal poly
-    v8:boolean = StrictlyInequals v0:unknown, v7:object
-    Branch v8:boolean, block13, block3
-inline_block0:
-    Return 194
-inline_slow:
-    v9:unknown = Call v0:unknown, undefined, 5
-    Return v9:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal poly
+    v4:unknown = Call v1:unknown, undefined, 5
+    Return v4:unknown
+
+=== After SSAConstruction ===
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v2:unknown = Mul v0:unknown, v0:unknown
+    Jump block1
+block0_split0:
+    v3:unknown = Mul v2:unknown, v0:unknown
+    Jump block2
+block0_split1:
+    v5:unknown = Mul 2, v0:unknown
+    Jump block3
+block0_split2:
+    v6:unknown = Mul v5:unknown, v0:unknown
+    Jump block4
+block0_split3:
+    v7:unknown = Add v3:unknown, v6:unknown
+    Jump block5
+block0_split4:
+    v9:unknown = Mul 3, v0:unknown
+    Jump block6
+block0_split5:
+    v10:unknown = Add v7:unknown, v9:unknown
+    Jump block7
+block0_split6:
+    v12:unknown = Add v10:unknown, 4
+    Jump block8
+block0_split7:
+    Return v12:unknown
+
+=== After SCCP ===
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v2:unknown = Mul v0:unknown, v0:unknown
+    Jump block1
+block0_split0:
+    v3:unknown = Mul v2:unknown, v0:unknown
+    Jump block2
+block0_split1:
+    v5:unknown = Mul 2, v0:unknown
+    Jump block3
+block0_split2:
+    v6:unknown = Mul v5:unknown, v0:unknown
+    Jump block4
+block0_split3:
+    v7:unknown = Add v3:unknown, v6:unknown
+    Jump block5
+block0_split4:
+    v9:unknown = Mul 3, v0:unknown
+    Jump block6
+block0_split5:
+    v10:unknown = Add v7:unknown, v9:unknown
+    Jump block7
+block0_split6:
+    v12:unknown = Add v10:unknown, 4
+    Jump block8
+block0_split7:
+    Return v12:unknown
+
+=== Before optimization ===
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v2:unknown = Mul v0:unknown, v0:unknown
+    Jump block1
+block0_split0:
+    v3:unknown = Mul v2:unknown, v0:unknown
+    Jump block2
+block0_split1:
+    v5:unknown = Mul 2, v0:unknown
+    Jump block3
+block0_split2:
+    v6:unknown = Mul v5:unknown, v0:unknown
+    Jump block4
+block0_split3:
+    v7:unknown = Add v3:unknown, v6:unknown
+    Jump block5
+block0_split4:
+    v9:unknown = Mul 3, v0:unknown
+    Jump block6
+block0_split5:
+    v10:unknown = Add v7:unknown, v9:unknown
+    Jump block7
+block0_split6:
+    v12:unknown = Add v10:unknown, 4
+    Jump block8
+block0_split7:
+    Return v12:unknown
+
+=== After SimplifyCFG ===
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v2:unknown = Mul v0:unknown, v0:unknown
+    v3:unknown = Mul v2:unknown, v0:unknown
+    v5:unknown = Mul 2, v0:unknown
+    v6:unknown = Mul v5:unknown, v0:unknown
+    v7:unknown = Add v3:unknown, v6:unknown
+    v9:unknown = Mul 3, v0:unknown
+    v10:unknown = Add v7:unknown, v9:unknown
+    v12:unknown = Add v10:unknown, 4
+    Return v12:unknown
+
+function(v0:unknown):
+block0:
+    v1:unknown = GetLexicalEnvironment
+    v2:unknown = Mul v0:unknown, v0:unknown
+    v3:unknown = Mul v2:unknown, v0:unknown
+    v5:unknown = Mul 2, v0:unknown
+    v6:unknown = Mul v5:unknown, v0:unknown
+    v7:unknown = Add v3:unknown, v6:unknown
+    v9:unknown = Mul 3, v0:unknown
+    v10:unknown = Add v7:unknown, v9:unknown
+    v12:unknown = Add v10:unknown, 4
+    Return v12:unknown

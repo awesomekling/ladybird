@@ -50,7 +50,7 @@ void TerminatorInstruction::set_false_target(BasicBlock* block)
 JumpInstruction::JumpInstruction(Opcode opcode, BasicBlock& target)
     : TerminatorInstruction(opcode)
 {
-    VERIFY(opcode == Opcode::Jump || opcode == Opcode::ContinuePendingUnwind || opcode == Opcode::EnterUnwindContext);
+    VERIFY(opcode == Opcode::Jump);
     set_true_target(target.index());
 }
 
@@ -62,16 +62,6 @@ void JumpInstruction::set_target(BasicBlock& block)
 NonnullOwnPtr<JumpInstruction> JumpInstruction::create(BasicBlock& target)
 {
     return adopt_own(*new JumpInstruction(Opcode::Jump, target));
-}
-
-NonnullOwnPtr<JumpInstruction> JumpInstruction::create_continue_pending_unwind(BasicBlock& resume_target)
-{
-    return adopt_own(*new JumpInstruction(Opcode::ContinuePendingUnwind, resume_target));
-}
-
-NonnullOwnPtr<JumpInstruction> JumpInstruction::create_enter_unwind_context(BasicBlock& entry_point)
-{
-    return adopt_own(*new JumpInstruction(Opcode::EnterUnwindContext, entry_point));
 }
 
 BranchInstruction::BranchInstruction(Value* condition, BasicBlock& true_target, BasicBlock& false_target)

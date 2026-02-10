@@ -665,11 +665,8 @@ static Value* try_algebraic_simplify(Instruction& instruction, Function& functio
         break;
 
     case Opcode::Mul:
-        // x * 0 -> 0, 0 * x -> 0 (only safe for Int32, since NaN * 0 = NaN)
+        // NB: x * 0 -> 0 is NOT safe even for Int32, since (-1) * 0 = -0.
         if (nops == 2) {
-            if ((is_constant_zero(op(0)) && op(1)->type() == Type::Int32)
-                || (is_constant_zero(op(1)) && op(0)->type() == Type::Int32))
-                return &function.create_constant(JS::Value(0));
             // x * 1 -> x, 1 * x -> x (only for numeric types, since "5" * 1 = 5)
             if (is_constant_one(op(1)) && is_numeric_type(op(0)->type()))
                 return op(0);

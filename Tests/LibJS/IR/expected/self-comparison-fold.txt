@@ -1,165 +1,176 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 42
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 42
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 42
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 42
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:boolean = StrictlyEquals v8:int32, v8:int32
-    v10:boolean = Move v9:boolean
-    v11:boolean = StrictlyInequals v8:int32, v8:int32
-    v12:boolean = Move v11:boolean
-    v13:boolean = LessThan v8:int32, v8:int32
+    v9:int32 = Move v8:int32
+    v10:boolean = StrictlyEquals v9:int32, v9:int32
+    v11:boolean = Move v10:boolean
+    v12:boolean = StrictlyInequals v9:int32, v9:int32
+    v13:boolean = Move v12:boolean
+    v14:boolean = LessThan v9:int32, v9:int32
     Jump block2
 block0_split1:
-    v14:boolean = Move v13:boolean
-    v15:boolean = LessThanEquals v8:int32, v8:int32
+    v15:boolean = Move v14:boolean
+    v16:boolean = LessThanEquals v9:int32, v9:int32
     Jump block3
 block0_split2:
-    v16:boolean = Move v15:boolean
-    Return v10:boolean
+    v17:boolean = Move v16:boolean
+    Return v11:boolean
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:boolean = StrictlyEquals v8:int32, v8:int32
-    v10:boolean = Move v9:boolean
-    v11:boolean = StrictlyInequals v8:int32, v8:int32
-    v12:boolean = Move v11:boolean
-    v13:boolean = LessThan v8:int32, v8:int32
+    v9:int32 = Move v8:int32
+    v10:boolean = StrictlyEquals v9:int32, v9:int32
+    v11:boolean = Move v10:boolean
+    v12:boolean = StrictlyInequals v9:int32, v9:int32
+    v13:boolean = Move v12:boolean
+    v14:boolean = LessThan v9:int32, v9:int32
     Jump block2
 block0_split1:
-    v14:boolean = Move v13:boolean
-    v15:boolean = LessThanEquals v8:int32, v8:int32
+    v15:boolean = Move v14:boolean
+    v16:boolean = LessThanEquals v9:int32, v9:int32
     Jump block3
 block0_split2:
-    v16:boolean = Move v15:boolean
-    Return v10:boolean
+    v17:boolean = Move v16:boolean
+    Return v11:boolean
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
     v6:undefined = Move undefined
-    v7:int32 = ToInt32 v0:unknown
+    v7:undefined = Move undefined
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:boolean = StrictlyEquals v8:int32, v8:int32
-    v10:boolean = Move v9:boolean
-    v11:boolean = StrictlyInequals v8:int32, v8:int32
-    v12:boolean = Move v11:boolean
-    v13:boolean = LessThan v8:int32, v8:int32
+    v9:int32 = Move v8:int32
+    v10:boolean = StrictlyEquals v9:int32, v9:int32
+    v11:boolean = Move v10:boolean
+    v12:boolean = StrictlyInequals v9:int32, v9:int32
+    v13:boolean = Move v12:boolean
+    v14:boolean = LessThan v9:int32, v9:int32
     Jump block2
 block0_split1:
-    v14:boolean = Move v13:boolean
-    v15:boolean = LessThanEquals v8:int32, v8:int32
+    v15:boolean = Move v14:boolean
+    v16:boolean = LessThanEquals v9:int32, v9:int32
     Jump block3
 block0_split2:
-    v16:boolean = Move v15:boolean
-    Return v10:boolean
+    v17:boolean = Move v16:boolean
+    Return v11:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:boolean = StrictlyEquals v8:int32, v8:int32
-    v10:boolean = Move v9:boolean
+    v9:int32 = Move v8:int32
+    v10:boolean = StrictlyEquals v9:int32, v9:int32
+    v11:boolean = Move v10:boolean
     Jump block2
 block0_split1:
     Jump block3
 block0_split2:
-    Return v10:boolean
+    Return v11:boolean
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v9:boolean = StrictlyEquals v7:int32, v7:int32
-    v10:boolean = Move v9:boolean
+    v9:int32 = Move v8:int32
+    v10:boolean = StrictlyEquals v8:int32, v8:int32
+    v11:boolean = Move v10:boolean
     Jump block2
 block0_split1:
     Jump block3
 block0_split2:
-    Return v9:boolean
+    Return v10:boolean
 
 === After InstCombine ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block1
 block0_split0:
-    v8:int32 = Move v7:int32
-    v10:boolean = Move true
+    v9:int32 = Move v8:int32
+    v11:boolean = Move true
     Jump block2
 block0_split1:
     Jump block3
@@ -169,9 +180,10 @@ block0_split2:
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
-    v8:int32 = Move v7:int32
-    v10:boolean = Move true
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
+    v9:int32 = Move v8:int32
+    v11:boolean = Move true
     Jump block3
 block0_split2:
     Return true
@@ -179,7 +191,8 @@ block0_split2:
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Jump block3
 block0_split2:
     Return true
@@ -187,10 +200,12 @@ block0_split2:
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Return true
 
 function(v0:unknown):
 block0:
-    v7:int32 = ToInt32 v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v8:int32 = ToInt32 v0:unknown
     Return true

@@ -1,381 +1,397 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal rotate
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal rotate
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal rotate
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal rotate
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal rotate
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal rotate
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 3
+    v4:unknown = Call v1:unknown, undefined, 3
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal rotate
-    v3:unknown = Call v0:unknown, undefined, 3
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal rotate
+    v4:unknown = Call v1:unknown, undefined, 3
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal rotate
-    v3:unknown = Call v0:unknown, undefined, 3
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal rotate
+    v4:unknown = Call v1:unknown, undefined, 3
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:int32 = Move 100
-    v4:int32 = Move 0
+    v1:unknown = GetLexicalEnvironment
+    v3:int32 = Move 100
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v12:number = ToNumeric v19:number
-    v13:number = Increment v12:number
+    v13:number = ToNumeric v20:number
+    v14:number = Increment v13:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v2:int32, block2:v10:number]
-    v20:number = Phi [block0:v4:int32, block2:v11:number]
-    v19:number = Phi [block0:v5:int32, block2:v13:number]
-    v18:unknown = Phi [block0:v22:unknown, block2:v7:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v9:unknown]
-    v16:unknown = Phi [block0:v24:undefined, block2:v12:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v3:int32, block2:v11:number]
+    v21:number = Phi [block0:v5:int32, block2:v12:number]
+    v20:number = Phi [block0:v6:int32, block2:v14:number]
+    v19:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v18:unknown = Phi [block0:v24:unknown, block2:v10:unknown]
+    v17:unknown = Phi [block0:v25:undefined, block2:v13:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:int32 = Move 100
-    v4:int32 = Move 0
+    v1:unknown = GetLexicalEnvironment
+    v3:int32 = Move 100
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v12:number = ToNumeric v19:number
-    v13:number = Increment v12:number
+    v13:number = ToNumeric v20:number
+    v14:number = Increment v13:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block2:v10:number]
-    v20:number = Phi [block0:v26:int32, block2:v11:number]
-    v19:number = Phi [block0:v27:int32, block2:v13:number]
-    v18:unknown = Phi [block0:v22:unknown, block2:v7:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v9:unknown]
-    v16:unknown = Phi [block0:v24:undefined, block2:v12:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block2:v11:number]
+    v21:number = Phi [block0:v27:int32, block2:v12:number]
+    v20:number = Phi [block0:v28:int32, block2:v14:number]
+    v19:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v18:unknown = Phi [block0:v24:unknown, block2:v10:unknown]
+    v17:unknown = Phi [block0:v25:undefined, block2:v13:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:int32 = Move 100
-    v4:int32 = Move 0
+    v1:unknown = GetLexicalEnvironment
+    v3:int32 = Move 100
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v12:number = ToNumeric v19:number
-    v13:number = Increment v12:number
+    v13:number = ToNumeric v20:number
+    v14:number = Increment v13:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block2:v10:number]
-    v20:number = Phi [block0:v26:int32, block2:v11:number]
-    v19:number = Phi [block0:v27:int32, block2:v13:number]
-    v18:unknown = Phi [block0:v22:unknown, block2:v7:number]
-    v17:unknown = Phi [block0:v23:unknown, block2:v9:unknown]
-    v16:unknown = Phi [block0:v24:undefined, block2:v12:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block2:v11:number]
+    v21:number = Phi [block0:v27:int32, block2:v12:number]
+    v20:number = Phi [block0:v28:int32, block2:v14:number]
+    v19:unknown = Phi [block0:v23:unknown, block2:v8:number]
+    v18:unknown = Phi [block0:v24:unknown, block2:v10:unknown]
+    v17:unknown = Phi [block0:v25:undefined, block2:v13:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v12:number = ToNumeric v19:number
-    v13:number = Increment v12:number
+    v13:number = ToNumeric v20:number
+    v14:number = Increment v13:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block2:v10:number]
-    v20:number = Phi [block0:v26:int32, block2:v11:number]
-    v19:number = Phi [block0:v27:int32, block2:v13:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block2:v11:number]
+    v21:number = Phi [block0:v27:int32, block2:v12:number]
+    v20:number = Phi [block0:v28:int32, block2:v14:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v12:number = ToNumeric v19:number
-    v13:number = Increment v12:number
+    v13:number = ToNumeric v20:number
+    v14:number = Increment v13:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block2:v7:number]
-    v20:number = Phi [block0:v26:int32, block2:v9:unknown]
-    v19:number = Phi [block0:v27:int32, block2:v13:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block2:v8:number]
+    v21:number = Phi [block0:v27:int32, block2:v10:unknown]
+    v20:number = Phi [block0:v28:int32, block2:v14:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === After RedundantCheckElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
+    v7:int32 = RightShift v21:number, v20:number
     Jump block5
 block2:
-    v13:number = Increment v19:number
+    v14:number = Increment v20:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block2:v7:number]
-    v20:number = Phi [block0:v26:int32, block2:v9:unknown]
-    v19:number = Phi [block0:v27:int32, block2:v13:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block2:v8:number]
+    v21:number = Phi [block0:v27:int32, block2:v10:unknown]
+    v20:number = Phi [block0:v28:int32, block2:v14:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
+    v15:number = Mul v22:number, v21:number
     Jump block9
 block1_split0:
-    v7:number = Sub v21:number, v6:int32
+    v8:number = Sub v22:number, v7:int32
     Jump block6
 block1_split1:
-    v8:int32 = RightShift v21:number, v19:number
+    v9:int32 = RightShift v22:number, v20:number
     Jump block7
 block1_split2:
-    v9:unknown = Add v8:int32, v20:number
+    v10:unknown = Add v9:int32, v21:number
     Jump block8
 block1_split3:
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
     Jump block2
 block4_split4:
-    Return v14:number
+    Return v15:number
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
-    v7:number = Sub v21:number, v6:int32
-    v8:int32 = RightShift v21:number, v19:number
-    v9:unknown = Add v8:int32, v20:number
-    v10:number = Move v7:number
-    v11:number = Move v9:unknown
-    v13:number = Increment v19:number
+    v7:int32 = RightShift v21:number, v20:number
+    v8:number = Sub v22:number, v7:int32
+    v9:int32 = RightShift v22:number, v20:number
+    v10:unknown = Add v9:int32, v21:number
+    v11:number = Move v8:number
+    v12:number = Move v10:unknown
+    v14:number = Increment v20:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block1:v7:number]
-    v20:number = Phi [block0:v26:int32, block1:v9:unknown]
-    v19:number = Phi [block0:v27:int32, block1:v13:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block1:v8:number]
+    v21:number = Phi [block0:v27:int32, block1:v10:unknown]
+    v20:number = Phi [block0:v28:int32, block1:v14:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
-    Return v14:number
+    v15:number = Mul v22:number, v21:number
+    Return v15:number
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
-    v7:number = Sub v21:number, v6:int32
-    v8:int32 = RightShift v21:number, v19:number
-    v9:unknown = Add v8:int32, v20:number
-    v13:number = Increment v19:number
+    v7:int32 = RightShift v21:number, v20:number
+    v8:number = Sub v22:number, v7:int32
+    v9:int32 = RightShift v22:number, v20:number
+    v10:unknown = Add v9:int32, v21:number
+    v14:number = Increment v20:number
     Jump block3
 block3:
-    v21:number = Phi [block0:v25:int32, block1:v7:number]
-    v20:number = Phi [block0:v26:int32, block1:v9:unknown]
-    v19:number = Phi [block0:v27:int32, block1:v13:number]
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v22:number = Phi [block0:v26:int32, block1:v8:number]
+    v21:number = Phi [block0:v27:int32, block1:v10:unknown]
+    v20:number = Phi [block0:v28:int32, block1:v14:number]
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
-    Return v14:number
+    v15:number = Mul v22:number, v21:number
+    Return v15:number
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v21:number <- v25:int32, v20:number <- v26:int32, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v22:number <- v26:int32, v21:number <- v27:int32, v20:number <- v28:int32]
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
-    v7:number = Sub v21:number, v6:int32
-    v8:int32 = RightShift v21:number, v19:number
-    v9:unknown = Add v8:int32, v20:number
-    v13:number = Increment v19:number
-    ParallelCopy [v21:number <- v7:number, v20:number <- v9:unknown, v19:number <- v13:number]
+    v7:int32 = RightShift v21:number, v20:number
+    v8:number = Sub v22:number, v7:int32
+    v9:int32 = RightShift v22:number, v20:number
+    v10:unknown = Add v9:int32, v21:number
+    v14:number = Increment v20:number
+    ParallelCopy [v22:number <- v8:number, v21:number <- v10:unknown, v20:number <- v14:number]
     Jump block3
 block3:
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
-    Return v14:number
+    v15:number = Mul v22:number, v21:number
+    Return v15:number
 
 === After CopyCoalescing ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v21:number <- v25:int32, v20:number <- v26:int32, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v22:number <- v26:int32, v21:number <- v27:int32, v20:number <- v28:int32]
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
-    v7:number = Sub v21:number, v6:int32
-    v8:int32 = RightShift v21:number, v19:number
-    v9:unknown = Add v8:int32, v20:number
-    v13:number = Increment v19:number
-    ParallelCopy [v21:number <- v7:number]
+    v7:int32 = RightShift v21:number, v20:number
+    v8:number = Sub v22:number, v7:int32
+    v9:int32 = RightShift v22:number, v20:number
+    v10:unknown = Add v9:int32, v21:number
+    v14:number = Increment v20:number
+    ParallelCopy [v22:number <- v8:number]
     Jump block3
 block3:
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
-    Return v14:number
+    v15:number = Mul v22:number, v21:number
+    Return v15:number
 
 function(v0:unknown):
 block0:
-    ParallelCopy [v21:number <- v25:int32, v20:number <- v26:int32, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v22:number <- v26:int32, v21:number <- v27:int32, v20:number <- v28:int32]
     Jump block3
 block1:
-    v6:int32 = RightShift v20:number, v19:number
-    v7:number = Sub v21:number, v6:int32
-    v8:int32 = RightShift v21:number, v19:number
-    v9:unknown = Add v8:int32, v20:number
-    v13:number = Increment v19:number
-    ParallelCopy [v21:number <- v7:number]
+    v7:int32 = RightShift v21:number, v20:number
+    v8:number = Sub v22:number, v7:int32
+    v9:int32 = RightShift v22:number, v20:number
+    v10:unknown = Add v9:int32, v21:number
+    v14:number = Increment v20:number
+    ParallelCopy [v22:number <- v8:number]
     Jump block3
 block3:
-    v15:boolean = LessThan v19:number, v0:unknown
-    Branch v15:boolean, block1, block4
+    v16:boolean = LessThan v20:number, v0:unknown
+    Branch v16:boolean, block1, block4
 block4:
-    v14:number = Mul v21:number, v20:number
-    Return v14:number
+    v15:number = Mul v22:number, v21:number
+    Return v15:number

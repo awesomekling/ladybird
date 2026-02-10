@@ -1,474 +1,641 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v6:number = ToNumeric v15:number
-    v7:number = Increment v6:number
+    v7:number = ToNumeric v29:number
+    v8:number = Increment v7:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v4:int32, block2:v10:number]
-    v15:number = Phi [block0:v5:int32, block2:v7:number]
-    v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v5:int32, block2:v13:number]
+    v29:number = Phi [block0:v6:int32, block2:v8:number]
+    v27:unknown = Phi [block0:v32:undefined, block2:v12:number]
+    v24:unknown = Phi [block0:v33:undefined, block2:v7:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v13:number]
+    v28:unknown = Phi [block3:v27:unknown, block11:v12:number]
+    v25:unknown = Phi [block3:v24:unknown, block11:v26:int32]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v15:int32, block9:v16:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    v15:int32 = Move 3
+    Jump block6
 block9:
-    Jump block5
+    v16:int32 = Move 0
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v6:number = ToNumeric v15:number
-    v7:number = Increment v6:number
+    v7:number = ToNumeric v29:number
+    v8:number = Increment v7:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v10:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v13:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v27:unknown = Phi [block0:v32:undefined, block2:v12:number]
+    v24:unknown = Phi [block0:v33:undefined, block2:v7:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v13:number]
+    v28:unknown = Phi [block3:v27:unknown, block11:v12:number]
+    v25:unknown = Phi [block3:v24:unknown, block11:v26:int32]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v38:int32, block9:v39:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    v15:int32 = Move 3
+    Jump block6
 block9:
-    Jump block5
+    v16:int32 = Move 0
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:int32 = Move 0
+    v3:undefined = Move undefined
     v5:int32 = Move 0
+    v6:int32 = Move 0
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v6:number = ToNumeric v15:number
-    v7:number = Increment v6:number
+    v7:number = ToNumeric v29:number
+    v8:number = Increment v7:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v10:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v14:unknown = Phi [block0:v17:undefined, block2:v6:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v13:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v27:unknown = Phi [block0:v32:undefined, block2:v12:number]
+    v24:unknown = Phi [block0:v33:undefined, block2:v7:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v13:number]
+    v28:unknown = Phi [block3:v27:unknown, block11:v12:number]
+    v25:unknown = Phi [block3:v24:unknown, block11:v26:int32]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v38:int32, block9:v39:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    v15:int32 = Move 3
+    Jump block6
 block9:
-    Jump block5
+    v16:int32 = Move 0
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v6:number = ToNumeric v15:number
-    v7:number = Increment v6:number
+    v7:number = ToNumeric v29:number
+    v8:number = Increment v7:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v10:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v13:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v13:number]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v38:int32, block9:v39:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    Jump block6
 block9:
-    Jump block5
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === After CopyPropagation ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v6:number = ToNumeric v15:number
-    v7:number = Increment v6:number
+    v7:number = ToNumeric v29:number
+    v8:number = Increment v7:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v9:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v12:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v12:number]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v38:int32, block9:v39:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    Jump block6
 block9:
-    Jump block5
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === After RedundantCheckElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    EnterUnwindContext block7
+    Jump block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v9:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v12:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block1, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    Jump block11
+    v31:number = Phi [block3:v30:number, block11:v12:number]
+    Return v31:number
 block6:
-    Jump block2
+    v26:int32 = Phi [block8:v38:int32, block9:v39:int32]
+    v12:number = Add v30:number, 1
+    Jump block15
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block9
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block8, block9
+block8:
+    Jump block6
 block9:
-    Jump block5
+    Jump block6
 block10:
-    Return v16:number
-block5_split0:
-    v10:number = Move v9:number
-    ContinuePendingUnwind block6
+    Jump block2
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+block6_split0:
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block10, block11
 
 === After SimplifyCFG ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v9:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v12:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    v10:number = Move v9:number
-    ContinuePendingUnwind block2
+    v31:number = Phi [block3:v30:number, block11:v12:number]
+    Return v31:number
+block6:
+    v26:int32 = Phi [block9:v39:int32, block7:v38:int32]
+    v12:number = Add v30:number, 1
+    v13:number = Move v12:number
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block5
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block6, block9
+block9:
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v9:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v12:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    v31:number = Phi [block3:v30:number, block11:v12:number]
+    Return v31:number
+block6:
+    v26:int32 = Phi [block9:v39:int32, block7:v38:int32]
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block5
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block6, block9
+block9:
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
 
 === After SplitCriticalEdges ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v16:number = Phi [block0:v18:int32, block2:v9:number]
-    v15:number = Phi [block0:v19:int32, block2:v7:number]
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v30:number = Phi [block0:v36:int32, block2:v12:number]
+    v29:number = Phi [block0:v37:int32, block2:v8:number]
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block16
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    v31:number = Phi [block16:v30:number, block18:v12:number]
+    Return v31:number
+block6:
+    v26:int32 = Phi [block9:v39:int32, block17:v38:int32]
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block12
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
-split_block7_block5:
-    Jump block5
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block17, block9
+block9:
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block18, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+split_block3_block4:
+    Jump block4
+split_block7_block6:
+    Jump block6
+split_block11_block4:
+    Jump block4
 
 === After SsaDestructionPass ===
 function():
 block0:
-    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
+    v0:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32, v29:number <- v37:int32]
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
-    ParallelCopy [v16:number <- v9:number, v15:number <- v7:number]
+    v8:number = Increment v29:number
+    ParallelCopy [v30:number <- v12:number, v29:number <- v8:number]
     Jump block3
 block3:
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block16
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    Return v31:number
+block6:
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block12
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
-split_block7_block5:
-    Jump block5
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block17, block9
+block9:
+    ParallelCopy [v26:int32 <- v39:int32]
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block18, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+split_block3_block4:
+    ParallelCopy [v31:number <- v30:number]
+    Jump block4
+split_block7_block6:
+    ParallelCopy [v26:int32 <- v38:int32]
+    Jump block6
+split_block11_block4:
+    ParallelCopy [v31:number <- v12:number]
+    Jump block4
 
 === After CopyCoalescing ===
 function():
 block0:
-    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
+    v0:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32, v29:number <- v37:int32]
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block16
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    Return v31:number
+block6:
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block12
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
-split_block7_block5:
-    Jump block5
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block17, block9
+block9:
+    ParallelCopy [v26:int32 <- v39:int32]
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block18, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+split_block3_block4:
+    Jump block4
+split_block7_block6:
+    ParallelCopy [v26:int32 <- v38:int32]
+    Jump block6
+split_block11_block4:
+    Jump block4
 
 === After PostSSACleanup ===
 function():
 block0:
-    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
+    v0:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32, v29:number <- v37:int32]
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    Return v31:number
+block6:
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block5
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block17, block9
+block9:
+    ParallelCopy [v26:int32 <- v39:int32]
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+split_block7_block6:
+    ParallelCopy [v26:int32 <- v38:int32]
+    Jump block6
 
 function():
 block0:
-    ParallelCopy [v16:number <- v18:int32, v15:number <- v19:int32]
+    v0:unknown = GetLexicalEnvironment
+    ParallelCopy [v30:number <- v36:int32, v29:number <- v37:int32]
     Jump block3
-block1:
-    EnterUnwindContext block7
 block2:
-    v7:number = Increment v15:number
+    v8:number = Increment v29:number
     Jump block3
 block3:
-    v12:boolean = LessThan v15:number, 3
-    Branch v12:boolean, block1, block4
+    v18:boolean = LessThan v29:number, 3
+    Branch v18:boolean, block7, block4
 block4:
-    Return v16:number
-block5:
-    LeaveUnwindContext
-    v9:number = Add v16:number, 1
-    ContinuePendingUnwind block2
+    Return v31:number
+block6:
+    v12:number = Add v30:number, 1
+    v19:boolean = StrictlyEquals v26:int32, 0
+    Branch v19:boolean, block2, block11
 block7:
-    v13:boolean = StrictlyEquals v15:number, 1
-    Branch v13:boolean, block8, block5
-block8: [finalizer: block5]
-    ScheduleJump finalizer: block5, target: block10
-block10:
-    Return v16:number
+    v20:boolean = StrictlyEquals v29:number, 1
+    Branch v20:boolean, block17, block9
+block9:
+    ParallelCopy [v26:int32 <- v39:int32]
+    Jump block6
+block11:
+    v21:boolean = StrictlyEquals v26:int32, 3
+    Branch v21:boolean, block4, block12
+block12:
+    v23:boolean = StrictlyEquals v26:int32, 2
+    Branch v23:boolean, block13, block14
+block13:
+    Return undefined
+block14:
+    Throw undefined
+split_block7_block6:
+    ParallelCopy [v26:int32 <- v38:int32]
+    Jump block6

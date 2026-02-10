@@ -157,7 +157,10 @@ static Optional<JS::Value> try_evaluate(Opcode opcode, ReadonlySpan<JS::Value> o
         if (nops == 2 && operands[0].is_int32() && operands[1].is_int32()) {
             i64 lhs = operands[0].as_i32();
             i64 rhs = operands[1].as_i32();
-            return make_int_or_double(lhs * rhs);
+            i64 result = lhs * rhs;
+            if (result == 0 && (lhs < 0 || rhs < 0))
+                return JS::Value(-0.0);
+            return make_int_or_double(result);
         }
         if (nops == 2 && both_numeric(operands[0], operands[1]))
             return JS::Value(*numeric_to_double(operands[0]) * *numeric_to_double(operands[1]));

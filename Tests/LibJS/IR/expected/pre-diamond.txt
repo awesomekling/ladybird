@@ -1,264 +1,280 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v4:unknown = Call v0:unknown, undefined, 1, true
+    v5:unknown = Call v1:unknown, undefined, 1, true
     Jump block2
 block0_split1:
-    End v4:unknown
+    End v5:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 1, true
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 1, true
+    End v5:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v4:unknown = Call v0:unknown, undefined, 1, true
-    End v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v5:unknown = Call v1:unknown, undefined, 1, true
+    End v5:unknown
 
 === After SSAConstruction ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
+    v5:undefined = Move undefined
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
+    v14:string = Phi [block1:v7:string, block2:v9:string]
     v13:string = Phi [block1:v6:string, block2:v8:string]
-    v12:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v9:string
-    v11:unknown = Add v13:string, v10:string
+    v10:string = Typeof v0:unknown
+    v11:string = Move v10:string
+    v12:unknown = Add v14:string, v11:string
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === After SCCP ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
+    v5:undefined = Move undefined
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
+    v14:string = Phi [block1:v7:string, block2:v9:string]
     v13:string = Phi [block1:v6:string, block2:v8:string]
-    v12:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v9:string
-    v11:unknown = Add v13:string, v10:string
+    v10:string = Typeof v0:unknown
+    v11:string = Move v10:string
+    v12:unknown = Add v14:string, v11:string
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === Before optimization ===
 function(v0:unknown, v1:unknown):
 block0:
-    v3:undefined = Move undefined
+    v2:unknown = GetLexicalEnvironment
     v4:undefined = Move undefined
+    v5:undefined = Move undefined
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
+    v14:string = Phi [block1:v7:string, block2:v9:string]
     v13:string = Phi [block1:v6:string, block2:v8:string]
-    v12:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v9:string
-    v11:unknown = Add v13:string, v10:string
+    v10:string = Typeof v0:unknown
+    v11:string = Move v10:string
+    v12:unknown = Add v14:string, v11:string
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v6:string, block2:v8:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v9:string
-    v11:unknown = Add v13:string, v10:string
+    v14:string = Phi [block1:v7:string, block2:v9:string]
+    v10:string = Typeof v0:unknown
+    v11:string = Move v10:string
+    v12:unknown = Add v14:string, v11:string
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === After CopyPropagation ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
-    v13:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v9:string
-    v11:unknown = Add v13:string, v9:string
+    v14:string = Phi [block1:v6:string, block2:v8:string]
+    v10:string = Typeof v0:unknown
+    v11:string = Move v10:string
+    v12:unknown = Add v14:string, v10:string
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === After PartialRedundancyElimination ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
-    v14:unknown = Phi [block1:v5:string, block2:v7:string]
-    v13:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v14:unknown
-    v11:unknown = Add v13:string, v14:unknown
+    v15:unknown = Phi [block1:v6:string, block2:v8:string]
+    v14:string = Phi [block1:v6:string, block2:v8:string]
+    v10:string = Typeof v0:unknown
+    v11:string = Move v15:unknown
+    v12:unknown = Add v14:string, v15:unknown
     Jump block4
 block3_split0:
-    Return v11:unknown
+    Return v12:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    v6:string = Move v5:string
+    v6:string = Typeof v0:unknown
+    v7:string = Move v6:string
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    v8:string = Move v7:string
+    v8:string = Typeof v0:unknown
+    v9:string = Move v8:string
     Jump block3
 block3:
-    v14:unknown = Phi [block1:v5:string, block2:v7:string]
-    v13:string = Phi [block1:v5:string, block2:v7:string]
-    v9:string = Typeof v0:unknown
-    v10:string = Move v14:unknown
-    v11:unknown = Add v13:string, v14:unknown
-    Return v11:unknown
+    v15:unknown = Phi [block1:v6:string, block2:v8:string]
+    v14:string = Phi [block1:v6:string, block2:v8:string]
+    v10:string = Typeof v0:unknown
+    v11:string = Move v15:unknown
+    v12:unknown = Add v14:string, v15:unknown
+    Return v12:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
+    v6:string = Typeof v0:unknown
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
+    v8:string = Typeof v0:unknown
     Jump block3
 block3:
-    v14:unknown = Phi [block1:v5:string, block2:v7:string]
-    v13:string = Phi [block1:v5:string, block2:v7:string]
-    v11:unknown = Add v13:string, v14:unknown
-    Return v11:unknown
+    v15:unknown = Phi [block1:v6:string, block2:v8:string]
+    v14:string = Phi [block1:v6:string, block2:v8:string]
+    v12:unknown = Add v14:string, v15:unknown
+    Return v12:unknown
 
 === After SsaDestructionPass ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    ParallelCopy [v14:unknown <- v5:string, v13:string <- v5:string]
+    v6:string = Typeof v0:unknown
+    ParallelCopy [v15:unknown <- v6:string, v14:string <- v6:string]
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    ParallelCopy [v14:unknown <- v7:string, v13:string <- v7:string]
+    v8:string = Typeof v0:unknown
+    ParallelCopy [v15:unknown <- v8:string, v14:string <- v8:string]
     Jump block3
 block3:
-    v11:unknown = Add v13:string, v14:unknown
-    Return v11:unknown
+    v12:unknown = Add v14:string, v15:unknown
+    Return v12:unknown
 
 === After CopyCoalescing ===
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    ParallelCopy [v13:string <- v5:string]
+    v6:string = Typeof v0:unknown
+    ParallelCopy [v14:string <- v6:string]
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    ParallelCopy [v13:string <- v7:string]
+    v8:string = Typeof v0:unknown
+    ParallelCopy [v14:string <- v8:string]
     Jump block3
 block3:
-    v11:unknown = Add v13:string, v14:unknown
-    Return v11:unknown
+    v12:unknown = Add v14:string, v15:unknown
+    Return v12:unknown
 
 function(v0:unknown, v1:unknown):
 block0:
+    v2:unknown = GetLexicalEnvironment
     Branch v1:unknown, block1, block2
 block1:
-    v5:string = Typeof v0:unknown
-    ParallelCopy [v13:string <- v5:string]
+    v6:string = Typeof v0:unknown
+    ParallelCopy [v14:string <- v6:string]
     Jump block3
 block2:
-    v7:string = Typeof v0:unknown
-    ParallelCopy [v13:string <- v7:string]
+    v8:string = Typeof v0:unknown
+    ParallelCopy [v14:string <- v8:string]
     Jump block3
 block3:
-    v11:unknown = Add v13:string, v14:unknown
-    Return v11:unknown
+    v12:unknown = Add v14:string, v15:unknown
+    Return v12:unknown

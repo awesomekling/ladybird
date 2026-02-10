@@ -1,174 +1,189 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal make_counter
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal make_counter
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = Call v2:unknown, undefined
+    v4:unknown = Call v3:unknown, undefined
     Jump block3
 block0_split2:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal make_counter
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal make_counter
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = Call v2:unknown, undefined
+    v4:unknown = Call v3:unknown, undefined
     Jump block3
 block0_split2:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal make_counter
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal make_counter
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    v3:unknown = Call v2:unknown, undefined
+    v4:unknown = Call v3:unknown, undefined
     Jump block3
 block0_split2:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal make_counter
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = Call v2:unknown, undefined
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal make_counter
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal make_counter
-    v2:unknown = Call v0:unknown, undefined
-    v3:unknown = Call v2:unknown, undefined
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal make_counter
+    v3:unknown = Call v1:unknown, undefined
+    v4:unknown = Call v3:unknown, undefined
+    End v4:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     InitializeBinding count 0
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Return v2:function
+    v3:function = NewFunction
+    Return v3:function
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     InitializeBinding count 0
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Return v2:function
+    v3:function = NewFunction
+    Return v3:function
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     InitializeBinding count 0
     Jump block2
 block0_split1:
-    v2:function = NewFunction
-    Return v2:function
+    v3:function = NewFunction
+    Return v3:function
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     InitializeBinding count 0
-    v2:function = NewFunction
-    Return v2:function
+    v3:function = NewFunction
+    Return v3:function
 
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     InitializeBinding count 0
-    v2:function = NewFunction
-    Return v2:function
+    v3:function = NewFunction
+    Return v3:function
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetBinding count
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetBinding count
     Jump block1
 block0_split0:
-    v1:unknown = ToNumeric v0:unknown
-    v2:unknown = Increment v1:unknown
+    v2:unknown = ToNumeric v1:unknown
+    v3:unknown = Increment v2:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:unknown
+    SetBinding count v3:unknown
     Jump block3
 block0_split2:
-    Return v1:unknown
+    Return v2:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetBinding count
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetBinding count
     Jump block1
 block0_split0:
-    v1:unknown = ToNumeric v0:unknown
-    v2:unknown = Increment v1:unknown
+    v2:unknown = ToNumeric v1:unknown
+    v3:unknown = Increment v2:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:unknown
+    SetBinding count v3:unknown
     Jump block3
 block0_split2:
-    Return v1:unknown
+    Return v2:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetBinding count
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetBinding count
     Jump block1
 block0_split0:
-    v1:unknown = ToNumeric v0:unknown
-    v2:unknown = Increment v1:unknown
+    v2:unknown = ToNumeric v1:unknown
+    v3:unknown = Increment v2:unknown
     Jump block2
 block0_split1:
-    SetBinding count v2:unknown
+    SetBinding count v3:unknown
     Jump block3
 block0_split2:
-    Return v1:unknown
+    Return v2:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetBinding count
-    v1:unknown = ToNumeric v0:unknown
-    v2:unknown = Increment v1:unknown
-    SetBinding count v2:unknown
-    Return v1:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetBinding count
+    v2:unknown = ToNumeric v1:unknown
+    v3:unknown = Increment v2:unknown
+    SetBinding count v3:unknown
+    Return v2:unknown
 
 function():
 block0:
-    v0:unknown = GetBinding count
-    v1:unknown = ToNumeric v0:unknown
-    v2:unknown = Increment v1:unknown
-    SetBinding count v2:unknown
-    Return v1:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetBinding count
+    v2:unknown = ToNumeric v1:unknown
+    v3:unknown = Increment v2:unknown
+    SetBinding count v3:unknown
+    Return v2:unknown

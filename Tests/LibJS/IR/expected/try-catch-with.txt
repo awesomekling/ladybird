@@ -1,166 +1,166 @@
 === After SSAConstruction ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
     v2:unknown = Move v1:unknown
+    v3:unknown = Move v2:unknown
     Jump block2
 block2:
-    End v2:unknown
+    End v3:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
     Jump block4
 block3_split0: [handler: block1]
-    LeaveLexicalEnvironment
-    Throw v5:string
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === After SCCP ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
     v2:unknown = Move v1:unknown
+    v3:unknown = Move v2:unknown
     Jump block2
 block2:
-    End v2:unknown
+    End v3:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
     Jump block4
 block3_split0: [handler: block1]
-    LeaveLexicalEnvironment
-    Throw v5:string
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === Before optimization ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
     v2:unknown = Move v1:unknown
+    v3:unknown = Move v2:unknown
     Jump block2
 block2:
-    End v2:unknown
+    End v3:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
     Jump block4
 block3_split0: [handler: block1]
-    LeaveLexicalEnvironment
-    Throw v5:string
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === After CopyPropagation ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = Move v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v0:unknown
+    End v1:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
     Jump block4
 block3_split0: [handler: block1]
-    LeaveLexicalEnvironment
-    Throw v5:string
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === After GlobalValueNumbering ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = Move v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v0:unknown
+    End v1:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
     Jump block4
 block3_split0: [handler: block1]
-    LeaveLexicalEnvironment
-    Throw v5:string
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
-    v2:unknown = Move v0:unknown
-    End v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
+    v3:unknown = Move v1:unknown
+    End v1:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
-    LeaveLexicalEnvironment
-    Throw v5:string
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    End v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    End v1:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
-    LeaveLexicalEnvironment
-    Throw v5:string
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string
 
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    End v0:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    End v1:unknown
 block3: [handler: block1]
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, 1
-    CacheObjectShape v3:object
-    EnterObjectEnvironment v3:object
-    LeaveLexicalEnvironment
-    Throw v5:string
+    v4:object = NewObject
+    InitObjectLiteralProperty v4:object, 1
+    CacheObjectShape v4:object
+    v6:unknown = EnterObjectEnvironment v4:object
+    SetLexicalEnvironment v0:unknown
+    Throw v7:string

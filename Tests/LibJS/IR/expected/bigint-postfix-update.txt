@@ -1,131 +1,145 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal foo
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal foo
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = ToNumeric v4:bigint
-    v6:bigint = Increment v5:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = ToNumeric v5:bigint
+    v7:bigint = Increment v6:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v5:bigint
-    Return v7:bigint
+    v8:bigint = Move v6:bigint
+    Return v8:bigint
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = ToNumeric v8:bigint
-    v6:bigint = Increment v5:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = ToNumeric v9:bigint
+    v7:bigint = Increment v6:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v5:bigint
-    Return v7:bigint
+    v8:bigint = Move v6:bigint
+    Return v8:bigint
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = ToNumeric v8:bigint
-    v6:bigint = Increment v5:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = ToNumeric v9:bigint
+    v7:bigint = Increment v6:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v5:bigint
-    Return v7:bigint
+    v8:bigint = Move v6:bigint
+    Return v8:bigint
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:bigint = Increment v5:bigint
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = ToNumeric v9:bigint
+    v7:bigint = Increment v6:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v5:bigint
-    Return v7:bigint
+    v8:bigint = Move v6:bigint
+    Return v8:bigint
 
 === After CopyPropagation ===
 function():
 block0:
-    v5:bigint = ToNumeric v8:bigint
-    v6:bigint = Increment v5:bigint
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = ToNumeric v9:bigint
+    v7:bigint = Increment v6:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v5:bigint
-    Return v5:bigint
+    v8:bigint = Move v6:bigint
+    Return v6:bigint
 
 === After RedundantCheckElimination ===
 function():
 block0:
-    v6:bigint = Increment v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v7:bigint = Increment v9:bigint
     Jump block1
 block0_split0:
-    v7:bigint = Move v8:bigint
-    Return v8:bigint
+    v8:bigint = Move v9:bigint
+    Return v9:bigint
 
 === After SimplifyCFG ===
 function():
 block0:
-    v6:bigint = Increment v8:bigint
-    v7:bigint = Move v8:bigint
-    Return v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v7:bigint = Increment v9:bigint
+    v8:bigint = Move v9:bigint
+    Return v9:bigint
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v6:bigint = Increment v8:bigint
-    Return v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v7:bigint = Increment v9:bigint
+    Return v9:bigint
 
 function():
 block0:
-    v6:bigint = Increment v8:bigint
-    Return v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v7:bigint = Increment v9:bigint
+    Return v9:bigint

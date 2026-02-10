@@ -1,213 +1,231 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal caller
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal caller
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
     v4:object = Move v3:object
-    v5:function = NewFunction
-    PutById v4:object, v5:function.toString
+    v5:object = Move v4:object
+    v6:function = NewFunction
+    PutById v5:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v3:object
-    v8:unknown = Call v6:unknown, undefined, v7:object
+    v8:object = Move v4:object
+    v9:unknown = Call v7:unknown, undefined, v8:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
     v4:object = Move v3:object
-    v5:function = NewFunction
-    PutById v4:object, v5:function.toString
+    v5:object = Move v4:object
+    v6:function = NewFunction
+    PutById v5:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v3:object
-    v8:unknown = Call v6:unknown, undefined, v7:object
+    v8:object = Move v4:object
+    v9:unknown = Call v7:unknown, undefined, v8:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
     v4:object = Move v3:object
-    v5:function = NewFunction
-    PutById v4:object, v5:function.toString
+    v5:object = Move v4:object
+    v6:function = NewFunction
+    PutById v5:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v3:object
-    v8:unknown = Call v6:unknown, undefined, v7:object
+    v8:object = Move v4:object
+    v9:unknown = Call v7:unknown, undefined, v8:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
     v4:object = Move v3:object
-    v5:function = NewFunction
-    PutById v4:object, v5:function.toString
+    v5:object = Move v4:object
+    v6:function = NewFunction
+    PutById v5:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v3:object
-    v8:unknown = Call v6:unknown, undefined, v7:object
+    v8:object = Move v4:object
+    v9:unknown = Call v7:unknown, undefined, v8:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === After CopyPropagation ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v4:object = Move v2:object
-    v5:function = NewFunction
-    PutById v2:object, v5:function.toString
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v5:object = Move v3:object
+    v6:function = NewFunction
+    PutById v3:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v2:object
-    v8:unknown = Call v6:unknown, undefined, v2:object
+    v8:object = Move v3:object
+    v9:unknown = Call v7:unknown, undefined, v3:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === After GlobalValueNumbering ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v4:object = Move v2:object
-    v5:function = NewFunction
-    PutById v2:object, v5:function.toString
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v5:object = Move v3:object
+    v6:function = NewFunction
+    PutById v3:object, v6:function.toString
     Jump block1
 block0_split0:
-    v6:unknown = GetGlobal String
+    v7:unknown = GetGlobal String
     Jump block2
 block0_split1:
-    v7:object = Move v2:object
-    v8:unknown = Call v6:unknown, undefined, v2:object
+    v8:object = Move v3:object
+    v9:unknown = Call v7:unknown, undefined, v3:object
     Jump block3
 block0_split2:
-    Return v8:unknown
+    Return v9:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v4:object = Move v2:object
-    v5:function = NewFunction
-    PutById v2:object, v5:function.toString
-    v6:unknown = GetGlobal String
-    v7:object = Move v2:object
-    v8:unknown = Call v6:unknown, undefined, v2:object
-    Return v8:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v5:object = Move v3:object
+    v6:function = NewFunction
+    PutById v3:object, v6:function.toString
+    v7:unknown = GetGlobal String
+    v8:object = Move v3:object
+    v9:unknown = Call v7:unknown, undefined, v3:object
+    Return v9:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:object = NewObject
-    v5:function = NewFunction
-    PutById v2:object, v5:function.toString
-    v6:unknown = GetGlobal String
-    v8:unknown = Call v6:unknown, undefined, v2:object
-    Return v8:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v6:function = NewFunction
+    PutById v3:object, v6:function.toString
+    v7:unknown = GetGlobal String
+    v9:unknown = Call v7:unknown, undefined, v3:object
+    Return v9:unknown
 
 function():
 block0:
-    v2:object = NewObject
-    v5:function = NewFunction
-    PutById v2:object, v5:function.toString
-    v6:unknown = GetGlobal String
-    v8:unknown = Call v6:unknown, undefined, v2:object
-    Return v8:unknown
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v6:function = NewFunction
+    PutById v3:object, v6:function.toString
+    v7:unknown = GetGlobal String
+    v9:unknown = Call v7:unknown, undefined, v3:object
+    Return v9:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    Return v0:string
+    v0:unknown = GetLexicalEnvironment
+    Return v1:string
 
 === After SCCP ===
 function():
 block0:
-    Return v0:string
+    v0:unknown = GetLexicalEnvironment
+    Return v1:string
 
 === Before optimization ===
 function():
 block0:
-    Return v0:string
+    v0:unknown = GetLexicalEnvironment
+    Return v1:string
 
 function():
 block0:
-    Return v0:string
+    v0:unknown = GetLexicalEnvironment
+    Return v1:string

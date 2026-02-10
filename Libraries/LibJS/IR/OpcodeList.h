@@ -24,7 +24,6 @@
     OP(Return,                          true,  E_NONE,       false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(End,                             true,  E_NONE,       false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(Throw,                           true,  E_THROW,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
-    OP(ContinuePendingUnwind,           true,  E_THROW,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
     /* SSA */                                                                                                                                \
     OP(Phi,                             false, E_NONE,       false, true,  255, Type::Unknown,   false, 0, R_NONE) \
     OP(ParallelCopy,                    false, E_WRITE,      false, false, 255, Type::Unknown,   false, 0, R_NONE) \
@@ -65,6 +64,7 @@
     OP(ToNumber,                        false, E_CALL,       false, true,  1,   Type::Number,    false, 0, R_PRIM) \
     OP(ToNumeric,                       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     OP(ToString,                        false, E_CALL,       false, true,  1,   Type::String,    false, 0, R_PRIM) \
+    OP(ToPrimitiveWithStringHint,       false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_PRIM) \
     OP(ToObject,                        false, E_THROW,      false, true,  1,   Type::Object,    false, 0, R_NONE) \
     OP(ToInt32,                         false, E_CALL,       false, true,  1,   Type::Int32,     false, 0, R_PRIM) \
     OP(ToLength,                        false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
@@ -126,11 +126,12 @@
     /* Environment */                                                                                                                        \
     OP(GetCalleeAndThisFromEnvironment, false, E_CALL,       false, true,  0,   Type::Unknown,   false, 2, R_NONE) \
     OP(CreateVariable,                  false, E_CALL,       false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(CreateLexicalEnvironment,        false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
+    OP(CreateLexicalEnvironment,        false, E_WRITE,      false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(CreateMutableBinding,            false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(CreateImmutableBinding,          false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
-    OP(LeaveLexicalEnvironment,         false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(EnterObjectEnvironment,          false, E_CALL,       false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
+    OP(GetLexicalEnvironment,           false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
+    OP(SetLexicalEnvironment,           false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
+    OP(EnterObjectEnvironment,          false, E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetBinding,                      false, E_CALL,       false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
     OP(InitializeBinding,               false, E_CALL,       false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(SetBinding,                      false, E_CALL,       false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
@@ -172,7 +173,6 @@
     /* Generators/Async */                                                                                                                   \
     OP(Yield,                           true,  E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
     OP(Await,                           true,  E_CALL,       false, true,  1,   Type::Unknown,   false, 0, R_NONE) \
-    OP(PrepareYield,                    false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetCompletionFields,             false, E_THROW,      false, true,  1,   Type::Unknown,   false, 2, R_NONE) \
     OP(SetCompletionType,               false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(NewTypeError,                    false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
@@ -189,16 +189,11 @@
     OP(GetImportMeta,                   false, E_CALL,       false, true,  0,   Type::Object,    false, 0, R_NONE) \
     /* Exception handling */                                                                                                                 \
     OP(Catch,                           false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(EnterUnwindContext,              true,  E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(LeaveUnwindContext,              false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(ScheduleJump,                    true,  E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(LeaveFinally,                    false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(RestoreScheduledJump,            false, E_WRITE,      false, false, 0,   Type::Unknown,   false, 0, R_NONE) \
-    OP(SetSavedReturnValue,             false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(GetException,                    false, E_WRITE,      false, true,  0,   Type::Unknown,   false, 0, R_NONE) \
     OP(SetException,                    false, E_WRITE,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     /* Guard operations (may throw but produce no value) */                                                                                  \
     OP(ThrowIfNotObject,                false, E_THROW,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
     OP(ThrowIfNullish,                  false, E_THROW,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
-    OP(ThrowIfTDZ,                      false, E_THROW,      false, false, 1,   Type::Unknown,   false, 0, R_NONE)
+    OP(ThrowIfTDZ,                      false, E_THROW,      false, false, 1,   Type::Unknown,   false, 0, R_NONE) \
+    OP(ThrowConstAssignment,            false, E_THROW,      false, false, 0,   Type::Unknown,   false, 0, R_NONE)
 // clang-format on

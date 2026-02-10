@@ -72,6 +72,7 @@ public:
     [[nodiscard]] Value& build_is_nullish(Value& operand);
     [[nodiscard]] Value& build_is_callable(Value& operand);
     [[nodiscard]] Value& build_is_constructor(Value& operand);
+    [[nodiscard]] Value& build_to_primitive_with_string_hint(Value& operand);
 
     // Increment/Decrement
     [[nodiscard]] Value& build_increment(Value& operand);
@@ -135,11 +136,12 @@ public:
     // Environment
     [[nodiscard]] Value& build_get_callee_and_this_from_environment(Bytecode::IdentifierTableIndex identifier);
     void build_create_variable(Bytecode::IdentifierTableIndex identifier, Bytecode::Op::EnvironmentMode mode, bool is_immutable, bool is_global, bool is_strict);
-    [[nodiscard]] Value& build_create_lexical_environment(u32 capacity);
+    [[nodiscard]] Value& build_create_lexical_environment(Value& parent, u32 capacity);
     void build_create_mutable_binding(Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
     void build_create_immutable_binding(Value& environment, Bytecode::IdentifierTableIndex identifier, bool is_strict);
-    void build_leave_lexical_environment();
-    void build_enter_object_environment(Value& object);
+    [[nodiscard]] Value& build_get_lexical_environment();
+    void build_set_lexical_environment(Value& environment);
+    [[nodiscard]] Value& build_enter_object_environment(Value& object);
     [[nodiscard]] Value& build_get_binding(Bytecode::IdentifierTableIndex identifier);
     void build_initialize_binding(Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode);
     void build_set_binding(Bytecode::IdentifierTableIndex identifier, Value& value, Bytecode::Op::EnvironmentMode);
@@ -159,7 +161,7 @@ public:
     [[nodiscard]] Value& build_new_array(Span<Value*> elements);
     [[nodiscard]] Value& build_new_array_with_length(Value& length);
     void build_array_append(Value& array, Value& value, bool is_spread);
-    [[nodiscard]] Value& build_new_class(Value* super_class, Span<Value*> element_keys);
+    [[nodiscard]] Value& build_new_class(Value* super_class, Value& class_environment, Span<Value*> element_keys);
     [[nodiscard]] Value& build_new_function(Value* home_object);
     [[nodiscard]] Value& build_new_regexp(Bytecode::StringTableIndex source, Bytecode::StringTableIndex flags, Bytecode::RegexTableIndex regex);
     [[nodiscard]] Value& build_get_template_object(Span<Value*> strings, u32 cache_index);
@@ -175,13 +177,6 @@ public:
 
     // Exception handling
     [[nodiscard]] Value& build_catch();
-    void build_enter_unwind_context(BasicBlock& entry_point);
-    void build_leave_unwind_context();
-    void build_schedule_jump(BasicBlock& finalizer, BasicBlock& deferred_target);
-    void build_leave_finally();
-    void build_restore_scheduled_jump();
-    void build_set_saved_return_value(Value& value);
-    void build_prepare_yield(Value& value);
     [[nodiscard]] Value& build_get_exception();
     void build_set_exception(Value& value);
 
@@ -189,6 +184,7 @@ public:
     void build_throw_if_not_object(Value& value);
     void build_throw_if_nullish(Value& value);
     void build_throw_if_tdz(Value& value);
+    void build_throw_const_assignment();
 
     // Async iterators
     [[nodiscard]] Value& build_create_async_from_sync_iterator(Value& iterator, Value& next_method, Value& done);
@@ -214,7 +210,6 @@ public:
 
     // Control flow (void, no result)
     void build_jump(BasicBlock& to);
-    void build_continue_pending_unwind(BasicBlock& resume_target);
     void build_branch(Value& condition, BasicBlock& if_true, BasicBlock& if_false);
     void build_return(Value& value);
     void build_end(Value& value);

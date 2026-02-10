@@ -1,348 +1,367 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 42
+    v4:unknown = Call v1:unknown, undefined, 42
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 42
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 42
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 42
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 42
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
+    v8:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v9:string, v11:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v10:string, v12:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v14:number = ToNumeric v19:number
-    v15:number = Increment v14:number
+    v15:number = ToNumeric v20:number
+    v16:number = Increment v15:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v5:undefined, block2:v13:boolean]
-    v21:unknown = Phi [block0:v4:undefined, block2:v9:string]
-    v20:unknown = Phi [block0:v3:undefined, block2:v11:string]
-    v19:number = Phi [block0:v7:int32, block2:v15:number]
-    v18:unknown = Phi [block0:v23:undefined, block2:v14:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v6:undefined, block2:v14:boolean]
+    v22:unknown = Phi [block0:v5:undefined, block2:v10:string]
+    v21:unknown = Phi [block0:v4:undefined, block2:v12:string]
+    v20:number = Phi [block0:v8:int32, block2:v16:number]
+    v19:unknown = Phi [block0:v24:undefined, block2:v15:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
+    v8:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v9:string, v11:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v10:string, v12:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v14:number = ToNumeric v19:number
-    v15:number = Increment v14:number
+    v15:number = ToNumeric v20:number
+    v16:number = Increment v15:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v13:boolean]
-    v21:unknown = Phi [block0:v25:undefined, block2:v9:string]
-    v20:unknown = Phi [block0:v24:undefined, block2:v11:string]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v18:unknown = Phi [block0:v23:undefined, block2:v14:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v14:boolean]
+    v22:unknown = Phi [block0:v26:undefined, block2:v10:string]
+    v21:unknown = Phi [block0:v25:undefined, block2:v12:string]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v19:unknown = Phi [block0:v24:undefined, block2:v15:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
     v4:undefined = Move undefined
     v5:undefined = Move undefined
-    v7:int32 = Move 0
+    v6:undefined = Move undefined
+    v8:int32 = Move 0
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v9:string, v11:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v10:string, v12:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v14:number = ToNumeric v19:number
-    v15:number = Increment v14:number
+    v15:number = ToNumeric v20:number
+    v16:number = Increment v15:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v13:boolean]
-    v21:unknown = Phi [block0:v25:undefined, block2:v9:string]
-    v20:unknown = Phi [block0:v24:undefined, block2:v11:string]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v18:unknown = Phi [block0:v23:undefined, block2:v14:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v14:boolean]
+    v22:unknown = Phi [block0:v26:undefined, block2:v10:string]
+    v21:unknown = Phi [block0:v25:undefined, block2:v12:string]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v19:unknown = Phi [block0:v24:undefined, block2:v15:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v9:string, v11:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v10:string, v12:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v14:number = ToNumeric v19:number
-    v15:number = Increment v14:number
+    v15:number = ToNumeric v20:number
+    v16:number = Increment v15:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v13:boolean]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v14:boolean]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v8:string, v10:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v9:string, v11:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v14:number = ToNumeric v19:number
-    v15:number = Increment v14:number
+    v15:number = ToNumeric v20:number
+    v16:number = Increment v15:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v12:boolean]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v13:boolean]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After RedundantCheckElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v10:string
-    v12:boolean = StrictlyEquals v8:string, v10:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v11:string
+    v13:boolean = StrictlyEquals v9:string, v11:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v15:number = Increment v19:number
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v12:boolean]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v13:boolean]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v8:string
-    v12:boolean = StrictlyEquals v8:string, v8:string
-    v13:boolean = Move v12:boolean
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v9:string
+    v13:boolean = StrictlyEquals v9:string, v9:string
+    v14:boolean = Move v13:boolean
     Jump block2
 block2:
-    v15:number = Increment v19:number
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block2:v12:boolean]
-    v19:number = Phi [block0:v27:int32, block2:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block2:v13:boolean]
+    v20:number = Phi [block0:v28:int32, block2:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v9:string = Move v8:string
-    v10:string = Typeof v0:unknown
-    v11:string = Move v8:string
-    v12:boolean = StrictlyEquals v8:string, v8:string
-    v13:boolean = Move v12:boolean
-    v15:number = Increment v19:number
+    v9:string = Typeof v0:unknown
+    v10:string = Move v9:string
+    v11:string = Typeof v0:unknown
+    v12:string = Move v9:string
+    v13:boolean = StrictlyEquals v9:string, v9:string
+    v14:boolean = Move v13:boolean
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block1:v12:boolean]
-    v19:number = Phi [block0:v27:int32, block1:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block1:v13:boolean]
+    v20:number = Phi [block0:v28:int32, block1:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v12:boolean = StrictlyEquals v8:string, v8:string
-    v15:number = Increment v19:number
+    v9:string = Typeof v0:unknown
+    v13:boolean = StrictlyEquals v9:string, v9:string
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block1:v12:boolean]
-    v19:number = Phi [block0:v27:int32, block1:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block1:v13:boolean]
+    v20:number = Phi [block0:v28:int32, block1:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After InstCombine ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v8:string = Typeof v0:unknown
-    v15:number = Increment v19:number
+    v9:string = Typeof v0:unknown
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block1:v28:boolean]
-    v19:number = Phi [block0:v27:int32, block1:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block1:v29:boolean]
+    v20:number = Phi [block0:v28:int32, block1:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
+    v1:unknown = GetLexicalEnvironment
     Jump block3
 block1:
-    v15:number = Increment v19:number
+    v16:number = Increment v20:number
     Jump block3
 block3:
-    v22:unknown = Phi [block0:v26:undefined, block1:v28:boolean]
-    v19:number = Phi [block0:v27:int32, block1:v15:number]
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v23:unknown = Phi [block0:v27:undefined, block1:v29:boolean]
+    v20:number = Phi [block0:v28:int32, block1:v16:number]
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After SsaDestructionPass ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v23:unknown <- v27:undefined, v20:number <- v28:int32]
     Jump block3
 block1:
-    v15:number = Increment v19:number
-    ParallelCopy [v22:unknown <- v28:boolean, v19:number <- v15:number]
+    v16:number = Increment v20:number
+    ParallelCopy [v23:unknown <- v29:boolean, v20:number <- v16:number]
     Jump block3
 block3:
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 === After CopyCoalescing ===
 function(v0:unknown):
 block0:
-    ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v23:unknown <- v27:undefined, v20:number <- v28:int32]
     Jump block3
 block1:
-    v15:number = Increment v19:number
-    ParallelCopy [v22:unknown <- v28:boolean]
+    v16:number = Increment v20:number
+    ParallelCopy [v23:unknown <- v29:boolean]
     Jump block3
 block3:
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown
 
 function(v0:unknown):
 block0:
-    ParallelCopy [v22:unknown <- v26:undefined, v19:number <- v27:int32]
+    v1:unknown = GetLexicalEnvironment
+    ParallelCopy [v23:unknown <- v27:undefined, v20:number <- v28:int32]
     Jump block3
 block1:
-    v15:number = Increment v19:number
-    ParallelCopy [v22:unknown <- v28:boolean]
+    v16:number = Increment v20:number
+    ParallelCopy [v23:unknown <- v29:boolean]
     Jump block3
 block3:
-    v17:boolean = LessThan v19:number, 10
-    Branch v17:boolean, block1, block4
+    v18:boolean = LessThan v20:number, 10
+    Branch v18:boolean, block1, block4
 block4:
-    Return v22:unknown
+    Return v23:unknown

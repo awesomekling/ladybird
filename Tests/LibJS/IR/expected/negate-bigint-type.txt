@@ -1,256 +1,256 @@
 === After SSAConstruction ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v7:unknown = Phi [block3:v8:undefined, block4:v5:unknown]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v8:unknown = Phi [block3:v9:undefined, block4:v6:unknown]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v3:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
+    v4:unknown = GetGlobal negateBigInt
     Jump block4
 block3_split0: [handler: block1]
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v6:unknown
+    v7:unknown = Move v6:unknown
+    End v7:unknown
 
 === After SCCP ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v7:unknown = Phi [block3:v8:undefined, block4:v5:unknown]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v8:unknown = Phi [block3:v9:undefined, block4:v6:unknown]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v3:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
+    v4:unknown = GetGlobal negateBigInt
     Jump block4
 block3_split0: [handler: block1]
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v6:unknown
+    v7:unknown = Move v6:unknown
+    End v7:unknown
 
 === Before optimization ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v7:unknown = Phi [block3:v8:undefined, block4:v5:unknown]
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v1:unknown = Move v0:unknown
+    v8:unknown = Phi [block3:v9:undefined, block4:v6:unknown]
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v2:unknown = Move v1:unknown
     Jump block2
 block2:
-    End v3:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
+    v4:unknown = GetGlobal negateBigInt
     Jump block4
 block3_split0: [handler: block1]
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v6:unknown
+    v7:unknown = Move v6:unknown
+    End v7:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
     Jump block2
 block2:
-    End v3:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
+    v4:unknown = GetGlobal negateBigInt
     Jump block4
 block3_split0: [handler: block1]
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v6:unknown
+    v7:unknown = Move v6:unknown
+    End v7:unknown
 
 === After CopyPropagation ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
     Jump block2
 block2:
-    End v3:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
+    v4:unknown = GetGlobal negateBigInt
     Jump block4
 block3_split0: [handler: block1]
-    v5:unknown = Call v3:unknown, undefined
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v5:unknown
+    v7:unknown = Move v6:unknown
+    End v6:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    End v3:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
-    v5:unknown = Call v3:unknown, undefined
+    v4:unknown = GetGlobal negateBigInt
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    v6:unknown = Move v5:unknown
-    LeaveUnwindContext
-    End v5:unknown
+    v7:unknown = Move v6:unknown
+    End v6:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    End v3:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
-    v5:unknown = Call v3:unknown, undefined
+    v4:unknown = GetGlobal negateBigInt
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    LeaveUnwindContext
-    End v5:unknown
+    End v6:unknown
 
 function():
 block0:
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    Jump block3
 block1:
-    v0:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    End v3:unknown
+    v1:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    End v4:unknown
 block3: [handler: block1]
-    v3:unknown = GetGlobal negateBigInt
-    v5:unknown = Call v3:unknown, undefined
+    v4:unknown = GetGlobal negateBigInt
+    v6:unknown = Call v4:unknown, undefined
     Jump block5
 block3_split1:
-    LeaveUnwindContext
-    End v5:unknown
+    End v6:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = Negate v4:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = Negate v5:bigint
     Jump block1
 block0_split0:
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v6:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v7:bigint
     Jump block2
 block0_split1:
-    Return v7:number
+    Return v8:number
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = Negate v8:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = Negate v9:bigint
     Jump block1
 block0_split0:
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v6:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v7:bigint
     Jump block2
 block0_split1:
-    Return v7:number
+    Return v8:number
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
-    v4:bigint = Move v3:bigint
-    v5:bigint = Negate v8:bigint
+    v3:undefined = Move undefined
+    v5:bigint = Move v4:bigint
+    v6:bigint = Negate v9:bigint
     Jump block1
 block0_split0:
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v6:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v7:bigint
     Jump block2
 block0_split1:
-    Return v7:number
+    Return v8:number
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v5:bigint = Negate v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = Negate v9:bigint
     Jump block1
 block0_split0:
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v6:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v7:bigint
     Jump block2
 block0_split1:
-    Return v7:number
+    Return v8:number
 
 === After CopyPropagation ===
 function():
 block0:
-    v5:bigint = Negate v8:bigint
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = Negate v9:bigint
     Jump block1
 block0_split0:
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v5:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v6:bigint
     Jump block2
 block0_split1:
-    Return v7:number
+    Return v8:number
 
 === After SimplifyCFG ===
 function():
 block0:
-    v5:bigint = Negate v8:bigint
-    v6:bigint = Move v5:bigint
-    v7:number = UnaryPlus v5:bigint
-    Return v7:number
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = Negate v9:bigint
+    v7:bigint = Move v6:bigint
+    v8:number = UnaryPlus v6:bigint
+    Return v8:number
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v5:bigint = Negate v8:bigint
-    v7:number = UnaryPlus v5:bigint
-    Return v7:number
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = Negate v9:bigint
+    v8:number = UnaryPlus v6:bigint
+    Return v8:number
 
 function():
 block0:
-    v5:bigint = Negate v8:bigint
-    v7:number = UnaryPlus v5:bigint
-    Return v7:number
+    v0:unknown = GetLexicalEnvironment
+    v6:bigint = Negate v9:bigint
+    v8:number = UnaryPlus v6:bigint
+    Return v8:number

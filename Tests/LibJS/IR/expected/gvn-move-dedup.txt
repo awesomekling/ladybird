@@ -1,110 +1,123 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v3:unknown = Call v0:unknown, undefined, 1
+    v4:unknown = Call v1:unknown, undefined, 1
     Jump block2
 block0_split1:
-    End v3:unknown
+    End v4:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v3:unknown = Call v0:unknown, undefined, 1
-    End v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v4:unknown = Call v1:unknown, undefined, 1
+    End v4:unknown
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
-    v4:unknown = Move v0:unknown
+    v4:undefined = Move undefined
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v5:unknown, v6:unknown
+    Return v7:boolean
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
-    v4:unknown = Move v0:unknown
+    v4:undefined = Move undefined
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v5:unknown, v6:unknown
+    Return v7:boolean
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v2:undefined = Move undefined
+    v1:unknown = GetLexicalEnvironment
     v3:undefined = Move undefined
-    v4:unknown = Move v0:unknown
+    v4:undefined = Move undefined
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v5:unknown, v6:unknown
+    Return v7:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v4:unknown = Move v0:unknown
+    v1:unknown = GetLexicalEnvironment
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v4:unknown, v5:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v5:unknown, v6:unknown
+    Return v7:boolean
 
 === After CopyPropagation ===
 function(v0:unknown):
 block0:
-    v4:unknown = Move v0:unknown
+    v1:unknown = GetLexicalEnvironment
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v0:unknown, v0:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v0:unknown, v0:unknown
+    Return v7:boolean
 
 === After GlobalValueNumbering ===
 function(v0:unknown):
 block0:
-    v4:unknown = Move v0:unknown
+    v1:unknown = GetLexicalEnvironment
     v5:unknown = Move v0:unknown
-    v6:boolean = StrictlyEquals v0:unknown, v0:unknown
-    Return v6:boolean
+    v6:unknown = Move v0:unknown
+    v7:boolean = StrictlyEquals v0:unknown, v0:unknown
+    Return v7:boolean
 
 === After DeadCodeElimination ===
 function(v0:unknown):
 block0:
-    v6:boolean = StrictlyEquals v0:unknown, v0:unknown
-    Return v6:boolean
+    v1:unknown = GetLexicalEnvironment
+    v7:boolean = StrictlyEquals v0:unknown, v0:unknown
+    Return v7:boolean
 
 function(v0:unknown):
 block0:
-    v6:boolean = StrictlyEquals v0:unknown, v0:unknown
-    Return v6:boolean
+    v1:unknown = GetLexicalEnvironment
+    v7:boolean = StrictlyEquals v0:unknown, v0:unknown
+    Return v7:boolean

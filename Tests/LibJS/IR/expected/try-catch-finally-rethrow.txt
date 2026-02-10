@@ -1,438 +1,500 @@
 === After SSAConstruction ===
 function():
 block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v22:unknown = Phi [block4:v24:unknown, block13:v9:unknown, block14:v9:unknown, block15:v9:unknown]
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v27:unknown = Phi [block5:v33:unknown, block11:v2:unknown]
-    v23:unknown = Phi [block5:v11:undefined, block11:v4:unknown]
-    v21:unknown = Phi [block5:v34:undefined, block11:v5:unknown]
-    v19:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
-    v6:unknown = GetGlobal result
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
     Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    v26:unknown = Phi [block6:v13:unknown, block7:v28:unknown, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
-    v25:unknown = Phi [block6:v32:undefined, block7:v29:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
-    v24:unknown = Phi [block6:v12:unknown, block7:v30:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
-    v20:unknown = Phi [block6:v14:unknown, block7:v31:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
+block1:
+    v30:unknown = Phi [block5:v32:unknown, block11:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
     Jump block13
-block5:
-    v11:undefined = Move undefined
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v13:unknown = Move v12:unknown
-    v14:unknown = GetGlobal result
+block2:
+    v33:unknown = Phi [block8:v35:unknown, block15:v3:unknown]
+    v31:unknown = Phi [block8:v13:unknown, block15:v30:unknown]
+    v29:unknown = Phi [block8:v8:unknown, block15:v5:unknown]
+    v28:unknown = Phi [block8:v36:undefined, block15:v6:unknown]
+    v27:unknown = Phi [block8:v22:undefined, block15:v2:unknown]
+    v7:unknown = GetGlobal result
     Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
+block3:
+    Jump block7
+block4:
+    v32:unknown = Phi [block6:v34:undefined, block20:v18:unknown, block21:v18:unknown, block22:v18:unknown]
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v10:int32 = Move 1
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    Jump block17
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal result
+    Jump block20
+block7: [handler: block6]
+    Throw v20:string
+block8:
+    v22:undefined = Move undefined
+    Jump block2
+block9:
+    v26:boolean = StrictlyEquals v10:int32, 2
+    Branch v26:boolean, block10, block11
+block10:
+    Return v8:unknown
+block11: [handler: block1]
+    Throw v8:unknown
 block0_split0:
-    EnterUnwindContext block3
+    Jump block3
 block1_split1:
-    v4:unknown = Add v3:unknown, v2:unknown
-    Jump block10
+    v5:unknown = Add v4:unknown, v3:unknown
+    Jump block14
 block1_split2:
-    SetGlobal result v4:unknown
-    Jump block11
+    SetGlobal result v5:unknown
+    Jump block15
 block1_split3:
-    v5:unknown = Move v4:unknown
+    v6:unknown = Move v5:unknown
     Jump block2
 block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
+    End v7:unknown
+block5_split5: [handler: block1]
+    v13:unknown = Add v11:unknown, v12:string
     Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
+block5_split6: [handler: block1]
+    SetGlobal result v13:unknown
+    Jump block19
+block5_split7:
+    v24:boolean = StrictlyEquals v10:int32, 0
+    Branch v24:boolean, block8, block9
+block6_split8: [handler: block4]
+    v18:unknown = Add v16:unknown, v17:string
+    Jump block21
+block6_split9: [handler: block4]
+    SetGlobal result v18:unknown
+    Jump block22
+block6_split10: [handler: block4]
+    Throw v19:string
 
 === After SCCP ===
 function():
 block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v22:unknown = Phi [block4:v24:unknown, block13:v9:unknown, block14:v9:unknown, block15:v9:unknown]
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v27:unknown = Phi [block5:v33:unknown, block11:v2:unknown]
-    v23:unknown = Phi [block5:v35:undefined, block11:v4:unknown]
-    v21:unknown = Phi [block5:v34:undefined, block11:v5:unknown]
-    v19:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
-    v6:unknown = GetGlobal result
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
     Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    v26:unknown = Phi [block6:v13:unknown, block7:v28:unknown, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
-    v25:unknown = Phi [block6:v32:undefined, block7:v29:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
-    v24:unknown = Phi [block6:v12:unknown, block7:v30:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
-    v20:unknown = Phi [block6:v14:unknown, block7:v31:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
+block1:
+    v30:unknown = Phi [block5:v32:unknown, block11:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
     Jump block13
-block5:
-    v11:undefined = Move undefined
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v13:unknown = Move v12:unknown
-    v14:unknown = GetGlobal result
+block2:
+    v33:unknown = Phi [block15:v3:unknown]
+    v31:unknown = Phi [block15:v30:unknown]
+    v29:unknown = Phi [block15:v5:unknown]
+    v28:unknown = Phi [block15:v6:unknown]
+    v27:unknown = Phi [block15:v2:unknown]
+    v7:unknown = GetGlobal result
     Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
-block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v4:unknown = Add v3:unknown, v2:unknown
-    Jump block10
-block1_split2:
-    SetGlobal result v4:unknown
+block3:
+    Jump block7
+block4:
+    v32:unknown = Phi [block6:v34:undefined, block20:v18:unknown, block21:v18:unknown, block22:v18:unknown]
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v10:int32 = Move 1
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    Jump block17
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal result
+    Jump block20
+block7: [handler: block6]
+    Throw v20:string
+block9:
+    v26:boolean = StrictlyEquals 1, 2
     Jump block11
+block11: [handler: block1]
+    Throw v8:unknown
+block0_split0:
+    Jump block3
+block1_split1:
+    v5:unknown = Add v4:unknown, v3:unknown
+    Jump block14
+block1_split2:
+    SetGlobal result v5:unknown
+    Jump block15
 block1_split3:
-    v5:unknown = Move v4:unknown
+    v6:unknown = Move v5:unknown
     Jump block2
 block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
+    End v7:unknown
+block5_split5: [handler: block1]
+    v13:unknown = Add v11:unknown, v12:string
     Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
+block5_split6: [handler: block1]
+    SetGlobal result v13:unknown
+    Jump block19
+block5_split7:
+    v24:boolean = StrictlyEquals 1, 0
+    Jump block9
+block6_split8: [handler: block4]
+    v18:unknown = Add v16:unknown, v17:string
+    Jump block21
+block6_split9: [handler: block4]
+    SetGlobal result v18:unknown
+    Jump block22
+block6_split10: [handler: block4]
+    Throw v19:string
 
 === Before optimization ===
 function():
 block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v22:unknown = Phi [block4:v24:unknown, block13:v9:unknown, block14:v9:unknown, block15:v9:unknown]
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v27:unknown = Phi [block5:v33:unknown, block11:v2:unknown]
-    v23:unknown = Phi [block5:v35:undefined, block11:v4:unknown]
-    v21:unknown = Phi [block5:v34:undefined, block11:v5:unknown]
-    v19:unknown = Phi [block5:v7:unknown, block11:v1:unknown]
-    v6:unknown = GetGlobal result
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
     Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    v26:unknown = Phi [block6:v13:unknown, block7:v28:unknown, block16:v13:unknown, block17:v13:unknown, block18:v13:unknown]
-    v25:unknown = Phi [block6:v32:undefined, block7:v29:undefined, block16:v16:unknown, block17:v16:unknown, block18:v16:unknown]
-    v24:unknown = Phi [block6:v12:unknown, block7:v30:undefined, block16:v12:unknown, block17:v12:unknown, block18:v12:unknown]
-    v20:unknown = Phi [block6:v14:unknown, block7:v31:undefined, block16:v14:unknown, block17:v14:unknown, block18:v14:unknown]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
+block1:
+    v30:unknown = Phi [block5:v32:unknown, block11:v13:unknown, block17:v13:unknown, block18:v13:unknown]
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
     Jump block13
-block5:
-    v11:undefined = Move undefined
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v13:unknown = Move v12:unknown
-    v14:unknown = GetGlobal result
+block2:
+    v33:unknown = Phi [block15:v3:unknown]
+    v31:unknown = Phi [block15:v30:unknown]
+    v29:unknown = Phi [block15:v5:unknown]
+    v28:unknown = Phi [block15:v6:unknown]
+    v27:unknown = Phi [block15:v2:unknown]
+    v7:unknown = GetGlobal result
     Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
-block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v4:unknown = Add v3:unknown, v2:unknown
-    Jump block10
-block1_split2:
-    SetGlobal result v4:unknown
+block3:
+    Jump block7
+block4:
+    v32:unknown = Phi [block6:v34:undefined, block20:v18:unknown, block21:v18:unknown, block22:v18:unknown]
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v10:int32 = Move 1
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    Jump block17
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v15:unknown = Move v14:unknown
+    v16:unknown = GetGlobal result
+    Jump block20
+block7: [handler: block6]
+    Throw v20:string
+block9:
+    v26:boolean = StrictlyEquals 1, 2
     Jump block11
+block11: [handler: block1]
+    Throw v8:unknown
+block0_split0:
+    Jump block3
+block1_split1:
+    v5:unknown = Add v4:unknown, v3:unknown
+    Jump block14
+block1_split2:
+    SetGlobal result v5:unknown
+    Jump block15
 block1_split3:
-    v5:unknown = Move v4:unknown
+    v6:unknown = Move v5:unknown
     Jump block2
 block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
+    End v7:unknown
+block5_split5: [handler: block1]
+    v13:unknown = Add v11:unknown, v12:string
     Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
+block5_split6: [handler: block1]
+    SetGlobal result v13:unknown
+    Jump block19
+block5_split7:
+    v24:boolean = StrictlyEquals 1, 0
+    Jump block9
+block6_split8: [handler: block4]
+    v18:unknown = Add v16:unknown, v17:string
+    Jump block21
+block6_split9: [handler: block4]
+    SetGlobal result v18:unknown
+    Jump block22
+block6_split10: [handler: block4]
+    Throw v19:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v6:unknown = GetGlobal result
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
     Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
     Jump block13
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
+block2:
+    v7:unknown = GetGlobal result
     Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
-block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v4:unknown = Add v3:unknown, v2:unknown
-    Jump block10
-block1_split2:
-    SetGlobal result v4:unknown
+block3:
+    Jump block7
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    Jump block17
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    Jump block20
+block7: [handler: block6]
+    Throw v20:string
+block9:
     Jump block11
+block11: [handler: block1]
+    Throw v8:unknown
+block0_split0:
+    Jump block3
+block1_split1:
+    v5:unknown = Add v4:unknown, v3:unknown
+    Jump block14
+block1_split2:
+    SetGlobal result v5:unknown
+    Jump block15
 block1_split3:
     Jump block2
 block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
+    End v7:unknown
+block5_split5: [handler: block1]
+    v13:unknown = Add v11:unknown, v12:string
     Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
+block5_split6: [handler: block1]
+    SetGlobal result v13:unknown
+    Jump block19
+block5_split7:
+    Jump block9
+block6_split8: [handler: block4]
+    v18:unknown = Add v16:unknown, v17:string
+    Jump block21
+block6_split9: [handler: block4]
+    SetGlobal result v18:unknown
+    Jump block22
+block6_split10: [handler: block4]
+    Throw v19:string
 
 === After CopyPropagation ===
 function():
 block0:
-    SetGlobal result v0:string
-    Jump block8
-block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    Jump block9
-block2:
-    v6:unknown = GetGlobal result
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
     Jump block12
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
-    v7:unknown = GetGlobal result
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
     Jump block13
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
+block2:
+    v7:unknown = GetGlobal result
     Jump block16
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
-block0_split0:
-    EnterUnwindContext block3
-block1_split1:
-    v4:unknown = Add v3:unknown, v1:unknown
-    Jump block10
-block1_split2:
-    SetGlobal result v4:unknown
+block3:
+    Jump block7
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    Jump block17
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    Jump block20
+block7: [handler: block6]
+    Throw v20:string
+block9:
     Jump block11
+block11: [handler: block1]
+    Throw v8:unknown
+block0_split0:
+    Jump block3
+block1_split1:
+    v5:unknown = Add v4:unknown, v2:unknown
+    Jump block14
+block1_split2:
+    SetGlobal result v5:unknown
+    Jump block15
 block1_split3:
     Jump block2
 block2_split4:
-    End v6:unknown
-block4_split5: [handler: block1]
-    v9:unknown = Add v7:unknown, v8:string
-    Jump block14
-block4_split6: [handler: block1]
-    SetGlobal result v9:unknown
-    Jump block15
-block4_split7: [handler: block1]
-    ContinuePendingUnwind block5
-block6_split8: [finalizer: block4]
-    v16:unknown = Add v14:unknown, v15:string
-    Jump block17
-block6_split9: [finalizer: block4]
-    SetGlobal result v16:unknown
+    End v7:unknown
+block5_split5: [handler: block1]
+    v13:unknown = Add v11:unknown, v12:string
     Jump block18
-block6_split10: [finalizer: block4]
-    Throw v17:string
+block5_split6: [handler: block1]
+    SetGlobal result v13:unknown
+    Jump block19
+block5_split7:
+    Jump block9
+block6_split8: [handler: block4]
+    v18:unknown = Add v16:unknown, v17:string
+    Jump block21
+block6_split9: [handler: block4]
+    SetGlobal result v18:unknown
+    Jump block22
+block6_split10: [handler: block4]
+    Throw v19:string
 
 === After SimplifyCFG ===
 function():
 block0:
-    SetGlobal result v0:string
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
+    Jump block7
 block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v2:unknown = Move v1:unknown
-    v3:unknown = GetGlobal result
-    v4:unknown = Add v3:unknown, v1:unknown
-    SetGlobal result v4:unknown
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v3:unknown = Move v2:unknown
+    v4:unknown = GetGlobal result
+    v5:unknown = Add v4:unknown, v2:unknown
+    SetGlobal result v5:unknown
     Jump block2
 block2:
-    v6:unknown = GetGlobal result
-    End v6:unknown
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
     v7:unknown = GetGlobal result
-    v9:unknown = Add v7:unknown, v8:string
-    SetGlobal result v9:unknown
-    ContinuePendingUnwind block5
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
-    v16:unknown = Add v14:unknown, v15:string
-    SetGlobal result v16:unknown
-    Throw v17:string
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
+    End v7:unknown
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    v13:unknown = Add v11:unknown, v12:string
+    SetGlobal result v13:unknown
+    Jump block11
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    v18:unknown = Add v16:unknown, v17:string
+    SetGlobal result v18:unknown
+    Throw v19:string
+block7: [handler: block6]
+    Throw v20:string
+block11: [handler: block1]
+    Throw v8:unknown
 
 === After DeadCodeElimination ===
 function():
 block0:
-    SetGlobal result v0:string
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
+    Jump block7
 block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v3:unknown = GetGlobal result
-    v4:unknown = Add v3:unknown, v1:unknown
-    SetGlobal result v4:unknown
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:unknown = GetGlobal result
+    v5:unknown = Add v4:unknown, v2:unknown
+    SetGlobal result v5:unknown
     Jump block2
 block2:
-    v6:unknown = GetGlobal result
-    End v6:unknown
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
     v7:unknown = GetGlobal result
-    v9:unknown = Add v7:unknown, v8:string
-    SetGlobal result v9:unknown
-    ContinuePendingUnwind block5
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
-    v16:unknown = Add v14:unknown, v15:string
-    SetGlobal result v16:unknown
-    Throw v17:string
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
+    End v7:unknown
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    v13:unknown = Add v11:unknown, v12:string
+    SetGlobal result v13:unknown
+    Jump block11
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    v18:unknown = Add v16:unknown, v17:string
+    SetGlobal result v18:unknown
+    Throw v19:string
+block7: [handler: block6]
+    Throw v20:string
+block11: [handler: block1]
+    Throw v8:unknown
+
+=== After SimplifyCFG ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
+    Jump block7
+block1:
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:unknown = GetGlobal result
+    v5:unknown = Add v4:unknown, v2:unknown
+    SetGlobal result v5:unknown
+    v7:unknown = GetGlobal result
+    End v7:unknown
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    v13:unknown = Add v11:unknown, v12:string
+    SetGlobal result v13:unknown
+    Throw v8:unknown
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    v18:unknown = Add v16:unknown, v17:string
+    SetGlobal result v18:unknown
+    Throw v19:string
+block7: [handler: block6]
+    Throw v20:string
 
 function():
 block0:
-    SetGlobal result v0:string
-    EnterUnwindContext block3
+    v0:unknown = GetLexicalEnvironment
+    SetGlobal result v1:string
+    Jump block7
 block1:
-    v1:unknown = Catch
-    LeaveUnwindContext
-    RestoreScheduledJump
-    v3:unknown = GetGlobal result
-    v4:unknown = Add v3:unknown, v1:unknown
-    SetGlobal result v4:unknown
-    Jump block2
-block2:
-    v6:unknown = GetGlobal result
-    End v6:unknown
-block3:
-    EnterUnwindContext block7
-block4: [handler: block1]
-    LeaveUnwindContext
+    v2:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v4:unknown = GetGlobal result
+    v5:unknown = Add v4:unknown, v2:unknown
+    SetGlobal result v5:unknown
     v7:unknown = GetGlobal result
-    v9:unknown = Add v7:unknown, v8:string
-    SetGlobal result v9:unknown
-    ContinuePendingUnwind block5
-block5:
-    LeaveUnwindContext
-    Jump block2
-block6: [finalizer: block4]
-    v12:unknown = Catch
-    v14:unknown = GetGlobal result
-    v16:unknown = Add v14:unknown, v15:string
-    SetGlobal result v16:unknown
-    Throw v17:string
-block7: [handler: block6] [finalizer: block4]
-    Throw v18:string
+    End v7:unknown
+block4:
+    v8:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    Jump block5
+block5: [handler: block1]
+    v11:unknown = GetGlobal result
+    v13:unknown = Add v11:unknown, v12:string
+    SetGlobal result v13:unknown
+    Throw v8:unknown
+block6: [handler: block4]
+    v14:unknown = Catch
+    SetLexicalEnvironment v0:unknown
+    v16:unknown = GetGlobal result
+    v18:unknown = Add v16:unknown, v17:string
+    SetGlobal result v18:unknown
+    Throw v19:string
+block7: [handler: block6]
+    Throw v20:string

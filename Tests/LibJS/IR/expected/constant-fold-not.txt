@@ -1,102 +1,112 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    v9:boolean = Not v6:int32
-    v10:boolean = Move v9:boolean
-    v11:boolean = Not v8:int32
-    v12:boolean = Move v11:boolean
-    v13:boolean = StrictlyInequals v10:boolean, v12:boolean
-    Return v13:boolean
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
+    v9:int32 = Move 1
+    v10:boolean = Not v7:int32
+    v11:boolean = Move v10:boolean
+    v12:boolean = Not v9:int32
+    v13:boolean = Move v12:boolean
+    v14:boolean = StrictlyInequals v11:boolean, v13:boolean
+    Return v14:boolean
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    v9:boolean = Not 0
-    v10:boolean = Move true
-    v11:boolean = Not 1
-    v12:boolean = Move false
-    v13:boolean = StrictlyInequals true, false
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
+    v9:int32 = Move 1
+    v10:boolean = Not 0
+    v11:boolean = Move true
+    v12:boolean = Not 1
+    v13:boolean = Move false
+    v14:boolean = StrictlyInequals true, false
     Return true
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
+    v0:unknown = GetLexicalEnvironment
     v2:undefined = Move undefined
     v3:undefined = Move undefined
     v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    v9:boolean = Not 0
-    v10:boolean = Move true
-    v11:boolean = Not 1
-    v12:boolean = Move false
-    v13:boolean = StrictlyInequals true, false
+    v5:undefined = Move undefined
+    v7:int32 = Move 0
+    v9:int32 = Move 1
+    v10:boolean = Not 0
+    v11:boolean = Move true
+    v12:boolean = Not 1
+    v13:boolean = Move false
+    v14:boolean = StrictlyInequals true, false
     Return true
 
 === After DeadCodeElimination ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return true

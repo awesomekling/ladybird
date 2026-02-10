@@ -5,6 +5,7 @@
  */
 
 #include <AK/NumericLimits.h>
+#include <AK/QuickSort.h>
 #include <AK/StdLibExtras.h>
 #include <LibJS/Bytecode/Instruction.h>
 #include <LibJS/Bytecode/Op.h>
@@ -307,6 +308,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         LOWER_SIMPLE_UNARY(ToObject)
         LOWER_SIMPLE_UNARY(ToInt32)
         LOWER_SIMPLE_UNARY(ToLength)
+        LOWER_SIMPLE_UNARY(ToPrimitiveWithStringHint)
 #undef LOWER_SIMPLE_UNARY
 
     // Unary ops with bytecode name mismatch
@@ -512,7 +514,7 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         emit<Bytecode::Op::CreateVariable>(instruction.identifier_index(), instruction.environment_mode(), instruction.is_immutable(), instruction.is_global(), instruction.is_strict());
         break;
     case Opcode::CreateLexicalEnvironment:
-        emit<Bytecode::Op::CreateLexicalEnvironment>(dst(), instruction.capacity());
+        emit<Bytecode::Op::CreateLexicalEnvironment>(dst(), operand(0), instruction.capacity());
         break;
     case Opcode::CreateMutableBinding:
         emit<Bytecode::Op::CreateMutableBinding>(operand(0), instruction.identifier_index(), instruction.is_strict());
@@ -520,11 +522,14 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::CreateImmutableBinding:
         emit<Bytecode::Op::CreateImmutableBinding>(operand(0), instruction.identifier_index(), instruction.is_strict());
         break;
-    case Opcode::LeaveLexicalEnvironment:
-        emit<Bytecode::Op::LeaveLexicalEnvironment>();
+    case Opcode::GetLexicalEnvironment:
+        emit<Bytecode::Op::GetLexicalEnvironment>(dst());
+        break;
+    case Opcode::SetLexicalEnvironment:
+        emit<Bytecode::Op::SetLexicalEnvironment>(operand(0));
         break;
     case Opcode::EnterObjectEnvironment:
-        emit<Bytecode::Op::EnterObjectEnvironment>(operand(0));
+        emit<Bytecode::Op::EnterObjectEnvironment>(dst(), operand(0));
         break;
     case Opcode::ResolveThisBinding:
         emit<Bytecode::Op::ResolveThisBinding>();
@@ -597,25 +602,6 @@ void Lowerer::lower_instruction(Instruction const& instruction)
         break;
 
     // Exception handling (non-terminator)
-    case Opcode::LeaveUnwindContext:
-        emit<Bytecode::Op::LeaveUnwindContext>();
-        break;
-    case Opcode::LeaveFinally:
-        emit<Bytecode::Op::LeaveFinally>();
-        break;
-    case Opcode::RestoreScheduledJump:
-        emit<Bytecode::Op::RestoreScheduledJump>();
-        break;
-    case Opcode::SetSavedReturnValue:
-        emit<Bytecode::Op::Mov>(
-            Bytecode::Operand(Bytecode::Register::saved_return_value()),
-            operand(0));
-        break;
-    case Opcode::PrepareYield:
-        emit<Bytecode::Op::PrepareYield>(
-            Bytecode::Operand(Bytecode::Register::saved_return_value()),
-            operand(0));
-        break;
     case Opcode::GetException:
         emit<Bytecode::Op::Mov>(dst(), Bytecode::Operand(Bytecode::Register::exception()));
         break;
@@ -625,9 +611,6 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // Control flow - handled separately
     case Opcode::Jump:
-    case Opcode::ContinuePendingUnwind:
-    case Opcode::EnterUnwindContext:
-    case Opcode::ScheduleJump:
     case Opcode::Branch:
     case Opcode::Return:
     case Opcode::End:
@@ -760,19 +743,20 @@ void Lowerer::lower_instruction(Instruction const& instruction)
 
     // NewClass
     case Opcode::NewClass: {
-        // Operands: [super_class (may be null), element_key0, element_key1, ...]
+        // Operands: [super_class (may be null), class_environment, element_key0, element_key1, ...]
         Optional<Bytecode::Operand> super_class;
         if (instruction.operand(0))
             super_class = operand(0);
-        size_t element_keys_count = instruction.operand_count() - 1;
+        auto class_environment = operand(1);
+        size_t element_keys_count = instruction.operand_count() - 2;
         Vector<Optional<Bytecode::Operand>> element_keys;
         for (size_t i = 0; i < element_keys_count; ++i) {
-            if (instruction.operand(i + 1))
-                element_keys.append(operand(i + 1));
+            if (instruction.operand(i + 2))
+                element_keys.append(operand(i + 2));
             else
                 element_keys.append(OptionalNone {});
         }
-        emit_with_extra_operand_slots<Bytecode::Op::NewClass>(element_keys_count, dst(), super_class, *instruction.class_expression(), instruction.lhs_name(), ReadonlySpan<Optional<Bytecode::Operand>> { element_keys });
+        emit_with_extra_operand_slots<Bytecode::Op::NewClass>(element_keys_count, dst(), super_class, class_environment, *instruction.class_expression(), instruction.lhs_name(), ReadonlySpan<Optional<Bytecode::Operand>> { element_keys });
         break;
     }
 
@@ -912,6 +896,9 @@ void Lowerer::lower_instruction(Instruction const& instruction)
     case Opcode::ThrowIfTDZ:
         emit<Bytecode::Op::ThrowIfTDZ>(operand(0));
         break;
+    case Opcode::ThrowConstAssignment:
+        emit<Bytecode::Op::ThrowConstAssignment>();
+        break;
 
     case Opcode::__Count:
         VERIFY_NOT_REACHED();
@@ -1038,30 +1025,6 @@ void Lowerer::lower_blocks()
                 if (target_index != i + 1)
                     emit<Bytecode::Op::Jump>(Bytecode::Label { static_cast<u32>(target_index) });
             }
-            break;
-        }
-        case Opcode::ContinuePendingUnwind: {
-            auto* target = terminator->true_target();
-            VERIFY(target);
-            auto target_index = m_ir_block_to_bytecode_index.get(target).value();
-            emit<Bytecode::Op::ContinuePendingUnwind>(Bytecode::Label { static_cast<u32>(target_index) });
-            break;
-        }
-        case Opcode::EnterUnwindContext: {
-            auto* target = terminator->true_target();
-            VERIFY(target);
-            auto target_index = m_ir_block_to_bytecode_index.get(target).value();
-            emit<Bytecode::Op::EnterUnwindContext>(Bytecode::Label { static_cast<u32>(target_index) });
-            break;
-        }
-        case Opcode::ScheduleJump: {
-            // false_target is the deferred jump target (stored in the instruction)
-            auto* deferred_target = terminator->false_target();
-            VERIFY(deferred_target);
-            auto target_index = m_ir_block_to_bytecode_index.get(deferred_target).value();
-            emit<Bytecode::Op::ScheduleJump>(Bytecode::Label { static_cast<u32>(target_index) });
-            // NB: The finalizer (true_target) is not encoded in the ScheduleJump instruction —
-            // the interpreter finds it via exception_handlers_for_offset at runtime.
             break;
         }
         case Opcode::Branch: {
@@ -1313,13 +1276,12 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, C
     executable->formal_parameter_count = source_executable->formal_parameter_count;
 
     // Generate exception handlers from IR block annotations.
-    // Each IR block may have an exception_handler and/or finalizer pointer
+    // Each IR block may have an exception_handler pointer
     // that was set during lifting and preserved through optimization passes.
     for (auto const& ir_block : function.basic_blocks()) {
         auto* handler_block = ir_block->exception_handler();
-        auto* finalizer_block = ir_block->finalizer();
 
-        if (!handler_block && !finalizer_block)
+        if (!handler_block)
             continue;
 
         auto block_idx_it = lowerer.m_ir_block_to_bytecode_index.find(ir_block.ptr());
@@ -1339,19 +1301,17 @@ GC::Ref<Bytecode::Executable> Lowerer::lower(VM& vm, Function const& function, C
         handler.start_offset = start_offset;
         handler.end_offset = end_offset;
 
-        if (handler_block) {
-            auto it = lowerer.m_ir_block_to_bytecode_index.find(handler_block);
-            if (it != lowerer.m_ir_block_to_bytecode_index.end())
-                handler.handler_offset = executable->basic_block_start_offsets[it->value];
-        }
-        if (finalizer_block) {
-            auto it = lowerer.m_ir_block_to_bytecode_index.find(finalizer_block);
-            if (it != lowerer.m_ir_block_to_bytecode_index.end())
-                handler.finalizer_offset = executable->basic_block_start_offsets[it->value];
-        }
+        auto it = lowerer.m_ir_block_to_bytecode_index.find(handler_block);
+        if (it != lowerer.m_ir_block_to_bytecode_index.end())
+            handler.handler_offset = executable->basic_block_start_offsets[it->value];
 
         executable->exception_handlers.append(handler);
     }
+
+    // Sort by start_offset since exception_handlers_for_offset uses binary search.
+    quick_sort(executable->exception_handlers, [](auto const& a, auto const& b) {
+        return a.start_offset < b.start_offset;
+    });
 
     return executable;
 }

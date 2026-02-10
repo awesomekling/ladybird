@@ -1,141 +1,155 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal go
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
     Jump block1
 block0_split0:
-    v2:unknown = Call v0:unknown, undefined
+    v3:unknown = Call v1:unknown, undefined
     Jump block2
 block0_split1:
-    End v2:unknown
+    End v3:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal go
-    v2:unknown = Call v0:unknown, undefined
-    End v2:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal go
+    v3:unknown = Call v1:unknown, undefined
+    End v3:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v3:object, null
-    Branch v7:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v4:object, null
+    Branch v8:boolean, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === After SCCP ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v3:object, null
-    Branch v7:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v4:object, null
+    Branch v8:boolean, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === Before optimization ===
 function():
 block0:
-    v1:undefined = Move undefined
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v3:object, null
-    Branch v7:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v2:undefined = Move undefined
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v4:object, null
+    Branch v8:boolean, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v3:object, null
-    Branch v7:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v4:object, null
+    Branch v8:boolean, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === After CopyPropagation ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v2:object, null
-    Branch v7:boolean, block1, block2
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v3:object, null
+    Branch v8:boolean, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === After TypeRefinement ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v2:object, null
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v3:object, null
     Branch false, block1, block2
 block1:
-    Return v4:string
-block2:
     Return v5:string
+block2:
+    Return v6:string
 
 === After SimplifyCFG ===
 function():
 block0:
-    v2:object = NewObject
-    v3:object = Move v2:object
-    v7:boolean = LooselyEquals v2:object, null
-    Return v5:string
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v4:object = Move v3:object
+    v8:boolean = LooselyEquals v3:object, null
+    Return v6:string
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v2:object = NewObject
-    v7:boolean = LooselyEquals v2:object, null
-    Return v5:string
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v8:boolean = LooselyEquals v3:object, null
+    Return v6:string
 
 function():
 block0:
-    v2:object = NewObject
-    v7:boolean = LooselyEquals v2:object, null
-    Return v5:string
+    v0:unknown = GetLexicalEnvironment
+    v3:object = NewObject
+    v8:boolean = LooselyEquals v3:object, null
+    Return v6:string

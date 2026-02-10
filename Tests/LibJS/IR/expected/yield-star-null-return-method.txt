@@ -1,1359 +1,1398 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:object = NewObject
-    v1:function = NewFunction v0:object
-    PutById v0:object, v1:function.next
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    v2:function = NewFunction v1:object
+    PutById v1:object, v2:function.next
     Jump block1
 block0_split0:
-    v2:function = NewFunction v0:object
-    PutGetterById v0:object, v2:function
+    v3:function = NewFunction v1:object
+    PutGetterById v1:object, v3:function
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal Symbol
+    v4:unknown = GetGlobal Symbol
     Jump block3
 block0_split2:
-    v4:unknown = GetById v3:unknown.iterator
+    v5:unknown = GetById v4:unknown.iterator
     Jump block4
 block0_split3:
-    v5:function = NewFunction v0:object
-    PutByValue v0:object, v4:unknown, v5:function
+    v6:unknown = ToPrimitiveWithStringHint v5:unknown
     Jump block5
 block0_split4:
-    SetGlobal iterable v0:object
+    v7:function = NewFunction v1:object
+    PutByValue v1:object, v6:unknown, v7:function
     Jump block6
 block0_split5:
-    v6:unknown = GetGlobal gen
+    SetGlobal iterable v1:object
     Jump block7
 block0_split6:
-    v8:unknown = Call v6:unknown, undefined
+    v8:unknown = GetGlobal gen
     Jump block8
 block0_split7:
-    SetGlobal iter v8:unknown
+    v10:unknown = Call v8:unknown, undefined
     Jump block9
 block0_split8:
-    v9:unknown = GetGlobal iter
+    SetGlobal iter v10:unknown
     Jump block10
 block0_split9:
-    v10:unknown = GetById v9:unknown.next
+    v11:unknown = GetGlobal iter
     Jump block11
 block0_split10:
-    v11:unknown = Call v10:unknown, v9:unknown
+    v12:unknown = GetById v11:unknown.next
     Jump block12
 block0_split11:
-    v12:unknown = GetGlobal iter
+    v13:unknown = Call v12:unknown, v11:unknown
     Jump block13
 block0_split12:
-    v13:unknown = GetById v12:unknown.return
+    v14:unknown = GetGlobal iter
     Jump block14
 block0_split13:
-    v15:unknown = Call v13:unknown, v12:unknown, 42
+    v15:unknown = GetById v14:unknown.return
     Jump block15
 block0_split14:
-    End v15:unknown
+    v17:unknown = Call v15:unknown, v14:unknown, 42
+    Jump block16
+block0_split15:
+    End v17:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:object = NewObject
-    v1:function = NewFunction v0:object
-    PutById v0:object, v1:function.next
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    v2:function = NewFunction v1:object
+    PutById v1:object, v2:function.next
     Jump block1
 block0_split0:
-    v2:function = NewFunction v0:object
-    PutGetterById v0:object, v2:function
+    v3:function = NewFunction v1:object
+    PutGetterById v1:object, v3:function
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal Symbol
+    v4:unknown = GetGlobal Symbol
     Jump block3
 block0_split2:
-    v4:unknown = GetById v3:unknown.iterator
+    v5:unknown = GetById v4:unknown.iterator
     Jump block4
 block0_split3:
-    v5:function = NewFunction v0:object
-    PutByValue v0:object, v4:unknown, v5:function
+    v6:unknown = ToPrimitiveWithStringHint v5:unknown
     Jump block5
 block0_split4:
-    SetGlobal iterable v0:object
+    v7:function = NewFunction v1:object
+    PutByValue v1:object, v6:unknown, v7:function
     Jump block6
 block0_split5:
-    v6:unknown = GetGlobal gen
+    SetGlobal iterable v1:object
     Jump block7
 block0_split6:
-    v8:unknown = Call v6:unknown, undefined
+    v8:unknown = GetGlobal gen
     Jump block8
 block0_split7:
-    SetGlobal iter v8:unknown
+    v10:unknown = Call v8:unknown, undefined
     Jump block9
 block0_split8:
-    v9:unknown = GetGlobal iter
+    SetGlobal iter v10:unknown
     Jump block10
 block0_split9:
-    v10:unknown = GetById v9:unknown.next
+    v11:unknown = GetGlobal iter
     Jump block11
 block0_split10:
-    v11:unknown = Call v10:unknown, v9:unknown
+    v12:unknown = GetById v11:unknown.next
     Jump block12
 block0_split11:
-    v12:unknown = GetGlobal iter
+    v13:unknown = Call v12:unknown, v11:unknown
     Jump block13
 block0_split12:
-    v13:unknown = GetById v12:unknown.return
+    v14:unknown = GetGlobal iter
     Jump block14
 block0_split13:
-    v15:unknown = Call v13:unknown, v12:unknown, 42
+    v15:unknown = GetById v14:unknown.return
     Jump block15
 block0_split14:
-    End v15:unknown
+    v17:unknown = Call v15:unknown, v14:unknown, 42
+    Jump block16
+block0_split15:
+    End v17:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:object = NewObject
-    v1:function = NewFunction v0:object
-    PutById v0:object, v1:function.next
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    v2:function = NewFunction v1:object
+    PutById v1:object, v2:function.next
     Jump block1
 block0_split0:
-    v2:function = NewFunction v0:object
-    PutGetterById v0:object, v2:function
+    v3:function = NewFunction v1:object
+    PutGetterById v1:object, v3:function
     Jump block2
 block0_split1:
-    v3:unknown = GetGlobal Symbol
+    v4:unknown = GetGlobal Symbol
     Jump block3
 block0_split2:
-    v4:unknown = GetById v3:unknown.iterator
+    v5:unknown = GetById v4:unknown.iterator
     Jump block4
 block0_split3:
-    v5:function = NewFunction v0:object
-    PutByValue v0:object, v4:unknown, v5:function
+    v6:unknown = ToPrimitiveWithStringHint v5:unknown
     Jump block5
 block0_split4:
-    SetGlobal iterable v0:object
+    v7:function = NewFunction v1:object
+    PutByValue v1:object, v6:unknown, v7:function
     Jump block6
 block0_split5:
-    v6:unknown = GetGlobal gen
+    SetGlobal iterable v1:object
     Jump block7
 block0_split6:
-    v8:unknown = Call v6:unknown, undefined
+    v8:unknown = GetGlobal gen
     Jump block8
 block0_split7:
-    SetGlobal iter v8:unknown
+    v10:unknown = Call v8:unknown, undefined
     Jump block9
 block0_split8:
-    v9:unknown = GetGlobal iter
+    SetGlobal iter v10:unknown
     Jump block10
 block0_split9:
-    v10:unknown = GetById v9:unknown.next
+    v11:unknown = GetGlobal iter
     Jump block11
 block0_split10:
-    v11:unknown = Call v10:unknown, v9:unknown
+    v12:unknown = GetById v11:unknown.next
     Jump block12
 block0_split11:
-    v12:unknown = GetGlobal iter
+    v13:unknown = Call v12:unknown, v11:unknown
     Jump block13
 block0_split12:
-    v13:unknown = GetById v12:unknown.return
+    v14:unknown = GetGlobal iter
     Jump block14
 block0_split13:
-    v15:unknown = Call v13:unknown, v12:unknown, 42
+    v15:unknown = GetById v14:unknown.return
     Jump block15
 block0_split14:
-    End v15:unknown
+    v17:unknown = Call v15:unknown, v14:unknown, 42
+    Jump block16
+block0_split15:
+    End v17:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:object = NewObject
-    v1:function = NewFunction v0:object
-    PutById v0:object, v1:function.next
-    v2:function = NewFunction v0:object
-    PutGetterById v0:object, v2:function
-    v3:unknown = GetGlobal Symbol
-    v4:unknown = GetById v3:unknown.iterator
-    v5:function = NewFunction v0:object
-    PutByValue v0:object, v4:unknown, v5:function
-    SetGlobal iterable v0:object
-    v6:unknown = GetGlobal gen
-    v8:unknown = Call v6:unknown, undefined
-    SetGlobal iter v8:unknown
-    v9:unknown = GetGlobal iter
-    v10:unknown = GetById v9:unknown.next
-    v11:unknown = Call v10:unknown, v9:unknown
-    v12:unknown = GetGlobal iter
-    v13:unknown = GetById v12:unknown.return
-    v15:unknown = Call v13:unknown, v12:unknown, 42
-    End v15:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    v2:function = NewFunction v1:object
+    PutById v1:object, v2:function.next
+    v3:function = NewFunction v1:object
+    PutGetterById v1:object, v3:function
+    v4:unknown = GetGlobal Symbol
+    v5:unknown = GetById v4:unknown.iterator
+    v6:unknown = ToPrimitiveWithStringHint v5:unknown
+    v7:function = NewFunction v1:object
+    PutByValue v1:object, v6:unknown, v7:function
+    SetGlobal iterable v1:object
+    v8:unknown = GetGlobal gen
+    v10:unknown = Call v8:unknown, undefined
+    SetGlobal iter v10:unknown
+    v11:unknown = GetGlobal iter
+    v12:unknown = GetById v11:unknown.next
+    v13:unknown = Call v12:unknown, v11:unknown
+    v14:unknown = GetGlobal iter
+    v15:unknown = GetById v14:unknown.return
+    v17:unknown = Call v15:unknown, v14:unknown, 42
+    End v17:unknown
 
 function():
 block0:
-    v0:object = NewObject
-    v1:function = NewFunction v0:object
-    PutById v0:object, v1:function.next
-    v2:function = NewFunction v0:object
-    PutGetterById v0:object, v2:function
-    v3:unknown = GetGlobal Symbol
-    v4:unknown = GetById v3:unknown.iterator
-    v5:function = NewFunction v0:object
-    PutByValue v0:object, v4:unknown, v5:function
-    SetGlobal iterable v0:object
-    v6:unknown = GetGlobal gen
-    v8:unknown = Call v6:unknown, undefined
-    SetGlobal iter v8:unknown
-    v9:unknown = GetGlobal iter
-    v10:unknown = GetById v9:unknown.next
-    v11:unknown = Call v10:unknown, v9:unknown
-    v12:unknown = GetGlobal iter
-    v13:unknown = GetById v12:unknown.return
-    v15:unknown = Call v13:unknown, v12:unknown, 42
-    End v15:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    v2:function = NewFunction v1:object
+    PutById v1:object, v2:function.next
+    v3:function = NewFunction v1:object
+    PutGetterById v1:object, v3:function
+    v4:unknown = GetGlobal Symbol
+    v5:unknown = GetById v4:unknown.iterator
+    v6:unknown = ToPrimitiveWithStringHint v5:unknown
+    v7:function = NewFunction v1:object
+    PutByValue v1:object, v6:unknown, v7:function
+    SetGlobal iterable v1:object
+    v8:unknown = GetGlobal gen
+    v10:unknown = Call v8:unknown, undefined
+    SetGlobal iter v10:unknown
+    v11:unknown = GetGlobal iter
+    v12:unknown = GetById v11:unknown.next
+    v13:unknown = Call v12:unknown, v11:unknown
+    v14:unknown = GetGlobal iter
+    v15:unknown = GetById v14:unknown.return
+    v17:unknown = Call v15:unknown, v14:unknown, 42
+    End v17:unknown
 
 === After SSAConstruction ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
+    v1:unknown = GetGlobal iterable
     Jump block19
 block2:
-    v65:unknown = Phi [block20:v67:undefined, block21:v66:unknown]
-    v63:unknown = Phi [block20:v68:undefined, block21:v64:unknown]
-    v61:unknown = Phi [block20:v69:undefined, block21:v62:unknown]
-    v59:unknown = Phi [block20:v70:undefined, block21:v60:unknown]
-    v56:unknown = Phi [block20:v71:undefined, block21:v57:unknown]
-    v54:unknown = Phi [block20:v72:undefined, block21:v55:unknown]
-    v50:unknown = Phi [block20:v73:undefined, block21:v51:unknown]
-    v47:unknown = Phi [block20:v74:undefined, block21:v48:unknown]
-    v46:unknown = Phi [block20:v8:undefined, block21:v13:unknown]
-    v45:unknown = Phi [block20:v6:int32, block21:v12:unknown]
-    v44:unknown = Phi [block20:v75:undefined, block21:v10:unknown]
-    v42:unknown = Phi [block20:v30:unknown, block21:v43:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v66:unknown = Phi [block20:v68:undefined, block21:v67:unknown]
+    v64:unknown = Phi [block20:v69:undefined, block21:v65:unknown]
+    v62:unknown = Phi [block20:v70:undefined, block21:v63:unknown]
+    v60:unknown = Phi [block20:v71:undefined, block21:v61:unknown]
+    v57:unknown = Phi [block20:v72:undefined, block21:v58:unknown]
+    v55:unknown = Phi [block20:v73:undefined, block21:v56:unknown]
+    v51:unknown = Phi [block20:v74:undefined, block21:v52:unknown]
+    v48:unknown = Phi [block20:v75:undefined, block21:v49:unknown]
+    v47:unknown = Phi [block20:v9:undefined, block21:v14:unknown]
+    v46:unknown = Phi [block20:v7:int32, block21:v13:unknown]
+    v45:unknown = Phi [block20:v76:undefined, block21:v11:unknown]
+    v43:unknown = Phi [block20:v31:unknown, block21:v44:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v66:unknown = Phi [block26:v65:unknown, block34:v65:unknown, block39:v28:unknown]
-    v64:unknown = Phi [block26:v63:unknown, block34:v63:unknown, block39:v25:unknown]
-    v62:unknown = Phi [block26:v61:unknown, block34:v61:unknown, block39:v19:unknown]
-    v60:unknown = Phi [block26:v59:unknown, block34:v24:unknown, block39:v59:unknown]
-    v57:unknown = Phi [block26:v56:unknown, block34:v18:unknown, block39:v56:unknown]
-    v55:unknown = Phi [block26:v17:unknown, block34:v54:unknown, block39:v54:unknown]
-    v51:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v26:unknown]
-    v48:unknown = Phi [block26:v14:unknown, block34:v20:unknown, block39:v47:unknown]
-    v43:unknown = Phi [block26:v35:unknown, block34:v38:unknown, block39:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v67:unknown = Phi [block26:v66:unknown, block34:v66:unknown, block39:v29:unknown]
+    v65:unknown = Phi [block26:v64:unknown, block34:v64:unknown, block39:v26:unknown]
+    v63:unknown = Phi [block26:v62:unknown, block34:v62:unknown, block39:v20:unknown]
+    v61:unknown = Phi [block26:v60:unknown, block34:v25:unknown, block39:v60:unknown]
+    v58:unknown = Phi [block26:v57:unknown, block34:v19:unknown, block39:v57:unknown]
+    v56:unknown = Phi [block26:v18:unknown, block34:v55:unknown, block39:v55:unknown]
+    v52:unknown = Phi [block26:v16:unknown, block34:v22:unknown, block39:v27:unknown]
+    v49:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v48:unknown]
+    v44:unknown = Phi [block26:v36:unknown, block34:v39:unknown, block39:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v11:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block21
 block4:
-    v58:unknown = Phi [block25:v56:unknown, block33:v18:unknown]
-    v53:unknown = Phi [block25:v16:unknown, block33:v23:unknown]
-    v52:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
-    v49:unknown = Phi [block25:v14:unknown, block33:v20:unknown]
-    v32:unknown = Yield undefined
+    v59:unknown = Phi [block25:v57:unknown, block33:v19:unknown]
+    v54:unknown = Phi [block25:v17:unknown, block33:v24:unknown]
+    v53:unknown = Phi [block25:v16:unknown, block33:v22:unknown]
+    v50:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
     Jump block22
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block25
 block8:
-    v17:unknown = GetById v14:unknown.value
+    v18:unknown = GetById v15:unknown.value
     Jump block26
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
+    v19:unknown = GetMethod v3:unknown.throw
     Jump block27
 block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v20:unknown = GetMethod v3:unknown.return
     Jump block28
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
     Jump block29
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
     Jump block32
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block33
 block14:
-    v24:unknown = GetById v20:unknown.value
+    v25:unknown = GetById v21:unknown.value
     Jump block34
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
     Jump block35
 block17:
-    v27:unknown = GetById v25:unknown.value
+    v28:unknown = GetById v26:unknown.value
     Jump block38
 block18:
-    v28:unknown = GetById v25:unknown.value
+    v29:unknown = GetById v26:unknown.value
     Jump block39
 block1_split0:
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    v4:unknown = ExtractValue v1:unknown, 2
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    v5:unknown = ExtractValue v2:unknown, 2
     Jump block20
 block1_split1:
-    v6:int32 = Move 1
-    v8:undefined = Move undefined
+    v7:int32 = Move 1
+    v9:undefined = Move undefined
     Jump block2
 block3_split2:
     Jump block2
 block5_split3:
-    ThrowIfNotObject v14:unknown
+    ThrowIfNotObject v15:unknown
     Jump block23
 block5_split4:
-    v15:unknown = GetById v14:unknown.done
+    v16:unknown = GetById v15:unknown.done
     Jump block24
 block5_split5:
-    Branch v15:unknown, block7, block8
+    Branch v16:unknown, block7, block8
 block7_split6:
     Jump block4
 block8_split7:
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9_split8:
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10_split9:
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10_split9:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11_split10:
-    ThrowIfNotObject v20:unknown
+    ThrowIfNotObject v21:unknown
     Jump block30
 block11_split11:
-    v21:unknown = GetById v20:unknown.done
+    v22:unknown = GetById v21:unknown.done
     Jump block31
 block11_split12:
-    Branch v21:unknown, block13, block14
+    Branch v22:unknown, block13, block14
 block12_split13:
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13_split14:
     Jump block4
 block14_split15:
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v39:unknown = Yield v25:unknown, continuation: block3
 block16_split16:
-    ThrowIfNotObject v25:unknown
+    ThrowIfNotObject v26:unknown
     Jump block36
 block16_split17:
-    v26:unknown = GetById v25:unknown.done
+    v27:unknown = GetById v26:unknown.done
     Jump block37
 block16_split18:
-    Branch v26:unknown, block17, block18
+    Branch v27:unknown, block17, block18
 block17_split19:
-    v40:unknown = Yield v27:unknown
+    v41:unknown = Yield v28:unknown
 block18_split20:
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After SCCP ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
+    v1:unknown = GetGlobal iterable
     Jump block19
 block2:
-    v65:unknown = Phi [block20:v67:undefined, block21:v66:unknown]
-    v63:unknown = Phi [block20:v68:undefined, block21:v64:unknown]
-    v61:unknown = Phi [block20:v69:undefined, block21:v62:unknown]
-    v59:unknown = Phi [block20:v70:undefined, block21:v60:unknown]
-    v56:unknown = Phi [block20:v71:undefined, block21:v57:unknown]
-    v54:unknown = Phi [block20:v72:undefined, block21:v55:unknown]
-    v50:unknown = Phi [block20:v73:undefined, block21:v51:unknown]
-    v47:unknown = Phi [block20:v74:undefined, block21:v48:unknown]
-    v46:unknown = Phi [block20:v77:undefined, block21:v13:unknown]
-    v45:unknown = Phi [block20:v76:int32, block21:v12:unknown]
-    v44:unknown = Phi [block20:v75:undefined, block21:v10:unknown]
-    v42:unknown = Phi [block20:v30:unknown, block21:v43:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v66:unknown = Phi [block20:v68:undefined, block21:v67:unknown]
+    v64:unknown = Phi [block20:v69:undefined, block21:v65:unknown]
+    v62:unknown = Phi [block20:v70:undefined, block21:v63:unknown]
+    v60:unknown = Phi [block20:v71:undefined, block21:v61:unknown]
+    v57:unknown = Phi [block20:v72:undefined, block21:v58:unknown]
+    v55:unknown = Phi [block20:v73:undefined, block21:v56:unknown]
+    v51:unknown = Phi [block20:v74:undefined, block21:v52:unknown]
+    v48:unknown = Phi [block20:v75:undefined, block21:v49:unknown]
+    v47:unknown = Phi [block20:v78:undefined, block21:v14:unknown]
+    v46:unknown = Phi [block20:v77:int32, block21:v13:unknown]
+    v45:unknown = Phi [block20:v76:undefined, block21:v11:unknown]
+    v43:unknown = Phi [block20:v31:unknown, block21:v44:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v66:unknown = Phi [block26:v65:unknown, block34:v65:unknown, block39:v28:unknown]
-    v64:unknown = Phi [block26:v63:unknown, block34:v63:unknown, block39:v25:unknown]
-    v62:unknown = Phi [block26:v61:unknown, block34:v61:unknown, block39:v19:unknown]
-    v60:unknown = Phi [block26:v59:unknown, block34:v24:unknown, block39:v59:unknown]
-    v57:unknown = Phi [block26:v56:unknown, block34:v18:unknown, block39:v56:unknown]
-    v55:unknown = Phi [block26:v17:unknown, block34:v54:unknown, block39:v54:unknown]
-    v51:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v26:unknown]
-    v48:unknown = Phi [block26:v14:unknown, block34:v20:unknown, block39:v47:unknown]
-    v43:unknown = Phi [block26:v35:unknown, block34:v38:unknown, block39:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v67:unknown = Phi [block26:v66:unknown, block34:v66:unknown, block39:v29:unknown]
+    v65:unknown = Phi [block26:v64:unknown, block34:v64:unknown, block39:v26:unknown]
+    v63:unknown = Phi [block26:v62:unknown, block34:v62:unknown, block39:v20:unknown]
+    v61:unknown = Phi [block26:v60:unknown, block34:v25:unknown, block39:v60:unknown]
+    v58:unknown = Phi [block26:v57:unknown, block34:v19:unknown, block39:v57:unknown]
+    v56:unknown = Phi [block26:v18:unknown, block34:v55:unknown, block39:v55:unknown]
+    v52:unknown = Phi [block26:v16:unknown, block34:v22:unknown, block39:v27:unknown]
+    v49:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v48:unknown]
+    v44:unknown = Phi [block26:v36:unknown, block34:v39:unknown, block39:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v11:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block21
 block4:
-    v58:unknown = Phi [block25:v56:unknown, block33:v18:unknown]
-    v53:unknown = Phi [block25:v16:unknown, block33:v23:unknown]
-    v52:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
-    v49:unknown = Phi [block25:v14:unknown, block33:v20:unknown]
-    v32:unknown = Yield undefined
+    v59:unknown = Phi [block25:v57:unknown, block33:v19:unknown]
+    v54:unknown = Phi [block25:v17:unknown, block33:v24:unknown]
+    v53:unknown = Phi [block25:v16:unknown, block33:v22:unknown]
+    v50:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
     Jump block22
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block25
 block8:
-    v17:unknown = GetById v14:unknown.value
+    v18:unknown = GetById v15:unknown.value
     Jump block26
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
+    v19:unknown = GetMethod v3:unknown.throw
     Jump block27
 block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v20:unknown = GetMethod v3:unknown.return
     Jump block28
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
     Jump block29
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
     Jump block32
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block33
 block14:
-    v24:unknown = GetById v20:unknown.value
+    v25:unknown = GetById v21:unknown.value
     Jump block34
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
     Jump block35
 block17:
-    v27:unknown = GetById v25:unknown.value
+    v28:unknown = GetById v26:unknown.value
     Jump block38
 block18:
-    v28:unknown = GetById v25:unknown.value
+    v29:unknown = GetById v26:unknown.value
     Jump block39
 block1_split0:
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    v4:unknown = ExtractValue v1:unknown, 2
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    v5:unknown = ExtractValue v2:unknown, 2
     Jump block20
 block1_split1:
-    v6:int32 = Move 1
-    v8:undefined = Move undefined
+    v7:int32 = Move 1
+    v9:undefined = Move undefined
     Jump block2
 block3_split2:
     Jump block2
 block5_split3:
-    ThrowIfNotObject v14:unknown
+    ThrowIfNotObject v15:unknown
     Jump block23
 block5_split4:
-    v15:unknown = GetById v14:unknown.done
+    v16:unknown = GetById v15:unknown.done
     Jump block24
 block5_split5:
-    Branch v15:unknown, block7, block8
+    Branch v16:unknown, block7, block8
 block7_split6:
     Jump block4
 block8_split7:
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9_split8:
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10_split9:
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10_split9:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11_split10:
-    ThrowIfNotObject v20:unknown
+    ThrowIfNotObject v21:unknown
     Jump block30
 block11_split11:
-    v21:unknown = GetById v20:unknown.done
+    v22:unknown = GetById v21:unknown.done
     Jump block31
 block11_split12:
-    Branch v21:unknown, block13, block14
+    Branch v22:unknown, block13, block14
 block12_split13:
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13_split14:
     Jump block4
 block14_split15:
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v39:unknown = Yield v25:unknown, continuation: block3
 block16_split16:
-    ThrowIfNotObject v25:unknown
+    ThrowIfNotObject v26:unknown
     Jump block36
 block16_split17:
-    v26:unknown = GetById v25:unknown.done
+    v27:unknown = GetById v26:unknown.done
     Jump block37
 block16_split18:
-    Branch v26:unknown, block17, block18
+    Branch v27:unknown, block17, block18
 block17_split19:
-    v40:unknown = Yield v27:unknown
+    v41:unknown = Yield v28:unknown
 block18_split20:
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === Before optimization ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
+    v1:unknown = GetGlobal iterable
     Jump block19
 block2:
-    v65:unknown = Phi [block20:v67:undefined, block21:v66:unknown]
-    v63:unknown = Phi [block20:v68:undefined, block21:v64:unknown]
-    v61:unknown = Phi [block20:v69:undefined, block21:v62:unknown]
-    v59:unknown = Phi [block20:v70:undefined, block21:v60:unknown]
-    v56:unknown = Phi [block20:v71:undefined, block21:v57:unknown]
-    v54:unknown = Phi [block20:v72:undefined, block21:v55:unknown]
-    v50:unknown = Phi [block20:v73:undefined, block21:v51:unknown]
-    v47:unknown = Phi [block20:v74:undefined, block21:v48:unknown]
-    v46:unknown = Phi [block20:v77:undefined, block21:v13:unknown]
-    v45:unknown = Phi [block20:v76:int32, block21:v12:unknown]
-    v44:unknown = Phi [block20:v75:undefined, block21:v10:unknown]
-    v42:unknown = Phi [block20:v30:unknown, block21:v43:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v66:unknown = Phi [block20:v68:undefined, block21:v67:unknown]
+    v64:unknown = Phi [block20:v69:undefined, block21:v65:unknown]
+    v62:unknown = Phi [block20:v70:undefined, block21:v63:unknown]
+    v60:unknown = Phi [block20:v71:undefined, block21:v61:unknown]
+    v57:unknown = Phi [block20:v72:undefined, block21:v58:unknown]
+    v55:unknown = Phi [block20:v73:undefined, block21:v56:unknown]
+    v51:unknown = Phi [block20:v74:undefined, block21:v52:unknown]
+    v48:unknown = Phi [block20:v75:undefined, block21:v49:unknown]
+    v47:unknown = Phi [block20:v78:undefined, block21:v14:unknown]
+    v46:unknown = Phi [block20:v77:int32, block21:v13:unknown]
+    v45:unknown = Phi [block20:v76:undefined, block21:v11:unknown]
+    v43:unknown = Phi [block20:v31:unknown, block21:v44:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v66:unknown = Phi [block26:v65:unknown, block34:v65:unknown, block39:v28:unknown]
-    v64:unknown = Phi [block26:v63:unknown, block34:v63:unknown, block39:v25:unknown]
-    v62:unknown = Phi [block26:v61:unknown, block34:v61:unknown, block39:v19:unknown]
-    v60:unknown = Phi [block26:v59:unknown, block34:v24:unknown, block39:v59:unknown]
-    v57:unknown = Phi [block26:v56:unknown, block34:v18:unknown, block39:v56:unknown]
-    v55:unknown = Phi [block26:v17:unknown, block34:v54:unknown, block39:v54:unknown]
-    v51:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v26:unknown]
-    v48:unknown = Phi [block26:v14:unknown, block34:v20:unknown, block39:v47:unknown]
-    v43:unknown = Phi [block26:v35:unknown, block34:v38:unknown, block39:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v67:unknown = Phi [block26:v66:unknown, block34:v66:unknown, block39:v29:unknown]
+    v65:unknown = Phi [block26:v64:unknown, block34:v64:unknown, block39:v26:unknown]
+    v63:unknown = Phi [block26:v62:unknown, block34:v62:unknown, block39:v20:unknown]
+    v61:unknown = Phi [block26:v60:unknown, block34:v25:unknown, block39:v60:unknown]
+    v58:unknown = Phi [block26:v57:unknown, block34:v19:unknown, block39:v57:unknown]
+    v56:unknown = Phi [block26:v18:unknown, block34:v55:unknown, block39:v55:unknown]
+    v52:unknown = Phi [block26:v16:unknown, block34:v22:unknown, block39:v27:unknown]
+    v49:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v48:unknown]
+    v44:unknown = Phi [block26:v36:unknown, block34:v39:unknown, block39:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v11:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block21
 block4:
-    v58:unknown = Phi [block25:v56:unknown, block33:v18:unknown]
-    v53:unknown = Phi [block25:v16:unknown, block33:v23:unknown]
-    v52:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
-    v49:unknown = Phi [block25:v14:unknown, block33:v20:unknown]
-    v32:unknown = Yield undefined
+    v59:unknown = Phi [block25:v57:unknown, block33:v19:unknown]
+    v54:unknown = Phi [block25:v17:unknown, block33:v24:unknown]
+    v53:unknown = Phi [block25:v16:unknown, block33:v22:unknown]
+    v50:unknown = Phi [block25:v15:unknown, block33:v21:unknown]
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
     Jump block22
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block25
 block8:
-    v17:unknown = GetById v14:unknown.value
+    v18:unknown = GetById v15:unknown.value
     Jump block26
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
+    v19:unknown = GetMethod v3:unknown.throw
     Jump block27
 block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v20:unknown = GetMethod v3:unknown.return
     Jump block28
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
     Jump block29
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
     Jump block32
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block33
 block14:
-    v24:unknown = GetById v20:unknown.value
+    v25:unknown = GetById v21:unknown.value
     Jump block34
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
     Jump block35
 block17:
-    v27:unknown = GetById v25:unknown.value
+    v28:unknown = GetById v26:unknown.value
     Jump block38
 block18:
-    v28:unknown = GetById v25:unknown.value
+    v29:unknown = GetById v26:unknown.value
     Jump block39
 block1_split0:
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    v4:unknown = ExtractValue v1:unknown, 2
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    v5:unknown = ExtractValue v2:unknown, 2
     Jump block20
 block1_split1:
-    v6:int32 = Move 1
-    v8:undefined = Move undefined
+    v7:int32 = Move 1
+    v9:undefined = Move undefined
     Jump block2
 block3_split2:
     Jump block2
 block5_split3:
-    ThrowIfNotObject v14:unknown
+    ThrowIfNotObject v15:unknown
     Jump block23
 block5_split4:
-    v15:unknown = GetById v14:unknown.done
+    v16:unknown = GetById v15:unknown.done
     Jump block24
 block5_split5:
-    Branch v15:unknown, block7, block8
+    Branch v16:unknown, block7, block8
 block7_split6:
     Jump block4
 block8_split7:
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9_split8:
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10_split9:
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10_split9:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11_split10:
-    ThrowIfNotObject v20:unknown
+    ThrowIfNotObject v21:unknown
     Jump block30
 block11_split11:
-    v21:unknown = GetById v20:unknown.done
+    v22:unknown = GetById v21:unknown.done
     Jump block31
 block11_split12:
-    Branch v21:unknown, block13, block14
+    Branch v22:unknown, block13, block14
 block12_split13:
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13_split14:
     Jump block4
 block14_split15:
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v39:unknown = Yield v25:unknown, continuation: block3
 block16_split16:
-    ThrowIfNotObject v25:unknown
+    ThrowIfNotObject v26:unknown
     Jump block36
 block16_split17:
-    v26:unknown = GetById v25:unknown.done
+    v27:unknown = GetById v26:unknown.done
     Jump block37
 block16_split18:
-    Branch v26:unknown, block17, block18
+    Branch v27:unknown, block17, block18
 block17_split19:
-    v40:unknown = Yield v27:unknown
+    v41:unknown = Yield v28:unknown
 block18_split20:
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
+    v1:unknown = GetGlobal iterable
     Jump block19
 block2:
-    v50:unknown = Phi [block20:v73:undefined, block21:v51:unknown]
-    v46:unknown = Phi [block20:v77:undefined, block21:v13:unknown]
-    v45:unknown = Phi [block20:v76:int32, block21:v12:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v51:unknown = Phi [block20:v74:undefined, block21:v52:unknown]
+    v47:unknown = Phi [block20:v78:undefined, block21:v14:unknown]
+    v46:unknown = Phi [block20:v77:int32, block21:v13:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v51:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v26:unknown]
-    v43:unknown = Phi [block26:v35:unknown, block34:v38:unknown, block39:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v10:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v52:unknown = Phi [block26:v16:unknown, block34:v22:unknown, block39:v27:unknown]
+    v44:unknown = Phi [block26:v36:unknown, block34:v39:unknown, block39:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v11:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block21
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
     Jump block22
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block25
 block8:
-    v17:unknown = GetById v14:unknown.value
+    v18:unknown = GetById v15:unknown.value
     Jump block26
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
+    v19:unknown = GetMethod v3:unknown.throw
     Jump block27
 block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v20:unknown = GetMethod v3:unknown.return
     Jump block28
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
     Jump block29
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
     Jump block32
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block33
 block14:
-    v24:unknown = GetById v20:unknown.value
+    v25:unknown = GetById v21:unknown.value
     Jump block34
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
     Jump block35
 block17:
-    v27:unknown = GetById v25:unknown.value
+    v28:unknown = GetById v26:unknown.value
     Jump block38
 block18:
-    v28:unknown = GetById v25:unknown.value
+    v29:unknown = GetById v26:unknown.value
     Jump block39
 block1_split0:
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
     Jump block20
 block1_split1:
     Jump block2
 block3_split2:
     Jump block2
 block5_split3:
-    ThrowIfNotObject v14:unknown
+    ThrowIfNotObject v15:unknown
     Jump block23
 block5_split4:
-    v15:unknown = GetById v14:unknown.done
+    v16:unknown = GetById v15:unknown.done
     Jump block24
 block5_split5:
-    Branch v15:unknown, block7, block8
+    Branch v16:unknown, block7, block8
 block7_split6:
     Jump block4
 block8_split7:
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9_split8:
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10_split9:
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10_split9:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11_split10:
-    ThrowIfNotObject v20:unknown
+    ThrowIfNotObject v21:unknown
     Jump block30
 block11_split11:
-    v21:unknown = GetById v20:unknown.done
+    v22:unknown = GetById v21:unknown.done
     Jump block31
 block11_split12:
-    Branch v21:unknown, block13, block14
+    Branch v22:unknown, block13, block14
 block12_split13:
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13_split14:
     Jump block4
 block14_split15:
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v39:unknown = Yield v25:unknown, continuation: block3
 block16_split16:
-    ThrowIfNotObject v25:unknown
+    ThrowIfNotObject v26:unknown
     Jump block36
 block16_split17:
-    v26:unknown = GetById v25:unknown.done
+    v27:unknown = GetById v26:unknown.done
     Jump block37
 block16_split18:
-    Branch v26:unknown, block17, block18
+    Branch v27:unknown, block17, block18
 block17_split19:
-    v40:unknown = Yield v27:unknown
+    v41:unknown = Yield v28:unknown
 block18_split20:
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After CopyPropagation ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
+    v1:unknown = GetGlobal iterable
     Jump block19
 block2:
-    v50:unknown = Phi [block20:v73:undefined, block21:v51:unknown]
-    v46:unknown = Phi [block20:v77:undefined, block21:v13:unknown]
-    v45:unknown = Phi [block20:v76:int32, block21:v12:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v51:unknown = Phi [block20:v74:undefined, block21:v52:unknown]
+    v47:unknown = Phi [block20:v78:undefined, block21:v14:unknown]
+    v46:unknown = Phi [block20:v77:int32, block21:v13:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v51:unknown = Phi [block26:v15:unknown, block34:v21:unknown, block39:v26:unknown]
-    v43:unknown = Phi [block26:v35:unknown, block34:v38:unknown, block39:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v52:unknown = Phi [block26:v16:unknown, block34:v22:unknown, block39:v27:unknown]
+    v44:unknown = Phi [block26:v36:unknown, block34:v39:unknown, block39:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block21
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
     Jump block22
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block25
 block8:
-    v17:unknown = GetById v14:unknown.value
+    v18:unknown = GetById v15:unknown.value
     Jump block26
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
+    v19:unknown = GetMethod v3:unknown.throw
     Jump block27
 block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v20:unknown = GetMethod v3:unknown.return
     Jump block28
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
     Jump block29
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
     Jump block32
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block33
 block14:
-    v24:unknown = GetById v20:unknown.value
+    v25:unknown = GetById v21:unknown.value
     Jump block34
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
     Jump block35
 block17:
-    v27:unknown = GetById v25:unknown.value
+    v28:unknown = GetById v26:unknown.value
     Jump block38
 block18:
-    v28:unknown = GetById v25:unknown.value
+    v29:unknown = GetById v26:unknown.value
     Jump block39
 block1_split0:
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
     Jump block20
 block1_split1:
     Jump block2
 block3_split2:
     Jump block2
 block5_split3:
-    ThrowIfNotObject v14:unknown
+    ThrowIfNotObject v15:unknown
     Jump block23
 block5_split4:
-    v15:unknown = GetById v14:unknown.done
+    v16:unknown = GetById v15:unknown.done
     Jump block24
 block5_split5:
-    Branch v15:unknown, block7, block8
+    Branch v16:unknown, block7, block8
 block7_split6:
     Jump block4
 block8_split7:
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9_split8:
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10_split9:
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10_split9:
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11_split10:
-    ThrowIfNotObject v20:unknown
+    ThrowIfNotObject v21:unknown
     Jump block30
 block11_split11:
-    v21:unknown = GetById v20:unknown.done
+    v22:unknown = GetById v21:unknown.done
     Jump block31
 block11_split12:
-    Branch v21:unknown, block13, block14
+    Branch v22:unknown, block13, block14
 block12_split13:
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13_split14:
     Jump block4
 block14_split15:
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v39:unknown = Yield v25:unknown, continuation: block3
 block16_split16:
-    ThrowIfNotObject v25:unknown
+    ThrowIfNotObject v26:unknown
     Jump block36
 block16_split17:
-    v26:unknown = GetById v25:unknown.done
+    v27:unknown = GetById v26:unknown.done
     Jump block37
 block16_split18:
-    Branch v26:unknown, block17, block18
+    Branch v27:unknown, block17, block18
 block17_split19:
-    v40:unknown = Yield v27:unknown
+    v41:unknown = Yield v28:unknown
 block18_split20:
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After SimplifyCFG ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
+    v1:unknown = GetGlobal iterable
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
     Jump block2
 block2:
-    v50:unknown = Phi [block1:v73:undefined, block3:v51:unknown]
-    v46:unknown = Phi [block1:v77:undefined, block3:v13:unknown]
-    v45:unknown = Phi [block1:v76:int32, block3:v12:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v51:unknown = Phi [block1:v74:undefined, block3:v52:unknown]
+    v47:unknown = Phi [block1:v78:undefined, block3:v14:unknown]
+    v46:unknown = Phi [block1:v77:int32, block3:v13:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v51:unknown = Phi [block8:v15:unknown, block14:v21:unknown, block18:v26:unknown]
-    v43:unknown = Phi [block8:v35:unknown, block14:v38:unknown, block18:v41:unknown]
-    v10:unknown = Move v43:unknown
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v52:unknown = Phi [block8:v16:unknown, block14:v22:unknown, block18:v27:unknown]
+    v44:unknown = Phi [block8:v36:unknown, block14:v39:unknown, block18:v42:unknown]
+    v11:unknown = Move v44:unknown
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block2
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v14:unknown
-    v15:unknown = GetById v14:unknown.done
-    Branch v15:unknown, block7, block8
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block4
 block8:
-    v17:unknown = GetById v14:unknown.value
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v19:unknown = GetMethod v3:unknown.throw
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetMethod v3:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v20:unknown
-    v21:unknown = GetById v20:unknown.done
-    Branch v21:unknown, block13, block14
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block4
 block14:
-    v24:unknown = GetById v20:unknown.value
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block3
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v25:unknown
-    v26:unknown = GetById v25:unknown.done
-    Branch v26:unknown, block17, block18
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
 block17:
-    v27:unknown = GetById v25:unknown.value
-    v40:unknown = Yield v27:unknown
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
 block18:
-    v28:unknown = GetById v25:unknown.value
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
+    v1:unknown = GetGlobal iterable
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
     Jump block2
 block2:
-    v50:unknown = Phi [block1:v73:undefined, block3:v51:unknown]
-    v46:unknown = Phi [block1:v77:undefined, block3:v13:unknown]
-    v45:unknown = Phi [block1:v76:int32, block3:v12:unknown]
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v51:unknown = Phi [block1:v74:undefined, block3:v52:unknown]
+    v47:unknown = Phi [block1:v78:undefined, block3:v14:unknown]
+    v46:unknown = Phi [block1:v77:int32, block3:v13:unknown]
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v51:unknown = Phi [block8:v15:unknown, block14:v21:unknown, block18:v26:unknown]
-    v43:unknown = Phi [block8:v35:unknown, block14:v38:unknown, block18:v41:unknown]
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
+    v52:unknown = Phi [block8:v16:unknown, block14:v22:unknown, block18:v27:unknown]
+    v44:unknown = Phi [block8:v36:unknown, block14:v39:unknown, block18:v42:unknown]
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
     Jump block2
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v14:unknown
-    v15:unknown = GetById v14:unknown.done
-    Branch v15:unknown, block7, block8
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block4
 block8:
-    v17:unknown = GetById v14:unknown.value
-    v35:unknown = Yield v17:unknown, continuation: block3
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block3
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v19:unknown = GetMethod v3:unknown.throw
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetMethod v3:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v20:unknown
-    v21:unknown = GetById v20:unknown.done
-    Branch v21:unknown, block13, block14
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block4
 block14:
-    v24:unknown = GetById v20:unknown.value
-    v38:unknown = Yield v24:unknown, continuation: block3
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block3
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v25:unknown
-    v26:unknown = GetById v25:unknown.done
-    Branch v26:unknown, block17, block18
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
 block17:
-    v27:unknown = GetById v25:unknown.value
-    v40:unknown = Yield v27:unknown
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
 block18:
-    v28:unknown = GetById v25:unknown.value
-    v41:unknown = Yield v28:unknown, continuation: block3
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block3
 
 === After SsaDestructionPass ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    ParallelCopy [v50:unknown <- v73:undefined, v46:unknown <- v77:undefined, v45:unknown <- v76:int32]
+    v1:unknown = GetGlobal iterable
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    ParallelCopy [v50:unknown <- v51:unknown, v46:unknown <- v13:unknown, v45:unknown <- v12:unknown]
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    ParallelCopy [v51:unknown <- v52:unknown, v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
     Jump block2
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v14:unknown
-    v15:unknown = GetById v14:unknown.done
-    Branch v15:unknown, block7, block8
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block4
 block8:
-    v17:unknown = GetById v14:unknown.value
-    v35:unknown = Yield v17:unknown, continuation: block41
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block41
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v19:unknown = GetMethod v3:unknown.throw
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetMethod v3:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v20:unknown
-    v21:unknown = GetById v20:unknown.done
-    Branch v21:unknown, block13, block14
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block4
 block14:
-    v24:unknown = GetById v20:unknown.value
-    v38:unknown = Yield v24:unknown, continuation: block40
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block40
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v25:unknown
-    v26:unknown = GetById v25:unknown.done
-    Branch v26:unknown, block17, block18
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
 block17:
-    v27:unknown = GetById v25:unknown.value
-    v40:unknown = Yield v27:unknown
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
 block18:
-    v28:unknown = GetById v25:unknown.value
-    v41:unknown = Yield v28:unknown, continuation: block42
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block42
 pcopy_block14_block3:
-    ParallelCopy [v51:unknown <- v21:unknown, v43:unknown <- v38:unknown]
+    ParallelCopy [v52:unknown <- v22:unknown, v44:unknown <- v39:unknown]
     Jump block3
 pcopy_block8_block3:
-    ParallelCopy [v51:unknown <- v15:unknown, v43:unknown <- v35:unknown]
+    ParallelCopy [v52:unknown <- v16:unknown, v44:unknown <- v36:unknown]
     Jump block3
 pcopy_block18_block3:
-    ParallelCopy [v51:unknown <- v26:unknown, v43:unknown <- v41:unknown]
+    ParallelCopy [v52:unknown <- v27:unknown, v44:unknown <- v42:unknown]
     Jump block3
 
 === After CopyCoalescing ===
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    ParallelCopy [v50:unknown <- v73:undefined, v46:unknown <- v77:undefined, v45:unknown <- v76:int32]
+    v1:unknown = GetGlobal iterable
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    ParallelCopy [v46:unknown <- v13:unknown, v45:unknown <- v12:unknown]
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    ParallelCopy [v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
     Jump block2
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v14:unknown
-    v15:unknown = GetById v14:unknown.done
-    Branch v15:unknown, block7, block8
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block4
 block8:
-    v17:unknown = GetById v14:unknown.value
-    v35:unknown = Yield v17:unknown, continuation: block41
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block41
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v19:unknown = GetMethod v3:unknown.throw
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetMethod v3:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v20:unknown
-    v21:unknown = GetById v20:unknown.done
-    Branch v21:unknown, block13, block14
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block4
 block14:
-    v24:unknown = GetById v20:unknown.value
-    v38:unknown = Yield v24:unknown, continuation: block40
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block40
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v25:unknown
-    v26:unknown = GetById v25:unknown.done
-    Branch v26:unknown, block17, block18
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
 block17:
-    v27:unknown = GetById v25:unknown.value
-    v40:unknown = Yield v27:unknown
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
 block18:
-    v28:unknown = GetById v25:unknown.value
-    v41:unknown = Yield v28:unknown, continuation: block42
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block42
 pcopy_block14_block3:
-    ParallelCopy [v43:unknown <- v38:unknown]
+    ParallelCopy [v44:unknown <- v39:unknown]
     Jump block3
 pcopy_block8_block3:
-    ParallelCopy [v43:unknown <- v35:unknown]
+    ParallelCopy [v44:unknown <- v36:unknown]
     Jump block3
 pcopy_block18_block3:
-    ParallelCopy [v43:unknown <- v41:unknown]
+    ParallelCopy [v44:unknown <- v42:unknown]
     Jump block3
 
 function():
 block0:
-    v30:unknown = Yield undefined, continuation: block1
+    v0:unknown = GetLexicalEnvironment
+    v31:unknown = Yield undefined, continuation: block1
 block1:
-    v0:unknown = GetGlobal iterable
-    v1:unknown = GetIterator v0:unknown
-    v2:unknown = ExtractValue v1:unknown, 0
-    v3:unknown = ExtractValue v1:unknown, 1
-    ParallelCopy [v50:unknown <- v73:undefined, v46:unknown <- v77:undefined, v45:unknown <- v76:int32]
+    v1:unknown = GetGlobal iterable
+    v2:unknown = GetIterator v1:unknown
+    v3:unknown = ExtractValue v2:unknown, 0
+    v4:unknown = ExtractValue v2:unknown, 1
+    ParallelCopy [v51:unknown <- v74:undefined, v47:unknown <- v78:undefined, v46:unknown <- v77:int32]
     Jump block2
 block2:
-    v31:boolean = StrictlyEquals v45:unknown, 1
-    Branch v31:boolean, block5, block6
+    v32:boolean = StrictlyEquals v46:unknown, 1
+    Branch v32:boolean, block5, block6
 block3:
-    v11:unknown = GetCompletionFields v43:unknown
-    v12:unknown = ExtractValue v11:unknown, 0
-    v13:unknown = ExtractValue v11:unknown, 1
-    ParallelCopy [v46:unknown <- v13:unknown, v45:unknown <- v12:unknown]
+    v12:unknown = GetCompletionFields v44:unknown
+    v13:unknown = ExtractValue v12:unknown, 0
+    v14:unknown = ExtractValue v12:unknown, 1
+    ParallelCopy [v47:unknown <- v14:unknown, v46:unknown <- v13:unknown]
     Jump block2
 block4:
-    v32:unknown = Yield undefined
+    v33:unknown = Yield undefined
 block5:
-    v14:unknown = Call v3:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v14:unknown
-    v15:unknown = GetById v14:unknown.done
-    Branch v15:unknown, block7, block8
+    v15:unknown = Call v4:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v15:unknown
+    v16:unknown = GetById v15:unknown.done
+    Branch v16:unknown, block7, block8
 block6:
-    v34:boolean = StrictlyEquals v45:unknown, 5
-    Branch v34:boolean, block9, block10
+    v35:boolean = StrictlyEquals v46:unknown, 5
+    Branch v35:boolean, block9, block10
 block7:
-    v16:unknown = GetById v14:unknown.value
+    v17:unknown = GetById v15:unknown.value
     Jump block4
 block8:
-    v17:unknown = GetById v14:unknown.value
-    v35:unknown = Yield v17:unknown, continuation: block41
+    v18:unknown = GetById v15:unknown.value
+    v36:unknown = Yield v18:unknown, continuation: block41
 block9:
-    v18:unknown = GetMethod v2:unknown.throw
-    v36:boolean = IsUndefined v18:unknown
-    Branch v36:boolean, block12, block11
-block10:
-    v19:unknown = GetMethod v2:unknown.return
+    v19:unknown = GetMethod v3:unknown.throw
     v37:boolean = IsUndefined v19:unknown
-    Branch v37:boolean, block15, block16
+    Branch v37:boolean, block12, block11
+block10:
+    v20:unknown = GetMethod v3:unknown.return
+    v38:boolean = IsUndefined v20:unknown
+    Branch v38:boolean, block15, block16
 block11:
-    v20:unknown = Call v18:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v20:unknown
-    v21:unknown = GetById v20:unknown.done
-    Branch v21:unknown, block13, block14
+    v21:unknown = Call v19:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v21:unknown
+    v22:unknown = GetById v21:unknown.done
+    Branch v22:unknown, block13, block14
 block12:
-    IteratorClose v2:unknown, v3:unknown, v50:unknown
-    v22:unknown = NewTypeError
-    Throw v22:unknown
+    IteratorClose v3:unknown, v4:unknown, v51:unknown
+    v23:unknown = NewTypeError
+    Throw v23:unknown
 block13:
-    v23:unknown = GetById v20:unknown.value
+    v24:unknown = GetById v21:unknown.value
     Jump block4
 block14:
-    v24:unknown = GetById v20:unknown.value
-    v38:unknown = Yield v24:unknown, continuation: block40
+    v25:unknown = GetById v21:unknown.value
+    v39:unknown = Yield v25:unknown, continuation: block40
 block15:
-    v39:unknown = Yield v46:unknown
+    v40:unknown = Yield v47:unknown
 block16:
-    v25:unknown = Call v19:unknown, v2:unknown, v46:unknown
-    ThrowIfNotObject v25:unknown
-    v26:unknown = GetById v25:unknown.done
-    Branch v26:unknown, block17, block18
+    v26:unknown = Call v20:unknown, v3:unknown, v47:unknown
+    ThrowIfNotObject v26:unknown
+    v27:unknown = GetById v26:unknown.done
+    Branch v27:unknown, block17, block18
 block17:
-    v27:unknown = GetById v25:unknown.value
-    v40:unknown = Yield v27:unknown
+    v28:unknown = GetById v26:unknown.value
+    v41:unknown = Yield v28:unknown
 block18:
-    v28:unknown = GetById v25:unknown.value
-    v41:unknown = Yield v28:unknown, continuation: block42
+    v29:unknown = GetById v26:unknown.value
+    v42:unknown = Yield v29:unknown, continuation: block42
 pcopy_block14_block3:
-    ParallelCopy [v43:unknown <- v38:unknown]
+    ParallelCopy [v44:unknown <- v39:unknown]
     Jump block3
 pcopy_block8_block3:
-    ParallelCopy [v43:unknown <- v35:unknown]
+    ParallelCopy [v44:unknown <- v36:unknown]
     Jump block3
 pcopy_block18_block3:
-    ParallelCopy [v43:unknown <- v41:unknown]
+    ParallelCopy [v44:unknown <- v42:unknown]
     Jump block3
 
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = GetGlobal iterable
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal iterable
     Jump block1
 block0_split0:
-    Return v0:unknown
+    Return v1:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = GetGlobal iterable
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal iterable
     Jump block1
 block0_split0:
-    Return v0:unknown
+    Return v1:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = GetGlobal iterable
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal iterable
     Jump block1
 block0_split0:
-    Return v0:unknown
+    Return v1:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = GetGlobal iterable
-    Return v0:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal iterable
+    Return v1:unknown
 
 function():
 block0:
-    v0:unknown = GetGlobal iterable
-    Return v0:unknown
-
-=== After SSAConstruction ===
-function():
-block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, false
-    CacheObjectShape v0:object
-    Return v0:object
-
-=== After SCCP ===
-function():
-block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, false
-    CacheObjectShape v0:object
-    Return v0:object
-
-=== Before optimization ===
-function():
-block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, false
-    CacheObjectShape v0:object
-    Return v0:object
-
-function():
-block0:
-    v0:object = NewObject
-    InitObjectLiteralProperty v0:object, 1
-    InitObjectLiteralProperty v0:object, false
-    CacheObjectShape v0:object
-    Return v0:object
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal iterable
+    Return v1:unknown
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, false
+    CacheObjectShape v1:object
+    Return v1:object
+
+=== After SCCP ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, false
+    CacheObjectShape v1:object
+    Return v1:object
+
+=== Before optimization ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, false
+    CacheObjectShape v1:object
+    Return v1:object
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:object = NewObject
+    InitObjectLiteralProperty v1:object, 1
+    InitObjectLiteralProperty v1:object, false
+    CacheObjectShape v1:object
+    Return v1:object
+
+=== After SSAConstruction ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
     Return null
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return null
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return null
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     Return null

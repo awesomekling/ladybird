@@ -91,6 +91,7 @@ Value& Builder::build_is_undefined(Value& operand) { return build_unary_op(Opcod
 Value& Builder::build_is_nullish(Value& operand) { return build_unary_op(Opcode::IsNullish, operand); }
 Value& Builder::build_is_callable(Value& operand) { return build_unary_op(Opcode::IsCallable, operand); }
 Value& Builder::build_is_constructor(Value& operand) { return build_unary_op(Opcode::IsConstructor, operand); }
+Value& Builder::build_to_primitive_with_string_hint(Value& operand) { return build_unary_op(Opcode::ToPrimitiveWithStringHint, operand); }
 
 // Increment/Decrement
 Value& Builder::build_increment(Value& operand) { return build_unary_op(Opcode::Increment, operand); }
@@ -512,9 +513,10 @@ void Builder::build_create_variable(Bytecode::IdentifierTableIndex identifier, B
     current_block().append(move(instruction));
 }
 
-Value& Builder::build_create_lexical_environment(u32 capacity)
+Value& Builder::build_create_lexical_environment(Value& parent, u32 capacity)
 {
     auto instruction = Instruction::create<Opcode::CreateLexicalEnvironment>();
+    instruction->add_operand(&parent);
     instruction->set_capacity(capacity);
     return emit_with_result(move(instruction));
 }
@@ -537,9 +539,16 @@ void Builder::build_create_immutable_binding(Value& environment, Bytecode::Ident
     current_block().append(move(instruction));
 }
 
-void Builder::build_leave_lexical_environment()
+Value& Builder::build_get_lexical_environment()
 {
-    auto instruction = Instruction::create<Opcode::LeaveLexicalEnvironment>();
+    auto instruction = Instruction::create<Opcode::GetLexicalEnvironment>();
+    return emit_with_result(move(instruction));
+}
+
+void Builder::build_set_lexical_environment(Value& environment)
+{
+    auto instruction = Instruction::create<Opcode::SetLexicalEnvironment>();
+    instruction->add_operand(&environment);
     current_block().append(move(instruction));
 }
 
@@ -569,11 +578,11 @@ void Builder::build_create_variable_environment(u32 capacity)
     current_block().append(move(instruction));
 }
 
-void Builder::build_enter_object_environment(Value& object)
+Value& Builder::build_enter_object_environment(Value& object)
 {
     auto instruction = Instruction::create<Opcode::EnterObjectEnvironment>();
     instruction->add_operand(&object);
-    current_block().append(move(instruction));
+    return emit_with_result(move(instruction));
 }
 
 void Builder::build_resolve_this_binding()
@@ -672,10 +681,11 @@ void Builder::build_array_append(Value& array, Value& value, bool is_spread)
     current_block().append(move(instruction));
 }
 
-Value& Builder::build_new_class(Value* super_class, Span<Value*> element_keys)
+Value& Builder::build_new_class(Value* super_class, Value& class_environment, Span<Value*> element_keys)
 {
     auto instruction = Instruction::create<Opcode::NewClass>();
     instruction->add_operand(super_class);
+    instruction->add_operand(&class_environment);
     for (auto* key : element_keys)
         instruction->add_operand(key);
     return emit_with_result(move(instruction));
@@ -774,56 +784,6 @@ Value& Builder::build_catch()
     return emit_with_result(Instruction::create<Opcode::Catch>());
 }
 
-void Builder::build_enter_unwind_context(BasicBlock& entry_point)
-{
-    auto& block = current_block();
-    auto instruction = JumpInstruction::create_enter_unwind_context(entry_point);
-    CFG::add_predecessor(entry_point, block);
-    block.append(move(instruction));
-}
-
-void Builder::build_leave_unwind_context()
-{
-    auto instruction = Instruction::create<Opcode::LeaveUnwindContext>();
-    current_block().append(move(instruction));
-}
-
-void Builder::build_schedule_jump(BasicBlock& finalizer, BasicBlock& deferred_target)
-{
-    auto& block = current_block();
-    auto instruction = TerminatorInstruction::create<Opcode::ScheduleJump>();
-    instruction->set_true_target(&finalizer);
-    instruction->set_false_target(&deferred_target);
-    CFG::add_predecessor(finalizer, block);
-    block.append(move(instruction));
-}
-
-void Builder::build_leave_finally()
-{
-    auto instruction = Instruction::create<Opcode::LeaveFinally>();
-    current_block().append(move(instruction));
-}
-
-void Builder::build_restore_scheduled_jump()
-{
-    auto instruction = Instruction::create<Opcode::RestoreScheduledJump>();
-    current_block().append(move(instruction));
-}
-
-void Builder::build_set_saved_return_value(Value& value)
-{
-    auto instruction = Instruction::create<Opcode::SetSavedReturnValue>();
-    instruction->add_operand(&value);
-    current_block().append(move(instruction));
-}
-
-void Builder::build_prepare_yield(Value& value)
-{
-    auto instruction = Instruction::create<Opcode::PrepareYield>();
-    instruction->add_operand(&value);
-    current_block().append(move(instruction));
-}
-
 Value& Builder::build_get_exception()
 {
     return emit_with_result(Instruction::create<Opcode::GetException>());
@@ -855,6 +815,12 @@ void Builder::build_throw_if_tdz(Value& value)
 {
     auto instruction = Instruction::create<Opcode::ThrowIfTDZ>();
     instruction->add_operand(&value);
+    current_block().append(move(instruction));
+}
+
+void Builder::build_throw_const_assignment()
+{
+    auto instruction = Instruction::create<Opcode::ThrowConstAssignment>();
     current_block().append(move(instruction));
 }
 
@@ -931,14 +897,6 @@ void Builder::build_jump(BasicBlock& to)
     auto& block = current_block();
     auto instruction = JumpInstruction::create(to);
     CFG::add_predecessor(to, block);
-    block.append(move(instruction));
-}
-
-void Builder::build_continue_pending_unwind(BasicBlock& resume_target)
-{
-    auto& block = current_block();
-    auto instruction = JumpInstruction::create_continue_pending_unwind(resume_target);
-    CFG::add_predecessor(resume_target, block);
     block.append(move(instruction));
 }
 

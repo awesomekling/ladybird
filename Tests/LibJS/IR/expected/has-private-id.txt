@@ -1,185 +1,204 @@
 === After SSAConstruction ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     CreatePrivateEnvironment
     AddPrivateName
-    v2:function = NewClass null, null, v1:string
+    SetLexicalEnvironment v0:unknown
+    v3:function = NewClass null, v1:unknown, null, v2:string
     Jump block2
 block0_split1:
     LeavePrivateEnvironment
-    InitializeBinding Foo v2:function
+    InitializeBinding Foo v3:function
     Jump block3
 block0_split2:
-    v3:unknown = GetGlobal Foo
+    v4:unknown = GetGlobal Foo
     Jump block4
 block0_split3:
-    v4:unknown = GetById v3:unknown.check
+    v5:unknown = GetById v4:unknown.check
     Jump block5
 block0_split4:
-    v5:unknown = GetGlobal Foo
+    v6:unknown = GetGlobal Foo
     Jump block6
 block0_split5:
-    v6:object = Construct v5:unknown
+    v7:object = Construct v6:unknown
     Jump block7
 block0_split6:
-    v7:unknown = Call v4:unknown, v3:unknown, v6:object
+    v8:unknown = Call v5:unknown, v4:unknown, v7:object
     Jump block8
 block0_split7:
-    End v7:unknown
+    End v8:unknown
 
 === After SCCP ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     CreatePrivateEnvironment
     AddPrivateName
-    v2:function = NewClass null, null, v1:string
+    SetLexicalEnvironment v0:unknown
+    v3:function = NewClass null, v1:unknown, null, v2:string
     Jump block2
 block0_split1:
     LeavePrivateEnvironment
-    InitializeBinding Foo v2:function
+    InitializeBinding Foo v3:function
     Jump block3
 block0_split2:
-    v3:unknown = GetGlobal Foo
+    v4:unknown = GetGlobal Foo
     Jump block4
 block0_split3:
-    v4:unknown = GetById v3:unknown.check
+    v5:unknown = GetById v4:unknown.check
     Jump block5
 block0_split4:
-    v5:unknown = GetGlobal Foo
+    v6:unknown = GetGlobal Foo
     Jump block6
 block0_split5:
-    v6:object = Construct v5:unknown
+    v7:object = Construct v6:unknown
     Jump block7
 block0_split6:
-    v7:unknown = Call v4:unknown, v3:unknown, v6:object
+    v8:unknown = Call v5:unknown, v4:unknown, v7:object
     Jump block8
 block0_split7:
-    End v7:unknown
+    End v8:unknown
 
 === Before optimization ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     Jump block1
 block0_split0:
     CreatePrivateEnvironment
     AddPrivateName
-    v2:function = NewClass null, null, v1:string
+    SetLexicalEnvironment v0:unknown
+    v3:function = NewClass null, v1:unknown, null, v2:string
     Jump block2
 block0_split1:
     LeavePrivateEnvironment
-    InitializeBinding Foo v2:function
+    InitializeBinding Foo v3:function
     Jump block3
 block0_split2:
-    v3:unknown = GetGlobal Foo
+    v4:unknown = GetGlobal Foo
     Jump block4
 block0_split3:
-    v4:unknown = GetById v3:unknown.check
+    v5:unknown = GetById v4:unknown.check
     Jump block5
 block0_split4:
-    v5:unknown = GetGlobal Foo
+    v6:unknown = GetGlobal Foo
     Jump block6
 block0_split5:
-    v6:object = Construct v5:unknown
+    v7:object = Construct v6:unknown
     Jump block7
 block0_split6:
-    v7:unknown = Call v4:unknown, v3:unknown, v6:object
+    v8:unknown = Call v5:unknown, v4:unknown, v7:object
     Jump block8
 block0_split7:
-    End v7:unknown
+    End v8:unknown
 
 === After SimplifyCFG ===
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     CreatePrivateEnvironment
     AddPrivateName
-    v2:function = NewClass null, null, v1:string
+    SetLexicalEnvironment v0:unknown
+    v3:function = NewClass null, v1:unknown, null, v2:string
     LeavePrivateEnvironment
-    InitializeBinding Foo v2:function
-    v3:unknown = GetGlobal Foo
-    v4:unknown = GetById v3:unknown.check
-    v5:unknown = GetGlobal Foo
-    v6:object = Construct v5:unknown
-    v7:unknown = Call v4:unknown, v3:unknown, v6:object
-    End v7:unknown
+    InitializeBinding Foo v3:function
+    v4:unknown = GetGlobal Foo
+    v5:unknown = GetById v4:unknown.check
+    v6:unknown = GetGlobal Foo
+    v7:object = Construct v6:unknown
+    v8:unknown = Call v5:unknown, v4:unknown, v7:object
+    End v8:unknown
 
 function():
 block0:
-    v0:unknown = CreateLexicalEnvironment
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = CreateLexicalEnvironment v0:unknown
     CreateVariable
     CreatePrivateEnvironment
     AddPrivateName
-    v2:function = NewClass null, null, v1:string
+    SetLexicalEnvironment v0:unknown
+    v3:function = NewClass null, v1:unknown, null, v2:string
     LeavePrivateEnvironment
-    InitializeBinding Foo v2:function
-    v3:unknown = GetGlobal Foo
-    v4:unknown = GetById v3:unknown.check
-    v5:unknown = GetGlobal Foo
-    v6:object = Construct v5:unknown
-    v7:unknown = Call v4:unknown, v3:unknown, v6:object
-    End v7:unknown
+    InitializeBinding Foo v3:function
+    v4:unknown = GetGlobal Foo
+    v5:unknown = GetById v4:unknown.check
+    v6:unknown = GetGlobal Foo
+    v7:object = Construct v6:unknown
+    v8:unknown = Call v5:unknown, v4:unknown, v7:object
+    End v8:unknown
 
 === After SSAConstruction ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === After SCCP ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === Before optimization ===
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 function():
 block0:
+    v0:unknown = GetLexicalEnvironment
     End undefined
 
 === After SSAConstruction ===
 function(v0:unknown):
 block0:
-    v1:boolean = HasPrivateId v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v2:boolean = HasPrivateId v0:unknown
     Jump block1
 block0_split0:
-    Return v1:boolean
+    Return v2:boolean
 
 === After SCCP ===
 function(v0:unknown):
 block0:
-    v1:boolean = HasPrivateId v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v2:boolean = HasPrivateId v0:unknown
     Jump block1
 block0_split0:
-    Return v1:boolean
+    Return v2:boolean
 
 === Before optimization ===
 function(v0:unknown):
 block0:
-    v1:boolean = HasPrivateId v0:unknown
+    v1:unknown = GetLexicalEnvironment
+    v2:boolean = HasPrivateId v0:unknown
     Jump block1
 block0_split0:
-    Return v1:boolean
+    Return v2:boolean
 
 === After SimplifyCFG ===
 function(v0:unknown):
 block0:
-    v1:boolean = HasPrivateId v0:unknown
-    Return v1:boolean
+    v1:unknown = GetLexicalEnvironment
+    v2:boolean = HasPrivateId v0:unknown
+    Return v2:boolean
 
 function(v0:unknown):
 block0:
-    v1:boolean = HasPrivateId v0:unknown
-    Return v1:boolean
+    v1:unknown = GetLexicalEnvironment
+    v2:boolean = HasPrivateId v0:unknown
+    Return v2:boolean

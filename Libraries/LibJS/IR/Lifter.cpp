@@ -115,19 +115,12 @@ void Lifter::lift_basic_blocks()
 
         // Get exception handlers for this bytecode block
         BasicBlock* exception_handler = nullptr;
-        BasicBlock* finalizer = nullptr;
         if (auto handlers = m_executable.exception_handlers_for_offset(start_offset); handlers.has_value()) {
-            if (handlers->handler_offset.has_value()) {
-                auto handler_block_index = address_to_block_index(handlers->handler_offset.value());
-                exception_handler = m_block_map.get(handler_block_index).value();
-            }
-            if (handlers->finalizer_offset.has_value()) {
-                auto finalizer_block_index = address_to_block_index(handlers->finalizer_offset.value());
-                finalizer = m_block_map.get(finalizer_block_index).value();
-            }
+            auto handler_block_index = address_to_block_index(handlers->handler_offset);
+            exception_handler = m_block_map.get(handler_block_index).value();
         }
         current_block->set_exception_handler(exception_handler ? Optional<BlockIndex>(exception_handler->index()) : Optional<BlockIndex>());
-        current_block->set_finalizer(finalizer ? Optional<BlockIndex>(finalizer->index()) : Optional<BlockIndex>());
+        current_block->set_finalizer({});
 
         auto bytecode_span = ReadonlyBytes { m_executable.bytecode.data() + start_offset, end_offset - start_offset };
         Bytecode::InstructionStreamIterator it(bytecode_span, &m_executable);
@@ -179,7 +172,7 @@ void Lifter::lift_basic_blocks()
 
                 // Continuation inherits exception handlers
                 continuation.set_exception_handler(exception_handler ? Optional<BlockIndex>(exception_handler->index()) : Optional<BlockIndex>());
-                continuation.set_finalizer(finalizer ? Optional<BlockIndex>(finalizer->index()) : Optional<BlockIndex>());
+                continuation.set_finalizer({});
 
                 // Emit fallthrough jump from current block to continuation
                 m_builder.set_insertion_block(current_block);
@@ -252,6 +245,17 @@ Value& Lifter::get_or_create_value_for_operand(Bytecode::Operand operand, BasicB
 void Lifter::define_operand(Bytecode::Operand operand, Value& value, BasicBlock& block)
 {
     auto raw = operand.raw();
+
+    // NB: Don't track definitions for constant operands. Constants are immutable
+    // and should always resolve to their actual constant value. Some bytecode
+    // instructions (e.g. ToPrimitiveWithStringHint) write back to their source
+    // operand, which may be a constant. Tracking that write would cause subsequent
+    // blocks on different control flow paths to see the stale result instead of
+    // the original constant.
+    auto decoded = m_executable.original_operand_from_raw(raw);
+    if (decoded.is_constant())
+        return;
+
     m_current_definitions.set(raw, &value);
     m_written_operands.set(raw);
     auto bi = to_index(block.index());
@@ -345,6 +349,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         LIFT_UNARY_VALUE(ToInt32, build_to_int32)
         LIFT_UNARY_VALUE(ToLength, build_to_length)
         LIFT_UNARY_VALUE(ToNumeric, build_to_numeric)
+        LIFT_UNARY_VALUE(ToPrimitiveWithStringHint, build_to_primitive_with_string_hint)
 #undef LIFT_UNARY_VALUE
     case TypeofBinding: {
         auto const& op = static_cast<Bytecode::Op::TypeofBinding const&>(instruction);
@@ -404,14 +409,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     // Move
     case Mov: {
         auto const& op = static_cast<Bytecode::Op::Mov const&>(instruction);
-        // Detect writes to special registers used by the unwind mechanism:
-        // - Mov to saved_return_value (register 1): emit SetSavedReturnValue
-        // - Mov to exception (register 2) with empty value: emit ClearException
-        if (op.dst().is_register() && op.dst().index() == Bytecode::Register::saved_return_value_index) {
-            auto& src = get_or_create_value_for_operand(op.src(), block);
-            m_builder.build_set_saved_return_value(src);
-            break;
-        }
+        // Detect writes to special registers:
+        // - Mov to exception register: emit SetException
+        // - Mov from exception register: emit GetException
         if (op.dst().is_register() && op.dst().index() == Bytecode::Register::exception_index) {
             // Mov to exception register: use SetException to write physical reg2.
             auto& src = get_or_create_value_for_operand(op.src(), block);
@@ -869,6 +869,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         Value* super_class = nullptr;
         if (op.super_class().has_value())
             super_class = &get_or_create_value_for_operand(op.super_class().value(), block);
+        auto& class_environment = get_or_create_value_for_operand(op.class_environment(), block);
         Vector<Value*> element_keys;
         for (size_t i = 0; i < op.element_keys_count(); ++i) {
             if (op.element_keys()[i].has_value())
@@ -876,7 +877,7 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
             else
                 element_keys.append(nullptr);
         }
-        auto& result = m_builder.build_new_class(super_class, element_keys.span());
+        auto& result = m_builder.build_new_class(super_class, class_environment, element_keys.span());
         result.defining_instruction()->set_class_expression(&op.class_expression());
         result.defining_instruction()->set_lhs_name(op.lhs_name());
         define_operand(op.dst(), result, block);
@@ -1089,9 +1090,9 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
     }
     case CreateLexicalEnvironment: {
         auto const& op = static_cast<Bytecode::Op::CreateLexicalEnvironment const&>(instruction);
-        auto& result = m_builder.build_create_lexical_environment(op.capacity());
-        if (op.dst().has_value())
-            define_operand(*op.dst(), result, block);
+        auto& parent = get_or_create_value_for_operand(op.parent(), block);
+        auto& result = m_builder.build_create_lexical_environment(parent, op.capacity());
+        define_operand(op.dst(), result, block);
         break;
     }
     case CreateMutableBinding: {
@@ -1106,13 +1107,23 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         m_builder.build_create_immutable_binding(env, op.identifier(), op.strict_binding());
         break;
     }
-    case LeaveLexicalEnvironment:
-        m_builder.build_leave_lexical_environment();
+    case GetLexicalEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::GetLexicalEnvironment const&>(instruction);
+        auto& result = m_builder.build_get_lexical_environment();
+        define_operand(op.dst(), result, block);
         break;
+    }
+    case SetLexicalEnvironment: {
+        auto const& op = static_cast<Bytecode::Op::SetLexicalEnvironment const&>(instruction);
+        auto& env = get_or_create_value_for_operand(op.environment(), block);
+        m_builder.build_set_lexical_environment(env);
+        break;
+    }
     case EnterObjectEnvironment: {
         auto const& op = static_cast<Bytecode::Op::EnterObjectEnvironment const&>(instruction);
         auto& object = get_or_create_value_for_operand(op.object(), block);
-        m_builder.build_enter_object_environment(object);
+        auto& result = m_builder.build_enter_object_environment(object);
+        define_operand(op.dst(), result, block);
         break;
     }
     case CreateVariableEnvironment: {
@@ -1134,21 +1145,6 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         define_operand(op.dst(), result, block);
         break;
     }
-    case LeaveUnwindContext:
-        m_builder.build_leave_unwind_context();
-        break;
-    case LeaveFinally:
-        m_builder.build_leave_finally();
-        break;
-    case RestoreScheduledJump:
-        m_builder.build_restore_scheduled_jump();
-        break;
-
-    // Terminators handled in connect_control_flow()
-    case EnterUnwindContext:
-    case ContinuePendingUnwind:
-    case ScheduleJump:
-        break;
 
     // Throw guard ops
     case ThrowIfNotObject: {
@@ -1167,6 +1163,10 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         auto const& op = static_cast<Bytecode::Op::ThrowIfTDZ const&>(instruction);
         auto& value = get_or_create_value_for_operand(op.src(), block);
         m_builder.build_throw_if_tdz(value);
+        break;
+    }
+    case ThrowConstAssignment: {
+        m_builder.build_throw_const_assignment();
         break;
     }
 
@@ -1280,12 +1280,6 @@ void Lifter::lift_instruction(Bytecode::Instruction const& instruction, BasicBlo
         // These are terminators that also define a result (the resume value)
         // They're handled in connect_control_flow() where we have block context
         break;
-    case PrepareYield: {
-        auto const& op = static_cast<Bytecode::Op::PrepareYield const&>(instruction);
-        auto& value = get_or_create_value_for_operand(op.value(), block);
-        m_builder.build_prepare_yield(value);
-        break;
-    }
     case CreateAsyncFromSyncIterator: {
         auto const& op = static_cast<Bytecode::Op::CreateAsyncFromSyncIterator const&>(instruction);
         auto& iterator = get_or_create_value_for_operand(op.iterator(), block);
@@ -1565,28 +1559,6 @@ void Lifter::connect_control_flow()
             break;
         }
 
-        case EnterUnwindContext: {
-            auto const& op = static_cast<Bytecode::Op::EnterUnwindContext const&>(*last_instruction);
-            auto* target = m_block_map.get(address_to_block_index(op.entry_point().address())).value();
-            m_builder.build_enter_unwind_context(*target);
-            break;
-        }
-        case ScheduleJump: {
-            auto const& op = static_cast<Bytecode::Op::ScheduleJump const&>(*last_instruction);
-            auto* deferred_target = m_block_map.get(address_to_block_index(op.target().address())).value();
-            auto handlers = m_executable.exception_handlers_for_offset(start_offset);
-            VERIFY(handlers.has_value() && handlers->finalizer_offset.has_value());
-            auto* finalizer = m_block_map.get(address_to_block_index(handlers->finalizer_offset.value())).value();
-            m_builder.build_schedule_jump(*finalizer, *deferred_target);
-            break;
-        }
-        case ContinuePendingUnwind: {
-            auto const& op = static_cast<Bytecode::Op::ContinuePendingUnwind const&>(*last_instruction);
-            auto* target = m_block_map.get(address_to_block_index(op.resume_target().address())).value();
-            m_builder.build_continue_pending_unwind(*target);
-            break;
-        }
-
         default:
             // If not terminated by a known terminator, fall through to next block
             if (block_index + 1 < m_executable.basic_block_start_offsets.size()) {
@@ -1636,13 +1608,7 @@ void Lifter::compute_block_predecessors()
             }
         }
 
-        // NB: ScheduleJump needs the finalizer annotation preserved because
-        //     the runtime handler finds the finalizer via exception_handlers_for_offset.
-        bool needs_eh_annotations = has_throwing_instr;
-        if (auto* term = block->terminator(); term && term->opcode() == Opcode::ScheduleJump)
-            needs_eh_annotations = true;
-
-        if (needs_eh_annotations) {
+        if (has_throwing_instr) {
             if (auto* handler = block->exception_handler())
                 CFG::add_predecessor(*handler, *block);
             if (auto* finalizer = block->finalizer())

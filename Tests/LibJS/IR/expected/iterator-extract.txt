@@ -1,215 +1,219 @@
 === After SSAConstruction ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     Jump block4
 block1:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block8
 block2:
-    v25:unknown = Phi [block7:v26:unknown, block13:v16:unknown]
-    v24:unknown = Phi [block7:v27:undefined, block13:v18:unknown]
-    v23:unknown = Phi [block7:v28:undefined, block13:v17:unknown]
-    v22:unknown = Phi [block7:v29:undefined, block13:v15:unknown]
-    v21:unknown = Phi [block7:v30:undefined, block13:v14:unknown]
-    v20:unknown = Phi [block7:v11:undefined, block13:v19:unknown]
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
+    v26:unknown = Phi [block7:v27:unknown, block13:v17:unknown]
+    v25:unknown = Phi [block7:v28:undefined, block13:v19:unknown]
+    v24:unknown = Phi [block7:v29:undefined, block13:v18:unknown]
+    v23:unknown = Phi [block7:v30:undefined, block13:v16:unknown]
+    v22:unknown = Phi [block7:v31:undefined, block13:v15:unknown]
+    v21:unknown = Phi [block7:v12:undefined, block13:v20:unknown]
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
     Jump block9
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
     Jump block10
 block0_split0:
     InitializeBinding sum 0
     Jump block5
 block0_split1:
-    v5:unknown = GetGlobal arr
+    v6:unknown = GetGlobal arr
     Jump block6
 block0_split2:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block7
 block0_split3:
-    v11:undefined = Move undefined
+    v12:undefined = Move undefined
     Jump block2
 block1_split4:
-    End v12:unknown
+    End v13:unknown
 block2_split5:
-    Branch v15:unknown, block1, block3
+    Branch v16:unknown, block1, block3
 block3_split6:
-    ThrowIfTDZ v16:unknown
+    ThrowIfTDZ v17:unknown
     Jump block11
 block3_split7:
-    v18:unknown = Add v17:unknown, v16:unknown
+    v19:unknown = Add v18:unknown, v17:unknown
     Jump block12
 block3_split8:
-    SetGlobal sum v18:unknown
+    SetGlobal sum v19:unknown
     Jump block13
 block3_split9:
-    v19:unknown = Move v18:unknown
+    v20:unknown = Move v19:unknown
     Jump block2
 
 === After SCCP ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     Jump block4
 block1:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block8
 block2:
-    v25:unknown = Phi [block7:v26:unknown, block13:v16:unknown]
-    v24:unknown = Phi [block7:v27:undefined, block13:v18:unknown]
-    v23:unknown = Phi [block7:v28:undefined, block13:v17:unknown]
-    v22:unknown = Phi [block7:v29:undefined, block13:v15:unknown]
-    v21:unknown = Phi [block7:v30:undefined, block13:v14:unknown]
-    v20:unknown = Phi [block7:v31:undefined, block13:v19:unknown]
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
+    v26:unknown = Phi [block7:v27:unknown, block13:v17:unknown]
+    v25:unknown = Phi [block7:v28:undefined, block13:v19:unknown]
+    v24:unknown = Phi [block7:v29:undefined, block13:v18:unknown]
+    v23:unknown = Phi [block7:v30:undefined, block13:v16:unknown]
+    v22:unknown = Phi [block7:v31:undefined, block13:v15:unknown]
+    v21:unknown = Phi [block7:v32:undefined, block13:v20:unknown]
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
     Jump block9
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
     Jump block10
 block0_split0:
     InitializeBinding sum 0
     Jump block5
 block0_split1:
-    v5:unknown = GetGlobal arr
+    v6:unknown = GetGlobal arr
     Jump block6
 block0_split2:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block7
 block0_split3:
-    v11:undefined = Move undefined
+    v12:undefined = Move undefined
     Jump block2
 block1_split4:
-    End v12:unknown
+    End v13:unknown
 block2_split5:
-    Branch v15:unknown, block1, block3
+    Branch v16:unknown, block1, block3
 block3_split6:
-    ThrowIfTDZ v16:unknown
+    ThrowIfTDZ v17:unknown
     Jump block11
 block3_split7:
-    v18:unknown = Add v17:unknown, v16:unknown
+    v19:unknown = Add v18:unknown, v17:unknown
     Jump block12
 block3_split8:
-    SetGlobal sum v18:unknown
+    SetGlobal sum v19:unknown
     Jump block13
 block3_split9:
-    v19:unknown = Move v18:unknown
+    v20:unknown = Move v19:unknown
     Jump block2
 
 === Before optimization ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     Jump block4
 block1:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block8
 block2:
-    v25:unknown = Phi [block7:v26:unknown, block13:v16:unknown]
-    v24:unknown = Phi [block7:v27:undefined, block13:v18:unknown]
-    v23:unknown = Phi [block7:v28:undefined, block13:v17:unknown]
-    v22:unknown = Phi [block7:v29:undefined, block13:v15:unknown]
-    v21:unknown = Phi [block7:v30:undefined, block13:v14:unknown]
-    v20:unknown = Phi [block7:v31:undefined, block13:v19:unknown]
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
+    v26:unknown = Phi [block7:v27:unknown, block13:v17:unknown]
+    v25:unknown = Phi [block7:v28:undefined, block13:v19:unknown]
+    v24:unknown = Phi [block7:v29:undefined, block13:v18:unknown]
+    v23:unknown = Phi [block7:v30:undefined, block13:v16:unknown]
+    v22:unknown = Phi [block7:v31:undefined, block13:v15:unknown]
+    v21:unknown = Phi [block7:v32:undefined, block13:v20:unknown]
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
     Jump block9
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
     Jump block10
 block0_split0:
     InitializeBinding sum 0
     Jump block5
 block0_split1:
-    v5:unknown = GetGlobal arr
+    v6:unknown = GetGlobal arr
     Jump block6
 block0_split2:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block7
 block0_split3:
-    v11:undefined = Move undefined
+    v12:undefined = Move undefined
     Jump block2
 block1_split4:
-    End v12:unknown
+    End v13:unknown
 block2_split5:
-    Branch v15:unknown, block1, block3
+    Branch v16:unknown, block1, block3
 block3_split6:
-    ThrowIfTDZ v16:unknown
+    ThrowIfTDZ v17:unknown
     Jump block11
 block3_split7:
-    v18:unknown = Add v17:unknown, v16:unknown
+    v19:unknown = Add v18:unknown, v17:unknown
     Jump block12
 block3_split8:
-    SetGlobal sum v18:unknown
+    SetGlobal sum v19:unknown
     Jump block13
 block3_split9:
-    v19:unknown = Move v18:unknown
+    v20:unknown = Move v19:unknown
     Jump block2
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     Jump block4
 block1:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block8
 block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
     Jump block9
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
     Jump block10
 block0_split0:
     InitializeBinding sum 0
     Jump block5
 block0_split1:
-    v5:unknown = GetGlobal arr
+    v6:unknown = GetGlobal arr
     Jump block6
 block0_split2:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block7
 block0_split3:
     Jump block2
 block1_split4:
-    End v12:unknown
+    End v13:unknown
 block2_split5:
-    Branch v15:unknown, block1, block3
+    Branch v16:unknown, block1, block3
 block3_split6:
-    ThrowIfTDZ v16:unknown
+    ThrowIfTDZ v17:unknown
     Jump block11
 block3_split7:
-    v18:unknown = Add v17:unknown, v16:unknown
+    v19:unknown = Add v18:unknown, v17:unknown
     Jump block12
 block3_split8:
-    SetGlobal sum v18:unknown
+    SetGlobal sum v19:unknown
     Jump block13
 block3_split9:
     Jump block2
@@ -217,47 +221,48 @@ block3_split9:
 === After CopyPropagation ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     Jump block4
 block1:
-    v12:unknown = GetGlobal sum
+    v13:unknown = GetGlobal sum
     Jump block8
 block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
     Jump block9
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
     Jump block10
 block0_split0:
     InitializeBinding sum 0
     Jump block5
 block0_split1:
-    v5:unknown = GetGlobal arr
+    v6:unknown = GetGlobal arr
     Jump block6
 block0_split2:
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block7
 block0_split3:
     Jump block2
 block1_split4:
-    End v12:unknown
+    End v13:unknown
 block2_split5:
-    Branch v15:unknown, block1, block3
+    Branch v16:unknown, block1, block3
 block3_split6:
-    ThrowIfTDZ v14:unknown
+    ThrowIfTDZ v15:unknown
     Jump block11
 block3_split7:
-    v18:unknown = Add v17:unknown, v14:unknown
+    v19:unknown = Add v18:unknown, v15:unknown
     Jump block12
 block3_split8:
-    SetGlobal sum v18:unknown
+    SetGlobal sum v19:unknown
     Jump block13
 block3_split9:
     Jump block2
@@ -265,80 +270,83 @@ block3_split9:
 === After SimplifyCFG ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     InitializeBinding sum 0
-    v5:unknown = GetGlobal arr
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v6:unknown = GetGlobal arr
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block2
 block1:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Branch v15:unknown, block1, block3
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
+    Branch v16:unknown, block1, block3
 block3:
-    v16:unknown = Move v14:unknown
-    v17:unknown = GetGlobal sum
-    ThrowIfTDZ v14:unknown
-    v18:unknown = Add v17:unknown, v14:unknown
-    SetGlobal sum v18:unknown
+    v17:unknown = Move v15:unknown
+    v18:unknown = GetGlobal sum
+    ThrowIfTDZ v15:unknown
+    v19:unknown = Add v18:unknown, v15:unknown
+    SetGlobal sum v19:unknown
     Jump block2
 
 === After DeadCodeElimination ===
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     InitializeBinding sum 0
-    v5:unknown = GetGlobal arr
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v6:unknown = GetGlobal arr
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block2
 block1:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Branch v15:unknown, block1, block3
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
+    Branch v16:unknown, block1, block3
 block3:
-    v17:unknown = GetGlobal sum
-    ThrowIfTDZ v14:unknown
-    v18:unknown = Add v17:unknown, v14:unknown
-    SetGlobal sum v18:unknown
+    v18:unknown = GetGlobal sum
+    ThrowIfTDZ v15:unknown
+    v19:unknown = Add v18:unknown, v15:unknown
+    SetGlobal sum v19:unknown
     Jump block2
 
 function():
 block0:
-    v3:array = NewArray 1, 2, 3
-    InitializeBinding arr v3:array
+    v0:unknown = GetLexicalEnvironment
+    v4:array = NewArray 1, 2, 3
+    InitializeBinding arr v4:array
     InitializeBinding sum 0
-    v5:unknown = GetGlobal arr
-    v6:unknown = GetIterator v5:unknown
-    v7:unknown = ExtractValue v6:unknown, 0
-    v8:unknown = ExtractValue v6:unknown, 1
-    v9:unknown = ExtractValue v6:unknown, 2
+    v6:unknown = GetGlobal arr
+    v7:unknown = GetIterator v6:unknown
+    v8:unknown = ExtractValue v7:unknown, 0
+    v9:unknown = ExtractValue v7:unknown, 1
+    v10:unknown = ExtractValue v7:unknown, 2
     Jump block2
 block1:
-    v12:unknown = GetGlobal sum
-    End v12:unknown
+    v13:unknown = GetGlobal sum
+    End v13:unknown
 block2:
-    v13:unknown = IteratorNextUnpack v7:unknown, v8:unknown, v9:unknown
-    v14:unknown = ExtractValue v13:unknown, 0
-    v15:unknown = ExtractValue v13:unknown, 1
-    Branch v15:unknown, block1, block3
+    v14:unknown = IteratorNextUnpack v8:unknown, v9:unknown, v10:unknown
+    v15:unknown = ExtractValue v14:unknown, 0
+    v16:unknown = ExtractValue v14:unknown, 1
+    Branch v16:unknown, block1, block3
 block3:
-    v17:unknown = GetGlobal sum
-    ThrowIfTDZ v14:unknown
-    v18:unknown = Add v17:unknown, v14:unknown
-    SetGlobal sum v18:unknown
+    v18:unknown = GetGlobal sum
+    ThrowIfTDZ v15:unknown
+    v19:unknown = Add v18:unknown, v15:unknown
+    SetGlobal sum v19:unknown
     Jump block2
