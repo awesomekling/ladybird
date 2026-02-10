@@ -13,6 +13,7 @@
 #include <AK/Vector.h>
 #include <LibJS/AST.h>
 #include <LibJS/ASTFactory.h>
+#include <LibJS/Runtime/ModuleRequest.h>
 #include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/SourceCode.h>
 #include <LibJS/SourceRange.h>
@@ -1402,6 +1403,216 @@ bool ast_is_array_expression(ASTNodeHandle handle)
 bool ast_is_call_expression(ASTNodeHandle handle)
 {
     return is<CallExpression>(*static_cast<ASTNode const*>(handle));
+}
+
+ASTNodeHandle ast_create_import_statement(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    u16 const* module_specifier, size_t module_specifier_len,
+    FFIImportEntry const* entries, size_t entry_count)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+
+    auto specifier_view = make_utf16_view(module_specifier, module_specifier_len);
+    ModuleRequest module_request { Utf16FlyString::from_utf16(specifier_view) };
+
+    Vector<ImportEntry> import_entries;
+    import_entries.ensure_capacity(entry_count);
+    for (size_t i = 0; i < entry_count; ++i) {
+        auto const& e = entries[i];
+        auto local_name = Utf16FlyString::from_utf16(make_utf16_view(e.local_name, e.local_name_len));
+        if (e.import_name_len == SIZE_MAX) {
+            // Namespace import (no import_name).
+            import_entries.unchecked_append(ImportEntry({}, move(local_name)));
+        } else {
+            auto import_name = Utf16FlyString::from_utf16(make_utf16_view(e.import_name, e.import_name_len));
+            import_entries.unchecked_append(ImportEntry(move(import_name), move(local_name)));
+        }
+    }
+
+    return arena_add(arena, create_ast_node<ImportStatement>(range, move(module_request), move(import_entries)));
+}
+
+ASTNodeHandle ast_create_export_statement(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle statement_or_null,
+    FFIExportEntry const* entries, size_t entry_count,
+    bool is_default,
+    u16 const* from_specifier, size_t from_specifier_len)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+
+    Vector<ExportEntry> export_entries;
+    export_entries.ensure_capacity(entry_count);
+    for (size_t i = 0; i < entry_count; ++i) {
+        auto const& e = entries[i];
+        Optional<Utf16FlyString> export_name;
+        if (e.export_name_len != SIZE_MAX)
+            export_name = Utf16FlyString::from_utf16(make_utf16_view(e.export_name, e.export_name_len));
+        Optional<Utf16FlyString> local_or_import_name;
+        if (e.local_or_import_name_len != SIZE_MAX)
+            local_or_import_name = Utf16FlyString::from_utf16(make_utf16_view(e.local_or_import_name, e.local_or_import_name_len));
+
+        ExportEntry::Kind kind;
+        switch (e.kind) {
+        case 0:
+            kind = ExportEntry::Kind::NamedExport;
+            break;
+        case 1:
+            kind = ExportEntry::Kind::ModuleRequestAll;
+            break;
+        case 2:
+            kind = ExportEntry::Kind::ModuleRequestAllButDefault;
+            break;
+        case 3:
+            kind = ExportEntry::Kind::EmptyNamedExport;
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+        export_entries.unchecked_append(ExportEntry(kind, move(export_name), move(local_or_import_name)));
+    }
+
+    RefPtr<ASTNode const> statement;
+    if (statement_or_null)
+        statement = as_ref<ASTNode>(statement_or_null);
+
+    Optional<ModuleRequest> module_request;
+    if (from_specifier_len != SIZE_MAX) {
+        auto specifier_view = make_utf16_view(from_specifier, from_specifier_len);
+        module_request = ModuleRequest { Utf16FlyString::from_utf16(specifier_view) };
+    }
+
+    return arena_add(arena, create_ast_node<ExportStatement>(range, move(statement), move(export_entries), is_default, move(module_request)));
+}
+
+void ast_import_statement_add_attribute(ASTNodeHandle import_stmt,
+    u16 const* key, size_t key_len,
+    u16 const* value, size_t value_len)
+{
+    auto& stmt = const_cast<ImportStatement&>(static_cast<ImportStatement const&>(*static_cast<ASTNode*>(import_stmt)));
+    auto key_view = make_utf16_view(key, key_len);
+    auto value_view = make_utf16_view(value, value_len);
+    const_cast<ModuleRequest&>(stmt.module_request()).add_attribute(
+        Utf16String::from_utf16(key_view), Utf16String::from_utf16(value_view));
+}
+
+void ast_export_statement_add_attribute(ASTNodeHandle export_stmt,
+    u16 const* key, size_t key_len,
+    u16 const* value, size_t value_len)
+{
+    auto& stmt = const_cast<ExportStatement&>(static_cast<ExportStatement const&>(*static_cast<ASTNode*>(export_stmt)));
+    auto key_view = make_utf16_view(key, key_len);
+    auto value_view = make_utf16_view(value, value_len);
+    const_cast<ModuleRequest&>(stmt.module_request()).add_attribute(
+        Utf16String::from_utf16(key_view), Utf16String::from_utf16(value_view));
+}
+
+void ast_program_append_import(ASTNodeHandle program, ASTNodeHandle import_stmt)
+{
+    auto& prog = static_cast<Program&>(*static_cast<ASTNode*>(program));
+    prog.append_import(as_ref<ImportStatement>(import_stmt));
+}
+
+void ast_program_append_export(ASTNodeHandle program, ASTNodeHandle export_stmt)
+{
+    auto& prog = static_cast<Program&>(*static_cast<ASTNode*>(program));
+    prog.append_export(as_ref<ExportStatement>(export_stmt));
+}
+
+// Buffers for converting Utf16FlyString names to u16 slices for FFI.
+// These are used by the export name extraction functions.
+static thread_local Vector<Vector<u16>> s_name_buffers;
+
+static FFIUtf16Slice fly_string_to_buffered_slice(Utf16FlyString const& s)
+{
+    auto view = s.view();
+    auto len = view.length_in_code_units();
+    Vector<u16> buf;
+    buf.ensure_capacity(len);
+    if (view.has_ascii_storage()) {
+        auto ascii = view.ascii_span();
+        for (auto ch : ascii)
+            buf.unchecked_append(static_cast<u16>(ch));
+    } else {
+        auto span = view.utf16_span();
+        for (size_t i = 0; i < span.size(); ++i)
+            buf.unchecked_append(static_cast<u16>(span[i]));
+    }
+    s_name_buffers.append(move(buf));
+    auto& stored = s_name_buffers.last();
+    return { stored.data(), stored.size() };
+}
+
+size_t ast_get_declaration_export_names(ASTNodeHandle declaration,
+    FFIUtf16Slice* out_names, size_t max_names)
+{
+    auto& node = *static_cast<ASTNode*>(declaration);
+    size_t count = 0;
+    s_name_buffers.clear_with_capacity();
+
+    if (is<FunctionDeclaration>(node)) {
+        auto& func = static_cast<FunctionDeclaration const&>(node);
+        if (count < max_names)
+            out_names[count] = fly_string_to_buffered_slice(func.name());
+        count++;
+    } else if (is<ClassDeclaration>(node)) {
+        auto& cls = static_cast<ClassDeclaration const&>(node);
+        if (count < max_names)
+            out_names[count] = fly_string_to_buffered_slice(cls.name());
+        count++;
+    } else if (is<VariableDeclaration>(node)) {
+        auto& vars = static_cast<VariableDeclaration const&>(node);
+        for (auto& decl : vars.declarations()) {
+            decl->target().visit(
+                [&](NonnullRefPtr<Identifier const> const& identifier) {
+                    if (count < max_names)
+                        out_names[count] = fly_string_to_buffered_slice(identifier->string());
+                    count++;
+                },
+                [&](NonnullRefPtr<BindingPattern const> const& binding) {
+                    MUST(binding->for_each_bound_identifier([&](auto& identifier) {
+                        if (count < max_names)
+                            out_names[count] = fly_string_to_buffered_slice(identifier.string());
+                        count++;
+                    }));
+                });
+        }
+    }
+    return count;
+}
+
+FFIUtf16Slice ast_get_function_name(ASTNodeHandle function_decl)
+{
+    s_name_buffers.clear_with_capacity();
+    auto& node = *static_cast<ASTNode*>(function_decl);
+    if (is<FunctionDeclaration>(node))
+        return fly_string_to_buffered_slice(static_cast<FunctionDeclaration const&>(node).name());
+    if (is<FunctionExpression>(node))
+        return fly_string_to_buffered_slice(static_cast<FunctionExpression const&>(node).name());
+    return { nullptr, 0 };
+}
+
+FFIUtf16Slice ast_get_class_name(ASTNodeHandle class_decl)
+{
+    s_name_buffers.clear_with_capacity();
+    auto& node = *static_cast<ASTNode*>(class_decl);
+    if (is<ClassDeclaration>(node))
+        return fly_string_to_buffered_slice(static_cast<ClassDeclaration const&>(node).name());
+    if (is<ClassExpression>(node))
+        return fly_string_to_buffered_slice(static_cast<ClassExpression const&>(node).name());
+    return { nullptr, 0 };
+}
+
+bool ast_function_has_name(ASTNodeHandle function_decl)
+{
+    auto& node = *static_cast<ASTNode*>(function_decl);
+    if (is<FunctionDeclaration>(node))
+        return !static_cast<FunctionDeclaration const&>(node).name().is_empty();
+    return false;
 }
 
 } // extern "C"

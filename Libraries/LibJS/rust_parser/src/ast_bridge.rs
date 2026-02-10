@@ -54,6 +54,29 @@ pub struct Span {
     pub end_offset: u32,
 }
 
+/// FFI struct for ImportEntry, matching the C++ FFIImportEntry.
+/// If import_name_len == usize::MAX, this is a namespace import.
+#[repr(C)]
+pub struct FFIImportEntry {
+    pub import_name: *const u16,
+    pub import_name_len: usize,
+    pub local_name: *const u16,
+    pub local_name_len: usize,
+}
+
+/// FFI struct for ExportEntry, matching the C++ FFIExportEntry.
+/// kind: 0=NamedExport, 1=ModuleRequestAll, 2=ModuleRequestAllButDefault, 3=EmptyNamedExport
+/// If export_name_len == usize::MAX, export_name is None.
+/// If local_or_import_name_len == usize::MAX, local_or_import_name is None.
+#[repr(C)]
+pub struct FFIExportEntry {
+    pub kind: u8,
+    pub export_name: *const u16,
+    pub export_name_len: usize,
+    pub local_or_import_name: *const u16,
+    pub local_or_import_name_len: usize,
+}
+
 // Raw extern "C" declarations. Private to this module — all other code
 // should use AstBuilder methods or the safe free functions below.
 extern "C" {
@@ -586,6 +609,56 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         base: NodeHandle, builder: *mut std::ffi::c_void,
     ) -> NodeHandle;
+
+    fn ast_create_import_statement(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        module_specifier: *const u16, module_specifier_len: usize,
+        entries: *const FFIImportEntry, entry_count: usize,
+    ) -> NodeHandle;
+
+    fn ast_create_export_statement(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        statement_or_null: NodeHandle,
+        entries: *const FFIExportEntry, entry_count: usize,
+        is_default: bool,
+        from_specifier: *const u16, from_specifier_len: usize,
+    ) -> NodeHandle;
+
+    fn ast_import_statement_add_attribute(
+        import_stmt: NodeHandle,
+        key: *const u16, key_len: usize,
+        value: *const u16, value_len: usize,
+    );
+
+    fn ast_export_statement_add_attribute(
+        export_stmt: NodeHandle,
+        key: *const u16, key_len: usize,
+        value: *const u16, value_len: usize,
+    );
+
+    fn ast_program_append_import(program: NodeHandle, import_stmt: NodeHandle);
+    fn ast_program_append_export(program: NodeHandle, export_stmt: NodeHandle);
+
+    fn ast_get_declaration_export_names(
+        declaration: NodeHandle,
+        out_names: *mut FFIUtf16Slice, max_names: usize,
+    ) -> usize;
+
+    fn ast_get_function_name(function_decl: NodeHandle) -> FFIUtf16Slice;
+    fn ast_get_class_name(class_decl: NodeHandle) -> FFIUtf16Slice;
+    fn ast_function_has_name(function_decl: NodeHandle) -> bool;
+}
+
+/// FFI struct matching C++ FFIUtf16Slice.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FFIUtf16Slice {
+    pub data: *const u16,
+    pub len: usize,
 }
 
 // === Safe free functions for scope analysis ===
@@ -1225,6 +1298,96 @@ impl AstBuilder {
     pub fn create_optional_chain(&self, span: Span, base: NodeHandle, builder: *mut std::ffi::c_void) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_optional_chain(a, sc, sl, scol, so, el, ecol, eo, base, builder) }
+    }
+
+    // === Import/Export ===
+
+    pub fn create_import_statement(
+        &self, span: Span,
+        module_specifier: &[u16],
+        entries: &[FFIImportEntry],
+    ) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe {
+            ast_create_import_statement(
+                a, sc, sl, scol, so, el, ecol, eo,
+                module_specifier.as_ptr(), module_specifier.len(),
+                entries.as_ptr(), entries.len(),
+            )
+        }
+    }
+
+    pub fn create_export_statement(
+        &self, span: Span,
+        statement: NodeHandle,
+        entries: &[FFIExportEntry],
+        is_default: bool,
+        from_specifier: Option<&[u16]>,
+    ) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        let (from_ptr, from_len) = match from_specifier {
+            Some(s) => (s.as_ptr(), s.len()),
+            None => (ptr::null(), usize::MAX),
+        };
+        unsafe {
+            ast_create_export_statement(
+                a, sc, sl, scol, so, el, ecol, eo,
+                statement, entries.as_ptr(), entries.len(),
+                is_default, from_ptr, from_len,
+            )
+        }
+    }
+
+    pub fn import_statement_add_attribute(&self, import_stmt: NodeHandle, key: &[u16], value: &[u16]) {
+        unsafe { ast_import_statement_add_attribute(import_stmt, key.as_ptr(), key.len(), value.as_ptr(), value.len()) }
+    }
+
+    pub fn export_statement_add_attribute(&self, export_stmt: NodeHandle, key: &[u16], value: &[u16]) {
+        unsafe { ast_export_statement_add_attribute(export_stmt, key.as_ptr(), key.len(), value.as_ptr(), value.len()) }
+    }
+
+    pub fn program_append_import(&self, program: NodeHandle, import_stmt: NodeHandle) {
+        unsafe { ast_program_append_import(program, import_stmt) }
+    }
+
+    pub fn program_append_export(&self, program: NodeHandle, export_stmt: NodeHandle) {
+        unsafe { ast_program_append_export(program, export_stmt) }
+    }
+
+    pub fn get_declaration_export_names(&self, declaration: NodeHandle) -> Vec<Vec<u16>> {
+        let mut buf = [FFIUtf16Slice { data: std::ptr::null(), len: 0 }; 64];
+        let count = unsafe {
+            ast_get_declaration_export_names(declaration, buf.as_mut_ptr(), buf.len())
+        };
+        let mut result = Vec::with_capacity(count);
+        for i in 0..count.min(buf.len()) {
+            let slice = &buf[i];
+            let s = unsafe { std::slice::from_raw_parts(slice.data, slice.len) };
+            result.push(s.to_vec());
+        }
+        result
+    }
+
+    pub fn get_function_name(&self, handle: NodeHandle) -> Vec<u16> {
+        let slice = unsafe { ast_get_function_name(handle) };
+        if slice.data.is_null() || slice.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(slice.data, slice.len) }.to_vec()
+        }
+    }
+
+    pub fn get_class_name(&self, handle: NodeHandle) -> Vec<u16> {
+        let slice = unsafe { ast_get_class_name(handle) };
+        if slice.data.is_null() || slice.len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(slice.data, slice.len) }.to_vec()
+        }
+    }
+
+    pub fn function_has_name(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_function_has_name(handle) }
     }
 }
 

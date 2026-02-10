@@ -508,6 +508,80 @@ bool ast_is_object_expression(ASTNodeHandle handle);
 bool ast_is_array_expression(ASTNodeHandle handle);
 bool ast_is_call_expression(ASTNodeHandle handle);
 
+// === Import/Export ===
+
+// FFI struct for ImportEntry.
+// If import_name_len == SIZE_MAX, this is a namespace import (no import_name).
+struct FFIImportEntry {
+    uint16_t const* import_name;
+    size_t import_name_len;
+    uint16_t const* local_name;
+    size_t local_name_len;
+};
+
+// FFI struct for ExportEntry.
+// kind: 0 = NamedExport, 1 = ModuleRequestAll, 2 = ModuleRequestAllButDefault, 3 = EmptyNamedExport
+// If export_name_len == SIZE_MAX, export_name is empty (Optional<> has no value).
+// If local_or_import_name_len == SIZE_MAX, local_or_import_name is empty.
+struct FFIExportEntry {
+    uint8_t kind;
+    uint16_t const* export_name;
+    size_t export_name_len;
+    uint16_t const* local_or_import_name;
+    size_t local_or_import_name_len;
+};
+
+ASTNodeHandle ast_create_import_statement(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    uint16_t const* module_specifier, size_t module_specifier_len,
+    struct FFIImportEntry const* entries, size_t entry_count);
+
+ASTNodeHandle ast_create_export_statement(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle statement_or_null,
+    struct FFIExportEntry const* entries, size_t entry_count,
+    bool is_default,
+    uint16_t const* from_specifier, size_t from_specifier_len);
+
+// Add an import attribute (key, value) to an ImportStatement's module request.
+void ast_import_statement_add_attribute(ASTNodeHandle import_stmt,
+    uint16_t const* key, size_t key_len,
+    uint16_t const* value, size_t value_len);
+
+// Add an import attribute (key, value) to an ExportStatement's module request.
+void ast_export_statement_add_attribute(ASTNodeHandle export_stmt,
+    uint16_t const* key, size_t key_len,
+    uint16_t const* value, size_t value_len);
+
+// Append import/export to program (registers in both statement list and import/export list).
+void ast_program_append_import(ASTNodeHandle program, ASTNodeHandle import_stmt);
+void ast_program_append_export(ASTNodeHandle program, ASTNodeHandle export_stmt);
+
+// Extract bound names from a declaration node for export.
+// For FunctionDeclaration/ClassDeclaration: returns 1 name.
+// For VariableDeclaration: returns all bound names (including from patterns).
+// Writes names into out_names (each as utf16 ptr+len pair), returns count.
+// out_names must be at least max_names entries. Each entry is a pair of (ptr, len)
+// pointing into the AST node's storage (valid as long as the node is alive).
+typedef struct {
+    uint16_t const* data;
+    size_t len;
+} FFIUtf16Slice;
+size_t ast_get_declaration_export_names(ASTNodeHandle declaration,
+    FFIUtf16Slice* out_names, size_t max_names);
+
+// Get function name from a FunctionDeclaration node.
+// Returns empty slice if anonymous.
+FFIUtf16Slice ast_get_function_name(ASTNodeHandle function_decl);
+
+// Get class name from a ClassDeclaration node.
+FFIUtf16Slice ast_get_class_name(ASTNodeHandle class_decl);
+
+// Check if a FunctionDeclaration has a name.
+bool ast_function_has_name(ASTNodeHandle function_decl);
+
 #ifdef __cplusplus
 }
 #endif

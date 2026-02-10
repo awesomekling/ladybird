@@ -37,7 +37,7 @@
 //! - Function declarations: `add_function_declaration()` (hoists, Annex B)
 //! - Class declarations: `add_lexical_declaration()` (block-scoped)
 
-use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
+use crate::ast_bridge::{FFIExportEntry, FFIImportEntry, NodeHandle, NULL_HANDLE};
 use crate::ffi_enums::{BindingEntryAlias, BindingEntryName, BindingPattern, ClassMethod};
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, FunctionParsingInsights, Parser, ProgramType};
 use crate::token::TokenType;
@@ -248,7 +248,14 @@ impl<'a> Parser<'a> {
         };
 
         // Parse function name
-        let name = if self.match_identifier() {
+        let name = if self.has_default_export_name && !self.match_identifier() {
+            // export default function() {} -- use *default* as name.
+            let default_name = utf16!("*default*");
+            self.last_function_name = default_name.to_vec();
+            let id = self.builder.create_identifier(self.span_from(start), default_name);
+            self.last_function_name_id = id;
+            id
+        } else if self.match_identifier() {
             let tok = self.consume();
             let value = self.token_value(&tok).to_vec();
             self.last_function_name = value.clone();
@@ -1042,15 +1049,151 @@ impl<'a> Parser<'a> {
             self.syntax_error("Cannot use 'import' outside a module");
         }
 
-        // TODO: Full import statement parsing
-        // For now, skip to semicolon
-        while !self.match_token(TokenType::Semicolon) && !self.done() {
-            self.consume();
+        // import ModuleSpecifier ;
+        if self.match_token(TokenType::StringLiteral) {
+            let module_specifier = self.consume_module_specifier();
+            let node = self.builder.create_import_statement(
+                self.span_from(start), &module_specifier, &[]);
+            self.parse_with_clause(node, true);
+            self.consume_or_insert_semicolon();
+            return node;
         }
-        self.consume_or_insert_semicolon();
 
-        // Return an expression statement as placeholder
-        self.builder.create_empty_statement(self.span_from(start))
+        // Representation: (import_name or None for namespace, local_name)
+        struct ImportEntryData {
+            import_name: Option<Vec<u16>>,
+            local_name: Vec<u16>,
+        }
+
+        let mut entries: Vec<ImportEntryData> = Vec::new();
+        let mut continue_parsing = true;
+
+        // ImportedDefaultBinding
+        if self.match_imported_binding() {
+            let tok = self.consume();
+            let local_name = self.token_value(&tok).to_vec();
+            entries.push(ImportEntryData {
+                import_name: Some(utf16!("default").to_vec()),
+                local_name,
+            });
+            if self.match_token(TokenType::Comma) {
+                self.consume();
+            } else {
+                continue_parsing = false;
+            }
+        }
+
+        if continue_parsing {
+            if self.match_token(TokenType::Asterisk) {
+                // NameSpaceImport: * as ImportedBinding
+                self.consume();
+                if !self.match_as() {
+                    self.expected("'as'");
+                }
+                self.consume(); // consume 'as'
+                if self.match_imported_binding() {
+                    let tok = self.consume();
+                    let namespace_name = self.token_value(&tok).to_vec();
+                    entries.push(ImportEntryData {
+                        import_name: None, // namespace
+                        local_name: namespace_name,
+                    });
+                } else {
+                    self.expected("identifier");
+                }
+            } else if self.match_token(TokenType::CurlyOpen) {
+                // NamedImports: { ImportSpecifier, ... }
+                self.consume();
+                while !self.done() && !self.match_token(TokenType::CurlyClose) {
+                    if self.match_identifier_name() {
+                        let require_as = !self.match_imported_binding();
+                        let name_pos = self.position();
+                        let tok = self.consume();
+                        let name = self.token_value(&tok).to_vec();
+
+                        if self.match_as() {
+                            self.consume(); // consume 'as'
+                            let alias_tok = self.consume_identifier();
+                            let alias = self.token_value(&alias_tok).to_vec();
+                            self.check_identifier_name_for_assignment_validity(&alias, false);
+                            entries.push(ImportEntryData {
+                                import_name: Some(name),
+                                local_name: alias,
+                            });
+                        } else if require_as {
+                            self.syntax_error_at_position(
+                                &format!("Unexpected reserved word '{}'", String::from_utf16_lossy(&name)),
+                                name_pos,
+                            );
+                        } else {
+                            self.check_identifier_name_for_assignment_validity(&name, false);
+                            entries.push(ImportEntryData {
+                                import_name: Some(name.clone()),
+                                local_name: name,
+                            });
+                        }
+                    } else if self.match_token(TokenType::StringLiteral) {
+                        // ImportSpecifier: ModuleExportName as ImportedBinding
+                        let tok = self.consume();
+                        let (name, _) = self.parse_string_value(&tok);
+
+                        if !self.match_as() {
+                            self.expected("'as'");
+                        }
+                        self.consume(); // consume 'as'
+
+                        let alias_tok = self.consume_identifier();
+                        let alias = self.token_value(&alias_tok).to_vec();
+                        self.check_identifier_name_for_assignment_validity(&alias, false);
+                        entries.push(ImportEntryData {
+                            import_name: Some(name),
+                            local_name: alias,
+                        });
+                    } else {
+                        self.expected("identifier");
+                        break;
+                    }
+
+                    if !self.match_token(TokenType::Comma) {
+                        break;
+                    }
+                    self.consume();
+                }
+                self.consume_token(TokenType::CurlyClose);
+            } else {
+                self.expected("import clauses");
+            }
+        }
+
+        // 'from' ModuleSpecifier
+        if !self.match_from() {
+            self.expected("'from'");
+        }
+        self.consume(); // consume 'from'
+
+        let module_specifier = self.consume_module_specifier();
+
+        // Build FFI entries.
+        let ffi_entries: Vec<FFIImportEntry> = entries.iter().map(|e| {
+            FFIImportEntry {
+                import_name: match &e.import_name {
+                    Some(n) => n.as_ptr(),
+                    None => std::ptr::null(),
+                },
+                import_name_len: match &e.import_name {
+                    Some(n) => n.len(),
+                    None => usize::MAX,
+                },
+                local_name: e.local_name.as_ptr(),
+                local_name_len: e.local_name.len(),
+            }
+        }).collect();
+
+        let node = self.builder.create_import_statement(
+            self.span_from(start), &module_specifier, &ffi_entries);
+        self.parse_with_clause(node, true);
+        self.consume_or_insert_semicolon();
+        node
     }
 
     // === Export statement ===
@@ -1063,37 +1206,376 @@ impl<'a> Parser<'a> {
             self.syntax_error("Cannot use 'export' outside a module");
         }
 
-        // Handle export default
+        struct ExportEntryData {
+            kind: u8, // 0=Named, 1=ModuleRequestAll, 2=AllButDefault, 3=EmptyNamed
+            export_name: Option<Vec<u16>>,
+            local_or_import_name: Option<Vec<u16>>,
+        }
+
+        let mut entries: Vec<ExportEntryData> = Vec::new();
+        let mut expression: NodeHandle = NULL_HANDLE;
+        let mut is_default = false;
+        let mut from_specifier: Option<Vec<u16>> = None;
+
         if self.match_token(TokenType::Default) {
+            is_default = true;
             self.consume();
-            if self.match_token(TokenType::Function) || (self.match_token(TokenType::Async) && { let nt = self.next_token(); nt.token_type == TokenType::Function && !nt.trivia_has_line_terminator }) {
-                let decl = self.parse_function_declaration();
-                return decl;
+
+            let mut local_name: Option<Vec<u16>> = None;
+
+            // Detect function declaration (with or without name).
+            let matches_function = self.match_function_declaration_for_export();
+
+            if matches_function != MatchesFunctionDeclaration::No {
+                let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
+                let decl = self.parse_function_declaration_for_export(has_default_name);
+                if !has_default_name {
+                    // Function has a name - extract it from the declaration.
+                    local_name = Some(self.builder.get_function_name(decl));
+                }
+                expression = decl;
+            } else if self.match_token(TokenType::Class) {
+                let next = self.next_token();
+                if next.token_type != TokenType::CurlyOpen && next.token_type != TokenType::Extends {
+                    // Named class declaration.
+                    let decl = self.parse_class_declaration();
+                    local_name = Some(self.builder.get_class_name(decl));
+                    expression = decl;
+                } else {
+                    // Unnamed class expression.
+                    let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                    self.consume_or_insert_semicolon();
+                    expression = expr;
+                }
+            } else if self.match_expression() {
+                let special_case = self.match_token(TokenType::Class)
+                    || self.match_token(TokenType::Function)
+                    || (self.match_token(TokenType::Async) && {
+                        let nt = self.next_token();
+                        nt.token_type == TokenType::Function && !nt.trivia_has_line_terminator
+                    });
+                expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                if !special_case {
+                    self.consume_or_insert_semicolon();
+                }
+            } else {
+                self.expected("declaration or assignment expression");
             }
-            if self.match_token(TokenType::Class) {
-                let decl = self.parse_class_declaration();
-                return decl;
+
+            if local_name.is_none() {
+                local_name = Some(utf16!("*default*").to_vec());
             }
-            let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-            self.consume_or_insert_semicolon();
-            return self.builder.create_expression_statement(self.span_from(start), expr);
+
+            entries.push(ExportEntryData {
+                kind: 0, // NamedExport
+                export_name: Some(utf16!("default").to_vec()),
+                local_or_import_name: local_name,
+            });
+        } else {
+            #[derive(PartialEq)]
+            enum FromSpecifier { NotAllowed, Optional, Required }
+            let mut check_for_from = FromSpecifier::NotAllowed;
+
+            if self.match_token(TokenType::Asterisk) {
+                self.consume();
+                if self.match_as() {
+                    // * as ModuleExportName
+                    self.consume(); // consume 'as'
+                    let (exported_name, _) = self.parse_module_export_name();
+                    entries.push(ExportEntryData {
+                        kind: 1, // ModuleRequestAll
+                        export_name: Some(exported_name),
+                        local_or_import_name: None,
+                    });
+                } else {
+                    entries.push(ExportEntryData {
+                        kind: 2, // ModuleRequestAllButDefault
+                        export_name: None,
+                        local_or_import_name: None,
+                    });
+                }
+                check_for_from = FromSpecifier::Required;
+            } else if self.match_declaration() {
+                let declaration = self.parse_declaration();
+                // The declaration is the expression; extract export names from it.
+                let names = self.builder.get_declaration_export_names(declaration);
+                for name in &names {
+                    entries.push(ExportEntryData {
+                        kind: 0,
+                        export_name: Some(name.clone()),
+                        local_or_import_name: Some(name.clone()),
+                    });
+                }
+                expression = declaration;
+            } else if self.match_token(TokenType::Var) {
+                let var_decl = self.parse_variable_declaration(false);
+                let names = self.builder.get_declaration_export_names(var_decl);
+                for name in &names {
+                    entries.push(ExportEntryData {
+                        kind: 0,
+                        export_name: Some(name.clone()),
+                        local_or_import_name: Some(name.clone()),
+                    });
+                }
+                expression = var_decl;
+            } else if self.match_token(TokenType::CurlyOpen) {
+                self.consume();
+                check_for_from = FromSpecifier::Optional;
+
+                while !self.done() && !self.match_token(TokenType::CurlyClose) {
+                    let (identifier, was_string) = self.parse_module_export_name();
+                    if was_string {
+                        // String on LHS requires `from`.
+                        check_for_from = FromSpecifier::Required;
+                    }
+
+                    if self.match_as() {
+                        self.consume(); // consume 'as'
+                        let (export_name, _) = self.parse_module_export_name();
+                        entries.push(ExportEntryData {
+                            kind: 0,
+                            export_name: Some(export_name),
+                            local_or_import_name: Some(identifier),
+                        });
+                    } else {
+                        entries.push(ExportEntryData {
+                            kind: 0,
+                            export_name: Some(identifier.clone()),
+                            local_or_import_name: Some(identifier),
+                        });
+                    }
+
+                    if !self.match_token(TokenType::Comma) {
+                        break;
+                    }
+                    self.consume();
+                }
+
+                if entries.is_empty() {
+                    entries.push(ExportEntryData {
+                        kind: 3, // EmptyNamedExport
+                        export_name: None,
+                        local_or_import_name: None,
+                    });
+                }
+
+                self.consume_token(TokenType::CurlyClose);
+            } else {
+                self.syntax_error("Unexpected token 'export'");
+            }
+
+            if check_for_from != FromSpecifier::NotAllowed && self.match_from() {
+                self.consume(); // consume 'from'
+                from_specifier = Some(self.consume_module_specifier());
+            } else if check_for_from == FromSpecifier::Required {
+                self.expected("'from'");
+            }
+
+            if check_for_from != FromSpecifier::NotAllowed {
+                self.consume_or_insert_semicolon();
+            }
         }
 
-        // Handle other export forms
-        if self.match_declaration() {
-            return self.parse_declaration();
+        // Build FFI entries.
+        let ffi_entries: Vec<FFIExportEntry> = entries.iter().map(|e| {
+            FFIExportEntry {
+                kind: e.kind,
+                export_name: match &e.export_name {
+                    Some(n) => n.as_ptr(),
+                    None => std::ptr::null(),
+                },
+                export_name_len: match &e.export_name {
+                    Some(n) => n.len(),
+                    None => usize::MAX,
+                },
+                local_or_import_name: match &e.local_or_import_name {
+                    Some(n) => n.as_ptr(),
+                    None => std::ptr::null(),
+                },
+                local_or_import_name_len: match &e.local_or_import_name {
+                    Some(n) => n.len(),
+                    None => usize::MAX,
+                },
+            }
+        }).collect();
+
+        let node = self.builder.create_export_statement(
+            self.span_from(start),
+            expression,
+            &ffi_entries,
+            is_default,
+            from_specifier.as_deref(),
+        );
+
+        if from_specifier.is_some() {
+            self.parse_with_clause(node, false);
         }
 
-        if self.match_token(TokenType::Var) {
-            return self.parse_variable_declaration(false);
-        }
-
-        // TODO: Handle export { ... }, export *, export from
-        while !self.match_token(TokenType::Semicolon) && !self.done() {
-            self.consume();
-        }
-        self.consume_or_insert_semicolon();
-
-        self.builder.create_empty_statement(self.span_from(start))
+        node
     }
+
+    // === Import/Export helpers ===
+
+    /// Check if the current token is a valid ImportedBinding (identifier, yield, or await).
+    fn match_imported_binding(&self) -> bool {
+        self.match_identifier() || self.match_token(TokenType::Yield) || self.match_token(TokenType::Await)
+    }
+
+    /// Check if the current token is the contextual keyword "as".
+    fn match_as(&self) -> bool {
+        self.match_token(TokenType::Identifier) && self.token_original_value(&self.current_token) == utf16!("as")
+    }
+
+    /// Check if the current token is the contextual keyword "from".
+    fn match_from(&self) -> bool {
+        self.match_token(TokenType::Identifier) && self.token_original_value(&self.current_token) == utf16!("from")
+    }
+
+    /// Consume a string literal as a module specifier and return its value.
+    fn consume_module_specifier(&mut self) -> Vec<u16> {
+        if !self.match_token(TokenType::StringLiteral) {
+            self.expected("module specifier (string)");
+            return utf16!("!!invalid!!").to_vec();
+        }
+        let tok = self.consume();
+        let (value, _) = self.parse_string_value(&tok);
+        value
+    }
+
+    /// Parse a ModuleExportName (IdentifierName or StringLiteral).
+    /// Returns (name, was_string_literal).
+    fn parse_module_export_name(&mut self) -> (Vec<u16>, bool) {
+        if self.match_identifier_name() {
+            let tok = self.consume();
+            (self.token_value(&tok).to_vec(), false)
+        } else if self.match_token(TokenType::StringLiteral) {
+            let tok = self.consume();
+            let (value, _) = self.parse_string_value(&tok);
+            (value, true)
+        } else {
+            self.expected("export specifier (string or identifier)");
+            (Vec::new(), false)
+        }
+    }
+
+    /// Parse a `with { ... }` clause for import/export attributes.
+    fn parse_with_clause(&mut self, node: NodeHandle, is_import: bool) {
+        if !self.match_token(TokenType::With) {
+            return;
+        }
+        self.consume();
+        self.consume_token(TokenType::CurlyOpen);
+
+        while !self.done() && !self.match_token(TokenType::CurlyClose) {
+            let key: Vec<u16>;
+            if self.match_token(TokenType::StringLiteral) {
+                let tok = self.consume();
+                let (value, _) = self.parse_string_value(&tok);
+                key = value;
+            } else if self.match_identifier_name() {
+                let tok = self.consume();
+                key = self.token_value(&tok).to_vec();
+            } else {
+                self.expected("identifier or string as attribute key");
+                self.consume();
+                continue;
+            }
+
+            self.consume_token(TokenType::Colon);
+
+            if self.match_token(TokenType::StringLiteral) {
+                let tok = self.consume();
+                let (value, _) = self.parse_string_value(&tok);
+                if is_import {
+                    self.builder.import_statement_add_attribute(node, &key, &value);
+                } else {
+                    self.builder.export_statement_add_attribute(node, &key, &value);
+                }
+            } else {
+                self.expected("string as attribute value");
+                self.consume();
+            }
+
+            if self.match_token(TokenType::Comma) {
+                self.consume();
+            } else {
+                break;
+            }
+        }
+        self.consume_token(TokenType::CurlyClose);
+    }
+
+    /// Detect if the current position matches a function declaration for `export default`.
+    fn match_function_declaration_for_export(&mut self) -> MatchesFunctionDeclaration {
+        if self.match_token(TokenType::Function) {
+            let next = self.next_token();
+            if next.token_type == TokenType::Asterisk {
+                // function * [name?]
+                self.save_state();
+                self.consume(); // function
+                self.consume(); // *
+                let result = if self.match_token(TokenType::ParenOpen) {
+                    MatchesFunctionDeclaration::WithoutName
+                } else {
+                    MatchesFunctionDeclaration::Yes
+                };
+                self.load_state();
+                return result;
+            }
+            return if next.token_type == TokenType::ParenOpen {
+                MatchesFunctionDeclaration::WithoutName
+            } else {
+                MatchesFunctionDeclaration::Yes
+            };
+        }
+
+        if self.match_token(TokenType::Async) {
+            let next = self.next_token();
+            if next.token_type != TokenType::Function || next.trivia_has_line_terminator {
+                return MatchesFunctionDeclaration::No;
+            }
+            // async function [*?] [name?]
+            self.save_state();
+            self.consume(); // async
+            self.consume(); // function
+            let has_asterisk = self.match_token(TokenType::Asterisk);
+            if has_asterisk {
+                self.consume(); // *
+            }
+            let result = if self.match_token(TokenType::ParenOpen) {
+                MatchesFunctionDeclaration::WithoutName
+            } else {
+                MatchesFunctionDeclaration::Yes
+            };
+            self.load_state();
+            return result;
+        }
+
+        MatchesFunctionDeclaration::No
+    }
+
+    /// Parse a function declaration for `export default`, optionally with a default export name.
+    fn parse_function_declaration_for_export(&mut self, has_default_name: bool) -> NodeHandle {
+        if has_default_name {
+            self.parse_function_declaration_with_default_export_name()
+        } else {
+            self.parse_function_declaration()
+        }
+    }
+
+    /// Parse a function declaration where if the function has no name,
+    /// it gets `*default*` as its name (for `export default function() {}`).
+    fn parse_function_declaration_with_default_export_name(&mut self) -> NodeHandle {
+        self.has_default_export_name = true;
+        let result = self.parse_function_declaration();
+        self.has_default_export_name = false;
+        result
+    }
+}
+
+#[derive(PartialEq)]
+enum MatchesFunctionDeclaration {
+    No,
+    Yes,
+    WithoutName,
 }

@@ -298,6 +298,7 @@ pub struct Parser<'a> {
     /// True while parsing a class body that has an `extends` clause.
     /// Used to enable `allow_super_constructor_call` for constructors.
     pub(crate) class_has_super_class: bool,
+    pub(crate) has_default_export_name: bool,
 
     /// Set by parse_variable_declaration when is_for_loop is true.
     /// Used by for-in/of parsing to validate constraints.
@@ -352,6 +353,7 @@ impl<'a> Parser<'a> {
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
             class_has_super_class: false,
+            has_default_export_name: false,
             for_loop_declaration_count: 0,
             for_loop_declaration_has_init: false,
             for_loop_declaration_is_var: false,
@@ -558,6 +560,10 @@ impl<'a> Parser<'a> {
             line,
             column,
         });
+    }
+
+    pub(crate) fn syntax_error_at_position(&mut self, message: &str, pos: Position) {
+        self.syntax_error_at(message, pos.line, pos.column);
     }
 
     pub(crate) fn expected(&mut self, what: &str) {
@@ -872,10 +878,10 @@ impl<'a> Parser<'a> {
             if self.match_export_or_import() {
                 if self.match_token(TokenType::Export) {
                     let stmt = self.parse_export_statement();
-                    self.builder.scope_node_append(program, stmt);
+                    self.builder.program_append_export(program, stmt);
                 } else {
                     let stmt = self.parse_import_statement();
-                    self.builder.scope_node_append(program, stmt);
+                    self.builder.program_append_import(program, stmt);
                 }
             } else {
                 self.expected("statement or declaration");
