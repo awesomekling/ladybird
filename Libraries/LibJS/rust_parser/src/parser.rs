@@ -455,8 +455,21 @@ impl<'a> Parser<'a> {
 
     /// Consume a numeric literal and validate.
     pub(crate) fn consume_and_validate_numeric_literal(&mut self) -> Token {
-        // TODO: Add validation for numeric literal (e.g., no legacy octal in strict mode)
-        self.consume()
+        let tok = self.consume();
+        // Unprefixed octal (e.g., 07) not allowed in strict mode.
+        if self.strict_mode {
+            let value = self.token_value(&tok);
+            if value.len() > 1 && value[0] == b'0' as u16
+                && value[1] >= b'0' as u16 && value[1] <= b'9' as u16
+            {
+                self.syntax_error("Unprefixed octal number not allowed in strict mode");
+            }
+        }
+        // Numeric literal must not be immediately followed by identifier (e.g., 3in).
+        if self.match_identifier_name() && self.current_token.trivia_len == 0 {
+            self.syntax_error("Numeric literal must not be immediately followed by identifier");
+        }
+        tok
     }
 
     /// Consume a semicolon, or insert one automatically (ASI).

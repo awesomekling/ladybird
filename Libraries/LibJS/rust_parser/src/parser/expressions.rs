@@ -1093,6 +1093,9 @@ impl<'a> Parser<'a> {
             TokenType::PrivateIdentifier => {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                if value == utf16!("#constructor") {
+                    self.syntax_error("Private property with name '#constructor' is not allowed");
+                }
                 (self.builder.create_private_identifier(self.span_from(start), &value), Some(value), false)
             }
             _ => {
