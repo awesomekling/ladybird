@@ -590,6 +590,11 @@ impl<'a> Parser<'a> {
                         return (self.builder.create_assignment_expression_with_pattern(span, op, binding_pattern, rhs), ForbiddenTokens::none());
                     }
                 }
+                // Logical assignment operators (&&=, ||=, ??=) do not allow CallExpression as LHS.
+                let allow_call = !matches!(tt, TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals | TokenType::DoubleQuestionMarkEquals);
+                if !self.is_simple_assignment_target(lhs, allow_call) {
+                    self.syntax_error("Invalid left-hand side in assignment");
+                }
                 self.consume();
                 let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                 let span = self.span_from(start);
@@ -650,11 +655,17 @@ impl<'a> Parser<'a> {
 
             // === Postfix ===
             TokenType::PlusPlus => {
+                if !self.is_simple_assignment_target(lhs, true) {
+                    self.syntax_error("Invalid left-hand side in postfix operation");
+                }
                 self.consume();
                 let span = self.span_from(start);
                 (self.builder.create_update_expression(span, UpdateOp::INCREMENT, lhs, false), ForbiddenTokens::none())
             }
             TokenType::MinusMinus => {
+                if !self.is_simple_assignment_target(lhs, true) {
+                    self.syntax_error("Invalid left-hand side in postfix operation");
+                }
                 self.consume();
                 let span = self.span_from(start);
                 (self.builder.create_update_expression(span, UpdateOp::DECREMENT, lhs, false), ForbiddenTokens::none())
@@ -685,11 +696,17 @@ impl<'a> Parser<'a> {
             TokenType::PlusPlus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
+                if !self.is_simple_assignment_target(expr, true) {
+                    self.syntax_error("Invalid left-hand side in prefix operation");
+                }
                 self.builder.create_update_expression(self.span_from(start), UpdateOp::INCREMENT, expr, true)
             }
             TokenType::MinusMinus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
+                if !self.is_simple_assignment_target(expr, true) {
+                    self.syntax_error("Invalid left-hand side in prefix operation");
+                }
                 self.builder.create_update_expression(self.span_from(start), UpdateOp::DECREMENT, expr, true)
             }
             TokenType::ExclamationMark | TokenType::Tilde | TokenType::Plus
@@ -1684,6 +1701,14 @@ impl<'a> Parser<'a> {
             uses_this, uses_this_from_env,
             insights.contains_direct_call_to_eval, might_need_arguments,
         )
+    }
+
+    /// Check if a node is a valid simple assignment target (Identifier, MemberExpression,
+    /// or optionally CallExpression for web reality compatibility).
+    fn is_simple_assignment_target(&self, handle: NodeHandle, allow_call_expression: bool) -> bool {
+        self.builder.is_identifier(handle)
+            || self.builder.is_member_expression(handle)
+            || (allow_call_expression && self.builder.is_call_expression(handle))
     }
 }
 

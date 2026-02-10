@@ -298,6 +298,12 @@ pub struct Parser<'a> {
     /// True while parsing a class body that has an `extends` clause.
     /// Used to enable `allow_super_constructor_call` for constructors.
     pub(crate) class_has_super_class: bool,
+
+    /// Set by parse_variable_declaration when is_for_loop is true.
+    /// Used by for-in/of parsing to validate constraints.
+    pub(crate) for_loop_declaration_count: usize,
+    pub(crate) for_loop_declaration_has_init: bool,
+    pub(crate) for_loop_declaration_is_var: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -346,6 +352,9 @@ impl<'a> Parser<'a> {
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
             class_has_super_class: false,
+            for_loop_declaration_count: 0,
+            for_loop_declaration_has_init: false,
+            for_loop_declaration_is_var: false,
         }
     }
 

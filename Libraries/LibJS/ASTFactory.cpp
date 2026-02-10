@@ -1399,6 +1399,11 @@ bool ast_is_array_expression(ASTNodeHandle handle)
     return is<ArrayExpression>(*static_cast<ASTNode const*>(handle));
 }
 
+bool ast_is_call_expression(ASTNodeHandle handle)
+{
+    return is<CallExpression>(*static_cast<ASTNode const*>(handle));
+}
+
 } // extern "C"
 
 // === High-level integration ===

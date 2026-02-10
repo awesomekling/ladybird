@@ -190,6 +190,7 @@ extern "C" {
     fn ast_is_member_expression(handle: NodeHandle) -> bool;
     fn ast_is_object_expression(handle: NodeHandle) -> bool;
     fn ast_is_array_expression(handle: NodeHandle) -> bool;
+    fn ast_is_call_expression(handle: NodeHandle) -> bool;
     fn ast_create_conditional_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -805,6 +806,10 @@ impl AstBuilder {
 
     pub fn is_array_expression(&self, handle: NodeHandle) -> bool {
         unsafe { ast_is_array_expression(handle) }
+    }
+
+    pub fn is_call_expression(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_is_call_expression(handle) }
     }
 
     pub fn create_conditional_expression(&self, span: Span, test: NodeHandle, consequent: NodeHandle, alternate: NodeHandle) -> NodeHandle {

@@ -118,6 +118,7 @@ impl<'a> Parser<'a> {
         let mut declarators = Vec::new();
         let mut var_bound_names: Vec<(Vec<u16>, NodeHandle)> = Vec::new();
         let mut lexical_bound_names: Vec<Vec<u16>> = Vec::new();
+        let mut any_init = false;
 
         loop {
             let decl_start = self.position();
@@ -156,6 +157,7 @@ impl<'a> Parser<'a> {
             // Parse optional initializer
             let init = if self.match_token(TokenType::Equals) {
                 self.consume();
+                any_init = true;
                 let forbidden = if is_for_loop {
                     ForbiddenTokens::with_in()
                 } else {
@@ -184,6 +186,13 @@ impl<'a> Parser<'a> {
         }
 
         let decl = self.builder.create_variable_declaration(self.span_from(start), kind as u8, &declarators);
+
+        // Track info for for-in/of validation.
+        if is_for_loop {
+            self.for_loop_declaration_count = declarators.len();
+            self.for_loop_declaration_has_init = any_init;
+            self.for_loop_declaration_is_var = kind == DeclarationKind::Var;
+        }
 
         // Register with scope collector.
         if self.scope_collector.has_current_scope() {

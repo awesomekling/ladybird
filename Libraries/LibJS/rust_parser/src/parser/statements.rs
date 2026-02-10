@@ -366,6 +366,21 @@ impl<'a> Parser<'a> {
 
         // Check for in/of
         if self.match_token(TokenType::In) && !is_await {
+            if is_declaration {
+                if self.for_loop_declaration_count > 1 {
+                    self.syntax_error("Multiple declarations not allowed in for..in/of");
+                }
+                if self.for_loop_declaration_has_init {
+                    // Annex B: var with simple identifier is allowed in for-in (non-strict).
+                    if !(self.for_loop_declaration_is_var && self.for_loop_declaration_count == 1 && !self.strict_mode) {
+                        self.syntax_error("Variable initializer not allowed in for..in/of");
+                    }
+                }
+            } else if !self.builder.is_identifier(init) && !self.builder.is_member_expression(init)
+                && !self.builder.is_call_expression(init)
+                && !self.builder.is_object_expression(init) && !self.builder.is_array_expression(init) {
+                self.syntax_error("Invalid left-hand side in for-loop");
+            }
             self.consume();
             let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
             self.consume_token(TokenType::ParenClose);
@@ -398,6 +413,18 @@ impl<'a> Parser<'a> {
         if self.match_identifier_name() {
             let value = self.token_value(&self.current_token).to_vec();
             if value == utf16!("of") {
+                if is_declaration {
+                    if self.for_loop_declaration_count > 1 {
+                        self.syntax_error("Multiple declarations not allowed in for..in/of");
+                    }
+                    if self.for_loop_declaration_has_init {
+                        self.syntax_error("Variable initializer not allowed in for..of");
+                    }
+                } else if !self.builder.is_identifier(init) && !self.builder.is_member_expression(init)
+                    && !self.builder.is_call_expression(init)
+                    && !self.builder.is_object_expression(init) && !self.builder.is_array_expression(init) {
+                    self.syntax_error("Invalid left-hand side in for-loop");
+                }
                 self.consume();
                 let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::ParenClose);

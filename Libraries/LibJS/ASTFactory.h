@@ -506,6 +506,7 @@ bool ast_is_identifier(ASTNodeHandle handle);
 bool ast_is_member_expression(ASTNodeHandle handle);
 bool ast_is_object_expression(ASTNodeHandle handle);
 bool ast_is_array_expression(ASTNodeHandle handle);
+bool ast_is_call_expression(ASTNodeHandle handle);
 
 #ifdef __cplusplus
 }
