@@ -5,6 +5,37 @@
  */
 
 //! Declaration parsing: variables, functions, classes, imports, exports.
+//!
+//! ## Function parsing flow
+//!
+//! Parsing a function (declaration, expression, method, or arrow) follows
+//! this sequence:
+//!
+//! 1. Save `function_might_need_arguments_object`, reset to `false`
+//! 2. Consume `async`, `function`, `*`, and optional name
+//! 3. Open a function scope in the scope collector
+//! 4. Set generator/async context flags (needed for default parameter
+//!    expressions, e.g., `function f(x = yield)` must know the context)
+//! 5. Parse formal parameters → `(params, function_length, param_info)`
+//! 6. Restore generator/async flags (body parsing saves/restores these)
+//! 7. Parse function body → `(body, has_use_strict, insights)`
+//! 8. If `has_use_strict` or non-normal kind: retroactively check
+//!    function name and parameter names for strict mode violations
+//! 9. Read `function_might_need_arguments_object` and restore saved value
+//! 10. Create the AST node via the builder
+//!
+//! Arrow functions differ: they use speculative parsing (save/load state)
+//! and do NOT save/restore `function_might_need_arguments_object` (arrows
+//! don't have their own `arguments` object, so the flag propagates up).
+//!
+//! ## Scope collector interaction
+//!
+//! Variable and function declarations are registered with the scope
+//! collector during parsing so that scope analysis can resolve identifiers.
+//! - `var` declarations: `add_var_declaration()` (hoists to function scope)
+//! - `let`/`const` declarations: `add_lexical_declaration()` (block-scoped)
+//! - Function declarations: `add_function_declaration()` (hoists, Annex B)
+//! - Class declarations: `add_lexical_declaration()` (block-scoped)
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, FunctionParsingInsights, Parser, ProgramType};
@@ -432,11 +463,13 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyClose);
         self.strict_mode = strict_before;
 
-        // Create synthetic constructor if none was declared
+        // If no explicit constructor was declared, synthesize a default one.
+        // Per the spec, derived classes get `constructor(...args) { super(...args); }`
+        // and base classes get an empty `constructor() {}`.
         if constructor_func == NULL_HANDLE {
             let ctor_body = self.builder.create_function_body(self.span_from(start));
             if super_class != NULL_HANDLE {
-                // Generate: constructor(...args) { return super(...args); }
+                // Derived class: constructor(...args) { return super(...args); }
                 let args_name: Vec<u16> = "args".encode_utf16().collect();
                 let args_ident = self.builder.create_identifier(self.span_from(start), &args_name);
                 let super_call = self.builder.create_synthetic_constructor_super_call(self.span_from(start), args_ident);
@@ -444,8 +477,12 @@ impl<'a> Parser<'a> {
                 self.builder.scope_node_append(ctor_body, return_stmt);
                 let args_binding = self.builder.create_identifier(self.span_from(start), &args_name);
                 let ctor_params = self.builder.create_function_parameters(
-                    &[args_binding], &[NULL_HANDLE], &[true], &[false],
+                    &[args_binding], &[NULL_HANDLE],
+                    &[true],   // is_rest: ...args
+                    &[false],  // has_default
                 );
+                //                       FunctionKind, is_strict, is_arrow,
+                //                       uses_this, uses_this_from_env, eval, arguments_object
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
                     start.2, self.source_text_end_offset() - start.2,
@@ -454,6 +491,7 @@ impl<'a> Parser<'a> {
                     true, true, false, false,
                 );
             } else {
+                // Base class: empty constructor() {}
                 let ctor_params = self.builder.create_function_parameters_empty();
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
@@ -544,12 +582,13 @@ impl<'a> Parser<'a> {
                 && key_value.as_deref() == Some(ctor_name.as_slice());
 
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
+            // ClassMethod::Kind enum values must match C++: Method=0, Getter=1, Setter=2.
             let method_kind = if is_getter {
-                1 // Getter
+                1
             } else if is_setter {
-                2 // Setter
+                2
             } else {
-                0 // Method
+                0
             };
 
             let constructor = if is_constructor { Some(func) } else { None };

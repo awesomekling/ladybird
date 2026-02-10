@@ -5,6 +5,47 @@
  */
 
 //! JavaScript parser: recursive descent with precedence climbing.
+//!
+//! This is the core parser module. It contains the `Parser` struct (parser
+//! state + helpers) and delegates actual parsing to submodules:
+//!
+//! - `expressions` — `parse_expression()`, primary/secondary expressions
+//! - `statements` — `parse_statement()`, control flow
+//! - `declarations` — functions, classes, variables, import/export
+//!
+//! ## How parsing works
+//!
+//! The parser is a single-pass, recursive-descent parser. Expression parsing
+//! uses precedence climbing (Pratt-style): `parse_expression(min_precedence)`
+//! parses a primary expression, then loops consuming binary/postfix operators
+//! whose precedence is >= `min_precedence`.
+//!
+//! The parser reads tokens one at a time from the Lexer. The "current token"
+//! is always available via `self.current_token`. Calling `consume()` returns
+//! the current token and advances to the next one.
+//!
+//! ## Backtracking
+//!
+//! Some constructs require speculative parsing (e.g., arrow functions:
+//! `(a, b) =>` looks like a parenthesized expression until `=>` is seen).
+//! The parser supports this via `save_state()` / `load_state()`, which
+//! save and restore the full parser state including lexer position, current
+//! token, error list, and all boolean flags.
+//!
+//! ## Scope tracking
+//!
+//! During parsing, the `ScopeCollector` builds a tree of scope records.
+//! Each scope tracks variable declarations, function declarations, and
+//! identifier references. After parsing completes, `scope_collector.analyze()`
+//! runs bottom-up to resolve identifiers, propagate `eval` poisoning, and
+//! hoist functions (including Annex B).
+//!
+//! ## ForbiddenTokens
+//!
+//! Some expression contexts restrict which operators are valid. For example,
+//! the `in` operator is forbidden in for-loop headers (`for (x in ...)` is
+//! for-in, not a comparison). `ForbiddenTokens` tracks these restrictions
+//! and is threaded through expression parsing.
 
 use std::collections::HashMap;
 
@@ -24,7 +65,8 @@ pub enum ProgramType {
     Module = 1,
 }
 
-/// DeclarationKind for variable declarations.
+/// Declaration kind for variable declarations.
+/// Values must match C++ `DeclarationKind` enum (used across FFI).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeclarationKind {
     Var = 0,
@@ -32,7 +74,8 @@ pub enum DeclarationKind {
     Const = 2,
 }
 
-/// FunctionKind for function node creation.
+/// Function kind for function node creation.
+/// Values must match C++ `FunctionKind` enum (used across FFI).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FunctionKind {
     Normal = 0,
@@ -55,8 +98,14 @@ pub enum Associativity {
     Right,
 }
 
-/// Tracks which tokens are forbidden in expression parsing to prevent
-/// ambiguous mixing of &&/|| with ??.
+/// Tracks which tokens are forbidden in the current expression context.
+///
+/// This is threaded through `parse_expression()` to prevent ambiguity:
+/// - `forbid_in`: in for-loop init position (`for (x in ...)` is for-in, not comparison)
+/// - `forbid_logical/forbid_coalesce`: `&&`/`||` and `??` cannot be mixed without parens
+/// - `forbid_paren_open`: prevents consuming `(` as call in `new Foo()` callee position
+/// - `forbid_question_mark_period`: prevents `?.` in `new Foo?.bar`
+/// - `forbid_equals`: prevents `=` from being consumed as assignment in certain contexts
 #[derive(Clone, Copy)]
 pub struct ForbiddenTokens {
     pub forbid_in: bool,
@@ -132,7 +181,13 @@ pub struct ParserError {
     pub column: u32,
 }
 
-/// Parser state that can be saved/restored for backtracking.
+/// Snapshot of parser state for speculative parsing (backtracking).
+///
+/// When the parser needs to try parsing a construct that might fail
+/// (e.g., arrow function parameters), it calls `save_state()` to push
+/// a `SavedState` onto the stack. If parsing fails, `load_state()`
+/// restores everything — including the error list and lexer position.
+/// If parsing succeeds, `discard_saved_state()` drops the snapshot.
 struct SavedState {
     token: Token,
     errors_len: usize,
@@ -154,17 +209,36 @@ struct SavedState {
 }
 
 /// The main JavaScript parser.
+///
+/// Owns the lexer, AST builder (FFI to C++), and scope collector.
+/// Parsing methods live in the `expressions`, `statements`, and
+/// `declarations` submodules (all `impl Parser`).
 pub struct Parser<'a> {
+    /// Tokenizer that feeds us tokens one at a time.
     lexer: Lexer<'a>,
+    /// FFI bridge to the C++ AST factory. Creates C++ AST nodes.
     pub(crate) builder: AstBuilder,
+    /// The token currently being examined. `consume()` returns this
+    /// and advances to the next token.
     current_token: Token,
+    /// Syntax errors accumulated during parsing. On successful parse
+    /// this is empty. Errors are reported to C++ after parsing.
     errors: Vec<ParserError>,
+    /// Stack of saved states for speculative parsing (backtracking).
     saved_states: Vec<SavedState>,
+    /// Whether we're parsing a Script or Module.
     program_type: ProgramType,
+    /// The original UTF-16 source text. Used by `token_value()` to
+    /// extract string slices for token values.
     source: &'a [u16],
+    /// Builds a tree of scope records during parsing, then resolves
+    /// identifiers and hoists functions in a post-parse analysis pass.
     pub(crate) scope_collector: ScopeCollector,
 
-    // Parser state flags (mirrors C++ ParserState)
+    // --- Parser state flags ---
+    // These mirror the C++ Parser::ParserState fields. They track what
+    // kind of syntactic context we're currently inside, which affects
+    // what constructs are legal.
     pub(crate) strict_mode: bool,
     pub(crate) allow_super_property_lookup: bool,
     pub(crate) allow_super_constructor_call: bool,
@@ -178,10 +252,22 @@ pub struct Parser<'a> {
     pub(crate) in_arrow_function_context: bool,
     pub(crate) in_break_context: bool,
     pub(crate) in_continue_context: bool,
+    /// Set when a string literal with a legacy octal escape (\1-\7, \8, \9)
+    /// is parsed in non-strict mode. If a 'use strict' directive is later
+    /// found in the same scope, this triggers a retroactive syntax error.
     pub(crate) string_legacy_octal_escape_sequence_in_scope: bool,
     pub(crate) in_class_field_initializer: bool,
     pub(crate) in_class_static_init_block: bool,
+    /// Tracks whether the current function body references `arguments` or
+    /// `eval` as a freestanding identifier (not after `.`). Each function
+    /// saves and resets this flag before parsing its body, then reads the
+    /// accumulated value. Arrow functions do NOT save/restore — they let
+    /// the flag propagate to the enclosing function (since arrows don't
+    /// have their own `arguments` object).
     pub(crate) function_might_need_arguments_object: bool,
+    /// True when the previously consumed token was `.` — used by
+    /// `check_arguments_or_eval()` to avoid flagging `obj.arguments`
+    /// as a reference to the `arguments` identifier.
     pub(crate) previous_token_was_period: bool,
 
     /// Labels currently in scope. Value is Some(line, col) if a `continue`
@@ -672,6 +758,16 @@ impl<'a> Parser<'a> {
 
     /// Re-parse the source range starting at `start` as a binding pattern
     /// with member expressions allowed (for destructuring assignment patterns).
+    /// Re-parse an already-parsed expression as a binding pattern.
+    ///
+    /// This is needed for destructuring assignment: `({ a, b } = obj)`.
+    /// When the parser first sees `{ a, b }`, it parses it as an object
+    /// expression. Only when `=` follows does it realize this was actually
+    /// a destructuring pattern. At that point, we re-lex from the start
+    /// of the expression and parse it as a binding pattern instead.
+    ///
+    /// The scope collector is shared (same parser instance), so identifiers
+    /// registered by the re-parse are added to the current scope.
     pub(crate) fn synthesize_binding_pattern(&mut self, start: (u32, u32, u32)) -> NodeHandle {
         let saved_lexer = std::mem::replace(
             &mut self.lexer,
@@ -883,37 +979,65 @@ impl<'a> Parser<'a> {
 
     // === Operator precedence ===
 
+    /// Returns a numeric precedence level for an operator token.
+    /// Higher values bind tighter: `.` (20) > `*` (15) > `+` (14) > `,` (1).
+    /// Used by the precedence climbing loop in `parse_expression()`.
     pub(crate) fn operator_precedence(tt: TokenType) -> i32 {
         match tt {
+            // 20: Member access, call, optional chain (tightest binding)
             TokenType::Period | TokenType::BracketOpen | TokenType::ParenOpen | TokenType::QuestionMarkPeriod => 20,
+            // 19: new (binds tighter than unary so `new Foo()` works)
             TokenType::New => 19,
+            // 18: Postfix ++/--
             TokenType::PlusPlus | TokenType::MinusMinus => 18,
+            // 17: Unary prefix (!, ~, typeof, void, delete, await)
             TokenType::ExclamationMark | TokenType::Tilde | TokenType::Typeof | TokenType::Void | TokenType::Delete | TokenType::Await => 17,
+            // 16: Exponentiation (**)
             TokenType::DoubleAsterisk => 16,
+            // 15: Multiplicative (*, /, %)
             TokenType::Asterisk | TokenType::Slash | TokenType::Percent => 15,
+            // 14: Additive (+, -)
             TokenType::Plus | TokenType::Minus => 14,
+            // 13: Bitwise shift (<<, >>, >>>)
             TokenType::ShiftLeft | TokenType::ShiftRight | TokenType::UnsignedShiftRight => 13,
+            // 12: Relational (<, <=, >, >=, in, instanceof)
             TokenType::LessThan | TokenType::LessThanEquals | TokenType::GreaterThan | TokenType::GreaterThanEquals | TokenType::In | TokenType::Instanceof => 12,
+            // 11: Equality (==, !=, ===, !==)
             TokenType::EqualsEquals | TokenType::ExclamationMarkEquals | TokenType::EqualsEqualsEquals | TokenType::ExclamationMarkEqualsEquals => 11,
+            // 10: Bitwise AND (&)
             TokenType::Ampersand => 10,
+            // 9: Bitwise XOR (^)
             TokenType::Caret => 9,
+            // 8: Bitwise OR (|)
             TokenType::Pipe => 8,
+            // 7: Nullish coalescing (??)
             TokenType::DoubleQuestionMark => 7,
+            // 6: Logical AND (&&)
             TokenType::DoubleAmpersand => 6,
+            // 5: Logical OR (||)
             TokenType::DoublePipe => 5,
+            // 4: Conditional/ternary (?:)
             TokenType::QuestionMark => 4,
+            // 3: Assignment (=, +=, -=, etc.)
             TokenType::Equals | TokenType::PlusEquals | TokenType::MinusEquals
             | TokenType::DoubleAsteriskEquals | TokenType::AsteriskEquals | TokenType::SlashEquals
             | TokenType::PercentEquals | TokenType::ShiftLeftEquals | TokenType::ShiftRightEquals
             | TokenType::UnsignedShiftRightEquals | TokenType::AmpersandEquals | TokenType::CaretEquals
             | TokenType::PipeEquals | TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals
             | TokenType::DoubleQuestionMarkEquals => 3,
+            // 2: yield
             TokenType::Yield => 2,
+            // 1: Comma/sequence (loosest binding)
             TokenType::Comma => 1,
+            // 0: Not an operator (stops the precedence climbing loop)
             _ => 0,
         }
     }
 
+    /// Returns the associativity of an operator, which determines how
+    /// equal-precedence operators are grouped. Most are left-associative
+    /// (`a + b + c` = `(a + b) + c`). Assignment and exponentiation are
+    /// right-associative (`a = b = c` = `a = (b = c)`).
     pub(crate) fn operator_associativity(tt: TokenType) -> Associativity {
         match tt {
             TokenType::Period | TokenType::BracketOpen | TokenType::ParenOpen | TokenType::QuestionMarkPeriod

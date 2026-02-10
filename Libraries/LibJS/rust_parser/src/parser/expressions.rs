@@ -6,6 +6,36 @@
 
 //! Expression parsing: primary, secondary (binary/postfix), unary, and
 //! precedence climbing.
+//!
+//! ## How expression parsing works
+//!
+//! `parse_expression(min_precedence, associativity, forbidden)` is the
+//! main entry point. It uses Pratt-style precedence climbing:
+//!
+//! 1. Parse a **primary expression** (literal, identifier, unary, `(expr)`,
+//!    array, object, function, class, etc.)
+//!
+//! 2. Loop: try to parse a **secondary expression** (binary operator,
+//!    member access, call, assignment, ternary, etc.) If the operator's
+//!    precedence is >= `min_precedence`, consume it and recurse for the
+//!    right-hand side. Otherwise, stop.
+//!
+//! The `should_continue` return value from primary expressions controls
+//! whether secondary expression parsing happens. Arrow functions return
+//! `false` (nothing can follow `=> body`), while most other expressions
+//! return `true`.
+//!
+//! ## Key functions
+//!
+//! - `parse_expression()` — Precedence climbing loop
+//! - `parse_primary_expression()` — Literals, identifiers, prefix operators
+//! - `parse_secondary_expression()` — Binary ops, member access, calls
+//! - `parse_unary_prefixed_expression()` — `!`, `~`, `typeof`, `delete`, etc.
+//! - `parse_object_expression()` — Object literals `{ key: value }`
+//! - `parse_array_expression()` — Array literals `[a, b, c]`
+//! - `parse_template_literal()` — Template strings `` `hello ${name}` ``
+//! - `try_parse_arrow_function_expression()` — Arrow functions with backtracking
+//! - `parse_method_definition()` — Methods in objects and classes
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
 use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser};
@@ -117,6 +147,13 @@ impl<'a> Parser<'a> {
 
     // === Main expression parser with precedence climbing ===
 
+    /// Parse an expression using precedence climbing (Pratt parsing).
+    ///
+    /// `min_precedence` controls how "greedy" the parse is — only operators
+    /// with precedence >= min_precedence are consumed. Common values:
+    /// - 0: parse everything (full expression including comma)
+    /// - 2: parse assignment and above (skip comma/sequence)
+    /// - 17: parse unary and above (used after `delete`, `typeof`, etc.)
     pub(crate) fn parse_expression(&mut self, min_precedence: i32, associativity: Associativity, forbidden: ForbiddenTokens) -> NodeHandle {
         if self.match_unary_prefixed_expression() {
             let start = self.position();
@@ -149,6 +186,9 @@ impl<'a> Parser<'a> {
         self.continue_parse_expression(lhs_start, expr, min_precedence, associativity, forbidden)
     }
 
+    /// The precedence climbing loop. After parsing a primary expression,
+    /// this consumes secondary expressions (binary ops, member access,
+    /// calls, etc.) as long as their precedence exceeds `min_precedence`.
     fn continue_parse_expression(
         &mut self,
         lhs_start: (u32, u32, u32),
@@ -157,6 +197,9 @@ impl<'a> Parser<'a> {
         associativity: Associativity,
         forbidden: ForbiddenTokens,
     ) -> NodeHandle {
+        // Precedence climbing loop: keep consuming operators as long as they
+        // bind at least as tightly as our minimum. For left-associative operators
+        // at equal precedence, we stop (letting the caller handle them).
         while self.match_secondary_expression(&forbidden) {
             let new_precedence = Self::operator_precedence(self.current_token_type());
             if new_precedence < min_precedence {
@@ -190,6 +233,12 @@ impl<'a> Parser<'a> {
 
     // === Primary expression parsing ===
 
+    /// Parse a primary expression (literals, identifiers, `this`, etc.).
+    ///
+    /// Returns `(node, should_continue)` where `should_continue` controls
+    /// whether the precedence climbing loop will try to parse secondary
+    /// expressions (binary ops, member access, calls). Arrow functions
+    /// return `false` because nothing can follow `=> body`.
     fn parse_primary_expression(&mut self) -> (NodeHandle, bool) {
         self.last_parsed_identifier_is_eval = false;
         let start = self.position();
@@ -485,29 +534,33 @@ impl<'a> Parser<'a> {
             }
 
             // === Logical operators ===
+            // Values must match C++ LogicalOp enum: And=0, Or=1, NullishCoalescing=2.
+            // Mixing && / || with ?? without parens is a syntax error (per spec),
+            // enforced via forbidden tokens.
             TokenType::DoubleAmpersand => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleQuestionMark]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 0, lhs, rhs), new_forbidden) // And = 0
+                (self.builder.create_logical_expression(span, 0, lhs, rhs), new_forbidden)
             }
             TokenType::DoublePipe => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleQuestionMark]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 1, lhs, rhs), new_forbidden) // Or = 1
+                (self.builder.create_logical_expression(span, 1, lhs, rhs), new_forbidden)
             }
             TokenType::DoubleQuestionMark => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleAmpersand, TokenType::DoublePipe]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 2, lhs, rhs), new_forbidden) // NullishCoalescing = 2
+                (self.builder.create_logical_expression(span, 2, lhs, rhs), new_forbidden)
             }
 
             // === Assignment ===
+            // AssignmentOp values must match C++ AssignmentOp enum (see token_to_assignment_op).
             TokenType::Equals | TokenType::PlusEquals | TokenType::MinusEquals
             | TokenType::DoubleAsteriskEquals | TokenType::AsteriskEquals
             | TokenType::SlashEquals | TokenType::PercentEquals
@@ -517,7 +570,10 @@ impl<'a> Parser<'a> {
             | TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals
             | TokenType::DoubleQuestionMarkEquals => {
                 let op = token_to_assignment_op(tt);
-                // For plain '=', check if LHS is object/array expression (destructuring assignment)
+                // For plain `=`, the LHS might be a destructuring pattern:
+                //   ({ a, b } = obj)  or  [a, b] = arr
+                // We parsed LHS as an expression; if it's an object/array, re-parse
+                // it as a binding pattern using synthesize_binding_pattern.
                 if op == 0 && (self.builder.is_object_expression(lhs) || self.builder.is_array_expression(lhs)) {
                     let binding_pattern = self.synthesize_binding_pattern(lhs_start);
                     // Register bound names from the binding pattern with the scope collector.
@@ -617,6 +673,9 @@ impl<'a> Parser<'a> {
 
     // === Unary prefix expression ===
 
+    /// Parse a unary prefix expression: `!x`, `~x`, `typeof x`, `delete x`, etc.
+    /// The numeric constants passed to `create_unary_expression` must match
+    /// C++ `UnaryOp` enum: BitwiseNot=0, Not=1, Plus=2, Minus=3, Typeof=4, Void=5, Delete=6.
     fn parse_unary_prefixed_expression(&mut self) -> NodeHandle {
         let start = self.position();
         let tt = self.current_token_type();
@@ -681,22 +740,25 @@ impl<'a> Parser<'a> {
 
     // === new expression ===
 
+    /// Parse a `new` expression: `new Foo()`, `new Foo`, or `new.target`.
     fn parse_new_expression(&mut self) -> NodeHandle {
         let start = self.position();
         self.consume_token(TokenType::New);
 
-        // new.target
+        // new.target — a meta-property, not a constructor call.
         if self.match_token(TokenType::Period) {
             self.consume();
             self.consume_token(TokenType::Identifier); // "target"
             self.scope_collector.set_uses_new_target();
-            return self.builder.create_meta_property(self.span_from(start), 0); // NewTarget = 0
+            return self.builder.create_meta_property(self.span_from(start), 0); // 0 = NewTarget
         }
 
-        // new new ... (chained new expression)
+        // `new new Foo()` chains: `new (new Foo())`.
         let callee = if self.match_token(TokenType::New) {
             self.parse_new_expression()
         } else {
+            // Forbid `(` and `?.` in the callee so that `new Foo(args)` is parsed
+            // as calling Foo's constructor with args, not as `new (Foo(args))`.
             let forbidden = ForbiddenTokens::none().forbid(&[TokenType::ParenOpen, TokenType::QuestionMarkPeriod]);
             self.parse_expression(19, Associativity::Right, forbidden)
         };
@@ -754,11 +816,21 @@ impl<'a> Parser<'a> {
 
     // === Optional chaining ===
 
+    /// Parse an optional chain: `a?.b.c?.d()`.
+    ///
+    /// An optional chain is a sequence of member accesses and calls where
+    /// some links use `?.` (short-circuiting on null/undefined). The chain
+    /// can mix `?.` links with regular `.` and `()` links — all become part
+    /// of the same OptionalChain AST node.
+    ///
+    /// The boolean parameter in each `append_*` call indicates whether this
+    /// link is a short-circuit point (`true` for `?.`, `false` for `.`/`()`).
     fn parse_optional_chain(&mut self, start: (u32, u32, u32), base: NodeHandle) -> NodeHandle {
         let builder = self.builder.create_optional_chain_builder();
 
         loop {
             if self.match_token(TokenType::QuestionMarkPeriod) {
+                // This is an optional link (short-circuit point).
                 self.consume();
                 match self.current_token_type() {
                     TokenType::ParenOpen => {
@@ -796,6 +868,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             } else if self.match_token(TokenType::ParenOpen) {
+                // Non-optional call continuation: `a?.b()`
                 let (values, spreads) = self.parse_arguments();
                 self.builder.optional_chain_builder_append_call(builder, &values, &spreads, false);
             } else if self.match_token(TokenType::Period) {
@@ -1068,6 +1141,15 @@ impl<'a> Parser<'a> {
 
     // === Template literal ===
 
+    /// Parse a template literal: `` `hello ${name}!` ``
+    ///
+    /// Template literals alternate between string parts and expression parts.
+    /// The AST representation requires empty strings between consecutive
+    /// expressions (e.g., `` `${a}${b}` `` has parts: ["", a, "", b, ""]).
+    ///
+    /// Tagged templates (`` tag`...` ``) differ from untagged in two ways:
+    /// 1. They include raw (unprocessed) strings alongside cooked strings
+    /// 2. Invalid escape sequences produce `null` cooked values instead of errors
     pub(crate) fn parse_template_literal(&mut self, is_tagged: bool) -> NodeHandle {
         let start = self.position();
         self.consume_token(TokenType::TemplateLiteralStart);
@@ -1138,8 +1220,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Process template escape sequences, returning None if escape is invalid
-    /// (for tagged templates where invalid escapes produce undefined cooked values).
+    /// Process escape sequences in a template literal string part.
+    ///
+    /// Returns `None` if an invalid escape sequence is found. For tagged
+    /// templates, this is legal — the cooked value becomes `undefined`.
+    /// For untagged templates, the caller reports an error separately.
+    ///
+    /// Key differences from `process_escape_sequences` (string literals):
+    /// - Octal escapes (\1-\9) are always invalid (return None)
+    /// - Invalid hex/unicode escapes return None instead of being passed through
     fn process_template_escape_sequences(&self, raw: &[u16]) -> Option<Vec<u16>> {
         let mut result = Vec::with_capacity(raw.len());
         let mut i = 0;
@@ -1255,8 +1344,12 @@ impl<'a> Parser<'a> {
         self.process_escape_sequences(inner)
     }
 
-    /// Process escape sequences in a string.
-    /// Returns (processed_value, has_legacy_octal_escape).
+    /// Process escape sequences in a string literal value.
+    ///
+    /// Returns `(decoded_value, has_legacy_octal_escape)`. The `has_legacy_octal`
+    /// flag is tracked because legacy octal escapes (\1-\7, \8, \9) are forbidden
+    /// in strict mode and template literals. If a 'use strict' directive appears
+    /// later in the same function body, we need this flag to emit a retroactive error.
     fn process_escape_sequences(&self, inner: &[u16]) -> (Vec<u16>, bool) {
         let mut result = Vec::with_capacity(inner.len());
         let mut has_legacy_octal = false;
@@ -1321,11 +1414,13 @@ impl<'a> Parser<'a> {
                                 }
                                 i += 1;
                             }
-                            // Encode as UTF-16
+                            // Encode as UTF-16 (we work in UTF-16 throughout).
                             if code_point <= 0xFFFF {
                                 result.push(code_point as u16);
                             } else {
-                                // Surrogate pair
+                                // Code points above U+FFFF need a surrogate pair:
+                                // high surrogate = 0xD800 + (top 10 bits)
+                                // low surrogate  = 0xDC00 + (bottom 10 bits)
                                 let code_point = code_point - 0x10000;
                                 result.push((0xD800 + (code_point >> 10)) as u16);
                                 result.push((0xDC00 + (code_point & 0x3FF)) as u16);
@@ -1365,7 +1460,18 @@ impl<'a> Parser<'a> {
 
     // === Arrow function ===
 
-    /// Try to parse an arrow function expression.
+    /// Try to parse an arrow function expression using speculative parsing.
+    ///
+    /// Arrow functions are syntactically ambiguous: `(a, b)` could be a
+    /// parenthesized comma expression or arrow function parameters. We only
+    /// know which one it is when we see (or don't see) `=>` after the `)`.
+    ///
+    /// Strategy:
+    /// 1. Save parser state (`save_state()`)
+    /// 2. Try to parse parameters
+    /// 3. If `=>` follows, commit (`discard_saved_state()`) and parse body
+    /// 4. If not, rollback (`load_state()`) and return None
+    ///
     /// When `expect_parens` is true and `is_async` is false, the caller must
     /// have already consumed '('. For async arrows, this function consumes both
     /// 'async' and '(' itself.
@@ -1376,7 +1482,8 @@ impl<'a> Parser<'a> {
     fn try_parse_arrow_function_expression_impl(&mut self, expect_parens: bool, is_async: bool, source_start_override: Option<(u32, u32, u32)>) -> Option<NodeHandle> {
         let start = self.position();
 
-        // Fast path: single identifier => arrow
+        // Fast path for single-identifier arrow: `x => body`
+        // No need for save/load since we can check ahead without consuming.
         if !expect_parens && !is_async {
             if !self.match_identifier() {
                 return None;
@@ -1391,6 +1498,8 @@ impl<'a> Parser<'a> {
 
         if is_async {
             self.consume(); // consume 'async'
+            // A line terminator between `async` and the arrow params means
+            // this isn't an async arrow (ASI would apply).
             if self.current_token.trivia_has_line_terminator {
                 self.load_state();
                 return None;
@@ -1451,14 +1560,19 @@ impl<'a> Parser<'a> {
         }
         self.consume(); // consume =>
 
-        // Discard saved state - we're committed to arrow function
+        // We've seen `=>`, so this is definitely an arrow function.
+        // Discard the saved state — no going back now.
         self.discard_saved_state();
 
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
         let kind = fn_kind as u8;
         let src_start = source_start_override.unwrap_or(start).2;
 
+        // Arrow functions have two body forms:
+        // 1. Block body:      `(x) => { return x + 1; }`
+        // 2. Expression body: `(x) => x + 1`  (implicit return)
         if self.match_token(TokenType::CurlyOpen) {
+            // Block body — parsed like a regular function body.
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info);
 
             if has_use_strict || fn_kind != FunctionKind::Normal {
@@ -1470,12 +1584,13 @@ impl<'a> Parser<'a> {
                 span, NULL_HANDLE,
                 src_start, self.source_text_end_offset() - src_start,
                 body, params, function_length, kind,
-                self.strict_mode || has_use_strict, true,
+                self.strict_mode || has_use_strict, true, // true = is_arrow_function
                 insights.uses_this, insights.uses_this_from_environment,
                 insights.contains_direct_call_to_eval, false,
             ))
         } else {
-            // Expression body: set scope node and parameters for scope analysis.
+            // Expression body — we create a synthetic function body containing
+            // a single `return <expr>` statement.
             let body = self.builder.create_function_body(self.span_from(start));
             self.scope_collector.set_scope_node(body);
             self.scope_collector.set_function_parameters(&param_info);

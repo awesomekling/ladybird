@@ -5,6 +5,22 @@
  */
 
 //! Statement parsing: if, for, while, switch, try, etc.
+//!
+//! Each `parse_*_statement()` method consumes tokens for one statement
+//! and returns a `NodeHandle` to the created C++ AST node.
+//!
+//! ## Labelled statements
+//!
+//! Labels are tracked in `parser.labels_in_scope` so that `break` and
+//! `continue` can be validated. The `try_parse_labelled_statement()`
+//! method detects `identifier:` at statement position and wraps the
+//! inner statement in a `LabelledStatement` node.
+//!
+//! ## For loops
+//!
+//! `parse_for_statement()` handles all three forms: `for(;;)`,
+//! `for(x in obj)`, and `for(x of iter)`. It starts by parsing the
+//! initializer, then disambiguates based on whether `in` or `of` follows.
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
 use crate::parser::{Associativity, ForbiddenTokens, Parser};
@@ -297,8 +313,18 @@ impl<'a> Parser<'a> {
 
     // === For statement ===
 
+    /// Parse a for statement, which has four possible forms:
+    /// - `for (init; test; update) body`     (standard for)
+    /// - `for (lhs in rhs) body`              (for-in)
+    /// - `for (lhs of rhs) body`              (for-of)
+    /// - `for await (lhs of rhs) body`        (for-await-of)
+    ///
+    /// The disambiguation happens after parsing the init expression:
+    /// if `in` or `of` follows, it's a for-in/of loop. Otherwise, it's
+    /// a standard for loop.
     fn parse_for_statement(&mut self) -> NodeHandle {
         let start = self.position();
+        // For loops get their own block scope for `let`/`const` declarations.
         let loop_scope_node = self.builder.create_block_statement(self.span_from(start));
         self.scope_collector.open_for_loop_scope(loop_scope_node);
 
@@ -325,14 +351,15 @@ impl<'a> Parser<'a> {
             return result;
         }
 
-        // Parse init
+        // Parse the init expression/declaration.
         let init_start = self.position();
         let is_var_init = self.match_token(TokenType::Var);
         let is_declaration = is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
         let init = if is_declaration {
-            // Scope collector registration happens inside parse_variable_declaration.
             self.parse_variable_declaration(true)
         } else {
+            // Forbid `in` as a binary operator here so that `for (x in y)`
+            // is parsed as for-in rather than `for ((x in y); ...)`
             let forbidden = ForbiddenTokens::with_in();
             self.parse_expression(0, Associativity::Right, forbidden)
         };
@@ -352,7 +379,10 @@ impl<'a> Parser<'a> {
             self.in_continue_context = continue_before;
 
             self.scope_collector.close_scope();
-            // Synthesize binding pattern for destructuring assignment in for-in LHS.
+            // If the LHS was an array/object expression (not a declaration),
+            // it's actually a destructuring assignment pattern like:
+            //   for ({ a, b } in obj) ...
+            // Re-parse it as a binding pattern.
             if !is_declaration && (self.builder.is_array_expression(init) || self.builder.is_object_expression(init)) {
                 let pattern = self.synthesize_binding_pattern(init_start);
                 for (name, id) in std::mem::take(&mut self.pattern_bound_names) {

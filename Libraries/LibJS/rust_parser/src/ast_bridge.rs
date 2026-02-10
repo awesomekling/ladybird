@@ -5,7 +5,32 @@
  */
 
 //! Safe wrappers around the C++ AST factory functions.
-//! Every function here calls an `extern "C"` factory defined in ASTFactory.cpp.
+//!
+//! This module is the FFI bridge between the Rust parser and the C++
+//! AST node hierarchy. Every function here calls an `extern "C"` factory
+//! defined in `ASTFactory.cpp`.
+//!
+//! ## NodeHandle
+//!
+//! AST nodes are represented as opaque `NodeHandle` pointers (`*mut c_void`).
+//! On the C++ side, these are `ASTNode*` pointers. The nodes are ref-counted
+//! C++ objects, and an arena (also on the C++ side) holds refs to keep them
+//! alive during parsing. When parsing completes, the final Program node gets
+//! an extra ref before the arena is destroyed.
+//!
+//! ## AstBuilder
+//!
+//! The `AstBuilder` struct holds the arena handle and source code handle,
+//! and provides safe Rust methods that forward to the C++ factory functions.
+//! It handles marshalling Rust types (slices, bools, etc.) into C-compatible
+//! arguments.
+//!
+//! ## Span
+//!
+//! Every AST node needs source location info. The parser tracks positions
+//! as `(line, column, offset)` tuples. `AstBuilder` methods accept a `Span`
+//! struct with start and end positions, which gets unpacked into the
+//! individual u32 arguments that the C functions expect.
 
 use std::ptr;
 

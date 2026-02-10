@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+//! Token types and Token struct for the lexer.
+//!
+//! The `TokenType` enum must match the C++ `JS::TokenType` exactly
+//! (same variants in the same order) because scope analysis passes
+//! token type values across the FFI boundary. The order follows
+//! `ENUMERATE_JS_TOKENS` in Token.h (alphabetical).
+
 /// Token types matching the C++ `JS::TokenType` enum exactly.
 /// The order must match `ENUMERATE_JS_TOKENS` in Token.h (alphabetical).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

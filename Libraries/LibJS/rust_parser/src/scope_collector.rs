@@ -6,9 +6,48 @@
 
 //! Scope analysis for the Rust parser.
 //!
-//! Mirrors the C++ ScopeCollector: builds a tree of scope records during
-//! parsing, then runs bottom-up analysis (resolve identifiers, hoist
-//! functions) after parsing completes.
+//! Mirrors the C++ `ScopeCollector` class. This is a two-phase system:
+//!
+//! ## Phase 1: Build scope tree (during parsing)
+//!
+//! As the parser encounters scopes (functions, blocks, for-loops, etc.),
+//! it calls `open_*_scope()` to push a `ScopeRecord` onto the tree, and
+//! the scope is closed when parsing of the construct finishes. During
+//! parsing, declarations and identifier references are registered:
+//!
+//! - `add_var_declaration()` — `var` bindings (hoist to function scope)
+//! - `add_lexical_declaration()` — `let`/`const` (block-scoped)
+//! - `add_function_declaration()` — function declarations (may Annex-B hoist)
+//! - `register_identifier()` — any identifier reference
+//!
+//! ## Phase 2: Analyze (after parsing)
+//!
+//! `analyze()` walks the scope tree bottom-up and for each scope:
+//!
+//! 1. **Resolves identifiers**: matches identifier references to their
+//!    declarations (var, let/const, function, parameter, catch binding).
+//!    Unresolved identifiers are marked as global.
+//!
+//! 2. **Propagates eval poisoning**: if a scope contains a direct call
+//!    to `eval()`, all ancestor scopes must know (they can't optimize
+//!    away their environment records).
+//!
+//! 3. **Hoists functions (Annex B)**: in non-strict sloppy mode,
+//!    function declarations inside blocks can create `var` bindings
+//!    in the enclosing function scope.
+//!
+//! 4. **Builds local variable lists**: populates `FunctionScopeData`
+//!    on AST ScopeNode objects (function bodies, blocks) via FFI,
+//!    enabling the bytecode generator to use indexed locals.
+//!
+//! ## Key data structures
+//!
+//! - `ScopeRecord` — one scope (function, block, etc.) with its
+//!   variables, identifiers, and child scopes
+//! - `ScopeVariable` — a declared name within a scope (flags track
+//!   whether it's var/lexical/function/catch/parameter)
+//! - `IdentifierGroup` — a set of identifier references with the same
+//!   name within one scope (multiple `foo` refs are grouped together)
 
 use std::collections::HashMap;
 
@@ -46,17 +85,21 @@ impl ScopeLevel {
 }
 
 // === Variable flags ===
+// Bit flags on ScopeVariable that track how a name was declared.
+// A single name can accumulate multiple flags (e.g., a `var` that
+// shadows a parameter gets both FLAG_IS_VAR and FLAG_IS_FORBIDDEN_LEXICAL).
 
-const FLAG_IS_VAR: u16 = 1 << 0;
-const FLAG_IS_LEXICAL: u16 = 1 << 1;
-const FLAG_IS_FUNCTION: u16 = 1 << 2;
-const FLAG_IS_CATCH_PARAMETER: u16 = 1 << 3;
-const FLAG_IS_FORBIDDEN_LEXICAL: u16 = 1 << 4;
-const FLAG_IS_FORBIDDEN_VAR: u16 = 1 << 5;
-const FLAG_IS_BOUND: u16 = 1 << 6;
-const FLAG_IS_PARAMETER_CANDIDATE: u16 = 1 << 7;
+const FLAG_IS_VAR: u16 = 1 << 0;             // `var` declaration
+const FLAG_IS_LEXICAL: u16 = 1 << 1;         // `let` or `const` declaration
+const FLAG_IS_FUNCTION: u16 = 1 << 2;        // `function` declaration
+const FLAG_IS_CATCH_PARAMETER: u16 = 1 << 3; // `catch (e)` binding
+const FLAG_IS_FORBIDDEN_LEXICAL: u16 = 1 << 4; // parameter name that can't be re-declared with let/const
+const FLAG_IS_FORBIDDEN_VAR: u16 = 1 << 5;   // lexical name that blocks var hoisting
+const FLAG_IS_BOUND: u16 = 1 << 6;           // function expression name or class declaration name
+const FLAG_IS_PARAMETER_CANDIDATE: u16 = 1 << 7; // formal parameter name (candidate for local optimization)
 
 // === LocalVariable::DeclarationKind (for add_local_variable FFI) ===
+// Values must match C++ `ScopeNode::LocalVariable::DeclarationKind`.
 
 const LOCAL_VAR: u8 = 0;
 const LOCAL_LET_OR_CONST: u8 = 1;
@@ -65,6 +108,8 @@ const LOCAL_ARGUMENTS_OBJECT: u8 = 3;
 const LOCAL_CATCH_CLAUSE_PARAMETER: u8 = 4;
 
 // === C++ DeclarationKind (for set_declaration_kind FFI) ===
+// Values must match C++ `DeclarationKind` enum. Note: these start at 1
+// (not 0) because 0 means "unset" in the C++ code.
 
 const DECL_KIND_VAR: u8 = 1;
 const DECL_KIND_LET: u8 = 2;
@@ -72,9 +117,16 @@ const DECL_KIND_CONST: u8 = 3;
 
 // === Data structures ===
 
+/// A declared name within a scope. Multiple declaration forms can share
+/// the same name (e.g., `var x` and `function x`), so flags are ORed together.
 struct ScopeVariable {
+    /// Bit flags describing how this name was declared (FLAG_IS_* constants).
     flags: u16,
+    /// The Identifier AST node for the `var` declaration (used to build
+    /// FunctionScopeData on the C++ side). NULL_HANDLE if not a var.
     var_identifier: NodeHandle,
+    /// The FunctionDeclaration AST node, if this is a function declaration
+    /// (used for Annex B hoisting). NULL_HANDLE otherwise.
     function_declaration: NodeHandle,
 }
 
@@ -88,10 +140,20 @@ impl Default for ScopeVariable {
     }
 }
 
+/// Groups all Identifier AST nodes that share the same name within a scope.
+/// During analysis, the group is resolved to a local variable, parameter,
+/// or propagated to the parent scope if unresolved.
 struct IdentifierGroup {
+    /// True if any identifier in this group is referenced from a nested
+    /// function (prevents local variable optimization).
     captured_by_nested_function: bool,
+    /// True if any identifier in this group is inside a `with` block
+    /// (prevents local variable optimization since `with` can shadow anything).
     used_inside_with_statement: bool,
+    /// All Identifier AST nodes with this name in this scope.
     identifiers: Vec<NodeHandle>,
+    /// If this name was declared (var/let/const), tracks the declaration kind
+    /// so we can annotate each Identifier AST node on the C++ side.
     declaration_kind: Option<DeclarationKind>,
 }
 
@@ -651,7 +713,11 @@ impl ScopeCollector {
         }
     }
 
+    /// Analyze a scope and all its descendants, bottom-up.
+    /// Children are analyzed first so that unresolved identifiers bubble up
+    /// to their parent, and eval poisoning propagates outward.
     fn analyze_recursive(&mut self, idx: usize, initiated_by_eval: bool) {
+        // Process children first (bottom-up traversal).
         let children: Vec<usize> = self.records[idx].children.clone();
         for child_idx in children {
             self.analyze_recursive(child_idx, initiated_by_eval);
@@ -661,33 +727,61 @@ impl ScopeCollector {
             return;
         }
 
+        // 1. Propagate eval() flags from children to parent.
         Self::propagate_eval_poisoning(&mut self.records, idx);
+        // 2. Match identifier references to declarations; optimize as locals.
         Self::resolve_identifiers(&mut self.records, idx, initiated_by_eval);
+        // 3. Annex B: hoist block-scoped functions to enclosing function scope.
         Self::hoist_functions(&mut self.records, idx);
 
+        // 4. For function scopes, build the var declaration list that the
+        //    bytecode generator uses to initialize function-scoped variables.
         if self.records[idx].scope_type == ScopeType::Function && self.records[idx].has_function_parameters {
             Self::build_function_scope_data(&self.records, idx);
         }
     }
 
+    /// Propagate eval-related flags from a child scope to its parent.
+    ///
+    /// Three separate flags track eval impact:
+    /// - `contains_direct_call_to_eval`: this scope itself has `eval()`
+    /// - `screwed_by_eval_in_scope_chain`: some descendant has eval, so
+    ///   this scope can't optimize away its environment record
+    /// - `eval_in_current_function`: eval exists somewhere in the current
+    ///   function (propagates through blocks but stops at function boundaries)
     fn propagate_eval_poisoning(records: &mut [ScopeRecord], idx: usize) {
         if let Some(parent_idx) = records[idx].parent {
             if records[idx].contains_direct_call_to_eval || records[idx].screwed_by_eval_in_scope_chain {
                 records[parent_idx].screwed_by_eval_in_scope_chain = true;
             }
+            // eval_in_current_function propagates upward through blocks but
+            // stops at function boundaries (each function is independent).
             if records[idx].eval_in_current_function && records[idx].scope_type != ScopeType::Function {
                 records[parent_idx].eval_in_current_function = true;
             }
         }
     }
 
+    /// Try to resolve each identifier group in this scope to a local variable.
+    ///
+    /// For each named group, this function:
+    /// 1. Annotates identifiers with their declaration kind (var/let/const)
+    /// 2. Determines if the name can be optimized to a local variable index
+    /// 3. If not resolvable here, propagates the group to the parent scope
+    ///
+    /// An identifier is optimized to a local when:
+    /// - It's declared in this scope (var, let/const, function, parameter, catch)
+    /// - It's NOT captured by a nested function
+    /// - It's NOT used inside a `with` statement
+    /// - The scope chain is NOT poisoned by `eval()`
     fn resolve_identifiers(records: &mut [ScopeRecord], idx: usize, initiated_by_eval: bool) {
         let groups = std::mem::take(&mut records[idx].identifier_groups);
         let mut propagate_to_parent: Vec<(Vec<u16>, IdentifierGroup)> = Vec::new();
         let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
 
         for (name, mut group) in groups {
-            // Set declaration_kind on all identifiers in the group.
+            // Annotate each Identifier AST node with its declaration kind,
+            // so the bytecode generator knows how to handle TDZ checks, etc.
             if let Some(dk) = group.declaration_kind {
                 let ffi_kind = match dk {
                     DeclarationKind::Var => DECL_KIND_VAR,
@@ -701,7 +795,8 @@ impl ScopeCollector {
 
             let var_flags = records[idx].variables.get(&name).map_or(0, |v| v.flags);
 
-            // Determine local variable declaration kind.
+            // Determine what kind of local variable this is (if any).
+            // Priority: var (at top-level) > let/const > function declaration.
             let mut local_var_kind: Option<u8> = None;
             if records[idx].is_top_level() && (var_flags & FLAG_IS_VAR) != 0 {
                 local_var_kind = Some(LOCAL_VAR);
@@ -711,6 +806,8 @@ impl ScopeCollector {
                 local_var_kind = Some(LOCAL_FUNCTION);
             }
 
+            // Non-arrow functions implicitly declare `arguments` as a local.
+            // Arrow functions inherit `arguments` from their enclosing function.
             if records[idx].scope_type == ScopeType::Function
                 && !records[idx].is_arrow_function
                 && name == arguments_name
@@ -910,18 +1007,35 @@ impl ScopeCollector {
         }
     }
 
+    /// Annex B function hoisting: in sloppy mode, function declarations inside
+    /// blocks can create `var` bindings in the enclosing function scope.
+    ///
+    /// For example:
+    /// ```js
+    /// function f() {
+    ///     if (true) { function g() {} }  // g is hoisted to f's scope
+    ///     g(); // works in sloppy mode!
+    /// }
+    /// ```
+    ///
+    /// The function propagates upward through block scopes until it reaches
+    /// a function/program scope (top level) or is blocked by an existing
+    /// lexical or function declaration with the same name.
     fn hoist_functions(records: &mut [ScopeRecord], idx: usize) {
         let functions = std::mem::take(&mut records[idx].functions_to_hoist);
 
         for func in functions {
+            // A let/const or forbidden var with the same name blocks hoisting.
             if records[idx].has_flag(&func.name, FLAG_IS_LEXICAL | FLAG_IS_FORBIDDEN_VAR) {
                 continue;
             }
 
             if records[idx].is_top_level() {
+                // Reached function/program scope — register the hoisted function.
                 let ast_node = records[idx].ast_node;
                 unsafe { ast_bridge::ast_scope_node_add_hoisted_function(ast_node, func.declaration) };
             } else if let Some(parent_idx) = records[idx].parent {
+                // Not yet at top level — keep propagating upward unless blocked.
                 if !records[parent_idx].has_flag(&func.name, FLAG_IS_LEXICAL | FLAG_IS_FUNCTION) {
                     records[parent_idx].functions_to_hoist.push(func);
                 }

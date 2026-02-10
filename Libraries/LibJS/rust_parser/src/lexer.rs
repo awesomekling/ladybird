@@ -4,6 +4,36 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+//! Lexer: tokenizes UTF-16 JavaScript source code.
+//!
+//! The lexer operates directly on a `&[u16]` slice (UTF-16 code units).
+//! It produces `Token` structs one at a time via `next()`. Each token
+//! stores its type, position (line/column), and the start offset + length
+//! into the source buffer for its value.
+//!
+//! ## Template literals
+//!
+//! Template literals require stateful lexing because `${...}` expressions
+//! can contain arbitrary code (including nested templates). The lexer uses
+//! a `template_states` stack to track nesting. When a `${` is encountered
+//! inside a template, the lexer pushes state and switches to normal
+//! tokenization until the matching `}` is found.
+//!
+//! ## Regex vs division
+//!
+//! The lexer must distinguish `/regex/` from `a / b` (division). It uses
+//! the preceding token type: if the previous token could end an expression
+//! (identifier, literal, `)`, `]`, `++`, `--`), then `/` is division.
+//! Otherwise, it's the start of a regex literal.
+//!
+//! ## Escaped keywords
+//!
+//! When an identifier contains Unicode escape sequences (e.g., `\u0069f`
+//! for `if`), the lexer checks if the decoded value matches a keyword.
+//! If so, the token type is `EscapedKeyword` rather than the keyword
+//! type, because escaped keywords have different semantics (they can be
+//! used as identifiers in some contexts).
+
 use crate::token::{Token, TokenType};
 
 /// State for tracking template literal nesting.
