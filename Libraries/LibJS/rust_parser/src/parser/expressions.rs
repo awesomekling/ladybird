@@ -286,10 +286,13 @@ impl<'a> Parser<'a> {
                     }
                     let (arg_values, arg_spreads) = self.parse_arguments();
                     (self.builder.create_super_call(self.span_from(start), &arg_values, &arg_spreads), true)
-                } else {
+                } else if self.match_token(TokenType::Period) || self.match_token(TokenType::BracketOpen) {
                     if !self.allow_super_property_lookup {
                         self.syntax_error("'super' keyword unexpected here");
                     }
+                    (self.builder.create_super_expression(self.span_from(start)), true)
+                } else {
+                    self.syntax_error("'super' keyword unexpected here");
                     (self.builder.create_super_expression(self.span_from(start)), true)
                 }
             }
@@ -948,6 +951,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Await);
         let argument = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
+        self.scope_collector.set_contains_await_expression();
         self.builder.create_await_expression(self.span_from(start), argument)
     }
 
