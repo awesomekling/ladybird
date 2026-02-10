@@ -371,6 +371,12 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Returns the offset just past the last consumed token, excluding the
+    /// current token's leading trivia. Use for function source text end.
+    pub(crate) fn source_text_end_offset(&self) -> u32 {
+        self.current_token.offset - self.current_token.trivia_len
+    }
+
     pub(crate) fn token_span(&self, token: &Token) -> Span {
         Span {
             start_line: token.line_number,

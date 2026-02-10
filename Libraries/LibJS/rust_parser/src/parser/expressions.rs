@@ -911,14 +911,14 @@ impl<'a> Parser<'a> {
 
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
-            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter);
+            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, start);
             let prop_type = if is_getter { 1 } else if is_setter { 2 } else { 0 }; // KeyValue=0, Getter=1, Setter=2
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
 
         // Getter/setter
         if is_getter || is_setter {
-            let func = self.parse_method_definition(false, false, is_getter, is_setter);
+            let func = self.parse_method_definition(false, false, is_getter, is_setter, start);
             let prop_type = if is_getter { 1 } else { 2 };
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
@@ -1274,7 +1274,7 @@ impl<'a> Parser<'a> {
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
-                start.2, self.position().2 - start.2,
+                start.2, self.source_text_end_offset() - start.2,
                 body.0, params, function_length, kind,
                 self.strict_mode || body.1, true,
                 true, true, false, false,
@@ -1292,7 +1292,7 @@ impl<'a> Parser<'a> {
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
-                start.2, self.position().2 - start.2,
+                start.2, self.source_text_end_offset() - start.2,
                 body, params, function_length, kind,
                 self.strict_mode, true,
                 true, true, false, false,
@@ -1301,7 +1301,9 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a method definition for object/class.
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool) -> NodeHandle {
+    /// `source_text_start` is the offset where the method's source text begins
+    /// (before modifiers like async/get/set and the method name).
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, source_text_start: (u32, u32, u32)) -> NodeHandle {
         let start = self.position();
 
         let kind = match (is_async, is_generator) {
@@ -1320,7 +1322,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, NULL_HANDLE,
-            start.2, self.position().2 - start.2,
+            source_text_start.2, self.source_text_end_offset() - source_text_start.2,
             body.0, params, function_length, kind,
             self.strict_mode || body.1, false,
             true, false, false, true,

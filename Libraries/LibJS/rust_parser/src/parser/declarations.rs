@@ -239,7 +239,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_declaration(
             span, name,
-            start.2, self.position().2 - start.2,
+            start.2, self.source_text_end_offset() - start.2,
             body.0, params, function_length, kind as u8,
             self.strict_mode || body.1,
             true, false, false, true,
@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, name,
-            start.2, self.position().2 - start.2,
+            start.2, self.source_text_end_offset() - start.2,
             body.0, params, function_length, kind as u8,
             self.strict_mode || body.1, false,
             true, false, false, true,
@@ -388,7 +388,7 @@ impl<'a> Parser<'a> {
                 );
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
-                    start.2, self.position().2 - start.2,
+                    start.2, self.source_text_end_offset() - start.2,
                     ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
                     true, false,
                     true, true, false, false,
@@ -397,7 +397,7 @@ impl<'a> Parser<'a> {
                 let ctor_params = self.builder.create_function_parameters_empty();
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
-                    start.2, self.position().2 - start.2,
+                    start.2, self.source_text_end_offset() - start.2,
                     ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
                     true, false,
                     true, true, false, false,
@@ -411,7 +411,7 @@ impl<'a> Parser<'a> {
 
         self.builder.create_class_expression(
             self.span_from(start), name,
-            start.2, self.position().2 - start.2,
+            start.2, self.source_text_end_offset() - start.2,
             constructor_func, super_class,
             &elements,
         )
@@ -447,6 +447,7 @@ impl<'a> Parser<'a> {
         let mut is_generator = false;
         let mut is_getter = false;
         let mut is_setter = false;
+        let function_start = self.position();
 
         // Check modifiers
         if self.match_identifier_name() {
@@ -473,7 +474,7 @@ impl<'a> Parser<'a> {
 
         // Method
         if self.match_token(TokenType::ParenOpen) {
-            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter);
+            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, function_start);
             let method_kind = if is_getter {
                 1 // Getter
             } else if is_setter {
