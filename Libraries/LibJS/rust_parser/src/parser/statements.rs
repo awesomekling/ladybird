@@ -666,8 +666,30 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
         self.consume(); // consume :
 
+        if self.strict_mode && label == utf16!("let") {
+            self.syntax_error("Strict mode reserved word 'let' is not allowed in label");
+        }
+
         if self.labels_in_scope.contains_key(&label) {
             self.syntax_error("Label has already been declared");
+        }
+
+        // Function declarations in labelled statements have restrictions.
+        if self.match_token(TokenType::Function) {
+            if !allow_labelled_function || self.strict_mode {
+                self.syntax_error("Not allowed to declare a function here");
+            }
+            // Generator and async functions cannot be in labelled statements.
+            let next = self.next_token();
+            if next.token_type == TokenType::Asterisk {
+                self.syntax_error("Generator functions cannot be defined in labelled statements");
+            }
+        }
+        if self.match_token(TokenType::Async) {
+            let next = self.next_token();
+            if next.token_type == TokenType::Function && !next.trivia_has_line_terminator {
+                self.syntax_error("Async functions cannot be defined in labelled statements");
+            }
         }
 
         self.labels_in_scope.insert(label.clone(), None);
