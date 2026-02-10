@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_declaration(&mut self) -> NodeHandle {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
-            if next.token_type == TokenType::Function {
+            if next.token_type == TokenType::Function && !next.trivia_has_line_terminator {
                 let decl = self.parse_function_declaration();
                 self.register_function_declaration_with_scope_collector(decl);
                 return decl;
@@ -909,7 +909,7 @@ impl<'a> Parser<'a> {
         // Handle export default
         if self.match_token(TokenType::Default) {
             self.consume();
-            if self.match_token(TokenType::Function) || (self.match_token(TokenType::Async) && self.next_token().token_type == TokenType::Function) {
+            if self.match_token(TokenType::Function) || (self.match_token(TokenType::Async) && { let nt = self.next_token(); nt.token_type == TokenType::Function && !nt.trivia_has_line_terminator }) {
                 let decl = self.parse_function_declaration();
                 return decl;
             }

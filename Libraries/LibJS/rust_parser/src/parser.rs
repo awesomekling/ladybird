@@ -767,9 +767,9 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenType::Async => {
-                // async function
+                // async [no LineTerminator here] function
                 let next = self.next_token();
-                next.token_type == TokenType::Function
+                next.token_type == TokenType::Function && !next.trivia_has_line_terminator
             }
             TokenType::Identifier => {
                 // "using" declaration
