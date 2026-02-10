@@ -199,8 +199,9 @@ impl<'a> Parser<'a> {
             TokenType::ParenOpen => {
                 // Could be arrow function or parenthesized expression.
                 // Consume '(' first, then try arrow function (which expects '(' already consumed).
+                let paren_start = self.position();
                 self.consume_token(TokenType::ParenOpen);
-                if let Some(arrow) = self.try_parse_arrow_function_expression(true, false) {
+                if let Some(arrow) = self.try_parse_arrow_function_expression_impl(true, false, Some(paren_start)) {
                     return (arrow, false);
                 }
                 if self.match_token(TokenType::ParenClose) {
@@ -1321,6 +1322,10 @@ impl<'a> Parser<'a> {
     /// have already consumed '('. For async arrows, this function consumes both
     /// 'async' and '(' itself.
     pub(crate) fn try_parse_arrow_function_expression(&mut self, expect_parens: bool, is_async: bool) -> Option<NodeHandle> {
+        self.try_parse_arrow_function_expression_impl(expect_parens, is_async, None)
+    }
+
+    fn try_parse_arrow_function_expression_impl(&mut self, expect_parens: bool, is_async: bool, source_start_override: Option<(u32, u32, u32)>) -> Option<NodeHandle> {
         let start = self.position();
 
         // Fast path: single identifier => arrow
@@ -1402,6 +1407,7 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
 
         let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
+        let src_start = source_start_override.unwrap_or(start).2;
 
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info);
@@ -1409,7 +1415,7 @@ impl<'a> Parser<'a> {
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
-                start.2, self.source_text_end_offset() - start.2,
+                src_start, self.source_text_end_offset() - src_start,
                 body, params, function_length, kind,
                 self.strict_mode || has_use_strict, true,
                 insights.uses_this, insights.uses_this_from_environment,
@@ -1434,7 +1440,7 @@ impl<'a> Parser<'a> {
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
-                start.2, self.source_text_end_offset() - start.2,
+                src_start, self.source_text_end_offset() - src_start,
                 body, params, function_length, kind,
                 self.strict_mode, true,
                 insights_uses_this, insights_uses_this_from_env,
