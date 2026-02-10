@@ -324,8 +324,13 @@ impl<'a> Parser<'a> {
                 if self.match_token(TokenType::Period) {
                     // import.meta
                     self.consume();
-                    // Expect "meta"
+                    let meta_token = self.current_token.clone();
                     self.consume_token(TokenType::Identifier);
+                    // The string 'meta' cannot have escape sequences, so check original value.
+                    let meta_utf16: [u16; 4] = [b'm' as u16, b'e' as u16, b't' as u16, b'a' as u16];
+                    if self.token_original_value(&meta_token) != meta_utf16 {
+                        self.syntax_error("Expected 'meta' after 'import.'");
+                    }
                     (self.builder.create_meta_property(self.span_from(start), 1), true)
                 } else if self.match_token(TokenType::ParenOpen) {
                     // import()
