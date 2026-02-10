@@ -446,6 +446,9 @@ impl<'a> Parser<'a> {
         let mut elements = Vec::new();
         let mut constructor_func = NULL_HANDLE;
 
+        let saved_class_has_super = self.class_has_super_class;
+        self.class_has_super_class = super_class != NULL_HANDLE;
+
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::Semicolon) {
                 self.consume();
@@ -454,14 +457,17 @@ impl<'a> Parser<'a> {
 
             let (element, maybe_ctor) = self.parse_class_element();
             if let Some(ctor) = maybe_ctor {
+                if constructor_func != NULL_HANDLE {
+                    self.syntax_error("Classes may not have more than one constructor");
+                }
                 constructor_func = ctor;
-                // Constructor is NOT included in elements
             } else {
                 elements.push(element);
             }
         }
 
         self.consume_token(TokenType::CurlyClose);
+        self.class_has_super_class = saved_class_has_super;
         self.strict_mode = strict_before;
 
         // If no explicit constructor was declared, synthesize a default one.
@@ -597,13 +603,29 @@ impl<'a> Parser<'a> {
         // Parse key
         let (key, key_value, _is_proto) = self.parse_property_key();
 
+        // Static properties may not be named "prototype".
+        if is_static && key_value.as_deref() == Some(utf16!("prototype")) {
+            self.syntax_error("Classes may not have a static property named 'prototype'");
+        }
+
         // Method
         if self.match_token(TokenType::ParenOpen) {
-            // Check if this is the constructor before parsing the method body.
             let ctor_name = utf16!("constructor");
             let is_constructor = !is_static
                 && !is_getter && !is_setter
                 && key_value.as_deref() == Some(ctor_name);
+
+            if is_constructor {
+                if is_getter || is_setter {
+                    self.syntax_error("Class constructor may not be an accessor");
+                }
+                if is_generator {
+                    self.syntax_error("Class constructor may not be a generator");
+                }
+                if is_async {
+                    self.syntax_error("Class constructor may not be async");
+                }
+            }
 
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
             let method_kind = if is_getter {
@@ -617,6 +639,11 @@ impl<'a> Parser<'a> {
             let constructor = if is_constructor { Some(func) } else { None };
 
             return (self.builder.create_class_method(self.span_from(start), key, func, method_kind, is_static), constructor);
+        }
+
+        // Field named "constructor" is not allowed.
+        if !is_static && key_value.as_deref() == Some(utf16!("constructor")) {
+            self.syntax_error("Class cannot have field named 'constructor'");
         }
 
         // Field

@@ -294,6 +294,10 @@ pub struct Parser<'a> {
 
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
+
+    /// True while parsing a class body that has an `extends` clause.
+    /// Used to enable `allow_super_constructor_call` for constructors.
+    pub(crate) class_has_super_class: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -341,6 +345,7 @@ impl<'a> Parser<'a> {
             last_class_name_id: NULL_HANDLE,
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
+            class_has_super_class: false,
         }
     }
 

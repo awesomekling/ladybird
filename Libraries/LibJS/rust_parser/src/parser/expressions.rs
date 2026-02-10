@@ -281,6 +281,9 @@ impl<'a> Parser<'a> {
                 self.scope_collector.set_uses_new_target();
                 if self.match_token(TokenType::ParenOpen) {
                     // super(...) - SuperCall
+                    if !self.allow_super_constructor_call {
+                        self.syntax_error("'super' keyword unexpected here");
+                    }
                     let (arg_values, arg_spreads) = self.parse_arguments();
                     (self.builder.create_super_call(self.span_from(start), &arg_values, &arg_spreads), true)
                 } else {
@@ -731,6 +734,9 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Period) {
             self.consume();
             self.consume_token(TokenType::Identifier); // "target"
+            if !self.in_function_context && !self.in_eval_function_context && !self.in_class_static_init_block {
+                self.syntax_error("'new.target' not allowed outside of a function");
+            }
             self.scope_collector.set_uses_new_target();
             return self.builder.create_meta_property(self.span_from(start), MetaProperty::NEW_TARGET);
         }
@@ -1601,7 +1607,7 @@ impl<'a> Parser<'a> {
     /// Parse a method definition for object/class.
     /// `source_text_start` is the offset where the method's source text begins
     /// (before modifiers like async/get/set and the method name).
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, is_constructor: bool, source_text_start: Position) -> NodeHandle {
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, source_text_start: Position) -> NodeHandle {
         let start = self.position();
 
         // Save and reset function_might_need_arguments_object for this function scope.
@@ -1625,10 +1631,32 @@ impl<'a> Parser<'a> {
 
         let (params, function_length, param_info) = self.parse_formal_parameters();
 
+        // Getter must have no arguments, setter must have exactly one.
+        if is_getter && !param_info.is_empty() {
+            self.syntax_error("Getter function must have no arguments");
+        }
+        if is_setter {
+            if param_info.is_empty() || param_info.len() > 1 {
+                self.syntax_error("Setter function must have one argument");
+            } else if param_info[0].2 {
+                // rest parameter
+                self.syntax_error("Setter function must have one argument");
+            }
+        }
+
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;
 
+        // In a derived class constructor, allow super() calls.
+        let saved_allow_super_call = self.allow_super_constructor_call;
+        if is_constructor && self.class_has_super_class {
+            self.allow_super_constructor_call = true;
+        } else {
+            self.allow_super_constructor_call = false;
+        }
+
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+        self.allow_super_constructor_call = saved_allow_super_call;
 
         // Retroactive strict mode checks on parameters.
         if has_use_strict || fn_kind != FunctionKind::Normal {
