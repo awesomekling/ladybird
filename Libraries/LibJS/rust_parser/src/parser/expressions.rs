@@ -227,6 +227,7 @@ impl<'a> Parser<'a> {
 
             TokenType::Super => {
                 self.consume();
+                self.scope_collector.set_uses_new_target();
                 if self.match_token(TokenType::ParenOpen) {
                     // super(...) - SuperCall
                     let (arg_values, arg_spreads) = self.parse_arguments();
