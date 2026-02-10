@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
                 if !class_name.is_empty() {
                     let pos = self.position();
                     self.scope_collector.add_lexical_declaration(
-                        decl, &[class_name.as_slice()], pos.0, pos.1,
+                        decl, &[class_name.as_slice()], pos.line, pos.column,
                     );
                     if class_name_id != NULL_HANDLE {
                         self.scope_collector.register_identifier(class_name_id, &class_name, Some(DeclarationKind::Let));
@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
         let kind = self.last_function_kind;
         let pos = self.position();
         self.scope_collector.add_function_declaration(
-            decl, &name, name_id, kind, self.strict_mode, pos.0, pos.1,
+            decl, &name, name_id, kind, self.strict_mode, pos.line, pos.column,
         );
     }
 
@@ -192,13 +192,13 @@ impl<'a> Parser<'a> {
                     let names: Vec<(&[u16], NodeHandle)> = var_bound_names.iter()
                         .map(|(n, h)| (n.as_slice(), *h))
                         .collect();
-                    self.scope_collector.add_var_declaration(decl, &names, start.0, start.1);
+                    self.scope_collector.add_var_declaration(decl, &names, start.line, start.column);
                 }
                 DeclarationKind::Let | DeclarationKind::Const => {
                     let names: Vec<&[u16]> = lexical_bound_names.iter()
                         .map(|n| n.as_slice())
                         .collect();
-                    self.scope_collector.add_lexical_declaration(decl, &names, start.0, start.1);
+                    self.scope_collector.add_lexical_declaration(decl, &names, start.line, start.column);
                 }
             }
         }
@@ -300,7 +300,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_declaration(
             span, name,
-            start.2, self.source_text_end_offset() - start.2,
+            start.offset, self.source_text_end_offset() - start.offset,
             body, params, function_length, kind as u8,
             self.strict_mode || has_use_strict,
             insights.uses_this, insights.uses_this_from_environment,
@@ -380,7 +380,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, name,
-            start.2, self.source_text_end_offset() - start.2,
+            start.offset, self.source_text_end_offset() - start.offset,
             body, params, function_length, kind as u8,
             self.strict_mode || has_use_strict, false,
             insights.uses_this, insights.uses_this_from_environment,
@@ -486,7 +486,7 @@ impl<'a> Parser<'a> {
                 //                       uses_this, uses_this_from_env, eval, arguments_object
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
-                    start.2, self.source_text_end_offset() - start.2,
+                    start.offset, self.source_text_end_offset() - start.offset,
                     ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
                     true, false,
                     true, true, false, false,
@@ -496,7 +496,7 @@ impl<'a> Parser<'a> {
                 let ctor_params = self.builder.create_function_parameters_empty();
                 constructor_func = self.builder.create_function_expression(
                     self.span_from(start), name,
-                    start.2, self.source_text_end_offset() - start.2,
+                    start.offset, self.source_text_end_offset() - start.offset,
                     ctor_body, ctor_params, 0, FunctionKind::Normal as u8,
                     true, false,
                     true, true, false, false,
@@ -513,7 +513,7 @@ impl<'a> Parser<'a> {
 
         self.builder.create_class_expression(
             self.span_from(start), name,
-            start.2, self.source_text_end_offset() - start.2,
+            start.offset, self.source_text_end_offset() - start.offset,
             constructor_func, super_class,
             &elements,
         )

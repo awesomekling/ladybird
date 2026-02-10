@@ -39,7 +39,7 @@
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
 use crate::ffi_enums::{AssignmentOp, BinaryOp, LogicalOp, MetaProperty, ObjectProperty, UnaryOp, UpdateOp};
-use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser};
+use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser, Position};
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
     /// calls, etc.) as long as their precedence exceeds `min_precedence`.
     fn continue_parse_expression(
         &mut self,
-        lhs_start: (u32, u32, u32),
+        lhs_start: Position,
         mut expr: NodeHandle,
         min_precedence: i32,
         associativity: Associativity,
@@ -510,7 +510,7 @@ impl<'a> Parser<'a> {
 
     // === Secondary expression parsing ===
 
-    fn parse_secondary_expression(&mut self, lhs_start: (u32, u32, u32), lhs: NodeHandle, min_precedence: i32, forbidden: ForbiddenTokens) -> (NodeHandle, ForbiddenTokens) {
+    fn parse_secondary_expression(&mut self, lhs_start: Position, lhs: NodeHandle, min_precedence: i32, forbidden: ForbiddenTokens) -> (NodeHandle, ForbiddenTokens) {
         let callee_is_eval = self.last_parsed_identifier_is_eval;
         self.last_parsed_identifier_is_eval = false;
         let start = self.position();
@@ -723,7 +723,7 @@ impl<'a> Parser<'a> {
                 let rhs_start = self.position();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
                 if self.strict_mode && self.builder.is_identifier(expr) {
-                    self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.0, rhs_start.1);
+                    self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.line, rhs_start.column);
                 }
                 self.builder.create_unary_expression(self.span_from(start), UnaryOp::DELETE, expr)
             }
@@ -822,7 +822,7 @@ impl<'a> Parser<'a> {
     ///
     /// The boolean parameter in each `append_*` call indicates whether this
     /// link is a short-circuit point (`true` for `?.`, `false` for `.`/`()`).
-    fn parse_optional_chain(&mut self, start: (u32, u32, u32), base: NodeHandle) -> NodeHandle {
+    fn parse_optional_chain(&mut self, start: Position, base: NodeHandle) -> NodeHandle {
         let builder = self.builder.create_optional_chain_builder();
 
         loop {
@@ -1475,7 +1475,7 @@ impl<'a> Parser<'a> {
         self.try_parse_arrow_function_expression_impl(expect_parens, is_async, None)
     }
 
-    fn try_parse_arrow_function_expression_impl(&mut self, expect_parens: bool, is_async: bool, source_start_override: Option<(u32, u32, u32)>) -> Option<NodeHandle> {
+    fn try_parse_arrow_function_expression_impl(&mut self, expect_parens: bool, is_async: bool, source_start_override: Option<Position>) -> Option<NodeHandle> {
         let start = self.position();
 
         // Fast path for single-identifier arrow: `x => body`
@@ -1562,7 +1562,7 @@ impl<'a> Parser<'a> {
 
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
         let kind = fn_kind as u8;
-        let src_start = source_start_override.unwrap_or(start).2;
+        let src_start = source_start_override.unwrap_or(start).offset;
 
         // Arrow functions have two body forms:
         // 1. Block body:      `(x) => { return x + 1; }`
@@ -1616,7 +1616,7 @@ impl<'a> Parser<'a> {
     /// Parse a method definition for object/class.
     /// `source_text_start` is the offset where the method's source text begins
     /// (before modifiers like async/get/set and the method name).
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, is_constructor: bool, source_text_start: (u32, u32, u32)) -> NodeHandle {
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, is_constructor: bool, source_text_start: Position) -> NodeHandle {
         let start = self.position();
 
         // Save and reset function_might_need_arguments_object for this function scope.
@@ -1663,7 +1663,7 @@ impl<'a> Parser<'a> {
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, NULL_HANDLE,
-            source_text_start.2, self.source_text_end_offset() - source_text_start.2,
+            source_text_start.offset, self.source_text_end_offset() - source_text_start.offset,
             body, params, function_length, kind,
             self.strict_mode || has_use_strict, false,
             uses_this, uses_this_from_env,

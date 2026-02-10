@@ -58,6 +58,14 @@ mod declarations;
 mod expressions;
 mod statements;
 
+/// A source position: line number, column, and byte offset.
+#[derive(Clone, Copy)]
+pub struct Position {
+    pub line: u32,
+    pub column: u32,
+    pub offset: u32,
+}
+
 /// Program type: Script or Module.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ProgramType {
@@ -478,13 +486,12 @@ impl<'a> Parser<'a> {
 
     // === Position / Span ===
 
-    pub(crate) fn position(&self) -> (u32, u32, u32) {
-        // Use the current token's end position for the "current position"
-        (
-            self.current_token.line_number,
-            self.current_token.line_column,
-            self.current_token.offset,
-        )
+    pub(crate) fn position(&self) -> Position {
+        Position {
+            line: self.current_token.line_number,
+            column: self.current_token.line_column,
+            offset: self.current_token.offset,
+        }
     }
 
     /// Returns the offset just past the last consumed token, excluding the
@@ -505,15 +512,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn span_from(&self, start: (u32, u32, u32)) -> Span {
-        let (line, col, offset) = self.position();
+    pub(crate) fn span_from(&self, start: Position) -> Span {
+        let end = self.position();
         Span {
-            start_line: start.0,
-            start_column: start.1,
-            start_offset: start.2,
-            end_line: line,
-            end_column: col,
-            end_offset: offset,
+            start_line: start.line,
+            start_column: start.column,
+            start_offset: start.offset,
+            end_line: end.line,
+            end_column: end.column,
+            end_offset: end.offset,
         }
     }
 
@@ -767,10 +774,10 @@ impl<'a> Parser<'a> {
     ///
     /// The scope collector is shared (same parser instance), so identifiers
     /// registered by the re-parse are added to the current scope.
-    pub(crate) fn synthesize_binding_pattern(&mut self, start: (u32, u32, u32)) -> NodeHandle {
+    pub(crate) fn synthesize_binding_pattern(&mut self, start: Position) -> NodeHandle {
         let saved_lexer = std::mem::replace(
             &mut self.lexer,
-            Lexer::new_at_offset(self.source, start.2 as usize, start.0, start.1),
+            Lexer::new_at_offset(self.source, start.offset as usize, start.line, start.column),
         );
         let saved_token = std::mem::replace(&mut self.current_token, Token::new(TokenType::Eof));
         let saved_allow = self.allow_member_expressions;

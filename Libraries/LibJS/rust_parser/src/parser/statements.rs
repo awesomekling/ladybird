@@ -23,7 +23,7 @@
 //! initializer, then disambiguates based on whether `in` or `of` follows.
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
-use crate::parser::{Associativity, ForbiddenTokens, Parser};
+use crate::parser::{Associativity, ForbiddenTokens, Parser, Position};
 use crate::token::TokenType;
 
 impl<'a> Parser<'a> {
@@ -438,7 +438,7 @@ impl<'a> Parser<'a> {
         result
     }
 
-    fn parse_standard_for_loop(&mut self, start: (u32, u32, u32), init: NodeHandle) -> NodeHandle {
+    fn parse_standard_for_loop(&mut self, start: Position, init: NodeHandle) -> NodeHandle {
         let test = if self.match_token(TokenType::Semicolon) {
             NULL_HANDLE
         } else {
