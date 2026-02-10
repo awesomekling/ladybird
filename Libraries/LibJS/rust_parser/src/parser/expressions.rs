@@ -662,6 +662,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Period) {
             self.consume();
             self.consume_token(TokenType::Identifier); // "target"
+            self.scope_collector.set_uses_new_target();
             return self.builder.create_meta_property(self.span_from(start), 0); // NewTarget = 0
         }
 
@@ -1403,15 +1404,16 @@ impl<'a> Parser<'a> {
         let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
 
         if self.match_token(TokenType::CurlyOpen) {
-            let body = self.parse_function_body(is_async, false, &param_info);
+            let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info);
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
                 span, NULL_HANDLE,
                 start.2, self.source_text_end_offset() - start.2,
-                body.0, params, function_length, kind,
-                self.strict_mode || body.1, true,
-                true, true, false, false,
+                body, params, function_length, kind,
+                self.strict_mode || has_use_strict, true,
+                insights.uses_this, insights.uses_this_from_environment,
+                insights.contains_direct_call_to_eval, false,
             ))
         } else {
             // Expression body: set scope node and parameters for scope analysis.
@@ -1424,6 +1426,9 @@ impl<'a> Parser<'a> {
             if self.strict_mode {
                 self.builder.scope_node_set_strict_mode(body);
             }
+            let insights_uses_this = self.scope_collector.uses_this();
+            let insights_uses_this_from_env = self.scope_collector.uses_this_from_environment();
+            let insights_eval = self.scope_collector.contains_direct_call_to_eval();
             self.scope_collector.close_scope();
 
             let span = self.span_from(start);
@@ -1432,7 +1437,8 @@ impl<'a> Parser<'a> {
                 start.2, self.source_text_end_offset() - start.2,
                 body, params, function_length, kind,
                 self.strict_mode, true,
-                true, true, false, false,
+                insights_uses_this, insights_uses_this_from_env,
+                insights_eval, false,
             ))
         }
     }
@@ -1452,17 +1458,26 @@ impl<'a> Parser<'a> {
 
         self.scope_collector.open_function_scope(None);
 
+        let in_generator_before = self.in_generator_function_context;
+        let await_before = self.await_expression_is_valid;
+        self.in_generator_function_context = is_generator;
+        self.await_expression_is_valid = is_async;
+
         let (params, function_length, param_info) = self.parse_formal_parameters();
 
-        let body = self.parse_function_body(is_async, is_generator, &param_info);
+        self.in_generator_function_context = in_generator_before;
+        self.await_expression_is_valid = await_before;
+
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, NULL_HANDLE,
             source_text_start.2, self.source_text_end_offset() - source_text_start.2,
-            body.0, params, function_length, kind,
-            self.strict_mode || body.1, false,
-            true, false, false, true,
+            body, params, function_length, kind,
+            self.strict_mode || has_use_strict, false,
+            insights.uses_this, insights.uses_this_from_environment,
+            insights.contains_direct_call_to_eval, true,
         )
     }
 }

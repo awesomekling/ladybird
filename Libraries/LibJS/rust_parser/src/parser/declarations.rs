@@ -7,7 +7,7 @@
 //! Declaration parsing: variables, functions, classes, imports, exports.
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
-use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, Parser, ProgramType};
+use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, FunctionParsingInsights, Parser, ProgramType};
 use crate::token::TokenType;
 
 impl<'a> Parser<'a> {
@@ -221,7 +221,19 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(fn_name_ref);
         self.scope_collector.set_is_function_declaration();
 
+        // Set generator/async context before parsing parameters, since default
+        // parameter values are evaluated in the function's context (e.g. `yield`
+        // should be an identifier in a non-generator nested inside a generator).
+        let in_generator_before = self.in_generator_function_context;
+        let await_before = self.await_expression_is_valid;
+        self.in_generator_function_context = is_generator;
+        self.await_expression_is_valid = is_async;
+
         let (params, function_length, param_info) = self.parse_formal_parameters();
+
+        // Restore before parse_function_body (which saves/restores these itself).
+        self.in_generator_function_context = in_generator_before;
+        self.await_expression_is_valid = await_before;
 
         // Save function name state before body parsing, which may recursively
         // parse nested function declarations that clobber these fields.
@@ -229,7 +241,7 @@ impl<'a> Parser<'a> {
         let saved_fn_name_id = self.last_function_name_id;
         let saved_fn_kind = self.last_function_kind;
 
-        let body = self.parse_function_body(is_async, is_generator, &param_info);
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
         // Restore so register_function_declaration_with_scope_collector uses the right values.
         self.last_function_name = saved_fn_name;
@@ -240,9 +252,10 @@ impl<'a> Parser<'a> {
         self.builder.create_function_declaration(
             span, name,
             start.2, self.source_text_end_offset() - start.2,
-            body.0, params, function_length, kind as u8,
-            self.strict_mode || body.1,
-            true, false, false, true,
+            body, params, function_length, kind as u8,
+            self.strict_mode || has_use_strict,
+            insights.uses_this, insights.uses_this_from_environment,
+            insights.contains_direct_call_to_eval, true,
         )
     }
 
@@ -287,17 +300,26 @@ impl<'a> Parser<'a> {
         let fn_name = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
         self.scope_collector.open_function_scope(fn_name);
 
+        let in_generator_before = self.in_generator_function_context;
+        let await_before = self.await_expression_is_valid;
+        self.in_generator_function_context = is_generator;
+        self.await_expression_is_valid = is_async;
+
         let (params, function_length, param_info) = self.parse_formal_parameters();
 
-        let body = self.parse_function_body(is_async, is_generator, &param_info);
+        self.in_generator_function_context = in_generator_before;
+        self.await_expression_is_valid = await_before;
+
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, name,
             start.2, self.source_text_end_offset() - start.2,
-            body.0, params, function_length, kind as u8,
-            self.strict_mode || body.1, false,
-            true, false, false, true,
+            body, params, function_length, kind as u8,
+            self.strict_mode || has_use_strict, false,
+            insights.uses_this, insights.uses_this_from_environment,
+            insights.contains_direct_call_to_eval, true,
         )
     }
 
@@ -518,7 +540,8 @@ impl<'a> Parser<'a> {
     /// Parse a function body. The caller must have already opened the function
     /// scope (via open_function_scope) before parsing formal parameters, so that
     /// default parameter expressions can resolve identifiers in the function scope.
-    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, param_info: &[(Vec<u16>, NodeHandle, bool, bool)]) -> (NodeHandle, bool) {
+    /// Returns (body, has_use_strict, parsing_insights).
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, param_info: &[(Vec<u16>, NodeHandle, bool, bool)]) -> (NodeHandle, bool, FunctionParsingInsights) {
         let start = self.position();
         let body = self.builder.create_function_body(self.span_from(start));
         self.consume_token(TokenType::CurlyOpen);
@@ -552,11 +575,18 @@ impl<'a> Parser<'a> {
         self.await_expression_is_valid = await_before;
         self.labels_in_scope = old_labels;
 
+        // Read scope insights before closing the scope.
+        let insights = FunctionParsingInsights {
+            uses_this: self.scope_collector.uses_this(),
+            uses_this_from_environment: self.scope_collector.uses_this_from_environment(),
+            contains_direct_call_to_eval: self.scope_collector.contains_direct_call_to_eval(),
+        };
+
         self.builder.scope_node_shrink_to_fit(body);
         self.scope_collector.close_scope();
         self.consume_token(TokenType::CurlyClose);
 
-        (body, has_use_strict)
+        (body, has_use_strict, insights)
     }
 
     // === Formal parameters ===

@@ -41,6 +41,13 @@ pub enum FunctionKind {
     AsyncGenerator = 3,
 }
 
+/// Parsing insights collected from a function body's scope.
+pub struct FunctionParsingInsights {
+    pub uses_this: bool,
+    pub uses_this_from_environment: bool,
+    pub contains_direct_call_to_eval: bool,
+}
+
 /// Associativity for operator precedence.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Associativity {
