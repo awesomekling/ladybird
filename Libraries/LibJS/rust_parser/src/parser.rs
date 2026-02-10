@@ -384,10 +384,9 @@ impl<'a> Parser<'a> {
 
     /// Consume the current token and advance to the next one.
     pub(crate) fn consume(&mut self) -> Token {
-        let old = self.current_token.clone();
+        let old = std::mem::replace(&mut self.current_token, self.lexer.next());
         self.check_arguments_or_eval(&old);
         self.previous_token_was_period = old.token_type == TokenType::Period;
-        self.current_token = self.lexer.next();
         old
     }
 
@@ -402,10 +401,9 @@ impl<'a> Parser<'a> {
     /// Consume and re-lex for regex if needed (when `/` or `/=` appears in expression position).
     #[allow(dead_code)]
     pub(crate) fn consume_and_allow_division(&mut self) -> Token {
-        let old = self.current_token.clone();
+        let old = std::mem::replace(&mut self.current_token, self.lexer.next());
         self.check_arguments_or_eval(&old);
         self.previous_token_was_period = old.token_type == TokenType::Period;
-        self.current_token = self.lexer.next();
         old
     }
 
