@@ -186,54 +186,68 @@ fn unicode_id_continue(cp: u32) -> bool {
 }
 
 fn keyword_from_str(s: &[u16]) -> Option<TokenType> {
-    // Convert to ASCII bytes for matching (all keywords are ASCII)
-    if s.iter().any(|&cu| cu > 127) {
-        return None;
+    // Dispatch by length first to minimize comparisons, then compare
+    // against compile-time UTF-16 constants (zero allocation).
+    match s.len() {
+        2 => {
+            if s == utf16!("do") { return Some(TokenType::Do); }
+            if s == utf16!("if") { return Some(TokenType::If); }
+            if s == utf16!("in") { return Some(TokenType::In); }
+        }
+        3 => {
+            if s == utf16!("for") { return Some(TokenType::For); }
+            if s == utf16!("let") { return Some(TokenType::Let); }
+            if s == utf16!("new") { return Some(TokenType::New); }
+            if s == utf16!("try") { return Some(TokenType::Try); }
+            if s == utf16!("var") { return Some(TokenType::Var); }
+        }
+        4 => {
+            if s == utf16!("case") { return Some(TokenType::Case); }
+            if s == utf16!("else") { return Some(TokenType::Else); }
+            if s == utf16!("enum") { return Some(TokenType::Enum); }
+            if s == utf16!("null") { return Some(TokenType::NullLiteral); }
+            if s == utf16!("this") { return Some(TokenType::This); }
+            if s == utf16!("true") { return Some(TokenType::BoolLiteral); }
+            if s == utf16!("void") { return Some(TokenType::Void); }
+            if s == utf16!("with") { return Some(TokenType::With); }
+        }
+        5 => {
+            if s == utf16!("async") { return Some(TokenType::Async); }
+            if s == utf16!("await") { return Some(TokenType::Await); }
+            if s == utf16!("break") { return Some(TokenType::Break); }
+            if s == utf16!("catch") { return Some(TokenType::Catch); }
+            if s == utf16!("class") { return Some(TokenType::Class); }
+            if s == utf16!("const") { return Some(TokenType::Const); }
+            if s == utf16!("false") { return Some(TokenType::BoolLiteral); }
+            if s == utf16!("super") { return Some(TokenType::Super); }
+            if s == utf16!("throw") { return Some(TokenType::Throw); }
+            if s == utf16!("while") { return Some(TokenType::While); }
+            if s == utf16!("yield") { return Some(TokenType::Yield); }
+        }
+        6 => {
+            if s == utf16!("delete") { return Some(TokenType::Delete); }
+            if s == utf16!("export") { return Some(TokenType::Export); }
+            if s == utf16!("import") { return Some(TokenType::Import); }
+            if s == utf16!("return") { return Some(TokenType::Return); }
+            if s == utf16!("switch") { return Some(TokenType::Switch); }
+            if s == utf16!("typeof") { return Some(TokenType::Typeof); }
+        }
+        7 => {
+            if s == utf16!("default") { return Some(TokenType::Default); }
+            if s == utf16!("extends") { return Some(TokenType::Extends); }
+            if s == utf16!("finally") { return Some(TokenType::Finally); }
+        }
+        8 => {
+            if s == utf16!("continue") { return Some(TokenType::Continue); }
+            if s == utf16!("debugger") { return Some(TokenType::Debugger); }
+            if s == utf16!("function") { return Some(TokenType::Function); }
+        }
+        10 => {
+            if s == utf16!("instanceof") { return Some(TokenType::Instanceof); }
+        }
+        _ => {}
     }
-    let bytes: Vec<u8> = s.iter().map(|&cu| cu as u8).collect();
-    match bytes.as_slice() {
-        b"async" => Some(TokenType::Async),
-        b"await" => Some(TokenType::Await),
-        b"break" => Some(TokenType::Break),
-        b"case" => Some(TokenType::Case),
-        b"catch" => Some(TokenType::Catch),
-        b"class" => Some(TokenType::Class),
-        b"const" => Some(TokenType::Const),
-        b"continue" => Some(TokenType::Continue),
-        b"debugger" => Some(TokenType::Debugger),
-        b"default" => Some(TokenType::Default),
-        b"delete" => Some(TokenType::Delete),
-        b"do" => Some(TokenType::Do),
-        b"else" => Some(TokenType::Else),
-        b"enum" => Some(TokenType::Enum),
-        b"export" => Some(TokenType::Export),
-        b"extends" => Some(TokenType::Extends),
-        b"false" => Some(TokenType::BoolLiteral),
-        b"finally" => Some(TokenType::Finally),
-        b"for" => Some(TokenType::For),
-        b"function" => Some(TokenType::Function),
-        b"if" => Some(TokenType::If),
-        b"import" => Some(TokenType::Import),
-        b"in" => Some(TokenType::In),
-        b"instanceof" => Some(TokenType::Instanceof),
-        b"let" => Some(TokenType::Let),
-        b"new" => Some(TokenType::New),
-        b"null" => Some(TokenType::NullLiteral),
-        b"return" => Some(TokenType::Return),
-        b"super" => Some(TokenType::Super),
-        b"switch" => Some(TokenType::Switch),
-        b"this" => Some(TokenType::This),
-        b"throw" => Some(TokenType::Throw),
-        b"true" => Some(TokenType::BoolLiteral),
-        b"try" => Some(TokenType::Try),
-        b"typeof" => Some(TokenType::Typeof),
-        b"var" => Some(TokenType::Var),
-        b"void" => Some(TokenType::Void),
-        b"while" => Some(TokenType::While),
-        b"with" => Some(TokenType::With),
-        b"yield" => Some(TokenType::Yield),
-        _ => None,
-    }
+    None
 }
 
 fn single_char_token(ch: u16) -> TokenType {
