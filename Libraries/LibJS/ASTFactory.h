@@ -477,6 +477,24 @@ ASTNodeHandle ast_create_assignment_expression_with_pattern(ASTArenaHandle arena
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     uint8_t op, ASTNodeHandle pattern, ASTNodeHandle rhs);
 
+// === OptionalChain ===
+// Builder pattern: create builder, append references, then finalize into OptionalChain.
+typedef void* OptionalChainBuilderHandle;
+OptionalChainBuilderHandle ast_create_optional_chain_builder();
+void ast_optional_chain_builder_append_member(OptionalChainBuilderHandle builder,
+    ASTNodeHandle identifier, bool is_optional);
+void ast_optional_chain_builder_append_computed(OptionalChainBuilderHandle builder,
+    ASTNodeHandle expression, bool is_optional);
+void ast_optional_chain_builder_append_call(OptionalChainBuilderHandle builder,
+    ASTNodeHandle const* argument_values, bool const* argument_is_spread,
+    size_t argument_count, bool is_optional);
+void ast_optional_chain_builder_append_private_member(OptionalChainBuilderHandle builder,
+    ASTNodeHandle private_identifier, bool is_optional);
+ASTNodeHandle ast_create_optional_chain(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle base, OptionalChainBuilderHandle builder);
+
 // Node type checking (returns true if the handle is the given type)
 bool ast_is_identifier(ASTNodeHandle handle);
 bool ast_is_member_expression(ASTNodeHandle handle);

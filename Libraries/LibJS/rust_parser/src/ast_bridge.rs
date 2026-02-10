@@ -545,6 +545,32 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle,
     ) -> NodeHandle;
+
+    // OptionalChain
+    pub fn ast_create_optional_chain_builder() -> *mut std::ffi::c_void;
+    pub fn ast_optional_chain_builder_append_member(
+        builder: *mut std::ffi::c_void,
+        identifier: NodeHandle, is_optional: bool,
+    );
+    pub fn ast_optional_chain_builder_append_computed(
+        builder: *mut std::ffi::c_void,
+        expression: NodeHandle, is_optional: bool,
+    );
+    pub fn ast_optional_chain_builder_append_call(
+        builder: *mut std::ffi::c_void,
+        argument_values: *const NodeHandle, argument_is_spread: *const bool,
+        argument_count: usize, is_optional: bool,
+    );
+    pub fn ast_optional_chain_builder_append_private_member(
+        builder: *mut std::ffi::c_void,
+        private_identifier: NodeHandle, is_optional: bool,
+    );
+    pub fn ast_create_optional_chain(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        base: NodeHandle, builder: *mut std::ffi::c_void,
+    ) -> NodeHandle;
 }
 
 /// Builder wrapping the C++ AST factory with a simpler interface.
@@ -1085,6 +1111,33 @@ impl AstBuilder {
     pub fn create_for_await_of_statement_with_pattern(&self, span: Span, pattern: NodeHandle, rhs: NodeHandle, body: NodeHandle) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_for_await_of_statement_with_pattern(a, sc, sl, scol, so, el, ecol, eo, pattern, rhs, body) }
+    }
+
+    // === OptionalChain ===
+
+    pub fn create_optional_chain_builder(&self) -> *mut std::ffi::c_void {
+        unsafe { ast_create_optional_chain_builder() }
+    }
+
+    pub fn optional_chain_builder_append_member(&self, builder: *mut std::ffi::c_void, identifier: NodeHandle, is_optional: bool) {
+        unsafe { ast_optional_chain_builder_append_member(builder, identifier, is_optional) }
+    }
+
+    pub fn optional_chain_builder_append_computed(&self, builder: *mut std::ffi::c_void, expression: NodeHandle, is_optional: bool) {
+        unsafe { ast_optional_chain_builder_append_computed(builder, expression, is_optional) }
+    }
+
+    pub fn optional_chain_builder_append_call(&self, builder: *mut std::ffi::c_void, argument_values: &[NodeHandle], argument_is_spread: &[bool], is_optional: bool) {
+        unsafe { ast_optional_chain_builder_append_call(builder, argument_values.as_ptr(), argument_is_spread.as_ptr(), argument_values.len(), is_optional) }
+    }
+
+    pub fn optional_chain_builder_append_private_member(&self, builder: *mut std::ffi::c_void, private_identifier: NodeHandle, is_optional: bool) {
+        unsafe { ast_optional_chain_builder_append_private_member(builder, private_identifier, is_optional) }
+    }
+
+    pub fn create_optional_chain(&self, span: Span, base: NodeHandle, builder: *mut std::ffi::c_void) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_optional_chain(a, sc, sl, scol, so, el, ecol, eo, base, builder) }
     }
 }
 

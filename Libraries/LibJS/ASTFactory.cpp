@@ -1280,6 +1280,80 @@ ASTNodeHandle ast_create_assignment_expression_with_pattern(ASTArenaHandle arena
         static_cast<AssignmentOp>(op), NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern)), as_ref<Expression>(rhs)));
 }
 
+// === OptionalChain ===
+
+struct OptionalChainBuilder {
+    Vector<OptionalChain::Reference> references;
+};
+
+OptionalChainBuilderHandle ast_create_optional_chain_builder()
+{
+    return new OptionalChainBuilder();
+}
+
+void ast_optional_chain_builder_append_member(OptionalChainBuilderHandle builder_handle,
+    ASTNodeHandle identifier, bool is_optional)
+{
+    auto& builder = *static_cast<OptionalChainBuilder*>(builder_handle);
+    builder.references.append(OptionalChain::MemberReference {
+        as_ref<Identifier>(identifier),
+        is_optional ? OptionalChain::Mode::Optional : OptionalChain::Mode::NotOptional,
+    });
+}
+
+void ast_optional_chain_builder_append_computed(OptionalChainBuilderHandle builder_handle,
+    ASTNodeHandle expression, bool is_optional)
+{
+    auto& builder = *static_cast<OptionalChainBuilder*>(builder_handle);
+    builder.references.append(OptionalChain::ComputedReference {
+        as_ref<Expression>(expression),
+        is_optional ? OptionalChain::Mode::Optional : OptionalChain::Mode::NotOptional,
+    });
+}
+
+void ast_optional_chain_builder_append_call(OptionalChainBuilderHandle builder_handle,
+    ASTNodeHandle const* argument_values, bool const* argument_is_spread,
+    size_t argument_count, bool is_optional)
+{
+    auto& builder = *static_cast<OptionalChainBuilder*>(builder_handle);
+    Vector<CallExpression::Argument> args;
+    args.ensure_capacity(argument_count);
+    for (size_t i = 0; i < argument_count; ++i) {
+        args.unchecked_append({
+            .value = as_ref<Expression>(argument_values[i]),
+            .is_spread = argument_is_spread[i],
+        });
+    }
+    builder.references.append(OptionalChain::Call {
+        move(args),
+        is_optional ? OptionalChain::Mode::Optional : OptionalChain::Mode::NotOptional,
+    });
+}
+
+void ast_optional_chain_builder_append_private_member(OptionalChainBuilderHandle builder_handle,
+    ASTNodeHandle private_identifier, bool is_optional)
+{
+    auto& builder = *static_cast<OptionalChainBuilder*>(builder_handle);
+    builder.references.append(OptionalChain::PrivateMemberReference {
+        as_ref<PrivateIdentifier>(private_identifier),
+        is_optional ? OptionalChain::Mode::Optional : OptionalChain::Mode::NotOptional,
+    });
+}
+
+ASTNodeHandle ast_create_optional_chain(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle base, OptionalChainBuilderHandle builder_handle)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto& builder = *static_cast<OptionalChainBuilder*>(builder_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    auto result = arena_add(arena, create_ast_node<OptionalChain>(range,
+        as_ref<Expression>(base), move(builder.references)));
+    delete &builder;
+    return result;
+}
+
 bool ast_is_identifier(ASTNodeHandle handle)
 {
     return is<Identifier>(*static_cast<ASTNode const*>(handle));

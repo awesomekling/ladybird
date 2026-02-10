@@ -562,18 +562,8 @@ impl<'a> Parser<'a> {
 
             // === Optional chaining ===
             TokenType::QuestionMarkPeriod => {
-                // TODO: parse_optional_chain
-                self.consume();
-                if self.match_identifier_name() {
-                    let tok = self.consume();
-                    let value = self.token_value(&tok).to_vec();
-                    let prop = self.builder.create_identifier(self.span_from(start), &value);
-                    let span = self.span_from(start);
-                    (self.builder.create_member_expression(span, lhs, prop, false), ForbiddenTokens::none())
-                } else {
-                    self.expected("property name");
-                    (lhs, ForbiddenTokens::none())
-                }
+                let chain = self.parse_optional_chain(start, lhs);
+                (chain, ForbiddenTokens::none())
             }
 
             // === Postfix ===
@@ -732,6 +722,91 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::ParenClose);
         (values, spreads)
+    }
+
+    // === Optional chaining ===
+
+    fn parse_optional_chain(&mut self, start: (u32, u32, u32), base: NodeHandle) -> NodeHandle {
+        let builder = self.builder.create_optional_chain_builder();
+
+        loop {
+            if self.match_token(TokenType::QuestionMarkPeriod) {
+                self.consume();
+                match self.current_token_type() {
+                    TokenType::ParenOpen => {
+                        let (values, spreads) = self.parse_arguments();
+                        self.builder.optional_chain_builder_append_call(builder, &values, &spreads, true);
+                    }
+                    TokenType::BracketOpen => {
+                        self.consume();
+                        let expr = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
+                        self.consume_token(TokenType::BracketClose);
+                        self.builder.optional_chain_builder_append_computed(builder, expr, true);
+                    }
+                    TokenType::PrivateIdentifier => {
+                        let prop_start = self.position();
+                        let tok = self.consume();
+                        let value = self.token_value(&tok).to_vec();
+                        let prop = self.builder.create_private_identifier(self.span_from(prop_start), &value);
+                        self.builder.optional_chain_builder_append_private_member(builder, prop, true);
+                    }
+                    TokenType::TemplateLiteralStart => {
+                        self.syntax_error("Invalid tagged template literal after ?.");
+                        break;
+                    }
+                    _ => {
+                        if self.match_identifier_name() {
+                            let prop_start = self.position();
+                            let tok = self.consume();
+                            let value = self.token_value(&tok).to_vec();
+                            let prop = self.builder.create_identifier(self.span_from(prop_start), &value);
+                            self.builder.optional_chain_builder_append_member(builder, prop, true);
+                        } else {
+                            self.syntax_error("Invalid optional chain reference after ?.");
+                            break;
+                        }
+                    }
+                }
+            } else if self.match_token(TokenType::ParenOpen) {
+                let (values, spreads) = self.parse_arguments();
+                self.builder.optional_chain_builder_append_call(builder, &values, &spreads, false);
+            } else if self.match_token(TokenType::Period) {
+                self.consume();
+                if self.match_token(TokenType::PrivateIdentifier) {
+                    let prop_start = self.position();
+                    let tok = self.consume();
+                    let value = self.token_value(&tok).to_vec();
+                    let prop = self.builder.create_private_identifier(self.span_from(prop_start), &value);
+                    self.builder.optional_chain_builder_append_private_member(builder, prop, false);
+                } else if self.match_identifier_name() {
+                    let prop_start = self.position();
+                    let tok = self.consume();
+                    let value = self.token_value(&tok).to_vec();
+                    let prop = self.builder.create_identifier(self.span_from(prop_start), &value);
+                    self.builder.optional_chain_builder_append_member(builder, prop, false);
+                } else {
+                    self.expected("an identifier");
+                    break;
+                }
+            } else if self.match_token(TokenType::TemplateLiteralStart) {
+                self.syntax_error("Invalid tagged template literal after optional chain");
+                break;
+            } else if self.match_token(TokenType::BracketOpen) {
+                self.consume();
+                let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                self.consume_token(TokenType::BracketClose);
+                self.builder.optional_chain_builder_append_computed(builder, expr, false);
+            } else {
+                break;
+            }
+
+            if self.done() {
+                break;
+            }
+        }
+
+        let span = self.span_from(start);
+        self.builder.create_optional_chain(span, base, builder)
     }
 
     // === Yield expression ===
