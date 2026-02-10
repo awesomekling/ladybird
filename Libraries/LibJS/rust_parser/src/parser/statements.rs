@@ -459,6 +459,8 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyOpen);
 
+        self.scope_collector.open_block_scope(switch_stmt);
+
         let break_before = self.in_break_context;
         self.in_break_context = true;
 
@@ -468,6 +470,8 @@ impl<'a> Parser<'a> {
         }
 
         self.in_break_context = break_before;
+
+        self.scope_collector.close_scope();
         self.consume_token(TokenType::CurlyClose);
 
         switch_stmt
