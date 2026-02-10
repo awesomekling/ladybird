@@ -1349,6 +1349,7 @@ impl<'a> Parser<'a> {
         // Open function scope before parsing parameters so that default
         // parameter expressions can resolve identifiers in the function scope.
         self.scope_collector.open_function_scope(None);
+        self.scope_collector.set_is_arrow_function();
 
         let (params, function_length, param_info);
 
