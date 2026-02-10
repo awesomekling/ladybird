@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
         mut expr: NodeHandle,
         min_precedence: i32,
         associativity: Associativity,
-        forbidden: ForbiddenTokens,
+        mut forbidden: ForbiddenTokens,
     ) -> NodeHandle {
         // Precedence climbing loop: keep consuming operators as long as they
         // bind at least as tightly as our minimum. For left-associative operators
@@ -212,8 +212,9 @@ impl<'a> Parser<'a> {
 
             let result = self.parse_secondary_expression(lhs_start, expr, new_precedence, forbidden);
             expr = result.0;
-            let new_forbidden = result.1;
-            let _ = new_forbidden; // Forbidden tokens from secondary expression (e.g., ?? forbids &&/||)
+            // Merge back forbidden tokens from secondary expression so that
+            // e.g. `a ?? b && c` is correctly rejected (?? forbids &&/||).
+            forbidden = forbidden.merge(result.1);
         }
 
         // Handle comma (sequence expression)
