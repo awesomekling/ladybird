@@ -928,14 +928,14 @@ impl<'a> Parser<'a> {
 
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
-            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, start);
+            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, false, start);
             let prop_type = if is_getter { 1 } else if is_setter { 2 } else { 0 }; // KeyValue=0, Getter=1, Setter=2
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
 
         // Getter/setter
         if is_getter || is_setter {
-            let func = self.parse_method_definition(false, false, is_getter, is_setter, start);
+            let func = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
             let prop_type = if is_getter { 1 } else { 2 };
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
@@ -1467,8 +1467,12 @@ impl<'a> Parser<'a> {
     /// Parse a method definition for object/class.
     /// `source_text_start` is the offset where the method's source text begins
     /// (before modifiers like async/get/set and the method name).
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, source_text_start: (u32, u32, u32)) -> NodeHandle {
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, _is_getter: bool, _is_setter: bool, is_constructor: bool, source_text_start: (u32, u32, u32)) -> NodeHandle {
         let start = self.position();
+
+        // Save and reset function_might_need_arguments_object for this function scope.
+        let saved_might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = false;
 
         let kind = match (is_async, is_generator) {
             (true, true) => FunctionKind::AsyncGenerator as u8,
@@ -1491,14 +1495,24 @@ impl<'a> Parser<'a> {
 
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
+        let might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = saved_might_need_arguments;
+
+        // Constructors always need uses_this and uses_this_from_environment.
+        let (uses_this, uses_this_from_env) = if is_constructor {
+            (true, true)
+        } else {
+            (insights.uses_this, insights.uses_this_from_environment)
+        };
+
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, NULL_HANDLE,
             source_text_start.2, self.source_text_end_offset() - source_text_start.2,
             body, params, function_length, kind,
             self.strict_mode || has_use_strict, false,
-            insights.uses_this, insights.uses_this_from_environment,
-            insights.contains_direct_call_to_eval, true,
+            uses_this, uses_this_from_env,
+            insights.contains_direct_call_to_eval, might_need_arguments,
         )
     }
 }

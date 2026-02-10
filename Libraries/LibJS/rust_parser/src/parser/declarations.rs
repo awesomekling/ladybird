@@ -178,6 +178,10 @@ impl<'a> Parser<'a> {
     fn parse_function_declaration(&mut self) -> NodeHandle {
         let start = self.position();
 
+        // Save and reset function_might_need_arguments_object for this function scope.
+        let saved_might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = false;
+
         let is_async = if self.match_token(TokenType::Async) {
             self.consume();
             true
@@ -248,6 +252,9 @@ impl<'a> Parser<'a> {
         self.last_function_name_id = saved_fn_name_id;
         self.last_function_kind = saved_fn_kind;
 
+        let might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = saved_might_need_arguments;
+
         let span = self.span_from(start);
         self.builder.create_function_declaration(
             span, name,
@@ -255,7 +262,7 @@ impl<'a> Parser<'a> {
             body, params, function_length, kind as u8,
             self.strict_mode || has_use_strict,
             insights.uses_this, insights.uses_this_from_environment,
-            insights.contains_direct_call_to_eval, true,
+            insights.contains_direct_call_to_eval, might_need_arguments,
         )
     }
 
@@ -263,6 +270,10 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_function_expression(&mut self) -> NodeHandle {
         let start = self.position();
+
+        // Save and reset function_might_need_arguments_object for this function scope.
+        let saved_might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = false;
 
         let is_async = if self.match_token(TokenType::Async) {
             self.consume();
@@ -312,6 +323,9 @@ impl<'a> Parser<'a> {
 
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
+        let might_need_arguments = self.function_might_need_arguments_object;
+        self.function_might_need_arguments_object = saved_might_need_arguments;
+
         let span = self.span_from(start);
         self.builder.create_function_expression(
             span, name,
@@ -319,7 +333,7 @@ impl<'a> Parser<'a> {
             body, params, function_length, kind as u8,
             self.strict_mode || has_use_strict, false,
             insights.uses_this, insights.uses_this_from_environment,
-            insights.contains_direct_call_to_eval, true,
+            insights.contains_direct_call_to_eval, might_need_arguments,
         )
     }
 
@@ -504,7 +518,13 @@ impl<'a> Parser<'a> {
 
         // Method
         if self.match_token(TokenType::ParenOpen) {
-            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, function_start);
+            // Check if this is the constructor before parsing the method body.
+            let ctor_name = super::utf16_lit("constructor");
+            let is_constructor = !is_static
+                && !is_getter && !is_setter
+                && key_value.as_deref() == Some(ctor_name.as_slice());
+
+            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
             let method_kind = if is_getter {
                 1 // Getter
             } else if is_setter {
@@ -513,11 +533,6 @@ impl<'a> Parser<'a> {
                 0 // Method
             };
 
-            // Check if this is the constructor
-            let ctor_name = super::utf16_lit("constructor");
-            let is_constructor = !is_static
-                && !is_getter && !is_setter
-                && key_value.as_deref() == Some(ctor_name.as_slice());
             let constructor = if is_constructor { Some(func) } else { None };
 
             return (self.builder.create_class_method(self.span_from(start), key, func, method_kind, is_static), constructor);

@@ -283,6 +283,7 @@ impl<'a> Parser<'a> {
     /// Consume the current token and advance to the next one.
     pub(crate) fn consume(&mut self) -> Token {
         let old = self.current_token.clone();
+        self.check_arguments_or_eval(&old);
         self.previous_token_was_period = old.token_type == TokenType::Period;
         self.current_token = self.lexer.next();
         old
@@ -299,9 +300,29 @@ impl<'a> Parser<'a> {
     /// Consume and re-lex for regex if needed (when `/` or `/=` appears in expression position).
     pub(crate) fn consume_and_allow_division(&mut self) -> Token {
         let old = self.current_token.clone();
+        self.check_arguments_or_eval(&old);
         self.previous_token_was_period = old.token_type == TokenType::Period;
         self.current_token = self.lexer.next();
         old
+    }
+
+    /// Check if the token being consumed is a freestanding `arguments` or `eval` identifier.
+    /// If so, mark the current function as potentially needing an arguments object.
+    fn check_arguments_or_eval(&mut self, token: &Token) {
+        if token.token_type == TokenType::Identifier && !self.previous_token_was_period {
+            let value: &[u16] = if let Some(ref v) = token.identifier_value {
+                v
+            } else {
+                let start = token.value_start as usize;
+                let end = start + token.value_len as usize;
+                if end <= self.source.len() { &self.source[start..end] } else { &[] }
+            };
+            const ARGUMENTS: [u16; 9] = [b'a' as u16, b'r' as u16, b'g' as u16, b'u' as u16, b'm' as u16, b'e' as u16, b'n' as u16, b't' as u16, b's' as u16];
+            const EVAL: [u16; 4] = [b'e' as u16, b'v' as u16, b'a' as u16, b'l' as u16];
+            if value == ARGUMENTS || value == EVAL {
+                self.function_might_need_arguments_object = true;
+            }
+        }
     }
 
     /// Consume an identifier token.
