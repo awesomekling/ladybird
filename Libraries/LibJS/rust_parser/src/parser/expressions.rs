@@ -267,7 +267,14 @@ impl<'a> Parser<'a> {
 
             TokenType::StringLiteral => {
                 let tok = self.consume();
-                let value = self.parse_string_value(&tok);
+                let (value, has_octal) = self.parse_string_value(&tok);
+                if has_octal {
+                    if self.strict_mode {
+                        self.syntax_error("Octal escape sequence in string literal not allowed in strict mode");
+                    } else {
+                        self.string_legacy_octal_escape_sequence_in_scope = true;
+                    }
+                }
                 (self.builder.create_string_literal(self.span_from(start), &value), true)
             }
 
@@ -657,7 +664,11 @@ impl<'a> Parser<'a> {
             }
             TokenType::Delete => {
                 self.consume();
+                let rhs_start = self.position();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
+                if self.strict_mode && self.builder.is_identifier(expr) {
+                    self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.0, rhs_start.1);
+                }
                 self.builder.create_unary_expression(self.span_from(start), 6, expr) // Delete = 6
             }
             _ => {
@@ -985,7 +996,14 @@ impl<'a> Parser<'a> {
             }
             TokenType::StringLiteral => {
                 let tok = self.consume();
-                let value = self.parse_string_value(&tok);
+                let (value, has_octal) = self.parse_string_value(&tok);
+                if has_octal {
+                    if self.strict_mode {
+                        self.syntax_error("Octal escape sequence in string literal not allowed in strict mode");
+                    } else {
+                        self.string_legacy_octal_escape_sequence_in_scope = true;
+                    }
+                }
                 let is_proto = value == proto_name;
                 (self.builder.create_string_literal(self.span_from(start), &value), Some(value), is_proto)
             }
@@ -1090,7 +1108,10 @@ impl<'a> Parser<'a> {
                         None => parts.push(self.builder.create_null_literal(self.span_from(start))),
                     }
                 } else {
-                    let value = self.process_escape_sequences(raw);
+                    let (value, has_octal) = self.process_escape_sequences(raw);
+                    if has_octal {
+                        self.syntax_error("Octal escape sequence not allowed in template literal");
+                    }
                     parts.push(self.builder.create_string_literal(self.span_from(start), &value));
                 }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
@@ -1222,18 +1243,23 @@ impl<'a> Parser<'a> {
 
     // === String value parsing ===
 
-    pub(crate) fn parse_string_value(&self, token: &Token) -> Vec<u16> {
+    /// Parse a string value from a string literal token.
+    /// Returns (value, has_legacy_octal_escape).
+    pub(crate) fn parse_string_value(&self, token: &Token) -> (Vec<u16>, bool) {
         let raw = self.token_value(token);
         if raw.len() < 2 {
-            return Vec::new();
+            return (Vec::new(), false);
         }
         // Strip surrounding quotes
         let inner = &raw[1..raw.len() - 1];
         self.process_escape_sequences(inner)
     }
 
-    fn process_escape_sequences(&self, inner: &[u16]) -> Vec<u16> {
+    /// Process escape sequences in a string.
+    /// Returns (processed_value, has_legacy_octal_escape).
+    fn process_escape_sequences(&self, inner: &[u16]) -> (Vec<u16>, bool) {
         let mut result = Vec::with_capacity(inner.len());
+        let mut has_legacy_octal = false;
         let mut i = 0;
         while i < inner.len() {
             if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
@@ -1248,6 +1274,7 @@ impl<'a> Parser<'a> {
                     c if c == b'0' as u16 => {
                         // \0 followed by a digit is an octal escape
                         if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
+                            has_legacy_octal = true;
                             let (val, consumed) = parse_octal_escape(inner, i);
                             result.push(val);
                             i += consumed;
@@ -1257,9 +1284,15 @@ impl<'a> Parser<'a> {
                     }
                     c if c >= b'1' as u16 && c <= b'7' as u16 => {
                         // Octal escape: \1 through \377
+                        has_legacy_octal = true;
                         let (val, consumed) = parse_octal_escape(inner, i);
                         result.push(val);
                         i += consumed;
+                    }
+                    c if c == b'8' as u16 || c == b'9' as u16 => {
+                        // \8 and \9 are not valid octal but are legacy escapes
+                        has_legacy_octal = true;
+                        result.push(c);
                     }
                     c if c == b'x' as u16 => {
                         // Hex escape: \xHH
@@ -1327,7 +1360,7 @@ impl<'a> Parser<'a> {
             }
             i += 1;
         }
-        result
+        (result, has_legacy_octal)
     }
 
     // === Arrow function ===
@@ -1421,11 +1454,16 @@ impl<'a> Parser<'a> {
         // Discard saved state - we're committed to arrow function
         self.discard_saved_state();
 
-        let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
+        let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
+        let kind = fn_kind as u8;
         let src_start = source_start_override.unwrap_or(start).2;
 
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info);
+
+            if has_use_strict || fn_kind != FunctionKind::Normal {
+                self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
+            }
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
@@ -1474,12 +1512,13 @@ impl<'a> Parser<'a> {
         let saved_might_need_arguments = self.function_might_need_arguments_object;
         self.function_might_need_arguments_object = false;
 
-        let kind = match (is_async, is_generator) {
-            (true, true) => FunctionKind::AsyncGenerator as u8,
-            (true, false) => FunctionKind::Async as u8,
-            (false, true) => FunctionKind::Generator as u8,
-            (false, false) => FunctionKind::Normal as u8,
+        let fn_kind = match (is_async, is_generator) {
+            (true, true) => FunctionKind::AsyncGenerator,
+            (true, false) => FunctionKind::Async,
+            (false, true) => FunctionKind::Generator,
+            (false, false) => FunctionKind::Normal,
         };
+        let kind = fn_kind as u8;
 
         self.scope_collector.open_function_scope(None);
 
@@ -1494,6 +1533,11 @@ impl<'a> Parser<'a> {
         self.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+
+        // Retroactive strict mode checks on parameters.
+        if has_use_strict || fn_kind != FunctionKind::Normal {
+            self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
+        }
 
         let might_need_arguments = self.function_might_need_arguments_object;
         self.function_might_need_arguments_object = saved_might_need_arguments;

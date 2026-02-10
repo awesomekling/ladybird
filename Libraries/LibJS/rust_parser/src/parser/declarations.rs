@@ -93,6 +93,7 @@ impl<'a> Parser<'a> {
             let (target, is_pattern) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                self.check_identifier_name_for_assignment_validity(&value, false);
                 let id = self.builder.create_identifier(self.span_from(decl_start), &value);
                 // Track bound names for scope collector
                 if kind == DeclarationKind::Var {
@@ -247,6 +248,15 @@ impl<'a> Parser<'a> {
 
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
 
+        // Retroactive strict mode checks on function name and parameters.
+        if has_use_strict || kind != FunctionKind::Normal {
+            let force_strict = has_use_strict;
+            if name != NULL_HANDLE {
+                self.check_identifier_name_for_assignment_validity(&fn_name, force_strict);
+            }
+            self.check_parameters_post_body(&param_info, force_strict, kind);
+        }
+
         // Restore so register_function_declaration_with_scope_collector uses the right values.
         self.last_function_name = saved_fn_name;
         self.last_function_name_id = saved_fn_name_id;
@@ -322,6 +332,15 @@ impl<'a> Parser<'a> {
         self.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+
+        // Retroactive strict mode checks on function name and parameters.
+        if has_use_strict || kind != FunctionKind::Normal {
+            let force_strict = has_use_strict;
+            if name != NULL_HANDLE {
+                self.check_identifier_name_for_assignment_validity(&fn_name_value, force_strict);
+            }
+            self.check_parameters_post_body(&param_info, force_strict, kind);
+        }
 
         let might_need_arguments = self.function_might_need_arguments_object;
         self.function_might_need_arguments_object = saved_might_need_arguments;
@@ -628,6 +647,7 @@ impl<'a> Parser<'a> {
         let mut is_pattern = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
+        let mut has_seen_rest = false;
         let mut param_info: Vec<(Vec<u16>, NodeHandle, bool, bool)> = Vec::new();
 
         loop {
@@ -642,6 +662,23 @@ impl<'a> Parser<'a> {
             let (binding, is_pat) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                self.check_identifier_name_for_assignment_validity(&value, false);
+                // Check for duplicate parameter names.
+                for (prev_name, _, _, _) in &param_info {
+                    if *prev_name == value {
+                        if self.strict_mode {
+                            let name_str = String::from_utf16_lossy(&value);
+                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
+                        } else if has_seen_default {
+                            let name_str = String::from_utf16_lossy(&value);
+                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with default parameter", name_str));
+                        } else if has_seen_rest {
+                            let name_str = String::from_utf16_lossy(&value);
+                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with rest parameter", name_str));
+                        }
+                        break;
+                    }
+                }
                 let id = self.builder.create_identifier(self.span_from(param_start), &value);
                 param_info.push((value, id, rest, false));
                 (id, false)
@@ -673,6 +710,9 @@ impl<'a> Parser<'a> {
             default_values.push(default_value);
             is_rest.push(rest);
             is_pattern.push(is_pat);
+            if rest {
+                has_seen_rest = true;
+            }
 
             if rest || !self.match_token(TokenType::Comma) {
                 break;
@@ -751,7 +791,7 @@ impl<'a> Parser<'a> {
 
                         if self.match_token(TokenType::StringLiteral) {
                             let tok = self.consume();
-                            let value = self.parse_string_value(&tok);
+                            let (value, _has_octal) = self.parse_string_value(&tok);
                             name = self.builder.create_identifier(self.span_from(entry_start), &value);
                             name_type = 1;
                         } else if self.match_token(TokenType::BigIntLiteral) {

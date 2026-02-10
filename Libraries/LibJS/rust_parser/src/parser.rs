@@ -589,6 +589,49 @@ impl<'a> Parser<'a> {
         ) || self.match_identifier_name()
     }
 
+    /// Check if an identifier name is valid as an assignment target.
+    /// In strict mode (or with force_strict), "eval" and "arguments" are forbidden,
+    /// as are strict reserved words like "implements", "interface", etc.
+    pub(crate) fn check_identifier_name_for_assignment_validity(&mut self, name: &[u16], force_strict: bool) {
+        if self.strict_mode || force_strict {
+            if name == utf16_lit("arguments") || name == utf16_lit("eval") {
+                self.syntax_error("Binding pattern target may not be called 'arguments' or 'eval' in strict mode");
+            } else if is_strict_reserved_word(name) {
+                let name_str = String::from_utf16_lossy(name);
+                self.syntax_error(&format!("Binding pattern target may not be called '{}' in strict mode", name_str));
+            }
+        }
+    }
+
+    /// Post-body check for function parameters when 'use strict' was found in the
+    /// body or the function is a generator/async. Re-validates parameter names and
+    /// checks for duplicates.
+    pub(crate) fn check_parameters_post_body(
+        &mut self,
+        param_info: &[(Vec<u16>, NodeHandle, bool, bool)],
+        force_strict: bool,
+        _kind: FunctionKind,
+    ) {
+        let mut seen_names: Vec<&[u16]> = Vec::new();
+        for (name, _, _, _) in param_info {
+            if name.is_empty() {
+                continue;
+            }
+            self.check_identifier_name_for_assignment_validity(name, force_strict);
+            for &prev_name in &seen_names {
+                if prev_name == name.as_slice() {
+                    let name_str = String::from_utf16_lossy(name);
+                    self.syntax_error(&format!(
+                        "Duplicate parameter '{}' not allowed in strict mode",
+                        name_str
+                    ));
+                    break;
+                }
+            }
+            seen_names.push(name);
+        }
+    }
+
     /// Extract the value of a token as a UTF-16 slice from the source.
     /// For identifiers with unicode escape sequences, returns the decoded value.
     pub(crate) fn token_value<'b>(&'b self, token: &'b Token) -> &'b [u16] {
@@ -894,6 +937,19 @@ impl<'a> Parser<'a> {
 /// Check if a raw token value is 'use strict' or "use strict".
 fn is_use_strict(raw: &[u16]) -> bool {
     raw == utf16_lit("'use strict'") || raw == utf16_lit("\"use strict\"")
+}
+
+/// Check if a name is a strict-mode reserved word.
+fn is_strict_reserved_word(name: &[u16]) -> bool {
+    name == utf16_lit("implements")
+        || name == utf16_lit("interface")
+        || name == utf16_lit("let")
+        || name == utf16_lit("package")
+        || name == utf16_lit("private")
+        || name == utf16_lit("protected")
+        || name == utf16_lit("public")
+        || name == utf16_lit("static")
+        || name == utf16_lit("yield")
 }
 
 /// Convert an ASCII string literal to a UTF-16 slice at compile time.
