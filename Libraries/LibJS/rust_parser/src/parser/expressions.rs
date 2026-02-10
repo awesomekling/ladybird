@@ -286,14 +286,14 @@ impl<'a> Parser<'a> {
 
             TokenType::Function => {
                 let expr = self.parse_function_expression();
-                (expr, false)
+                (expr, true)
             }
 
             TokenType::Async => {
                 let next = self.next_token();
                 if next.token_type == TokenType::Function && !next.trivia_has_line_terminator {
                     let expr = self.parse_function_expression();
-                    return (expr, false);
+                    return (expr, true);
                 }
                 // async arrow function: arrow parser will consume 'async' and optional '('
                 if let Some(arrow) = self.try_parse_arrow_function_expression(next.token_type == TokenType::ParenOpen, true) {
