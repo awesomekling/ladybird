@@ -211,6 +211,14 @@ impl ScopeRecord {
         self.scope_level.is_top_level()
     }
 
+    /// Get or create a variable entry, only allocating the key when inserting.
+    fn variable(&mut self, name: &[u16]) -> &mut ScopeVariable {
+        if !self.variables.contains_key(name) {
+            self.variables.insert(name.to_vec(), ScopeVariable::default());
+        }
+        self.variables.get_mut(name).unwrap()
+    }
+
     fn has_flag(&self, name: &[u16], flags: u16) -> bool {
         self.variables.get(name).is_some_and(|v| v.flags & flags != 0)
     }
@@ -337,7 +345,7 @@ impl ScopeCollector {
         self.open_scope(ScopeType::Function, NULL_HANDLE, ScopeLevel::FunctionTopLevel);
         if let Some(name) = function_name {
             let idx = self.current.unwrap();
-            self.records[idx].variables.entry(name.to_vec()).or_default().flags |= FLAG_IS_BOUND;
+            self.records[idx].variable(name).flags |= FLAG_IS_BOUND;
         }
     }
 
@@ -369,7 +377,7 @@ impl ScopeCollector {
         self.open_scope(ScopeType::ClassDeclaration, NULL_HANDLE, ScopeLevel::NotTopLevel);
         if let Some(name) = class_name {
             let idx = self.current.unwrap();
-            self.records[idx].variables.entry(name.to_vec()).or_default().flags |= FLAG_IS_BOUND;
+            self.records[idx].variable(name).flags |= FLAG_IS_BOUND;
         }
     }
 
@@ -385,7 +393,7 @@ impl ScopeCollector {
         let idx = self.current.unwrap();
 
         for name in bound_names {
-            let var = self.records[idx].variables.entry(name.to_vec()).or_default();
+            let var = self.records[idx].variable(name);
             if var.flags & (FLAG_IS_VAR | FLAG_IS_FORBIDDEN_LEXICAL | FLAG_IS_FUNCTION | FLAG_IS_LEXICAL) != 0 {
                 self.errors.push(ScopeError {
                     message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
@@ -417,7 +425,7 @@ impl ScopeCollector {
 
             let mut scope_idx = idx;
             loop {
-                let var = self.records[scope_idx].variables.entry(name.to_vec()).or_default();
+                let var = self.records[scope_idx].variable(name);
                 if var.flags & (FLAG_IS_LEXICAL | FLAG_IS_FUNCTION | FLAG_IS_FORBIDDEN_VAR) != 0 {
                     self.errors.push(ScopeError {
                         message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
@@ -460,7 +468,7 @@ impl ScopeCollector {
         }
 
         if scope_level != ScopeLevel::NotTopLevel && scope_level != ScopeLevel::ModuleTopLevel {
-            let var = self.records[idx].variables.entry(name.to_vec()).or_default();
+            let var = self.records[idx].variable(name);
             var.flags |= FLAG_IS_VAR;
             var.var_identifier = name_identifier;
 
@@ -487,7 +495,7 @@ impl ScopeCollector {
                         column: decl_column,
                     });
                 }
-                self.records[idx].variables.entry(name.to_vec()).or_default().flags |= FLAG_IS_LEXICAL;
+                self.records[idx].variable(name).flags |= FLAG_IS_LEXICAL;
                 let ast_node = self.records[idx].ast_node;
                 ffi::scope_node_add_lexical_declaration(ast_node, declaration);
                 return;
@@ -500,7 +508,7 @@ impl ScopeCollector {
                 });
             }
 
-            let var = self.records[idx].variables.entry(name.to_vec()).or_default();
+            let var = self.records[idx].variable(name);
             var.flags |= FLAG_IS_FUNCTION;
             var.function_declaration = declaration;
 
@@ -512,14 +520,14 @@ impl ScopeCollector {
     pub fn add_catch_parameter_pattern(&mut self, bound_names: &[&[u16]]) {
         let idx = self.current.unwrap();
         for name in bound_names {
-            let var = self.records[idx].variables.entry(name.to_vec()).or_default();
+            let var = self.records[idx].variable(name);
             var.flags |= FLAG_IS_FORBIDDEN_VAR | FLAG_IS_BOUND | FLAG_IS_CATCH_PARAMETER;
         }
     }
 
     pub fn add_catch_parameter_identifier(&mut self, name: &[u16], identifier: NodeHandle) {
         let idx = self.current.unwrap();
-        let var = self.records[idx].variables.entry(name.to_vec()).or_default();
+        let var = self.records[idx].variable(name);
         var.flags |= FLAG_IS_VAR | FLAG_IS_BOUND | FLAG_IS_CATCH_PARAMETER;
         var.var_identifier = identifier;
     }
@@ -528,11 +536,10 @@ impl ScopeCollector {
 
     pub fn register_identifier(&mut self, id: NodeHandle, name: &[u16], declaration_kind: Option<DeclarationKind>) {
         let idx = self.current.unwrap();
-        let name_vec = name.to_vec();
-        if let Some(group) = self.records[idx].identifier_groups.get_mut(&name_vec) {
+        if let Some(group) = self.records[idx].identifier_groups.get_mut(name) {
             group.identifiers.push(id);
         } else {
-            self.records[idx].identifier_groups.insert(name_vec, IdentifierGroup {
+            self.records[idx].identifier_groups.insert(name.to_vec(), IdentifierGroup {
                 captured_by_nested_function: false,
                 used_inside_with_statement: false,
                 identifiers: vec![id],
