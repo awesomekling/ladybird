@@ -52,6 +52,7 @@
 use std::collections::HashMap;
 
 use crate::ast_bridge::{self, NodeHandle, NULL_HANDLE};
+use crate::ffi_enums;
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
 
 // === Enums ===
@@ -98,22 +99,9 @@ const FLAG_IS_FORBIDDEN_VAR: u16 = 1 << 5;   // lexical name that blocks var hoi
 const FLAG_IS_BOUND: u16 = 1 << 6;           // function expression name or class declaration name
 const FLAG_IS_PARAMETER_CANDIDATE: u16 = 1 << 7; // formal parameter name (candidate for local optimization)
 
-// === LocalVariable::DeclarationKind (for add_local_variable FFI) ===
-// Values must match C++ `ScopeNode::LocalVariable::DeclarationKind`.
-
-const LOCAL_VAR: u8 = 0;
-const LOCAL_LET_OR_CONST: u8 = 1;
-const LOCAL_FUNCTION: u8 = 2;
-const LOCAL_ARGUMENTS_OBJECT: u8 = 3;
-const LOCAL_CATCH_CLAUSE_PARAMETER: u8 = 4;
-
-// === C++ DeclarationKind (for set_declaration_kind FFI) ===
-// Values must match C++ `DeclarationKind` enum. Note: these start at 1
-// (not 0) because 0 means "unset" in the C++ code.
-
-const DECL_KIND_VAR: u8 = 1;
-const DECL_KIND_LET: u8 = 2;
-const DECL_KIND_CONST: u8 = 3;
+// Re-export FFI enum constants under short local names.
+use ffi_enums::LocalVariable as LV;
+use ffi_enums::DeclarationKind as DK;
 
 // === Data structures ===
 
@@ -784,9 +772,9 @@ impl ScopeCollector {
             // so the bytecode generator knows how to handle TDZ checks, etc.
             if let Some(dk) = group.declaration_kind {
                 let ffi_kind = match dk {
-                    DeclarationKind::Var => DECL_KIND_VAR,
-                    DeclarationKind::Let => DECL_KIND_LET,
-                    DeclarationKind::Const => DECL_KIND_CONST,
+                    DeclarationKind::Var => DK::VAR,
+                    DeclarationKind::Let => DK::LET,
+                    DeclarationKind::Const => DK::CONST,
                 };
                 for &id in &group.identifiers {
                     unsafe { ast_bridge::ast_identifier_set_declaration_kind(id, ffi_kind) };
@@ -799,11 +787,11 @@ impl ScopeCollector {
             // Priority: var (at top-level) > let/const > function declaration.
             let mut local_var_kind: Option<u8> = None;
             if records[idx].is_top_level() && (var_flags & FLAG_IS_VAR) != 0 {
-                local_var_kind = Some(LOCAL_VAR);
+                local_var_kind = Some(LV::VAR);
             } else if (var_flags & FLAG_IS_LEXICAL) != 0 {
-                local_var_kind = Some(LOCAL_LET_OR_CONST);
+                local_var_kind = Some(LV::LET_OR_CONST);
             } else if (var_flags & FLAG_IS_FUNCTION) != 0 {
-                local_var_kind = Some(LOCAL_FUNCTION);
+                local_var_kind = Some(LV::FUNCTION);
             }
 
             // Non-arrow functions implicitly declare `arguments` as a local.
@@ -812,13 +800,13 @@ impl ScopeCollector {
                 && !records[idx].is_arrow_function
                 && name == arguments_name
             {
-                local_var_kind = Some(LOCAL_ARGUMENTS_OBJECT);
+                local_var_kind = Some(LV::ARGUMENTS_OBJECT);
             }
 
             if records[idx].scope_type == ScopeType::Catch
                 && (var_flags & FLAG_IS_CATCH_PARAMETER) != 0
             {
-                local_var_kind = Some(LOCAL_CATCH_CLAUSE_PARAMETER);
+                local_var_kind = Some(LV::CATCH_CLAUSE_PARAMETER);
             }
 
             let hoistable = records[idx].has_hoistable_function_named(&name);
@@ -901,7 +889,7 @@ impl ScopeCollector {
                             } else {
                                 let lvi = unsafe {
                                     ast_bridge::ast_scope_node_add_local_variable(
-                                        scope_ast_node, name.as_ptr(), name.len(), LOCAL_VAR,
+                                        scope_ast_node, name.as_ptr(), name.len(), LV::VAR,
                                     )
                                 };
                                 for &id in &group.identifiers {

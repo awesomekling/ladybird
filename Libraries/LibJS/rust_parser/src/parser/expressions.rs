@@ -38,6 +38,7 @@
 //! - `parse_method_definition()` — Methods in objects and classes
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
+use crate::ffi_enums::{AssignmentOp, BinaryOp, LogicalOp, MetaProperty, ObjectProperty, UnaryOp, UpdateOp};
 use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser};
 use crate::token::{Token, TokenType};
 
@@ -390,7 +391,7 @@ impl<'a> Parser<'a> {
                     if self.program_type != super::ProgramType::Module {
                         self.syntax_error("import.meta is only allowed in modules");
                     }
-                    (self.builder.create_meta_property(self.span_from(start), 1), true)
+                    (self.builder.create_meta_property(self.span_from(start), MetaProperty::IMPORT_META), true)
                 } else if self.match_token(TokenType::ParenOpen) {
                     // import()
                     self.consume();
@@ -534,7 +535,6 @@ impl<'a> Parser<'a> {
             }
 
             // === Logical operators ===
-            // Values must match C++ LogicalOp enum: And=0, Or=1, NullishCoalescing=2.
             // Mixing && / || with ?? without parens is a syntax error (per spec),
             // enforced via forbidden tokens.
             TokenType::DoubleAmpersand => {
@@ -542,25 +542,24 @@ impl<'a> Parser<'a> {
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleQuestionMark]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 0, lhs, rhs), new_forbidden)
+                (self.builder.create_logical_expression(span, LogicalOp::AND, lhs, rhs), new_forbidden)
             }
             TokenType::DoublePipe => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleQuestionMark]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 1, lhs, rhs), new_forbidden)
+                (self.builder.create_logical_expression(span, LogicalOp::OR, lhs, rhs), new_forbidden)
             }
             TokenType::DoubleQuestionMark => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleAmpersand, TokenType::DoublePipe]);
                 let rhs = self.parse_expression(min_precedence, Associativity::Left, new_forbidden);
                 let span = self.span_from(start);
-                (self.builder.create_logical_expression(span, 2, lhs, rhs), new_forbidden)
+                (self.builder.create_logical_expression(span, LogicalOp::NULLISH_COALESCING, lhs, rhs), new_forbidden)
             }
 
             // === Assignment ===
-            // AssignmentOp values must match C++ AssignmentOp enum (see token_to_assignment_op).
             TokenType::Equals | TokenType::PlusEquals | TokenType::MinusEquals
             | TokenType::DoubleAsteriskEquals | TokenType::AsteriskEquals
             | TokenType::SlashEquals | TokenType::PercentEquals
@@ -574,7 +573,7 @@ impl<'a> Parser<'a> {
                 //   ({ a, b } = obj)  or  [a, b] = arr
                 // We parsed LHS as an expression; if it's an object/array, re-parse
                 // it as a binding pattern using synthesize_binding_pattern.
-                if op == 0 && (self.builder.is_object_expression(lhs) || self.builder.is_array_expression(lhs)) {
+                if op == AssignmentOp::ASSIGNMENT && (self.builder.is_object_expression(lhs) || self.builder.is_array_expression(lhs)) {
                     let binding_pattern = self.synthesize_binding_pattern(lhs_start);
                     // Register bound names from the binding pattern with the scope collector.
                     for (name, id) in std::mem::take(&mut self.pattern_bound_names) {
@@ -649,12 +648,12 @@ impl<'a> Parser<'a> {
             TokenType::PlusPlus => {
                 self.consume();
                 let span = self.span_from(start);
-                (self.builder.create_update_expression(span, 0, lhs, false), ForbiddenTokens::none()) // Increment = 0
+                (self.builder.create_update_expression(span, UpdateOp::INCREMENT, lhs, false), ForbiddenTokens::none())
             }
             TokenType::MinusMinus => {
                 self.consume();
                 let span = self.span_from(start);
-                (self.builder.create_update_expression(span, 1, lhs, false), ForbiddenTokens::none()) // Decrement = 1
+                (self.builder.create_update_expression(span, UpdateOp::DECREMENT, lhs, false), ForbiddenTokens::none())
             }
 
             // === Tagged template literal ===
@@ -674,8 +673,6 @@ impl<'a> Parser<'a> {
     // === Unary prefix expression ===
 
     /// Parse a unary prefix expression: `!x`, `~x`, `typeof x`, `delete x`, etc.
-    /// The numeric constants passed to `create_unary_expression` must match
-    /// C++ `UnaryOp` enum: BitwiseNot=0, Not=1, Plus=2, Minus=3, Typeof=4, Void=5, Delete=6.
     fn parse_unary_prefixed_expression(&mut self) -> NodeHandle {
         let start = self.position();
         let tt = self.current_token_type();
@@ -684,42 +681,42 @@ impl<'a> Parser<'a> {
             TokenType::PlusPlus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_update_expression(self.span_from(start), 0, expr, true) // Increment = 0
+                self.builder.create_update_expression(self.span_from(start), UpdateOp::INCREMENT, expr, true)
             }
             TokenType::MinusMinus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_update_expression(self.span_from(start), 1, expr, true) // Decrement = 1
+                self.builder.create_update_expression(self.span_from(start), UpdateOp::DECREMENT, expr, true)
             }
             TokenType::ExclamationMark => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 1, expr) // Not = 1
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::NOT, expr)
             }
             TokenType::Tilde => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 0, expr) // BitwiseNot = 0
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::BITWISE_NOT, expr)
             }
             TokenType::Plus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 2, expr) // Plus = 2
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::PLUS, expr)
             }
             TokenType::Minus => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 3, expr) // Minus = 3
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::MINUS, expr)
             }
             TokenType::Typeof => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 4, expr) // Typeof = 4
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::TYPEOF, expr)
             }
             TokenType::Void => {
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), 5, expr) // Void = 5
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::VOID, expr)
             }
             TokenType::Delete => {
                 self.consume();
@@ -728,7 +725,7 @@ impl<'a> Parser<'a> {
                 if self.strict_mode && self.builder.is_identifier(expr) {
                     self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.0, rhs_start.1);
                 }
-                self.builder.create_unary_expression(self.span_from(start), 6, expr) // Delete = 6
+                self.builder.create_unary_expression(self.span_from(start), UnaryOp::DELETE, expr)
             }
             _ => {
                 self.expected("unary expression");
@@ -750,7 +747,7 @@ impl<'a> Parser<'a> {
             self.consume();
             self.consume_token(TokenType::Identifier); // "target"
             self.scope_collector.set_uses_new_target();
-            return self.builder.create_meta_property(self.span_from(start), 0); // 0 = NewTarget
+            return self.builder.create_meta_property(self.span_from(start), MetaProperty::NEW_TARGET);
         }
 
         // `new new Foo()` chains: `new (new Foo())`.
@@ -960,7 +957,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 let span = self.span_from(spread_start);
-                properties.push(self.builder.create_object_property(span, expr, NULL_HANDLE, 3, false)); // Spread = 3
+                properties.push(self.builder.create_object_property(span, expr, NULL_HANDLE, ObjectProperty::SPREAD, false));
             } else {
                 let prop = self.parse_object_property();
                 properties.push(prop);
@@ -1013,14 +1010,14 @@ impl<'a> Parser<'a> {
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, false, start);
-            let prop_type = if is_getter { 1 } else if is_setter { 2 } else { 0 }; // KeyValue=0, Getter=1, Setter=2
+            let prop_type = if is_getter { ObjectProperty::GETTER } else if is_setter { ObjectProperty::SETTER } else { ObjectProperty::KEY_VALUE };
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
 
         // Getter/setter
         if is_getter || is_setter {
             let func = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
-            let prop_type = if is_getter { 1 } else { 2 };
+            let prop_type = if is_getter { ObjectProperty::GETTER } else { ObjectProperty::SETTER };
             return self.builder.create_object_property(self.span_from(start), key, func, prop_type, true);
         }
 
@@ -1028,8 +1025,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Colon) {
             self.consume();
             let value = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-            // ProtoSetter = 4 for __proto__: value
-            let prop_type = if is_proto { 4 } else { 0 };
+            let prop_type = if is_proto { ObjectProperty::PROTO_SETTER } else { ObjectProperty::KEY_VALUE };
             return self.builder.create_object_property(self.span_from(start), key, value, prop_type, false);
         }
 
@@ -1037,11 +1033,11 @@ impl<'a> Parser<'a> {
         if let Some(kv) = key_value {
             let value = self.builder.create_identifier(self.span_from(start), &kv);
             self.scope_collector.register_identifier(value, &kv, None);
-            return self.builder.create_object_property(self.span_from(start), key, value, 0, false);
+            return self.builder.create_object_property(self.span_from(start), key, value, ObjectProperty::KEY_VALUE, false);
         }
 
         self.expected("':' or '('");
-        self.builder.create_object_property(self.span_from(start), key, NULL_HANDLE, 0, false)
+        self.builder.create_object_property(self.span_from(start), key, NULL_HANDLE, ObjectProperty::KEY_VALUE, false)
     }
 
     pub(crate) fn match_property_key_ahead(&mut self) -> bool {
@@ -1730,51 +1726,51 @@ fn raw_template_value(raw: &[u16]) -> Vec<u16> {
 
 fn token_to_binary_op(tt: TokenType) -> u8 {
     match tt {
-        TokenType::Plus => 0,      // Addition
-        TokenType::Minus => 1,     // Subtraction
-        TokenType::Asterisk => 2,  // Multiplication
-        TokenType::Slash => 3,     // Division
-        TokenType::Percent => 4,   // Modulo
-        TokenType::DoubleAsterisk => 5, // Exponentiation
-        TokenType::EqualsEqualsEquals => 6,    // StrictlyEquals
-        TokenType::ExclamationMarkEqualsEquals => 7, // StrictlyInequals
-        TokenType::EqualsEquals => 8,   // LooselyEquals
-        TokenType::ExclamationMarkEquals => 9, // LooselyInequals
-        TokenType::GreaterThan => 10,   // GreaterThan
-        TokenType::GreaterThanEquals => 11, // GreaterThanEquals
-        TokenType::LessThan => 12,      // LessThan
-        TokenType::LessThanEquals => 13, // LessThanEquals
-        TokenType::Ampersand => 14,     // BitwiseAnd
-        TokenType::Pipe => 15,          // BitwiseOr
-        TokenType::Caret => 16,         // BitwiseXor
-        TokenType::ShiftLeft => 17,     // LeftShift
-        TokenType::ShiftRight => 18,    // RightShift
-        TokenType::UnsignedShiftRight => 19, // UnsignedRightShift
-        TokenType::In => 20,            // In
-        TokenType::Instanceof => 21,    // InstanceOf
-        _ => 0,
+        TokenType::Plus => BinaryOp::ADDITION,
+        TokenType::Minus => BinaryOp::SUBTRACTION,
+        TokenType::Asterisk => BinaryOp::MULTIPLICATION,
+        TokenType::Slash => BinaryOp::DIVISION,
+        TokenType::Percent => BinaryOp::MODULO,
+        TokenType::DoubleAsterisk => BinaryOp::EXPONENTIATION,
+        TokenType::EqualsEqualsEquals => BinaryOp::STRICTLY_EQUALS,
+        TokenType::ExclamationMarkEqualsEquals => BinaryOp::STRICTLY_INEQUALS,
+        TokenType::EqualsEquals => BinaryOp::LOOSELY_EQUALS,
+        TokenType::ExclamationMarkEquals => BinaryOp::LOOSELY_INEQUALS,
+        TokenType::GreaterThan => BinaryOp::GREATER_THAN,
+        TokenType::GreaterThanEquals => BinaryOp::GREATER_THAN_EQUALS,
+        TokenType::LessThan => BinaryOp::LESS_THAN,
+        TokenType::LessThanEquals => BinaryOp::LESS_THAN_EQUALS,
+        TokenType::Ampersand => BinaryOp::BITWISE_AND,
+        TokenType::Pipe => BinaryOp::BITWISE_OR,
+        TokenType::Caret => BinaryOp::BITWISE_XOR,
+        TokenType::ShiftLeft => BinaryOp::LEFT_SHIFT,
+        TokenType::ShiftRight => BinaryOp::RIGHT_SHIFT,
+        TokenType::UnsignedShiftRight => BinaryOp::UNSIGNED_RIGHT_SHIFT,
+        TokenType::In => BinaryOp::IN,
+        TokenType::Instanceof => BinaryOp::INSTANCE_OF,
+        _ => BinaryOp::ADDITION,
     }
 }
 
 fn token_to_assignment_op(tt: TokenType) -> u8 {
     match tt {
-        TokenType::Equals => 0,           // Assignment
-        TokenType::PlusEquals => 1,       // AdditionAssignment
-        TokenType::MinusEquals => 2,      // SubtractionAssignment
-        TokenType::AsteriskEquals => 3,   // MultiplicationAssignment
-        TokenType::SlashEquals => 4,      // DivisionAssignment
-        TokenType::PercentEquals => 5,    // ModuloAssignment
-        TokenType::DoubleAsteriskEquals => 6, // ExponentiationAssignment
-        TokenType::AmpersandEquals => 7,  // BitwiseAndAssignment
-        TokenType::PipeEquals => 8,       // BitwiseOrAssignment
-        TokenType::CaretEquals => 9,      // BitwiseXorAssignment
-        TokenType::ShiftLeftEquals => 10, // LeftShiftAssignment
-        TokenType::ShiftRightEquals => 11, // RightShiftAssignment
-        TokenType::UnsignedShiftRightEquals => 12, // UnsignedRightShiftAssignment
-        TokenType::DoubleAmpersandEquals => 13, // AndAssignment
-        TokenType::DoublePipeEquals => 14,     // OrAssignment
-        TokenType::DoubleQuestionMarkEquals => 15, // NullishAssignment
-        _ => 0,
+        TokenType::Equals => AssignmentOp::ASSIGNMENT,
+        TokenType::PlusEquals => AssignmentOp::ADDITION_ASSIGNMENT,
+        TokenType::MinusEquals => AssignmentOp::SUBTRACTION_ASSIGNMENT,
+        TokenType::AsteriskEquals => AssignmentOp::MULTIPLICATION_ASSIGNMENT,
+        TokenType::SlashEquals => AssignmentOp::DIVISION_ASSIGNMENT,
+        TokenType::PercentEquals => AssignmentOp::MODULO_ASSIGNMENT,
+        TokenType::DoubleAsteriskEquals => AssignmentOp::EXPONENTIATION_ASSIGNMENT,
+        TokenType::AmpersandEquals => AssignmentOp::BITWISE_AND_ASSIGNMENT,
+        TokenType::PipeEquals => AssignmentOp::BITWISE_OR_ASSIGNMENT,
+        TokenType::CaretEquals => AssignmentOp::BITWISE_XOR_ASSIGNMENT,
+        TokenType::ShiftLeftEquals => AssignmentOp::LEFT_SHIFT_ASSIGNMENT,
+        TokenType::ShiftRightEquals => AssignmentOp::RIGHT_SHIFT_ASSIGNMENT,
+        TokenType::UnsignedShiftRightEquals => AssignmentOp::UNSIGNED_RIGHT_SHIFT_ASSIGNMENT,
+        TokenType::DoubleAmpersandEquals => AssignmentOp::AND_ASSIGNMENT,
+        TokenType::DoublePipeEquals => AssignmentOp::OR_ASSIGNMENT,
+        TokenType::DoubleQuestionMarkEquals => AssignmentOp::NULLISH_ASSIGNMENT,
+        _ => AssignmentOp::ASSIGNMENT,
     }
 }
 

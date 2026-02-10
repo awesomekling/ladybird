@@ -38,6 +38,7 @@
 //! - Class declarations: `add_lexical_declaration()` (block-scoped)
 
 use crate::ast_bridge::{NodeHandle, NULL_HANDLE};
+use crate::ffi_enums::{BindingEntryAlias, BindingEntryName, BindingPattern, ClassMethod};
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, FunctionParsingInsights, Parser, ProgramType};
 use crate::token::TokenType;
 
@@ -582,13 +583,12 @@ impl<'a> Parser<'a> {
                 && key_value.as_deref() == Some(ctor_name.as_slice());
 
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
-            // ClassMethod::Kind enum values must match C++: Method=0, Getter=1, Setter=2.
             let method_kind = if is_getter {
-                1
+                ClassMethod::GETTER
             } else if is_setter {
-                2
+                ClassMethod::SETTER
             } else {
-                0
+                ClassMethod::METHOD
             };
 
             let constructor = if is_constructor { Some(func) } else { None };
@@ -777,7 +777,7 @@ impl<'a> Parser<'a> {
         }
         self.consume();
 
-        let kind: u8 = if is_object { 1 } else { 0 };
+        let kind: u8 = if is_object { BindingPattern::OBJECT } else { BindingPattern::ARRAY };
         let pattern = self.builder.create_binding_pattern(kind);
         let closing_token = if is_object { TokenType::CurlyClose } else { TokenType::BracketClose };
 
@@ -785,7 +785,7 @@ impl<'a> Parser<'a> {
             // Array elision: bare comma
             if !is_object && self.match_token(TokenType::Comma) {
                 self.consume();
-                self.builder.binding_pattern_append_entry(pattern, NULL_HANDLE, 0, NULL_HANDLE, 0, NULL_HANDLE, false);
+                self.builder.binding_pattern_append_entry(pattern, NULL_HANDLE, BindingEntryName::EMPTY, NULL_HANDLE, BindingEntryAlias::EMPTY, NULL_HANDLE, false);
                 continue;
             }
 
@@ -797,9 +797,9 @@ impl<'a> Parser<'a> {
             };
 
             let mut name = NULL_HANDLE;
-            let mut name_type: u8 = 0; // Empty
+            let mut name_type: u8 = BindingEntryName::EMPTY;
             let mut alias = NULL_HANDLE;
-            let mut alias_type: u8 = 0; // Empty
+            let mut alias_type: u8 = BindingEntryAlias::EMPTY;
 
             if is_object {
                 if self.allow_member_expressions && is_rest {
@@ -808,10 +808,10 @@ impl<'a> Parser<'a> {
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if self.builder.is_member_expression(expression) {
                         alias = expression;
-                        alias_type = 3; // MemberExpression
+                        alias_type = BindingEntryAlias::MEMBER_EXPRESSION;
                     } else if self.builder.is_identifier(expression) {
                         name = expression;
-                        name_type = 1; // Identifier
+                        name_type = BindingEntryName::IDENTIFIER;
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
                         break;
@@ -832,7 +832,7 @@ impl<'a> Parser<'a> {
                             let tok = self.consume();
                             let (value, _has_octal) = self.parse_string_value(&tok);
                             name = self.builder.create_identifier(self.span_from(entry_start), &value);
-                            name_type = 1;
+                            name_type = BindingEntryName::IDENTIFIER;
                         } else if self.match_token(TokenType::BigIntLiteral) {
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
@@ -843,20 +843,20 @@ impl<'a> Parser<'a> {
                                 &value
                             };
                             name = self.builder.create_identifier(self.span_from(entry_start), name_value);
-                            name_type = 1;
+                            name_type = BindingEntryName::IDENTIFIER;
                         } else {
                             // Identifier name or numeric literal
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
                             entry_name_value = value.clone();
                             name = self.builder.create_identifier(self.span_from(entry_start), &value);
-                            name_type = 1;
+                            name_type = BindingEntryName::IDENTIFIER;
                         }
                     } else if self.match_token(TokenType::BracketOpen) {
                         // Computed property name [expr]
                         self.consume();
                         name = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
-                        name_type = 2; // Expression
+                        name_type = BindingEntryName::EXPRESSION;
                         self.consume_token(TokenType::BracketClose);
                     } else {
                         self.expected("identifier or computed property name");
@@ -872,13 +872,13 @@ impl<'a> Parser<'a> {
                             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if self.builder.is_object_expression(expression) || self.builder.is_array_expression(expression) {
                                 alias = self.synthesize_binding_pattern(expr_start);
-                                alias_type = 2; // BindingPattern
+                                alias_type = BindingEntryAlias::BINDING_PATTERN;
                             } else if self.builder.is_member_expression(expression) {
                                 alias = expression;
-                                alias_type = 3; // MemberExpression
+                                alias_type = BindingEntryAlias::MEMBER_EXPRESSION;
                             } else if self.builder.is_identifier(expression) {
                                 alias = expression;
-                                alias_type = 1; // Identifier
+                                alias_type = BindingEntryAlias::IDENTIFIER;
                             } else {
                                 self.syntax_error("Invalid destructuring assignment target");
                                 break;
@@ -886,14 +886,14 @@ impl<'a> Parser<'a> {
                         } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                             // Nested binding pattern
                             alias = self.parse_binding_pattern();
-                            alias_type = 2; // BindingPattern
+                            alias_type = BindingEntryAlias::BINDING_PATTERN;
                         } else if self.match_identifier_name() {
                             let alias_start = self.position();
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
                             alias = self.builder.create_identifier(self.span_from(alias_start), &value);
                             self.pattern_bound_names.push((value, alias));
-                            alias_type = 1; // Identifier
+                            alias_type = BindingEntryAlias::IDENTIFIER;
                         } else {
                             self.expected("identifier or binding pattern");
                             break;
@@ -914,27 +914,27 @@ impl<'a> Parser<'a> {
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if self.builder.is_object_expression(expression) || self.builder.is_array_expression(expression) {
                         alias = self.synthesize_binding_pattern(expr_start);
-                        alias_type = 2; // BindingPattern
+                        alias_type = BindingEntryAlias::BINDING_PATTERN;
                     } else if self.builder.is_member_expression(expression) {
                         alias = expression;
-                        alias_type = 3; // MemberExpression
+                        alias_type = BindingEntryAlias::MEMBER_EXPRESSION;
                     } else if self.builder.is_identifier(expression) {
                         alias = expression;
-                        alias_type = 1; // Identifier
+                        alias_type = BindingEntryAlias::IDENTIFIER;
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
                         break;
                     }
                 } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                     alias = self.parse_binding_pattern();
-                    alias_type = 2; // BindingPattern
+                    alias_type = BindingEntryAlias::BINDING_PATTERN;
                 } else if self.match_identifier_name() {
                     let alias_start = self.position();
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     alias = self.builder.create_identifier(self.span_from(alias_start), &value);
                     self.pattern_bound_names.push((value, alias));
-                    alias_type = 1; // Identifier
+                    alias_type = BindingEntryAlias::IDENTIFIER;
                 } else {
                     self.expected("identifier or binding pattern");
                     break;

@@ -76,6 +76,7 @@
 //! - `scope_collector.rs` — Scope analysis (identifier resolution, hoisting)
 
 pub mod ast_bridge;
+pub mod ffi_enums;
 pub mod lexer;
 pub mod parser;
 pub mod scope_collector;
