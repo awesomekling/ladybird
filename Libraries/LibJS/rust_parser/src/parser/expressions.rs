@@ -1287,6 +1287,9 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             let return_stmt = self.builder.create_return_statement(self.span_from(start), expr);
             self.builder.scope_node_append(body, return_stmt);
+            if self.strict_mode {
+                self.builder.scope_node_set_strict_mode(body);
+            }
             self.scope_collector.close_scope();
 
             let span = self.span_from(start);
