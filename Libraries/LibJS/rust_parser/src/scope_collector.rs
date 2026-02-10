@@ -166,7 +166,9 @@ impl ScopeRecord {
     }
 
     fn get_parameter_index(&self, name: &[u16]) -> Option<u32> {
-        for (i, (pname, _is_rest)) in self.parameter_names.iter().enumerate() {
+        // Iterate backwards to return the last parameter with the same name,
+        // matching the semantics of duplicate parameter names in non-strict mode.
+        for (i, (pname, _is_rest)) in self.parameter_names.iter().enumerate().rev() {
             if pname == name {
                 return Some(i as u32);
             }
@@ -358,6 +360,11 @@ impl ScopeCollector {
         let idx = self.current.unwrap();
 
         for &(name, identifier) in bound_names {
+            // Register the declaration identifier so it participates in scope analysis.
+            if identifier != NULL_HANDLE {
+                self.register_identifier(identifier, name, Some(DeclarationKind::Var));
+            }
+
             let mut scope_idx = idx;
             loop {
                 let var = self.records[scope_idx].variables.entry(name.to_vec()).or_default();
@@ -375,11 +382,9 @@ impl ScopeCollector {
                 }
                 scope_idx = self.records[scope_idx].parent.unwrap();
             }
-
-            let top_ast_node = self.records[scope_idx].ast_node;
-            unsafe { ast_bridge::ast_scope_node_add_var_scoped_declaration(top_ast_node, declaration) };
         }
 
+        // Register declaration on top-level scope node once.
         if let Some(top_idx) = self.records[idx].top_level {
             let top_ast_node = self.records[top_idx].ast_node;
             unsafe { ast_bridge::ast_scope_node_add_var_scoped_declaration(top_ast_node, declaration) };
@@ -398,6 +403,11 @@ impl ScopeCollector {
     ) {
         let idx = self.current.unwrap();
         let scope_level = self.records[idx].scope_level;
+
+        // Register the name identifier so it participates in scope analysis.
+        if name_identifier != NULL_HANDLE {
+            self.register_identifier(name_identifier, name, None);
+        }
 
         if scope_level != ScopeLevel::NotTopLevel && scope_level != ScopeLevel::ModuleTopLevel {
             let var = self.records[idx].variables.entry(name.to_vec()).or_default();
@@ -485,13 +495,25 @@ impl ScopeCollector {
 
     pub fn set_function_parameters(
         &mut self,
-        entries: &[(Vec<u16>, NodeHandle, bool)],
+        entries: &[(Vec<u16>, NodeHandle, bool, bool)],
     ) {
         let idx = self.current.unwrap();
         self.records[idx].has_function_parameters = true;
 
-        for (name, identifier, is_rest) in entries {
-            self.records[idx].parameter_names.push((name.clone(), *is_rest));
+        let mut prev_was_pattern = false;
+        for (name, identifier, is_rest, is_from_pattern) in entries {
+            if *is_from_pattern {
+                if !prev_was_pattern {
+                    // First bound name from a pattern parameter — push one
+                    // empty placeholder so subsequent non-pattern parameters
+                    // get the correct positional index.
+                    self.records[idx].parameter_names.push((Vec::new(), false));
+                }
+                prev_was_pattern = true;
+            } else {
+                self.records[idx].parameter_names.push((name.clone(), *is_rest));
+                prev_was_pattern = false;
+            }
             self.register_identifier(*identifier, name, None);
             let var = self.records[idx].variables.entry(name.clone()).or_default();
             var.flags |= FLAG_IS_PARAMETER_CANDIDATE | FLAG_IS_FORBIDDEN_LEXICAL;
@@ -642,6 +664,10 @@ impl ScopeCollector {
         Self::propagate_eval_poisoning(&mut self.records, idx);
         Self::resolve_identifiers(&mut self.records, idx, initiated_by_eval);
         Self::hoist_functions(&mut self.records, idx);
+
+        if self.records[idx].scope_type == ScopeType::Function && self.records[idx].has_function_parameters {
+            Self::build_function_scope_data(&self.records, idx);
+        }
     }
 
     fn propagate_eval_poisoning(records: &mut [ScopeRecord], idx: usize) {
@@ -835,6 +861,52 @@ impl ScopeCollector {
                     records[parent_idx].identifier_groups.insert(name, group);
                 }
             }
+        }
+    }
+
+    fn build_function_scope_data(records: &[ScopeRecord], idx: usize) {
+        let record = &records[idx];
+        let scope_node = record.ast_node;
+        if scope_node == NULL_HANDLE {
+            return;
+        }
+
+        let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
+        let has_argument_parameter = record.variables.get(&arguments_name)
+            .is_some_and(|v| v.flags & FLAG_IS_FORBIDDEN_LEXICAL != 0);
+
+        // Collect IS_VAR variables.
+        let mut names_data: Vec<u16> = Vec::new();
+        let mut name_offsets: Vec<u32> = Vec::new();
+        let mut name_lengths: Vec<u32> = Vec::new();
+        let mut identifiers: Vec<NodeHandle> = Vec::new();
+        let mut is_parameter: Vec<u8> = Vec::new();
+
+        for (name, var) in &record.variables {
+            if var.flags & FLAG_IS_VAR == 0 {
+                continue;
+            }
+            if var.var_identifier == NULL_HANDLE {
+                continue;
+            }
+            name_offsets.push(names_data.len() as u32);
+            name_lengths.push(name.len() as u32);
+            names_data.extend_from_slice(name);
+            identifiers.push(var.var_identifier);
+            is_parameter.push(if var.flags & FLAG_IS_FORBIDDEN_LEXICAL != 0 { 1 } else { 0 });
+        }
+
+        unsafe {
+            ast_bridge::ast_scope_build_function_scope_data(
+                scope_node,
+                names_data.as_ptr(),
+                name_offsets.as_ptr(),
+                name_lengths.as_ptr(),
+                identifiers.as_ptr(),
+                is_parameter.as_ptr(),
+                identifiers.len(),
+                if has_argument_parameter { 1 } else { 0 },
+            );
         }
     }
 

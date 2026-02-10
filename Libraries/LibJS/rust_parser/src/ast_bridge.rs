@@ -163,6 +163,16 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         op: u8, lhs: NodeHandle, rhs: NodeHandle,
     ) -> NodeHandle;
+    pub fn ast_create_assignment_expression_with_pattern(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        op: u8, pattern: NodeHandle, rhs: NodeHandle,
+    ) -> NodeHandle;
+    pub fn ast_is_identifier(handle: NodeHandle) -> bool;
+    pub fn ast_is_member_expression(handle: NodeHandle) -> bool;
+    pub fn ast_is_object_expression(handle: NodeHandle) -> bool;
+    pub fn ast_is_array_expression(handle: NodeHandle) -> bool;
     pub fn ast_create_conditional_expression(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -483,6 +493,17 @@ extern "C" {
     pub fn ast_scope_node_add_hoisted_function(scope_node: NodeHandle, function_declaration: NodeHandle);
     pub fn ast_scope_node_shrink_to_fit(scope_node: NodeHandle);
 
+    pub fn ast_scope_build_function_scope_data(
+        scope_node: NodeHandle,
+        var_names_data: *const u16,
+        var_name_offsets: *const u32,
+        var_name_lengths: *const u32,
+        var_identifiers: *const NodeHandle,
+        var_is_parameter: *const u8,
+        var_count: usize,
+        has_argument_parameter: u8,
+    );
+
     // SwitchCase
     pub fn ast_switch_case_append(switch_case: NodeHandle, statement: NodeHandle);
 
@@ -660,6 +681,27 @@ impl AstBuilder {
     pub fn create_assignment_expression(&self, span: Span, op: u8, lhs: NodeHandle, rhs: NodeHandle) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_assignment_expression(a, sc, sl, scol, so, el, ecol, eo, op, lhs, rhs) }
+    }
+
+    pub fn create_assignment_expression_with_pattern(&self, span: Span, op: u8, pattern: NodeHandle, rhs: NodeHandle) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_assignment_expression_with_pattern(a, sc, sl, scol, so, el, ecol, eo, op, pattern, rhs) }
+    }
+
+    pub fn is_identifier(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_is_identifier(handle) }
+    }
+
+    pub fn is_member_expression(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_is_member_expression(handle) }
+    }
+
+    pub fn is_object_expression(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_is_object_expression(handle) }
+    }
+
+    pub fn is_array_expression(&self, handle: NodeHandle) -> bool {
+        unsafe { ast_is_array_expression(handle) }
     }
 
     pub fn create_conditional_expression(&self, span: Span, test: NodeHandle, consequent: NodeHandle, alternate: NodeHandle) -> NodeHandle {

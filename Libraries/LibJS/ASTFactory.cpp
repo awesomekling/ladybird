@@ -1084,6 +1084,68 @@ void ast_scope_node_shrink_to_fit(ASTNodeHandle scope_node)
     as_node<ScopeNode>(scope_node).shrink_to_fit();
 }
 
+void ast_scope_build_function_scope_data(
+    ASTNodeHandle scope_node_handle,
+    uint16_t const* var_names_data,
+    uint32_t const* var_name_offsets,
+    uint32_t const* var_name_lengths,
+    ASTNodeHandle const* var_identifiers,
+    uint8_t const* var_is_parameter,
+    size_t var_count,
+    uint8_t has_argument_parameter)
+{
+    auto& scope_node = as_node<ScopeNode>(scope_node_handle);
+
+    auto data = make<FunctionScopeData>();
+
+    // Extract functions_to_initialize from var-scoped function declarations (in reverse order, deduplicated).
+    HashTable<Utf16FlyString> seen_function_names;
+    for (ssize_t i = scope_node.var_declaration_count() - 1; i >= 0; i--) {
+        auto const& declaration = scope_node.var_declarations()[i];
+        if (is<FunctionDeclaration>(declaration)) {
+            auto& function_decl = static_cast<FunctionDeclaration const&>(*declaration);
+            if (seen_function_names.set(function_decl.name()) == AK::HashSetResult::InsertedNewEntry)
+                data->functions_to_initialize.append(static_ptr_cast<FunctionDeclaration const>(declaration));
+        }
+    }
+
+    data->has_function_named_arguments = seen_function_names.contains("arguments"_utf16_fly_string);
+    data->has_argument_parameter = has_argument_parameter != 0;
+
+    // Check if "arguments" is lexically declared.
+    MUST(scope_node.for_each_lexically_declared_identifier([&](auto const& identifier) {
+        if (identifier.string() == "arguments"_utf16_fly_string)
+            data->has_lexically_declared_arguments = true;
+    }));
+
+    // Build vars_to_initialize from Rust scope variables.
+    HashTable<Utf16FlyString> seen_var_names;
+    for (size_t i = 0; i < var_count; i++) {
+        auto name = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(var_names_data + var_name_offsets[i]), var_name_lengths[i]));
+        auto& identifier = as_node<Identifier>(var_identifiers[i]);
+        bool is_parameter = var_is_parameter[i] != 0;
+        bool is_non_local = !identifier.is_local();
+
+        if (seen_var_names.set(name) == AK::HashSetResult::InsertedNewEntry) {
+            data->vars_to_initialize.append({
+                .identifier = identifier,
+                .is_parameter = is_parameter,
+                .is_function_name = seen_function_names.contains(name),
+            });
+
+            data->var_names.set(name);
+
+            if (is_non_local) {
+                data->non_local_var_count_for_parameter_expressions++;
+                if (!is_parameter)
+                    data->non_local_var_count++;
+            }
+        }
+    }
+
+    scope_node.set_function_scope_data(move(data));
+}
+
 // === SwitchCase ===
 
 void ast_switch_case_append(ASTNodeHandle switch_case, ASTNodeHandle statement)
@@ -1205,6 +1267,37 @@ ASTNodeHandle ast_create_for_await_of_statement_with_pattern(ASTArenaHandle aren
     Variant<NonnullRefPtr<ASTNode const>, NonnullRefPtr<BindingPattern const>> lhs_variant = NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern));
     return arena_add(arena, create_ast_node<ForAwaitOfStatement>(range,
         move(lhs_variant), as_ref<Expression>(rhs), as_ref<Statement>(body)));
+}
+
+ASTNodeHandle ast_create_assignment_expression_with_pattern(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    u8 op, ASTNodeHandle pattern, ASTNodeHandle rhs)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    return arena_add(arena, create_ast_node<AssignmentExpression>(range,
+        static_cast<AssignmentOp>(op), NonnullRefPtr<BindingPattern const>(*static_cast<BindingPattern const*>(pattern)), as_ref<Expression>(rhs)));
+}
+
+bool ast_is_identifier(ASTNodeHandle handle)
+{
+    return is<Identifier>(*static_cast<ASTNode const*>(handle));
+}
+
+bool ast_is_member_expression(ASTNodeHandle handle)
+{
+    return is<MemberExpression>(*static_cast<ASTNode const*>(handle));
+}
+
+bool ast_is_object_expression(ASTNodeHandle handle)
+{
+    return is<ObjectExpression>(*static_cast<ASTNode const*>(handle));
+}
+
+bool ast_is_array_expression(ASTNodeHandle handle)
+{
+    return is<ArrayExpression>(*static_cast<ASTNode const*>(handle));
 }
 
 } // extern "C"

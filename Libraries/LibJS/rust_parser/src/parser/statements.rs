@@ -20,9 +20,8 @@ impl<'a> Parser<'a> {
             TokenType::CurlyOpen => self.parse_block_statement(),
             TokenType::Return => self.parse_return_statement(),
             TokenType::Var => {
-                let decl = self.parse_variable_declaration(false);
-                self.register_var_scoped_declaration(decl);
-                decl
+                // Scope collector registration happens inside parse_variable_declaration.
+                self.parse_variable_declaration(false)
             }
             TokenType::For => self.parse_for_statement(),
             TokenType::If => self.parse_if_statement(),
@@ -74,7 +73,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
         let block = self.builder.create_block_statement(self.span_from(start));
 
-        self.push_scope(block, false);
+        self.scope_collector.open_block_scope(block);
 
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_declaration() {
@@ -87,7 +86,7 @@ impl<'a> Parser<'a> {
         }
 
         self.builder.scope_node_shrink_to_fit(block);
-        self.pop_scope();
+        self.scope_collector.close_scope();
         self.consume_token(TokenType::CurlyClose);
         block
     }
@@ -300,6 +299,9 @@ impl<'a> Parser<'a> {
 
     fn parse_for_statement(&mut self) -> NodeHandle {
         let start = self.position();
+        let loop_scope_node = self.builder.create_block_statement(self.span_from(start));
+        self.scope_collector.open_for_loop_scope(loop_scope_node);
+
         self.consume_token(TokenType::For);
 
         let is_await = if self.match_token(TokenType::Await) {
@@ -318,17 +320,16 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Semicolon) && !is_await {
             // for (;;)
             self.consume();
-            return self.parse_standard_for_loop(start, NULL_HANDLE);
+            let result = self.parse_standard_for_loop(start, NULL_HANDLE);
+            self.scope_collector.close_scope();
+            return result;
         }
 
         // Parse init
         let is_var_init = self.match_token(TokenType::Var);
         let init = if is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const) {
-            let decl = self.parse_variable_declaration(true);
-            if is_var_init {
-                self.register_var_scoped_declaration(decl);
-            }
-            decl
+            // Scope collector registration happens inside parse_variable_declaration.
+            self.parse_variable_declaration(true)
         } else {
             let forbidden = ForbiddenTokens::with_in();
             self.parse_expression(0, Associativity::Right, forbidden)
@@ -348,6 +349,7 @@ impl<'a> Parser<'a> {
             self.in_break_context = break_before;
             self.in_continue_context = continue_before;
 
+            self.scope_collector.close_scope();
             return self.builder.create_for_in_statement(self.span_from(start), init, rhs, body);
         }
 
@@ -366,6 +368,7 @@ impl<'a> Parser<'a> {
                 self.in_break_context = break_before;
                 self.in_continue_context = continue_before;
 
+                self.scope_collector.close_scope();
                 if is_await {
                     return self.builder.create_for_await_of_statement(self.span_from(start), init, rhs, body);
                 }
@@ -375,7 +378,9 @@ impl<'a> Parser<'a> {
 
         // Standard for loop
         self.consume_token(TokenType::Semicolon);
-        self.parse_standard_for_loop(start, init)
+        let result = self.parse_standard_for_loop(start, init);
+        self.scope_collector.close_scope();
+        result
     }
 
     fn parse_standard_for_loop(&mut self, start: (u32, u32, u32), init: NodeHandle) -> NodeHandle {
@@ -414,8 +419,12 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenOpen);
         let object = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
+        let block = self.builder.create_block_statement(self.span_from(start));
+        self.scope_collector.open_with_scope(block);
         let body = self.parse_statement(false);
-        self.builder.create_with_statement(self.span_from(start), object, body)
+        self.builder.scope_node_append(block, body);
+        self.scope_collector.close_scope();
+        self.builder.create_with_statement(self.span_from(start), object, block)
     }
 
     // === Switch statement ===
@@ -511,27 +520,41 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Catch);
 
+        self.scope_collector.open_catch_scope();
+
         if self.match_token(TokenType::ParenOpen) {
             self.consume();
             if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pattern = self.parse_binding_pattern();
+                let bound = std::mem::take(&mut self.pattern_bound_names);
+                let names: Vec<&[u16]> = bound.iter().map(|(n, _)| n.as_slice()).collect();
+                self.scope_collector.add_catch_parameter_pattern(&names);
+                for (name, id) in &bound {
+                    self.scope_collector.register_identifier(*id, name, None);
+                }
                 self.consume_token(TokenType::ParenClose);
                 let body = self.parse_block_statement();
+                self.scope_collector.close_scope();
                 return self.builder.create_catch_clause_with_pattern(self.span_from(start), pattern, body);
             }
             let param = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                self.builder.create_identifier(self.span_from(start), &value)
+                let id = self.builder.create_identifier(self.span_from(start), &value);
+                self.scope_collector.add_catch_parameter_identifier(&value, id);
+                self.scope_collector.register_identifier(id, &value, None);
+                id
             } else {
                 self.expected("catch parameter");
                 NULL_HANDLE
             };
             self.consume_token(TokenType::ParenClose);
             let body = self.parse_block_statement();
+            self.scope_collector.close_scope();
             self.builder.create_catch_clause(self.span_from(start), param, body)
         } else {
             let body = self.parse_block_statement();
+            self.scope_collector.close_scope();
             self.builder.create_catch_clause(self.span_from(start), NULL_HANDLE, body)
         }
     }

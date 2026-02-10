@@ -300,6 +300,24 @@ impl<'a> Lexer<'a> {
         lexer
     }
 
+    pub fn new_at_offset(source: &'a [u16], offset: usize, line_number: u32, line_column: u32) -> Self {
+        let mut lexer = Lexer {
+            source,
+            position: offset,
+            current_code_unit: 0,
+            eof: false,
+            line_number,
+            line_column,
+            current_token_type: TokenType::Eof,
+            regex_is_in_character_class: false,
+            allow_html_comments: true,
+            template_states: Vec::new(),
+            saved_states: Vec::new(),
+        };
+        lexer.consume();
+        lexer
+    }
+
     pub fn disallow_html_comments(&mut self) {
         self.allow_html_comments = false;
     }

@@ -17,33 +17,36 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
             if next.token_type == TokenType::Function {
-                let (decl, name) = self.parse_function_declaration_with_name();
-                self.register_function_declaration(decl, &name, true);
+                let decl = self.parse_function_declaration();
+                self.register_function_declaration_with_scope_collector(decl);
                 return decl;
             }
         }
 
         match self.current_token_type() {
             TokenType::Function => {
-                let (decl, name) = self.parse_function_declaration_with_name();
-                self.register_function_declaration(decl, &name, false);
+                let decl = self.parse_function_declaration();
+                self.register_function_declaration_with_scope_collector(decl);
                 decl
             }
             TokenType::Class => {
                 let decl = self.parse_class_declaration();
-                self.register_lexical_declaration(decl);
+                let class_name = std::mem::take(&mut self.last_class_name);
+                let class_name_id = self.last_class_name_id;
+                if !class_name.is_empty() {
+                    let pos = self.position();
+                    self.scope_collector.add_lexical_declaration(
+                        decl, &[class_name.as_slice()], pos.0, pos.1,
+                    );
+                    if class_name_id != NULL_HANDLE {
+                        self.scope_collector.register_identifier(class_name_id, &class_name, Some(DeclarationKind::Let));
+                    }
+                }
                 decl
             }
             TokenType::Let | TokenType::Const => {
-                let names_before = self.declared_names.len();
-                let decl = self.parse_variable_declaration(false);
-                self.register_lexical_declaration(decl);
-                // Track declared names as lexical names for Annex B checks
-                let new_names: Vec<Vec<u16>> = self.declared_names.drain(names_before..).collect();
-                for name in &new_names {
-                    self.add_lexical_name(name);
-                }
-                decl
+                // Scope collector registration happens inside parse_variable_declaration.
+                self.parse_variable_declaration(false)
             }
             _ => {
                 self.expected("declaration");
@@ -53,30 +56,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a function declaration, returning both the node and the function name.
-    fn parse_function_declaration_with_name(&mut self) -> (NodeHandle, Vec<u16>) {
-        let decl = self.parse_function_declaration();
-        // Extract the name from the last_function_name set during parsing
+    /// Register a function declaration with the scope collector.
+    fn register_function_declaration_with_scope_collector(&mut self, decl: NodeHandle) {
         let name = std::mem::take(&mut self.last_function_name);
-        (decl, name)
-    }
-
-    /// Register a function declaration with the appropriate scope.
-    fn register_function_declaration(&mut self, decl: NodeHandle, name: &[u16], is_async_or_generator: bool) {
-        if self.current_scope_is_function_like() {
-            // At function/program top level: register as var-scoped
-            self.register_var_scoped_declaration(decl);
-        } else {
-            // In a block scope: register as lexical on the block
-            self.register_lexical_declaration(decl);
-            self.add_function_name(name);
-
-            // Annex B: In non-strict mode, normal function declarations
-            // in blocks are hoisted to the enclosing function scope.
-            if !self.strict_mode && !is_async_or_generator {
-                self.register_hoisted_function(decl, name);
-            }
-        }
+        let name_id = self.last_function_name_id;
+        let kind = self.last_function_kind;
+        let pos = self.position();
+        self.scope_collector.add_function_declaration(
+            decl, &name, name_id, kind, self.strict_mode, pos.0, pos.1,
+        );
     }
 
     // === Variable declaration ===
@@ -96,6 +84,8 @@ impl<'a> Parser<'a> {
         self.consume();
 
         let mut declarators = Vec::new();
+        let mut var_bound_names: Vec<(Vec<u16>, NodeHandle)> = Vec::new();
+        let mut lexical_bound_names: Vec<Vec<u16>> = Vec::new();
 
         loop {
             let decl_start = self.position();
@@ -103,12 +93,27 @@ impl<'a> Parser<'a> {
             let (target, is_pattern) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                if kind != DeclarationKind::Var {
-                    self.declared_names.push(value.clone());
+                let id = self.builder.create_identifier(self.span_from(decl_start), &value);
+                // Track bound names for scope collector
+                if kind == DeclarationKind::Var {
+                    var_bound_names.push((value.clone(), id));
+                } else {
+                    lexical_bound_names.push(value.clone());
                 }
-                (self.builder.create_identifier(self.span_from(decl_start), &value), false)
+                // Register identifier reference
+                self.scope_collector.register_identifier(id, &value, Some(kind));
+                (id, false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
-                (self.parse_binding_pattern(), true)
+                let pat = self.parse_binding_pattern();
+                for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
+                    if kind == DeclarationKind::Var {
+                        var_bound_names.push((n, id));
+                    } else {
+                        self.scope_collector.register_identifier(id, &n, Some(kind));
+                        lexical_bound_names.push(n);
+                    }
+                }
+                (pat, true)
             } else {
                 self.expected("variable name");
                 self.consume();
@@ -145,7 +150,27 @@ impl<'a> Parser<'a> {
             self.consume_or_insert_semicolon();
         }
 
-        self.builder.create_variable_declaration(self.span_from(start), kind as u8, &declarators)
+        let decl = self.builder.create_variable_declaration(self.span_from(start), kind as u8, &declarators);
+
+        // Register with scope collector.
+        if self.scope_collector.has_current_scope() {
+            match kind {
+                DeclarationKind::Var => {
+                    let names: Vec<(&[u16], NodeHandle)> = var_bound_names.iter()
+                        .map(|(n, h)| (n.as_slice(), *h))
+                        .collect();
+                    self.scope_collector.add_var_declaration(decl, &names, start.0, start.1);
+                }
+                DeclarationKind::Let | DeclarationKind::Const => {
+                    let names: Vec<&[u16]> = lexical_bound_names.iter()
+                        .map(|n| n.as_slice())
+                        .collect();
+                    self.scope_collector.add_lexical_declaration(decl, &names, start.0, start.1);
+                }
+            }
+        }
+
+        decl
     }
 
     // === Function declaration ===
@@ -181,15 +206,35 @@ impl<'a> Parser<'a> {
             let tok = self.consume();
             let value = self.token_value(&tok).to_vec();
             self.last_function_name = value.clone();
-            self.builder.create_identifier(self.span_from(start), &value)
+            let id = self.builder.create_identifier(self.span_from(start), &value);
+            self.last_function_name_id = id;
+            id
         } else {
             self.last_function_name.clear();
+            self.last_function_name_id = NULL_HANDLE;
             NULL_HANDLE
         };
+        self.last_function_kind = kind;
 
-        let (params, function_length, parameter_names) = self.parse_formal_parameters();
+        let fn_name = self.last_function_name.clone();
+        let fn_name_ref = if fn_name.is_empty() { None } else { Some(fn_name.as_slice()) };
+        self.scope_collector.open_function_scope(fn_name_ref);
+        self.scope_collector.set_is_function_declaration();
 
-        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
+        let (params, function_length, param_info) = self.parse_formal_parameters();
+
+        // Save function name state before body parsing, which may recursively
+        // parse nested function declarations that clobber these fields.
+        let saved_fn_name = self.last_function_name.clone();
+        let saved_fn_name_id = self.last_function_name_id;
+        let saved_fn_kind = self.last_function_kind;
+
+        let body = self.parse_function_body(is_async, is_generator, &param_info);
+
+        // Restore so register_function_declaration_with_scope_collector uses the right values.
+        self.last_function_name = saved_fn_name;
+        self.last_function_name_id = saved_fn_name_id;
+        self.last_function_kind = saved_fn_kind;
 
         let span = self.span_from(start);
         self.builder.create_function_declaration(
@@ -230,17 +275,21 @@ impl<'a> Parser<'a> {
         };
 
         // Optional name
+        let mut fn_name_value: Vec<u16> = Vec::new();
         let name = if self.match_identifier() {
             let tok = self.consume();
-            let value = self.token_value(&tok).to_vec();
-            self.builder.create_identifier(self.span_from(start), &value)
+            fn_name_value = self.token_value(&tok).to_vec();
+            self.builder.create_identifier(self.span_from(start), &fn_name_value)
         } else {
             NULL_HANDLE
         };
 
-        let (params, function_length, parameter_names) = self.parse_formal_parameters();
+        let fn_name = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
+        self.scope_collector.open_function_scope(fn_name);
 
-        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
+        let (params, function_length, param_info) = self.parse_formal_parameters();
+
+        let body = self.parse_function_body(is_async, is_generator, &param_info);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(
@@ -267,16 +316,30 @@ impl<'a> Parser<'a> {
             if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                self.builder.create_identifier(self.span_from(start), &value)
+                self.last_class_name = value.clone();
+                let id = self.builder.create_identifier(self.span_from(start), &value);
+                self.last_class_name_id = id;
+                id
             } else if expect_name {
                 self.expected("class name");
+                self.last_class_name.clear();
+                self.last_class_name_id = NULL_HANDLE;
                 NULL_HANDLE
             } else {
+                self.last_class_name.clear();
+                self.last_class_name_id = NULL_HANDLE;
                 NULL_HANDLE
             }
         } else {
+            self.last_class_name.clear();
+            self.last_class_name_id = NULL_HANDLE;
             NULL_HANDLE
         };
+
+        // Save the class name before parsing extends/body, which may recursively
+        // call parse_class_expression and clobber last_class_name/last_class_name_id.
+        let saved_class_name = self.last_class_name.clone();
+        let saved_class_name_id = self.last_class_name_id;
 
         // Optional extends
         let super_class = if self.match_token(TokenType::Extends) {
@@ -341,6 +404,10 @@ impl<'a> Parser<'a> {
                 );
             }
         }
+
+        // Restore class name so parse_class_declaration can use it.
+        self.last_class_name = saved_class_name;
+        self.last_class_name_id = saved_class_name_id;
 
         self.builder.create_class_expression(
             self.span_from(start), name,
@@ -439,17 +506,16 @@ impl<'a> Parser<'a> {
 
     // === Function body ===
 
-    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, parameter_names: &[Vec<u16>]) -> (NodeHandle, bool) {
+    /// Parse a function body. The caller must have already opened the function
+    /// scope (via open_function_scope) before parsing formal parameters, so that
+    /// default parameter expressions can resolve identifiers in the function scope.
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, param_info: &[(Vec<u16>, NodeHandle, bool, bool)]) -> (NodeHandle, bool) {
         let start = self.position();
         let body = self.builder.create_function_body(self.span_from(start));
         self.consume_token(TokenType::CurlyOpen);
 
-        self.push_scope(body, true);
-
-        // Add parameters for scope analysis (use set_argument_index, not set_local_variable_index)
-        for (index, param_name) in parameter_names.iter().enumerate() {
-            self.add_parameter(param_name, index as u32);
-        }
+        self.scope_collector.set_scope_node(body);
+        self.scope_collector.set_function_parameters(param_info);
 
         let in_function_before = self.in_function_context;
         let in_generator_before = self.in_generator_function_context;
@@ -478,7 +544,7 @@ impl<'a> Parser<'a> {
         self.labels_in_scope = old_labels;
 
         self.builder.scope_node_shrink_to_fit(body);
-        self.pop_scope();
+        self.scope_collector.close_scope();
         self.consume_token(TokenType::CurlyClose);
 
         (body, has_use_strict)
@@ -486,7 +552,9 @@ impl<'a> Parser<'a> {
 
     // === Formal parameters ===
 
-    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32, Vec<Vec<u16>>) {
+    /// Returns (params_node, function_length, param_info).
+    /// param_info entries: (name, identifier_handle, is_rest, is_from_pattern).
+    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>) {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
         self.consume_token(TokenType::ParenClose);
@@ -495,8 +563,7 @@ impl<'a> Parser<'a> {
 
     /// Parse formal parameters assuming the opening '(' has already been consumed.
     /// Does NOT consume the closing ')'.
-    /// Returns (params_node, function_length, parameter_names)
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32, Vec<Vec<u16>>) {
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>) {
         if self.match_token(TokenType::ParenClose) {
             return (self.builder.create_function_parameters_empty(), 0, Vec::new());
         }
@@ -507,7 +574,7 @@ impl<'a> Parser<'a> {
         let mut is_pattern = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
-        let mut parameter_names: Vec<Vec<u16>> = Vec::new();
+        let mut param_info: Vec<(Vec<u16>, NodeHandle, bool, bool)> = Vec::new();
 
         loop {
             let param_start = self.position();
@@ -521,11 +588,15 @@ impl<'a> Parser<'a> {
             let (binding, is_pat) = if self.match_identifier() {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                parameter_names.push(value.clone());
-                (self.builder.create_identifier(self.span_from(param_start), &value), false)
+                let id = self.builder.create_identifier(self.span_from(param_start), &value);
+                param_info.push((value, id, rest, false));
+                (id, false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
-                // TODO: Extract names from binding patterns for scope analysis
-                (self.parse_binding_pattern(), true)
+                let pat = self.parse_binding_pattern();
+                for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
+                    param_info.push((n, id, rest, true));
+                }
+                (pat, true)
             } else {
                 self.expected("parameter name");
                 self.consume();
@@ -560,7 +631,7 @@ impl<'a> Parser<'a> {
         }
 
         let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest, &is_pattern);
-        (params, function_length, parameter_names)
+        (params, function_length, param_info)
     }
 
     // === Binding pattern ===
@@ -598,74 +669,130 @@ impl<'a> Parser<'a> {
             let mut alias_type: u8 = 0; // Empty
 
             if is_object {
-                // Object binding pattern entry
-                let mut needs_alias = false;
-
-                if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
-                    let entry_start = self.position();
-
-                    if self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) {
-                        needs_alias = true;
-                    }
-
-                    if self.match_token(TokenType::StringLiteral) {
-                        let tok = self.consume();
-                        let value = self.parse_string_value(&tok);
-                        name = self.builder.create_identifier(self.span_from(entry_start), &value);
-                        name_type = 1;
-                    } else if self.match_token(TokenType::BigIntLiteral) {
-                        let tok = self.consume();
-                        let value = self.token_value(&tok).to_vec();
-                        // Strip trailing 'n' for the identifier name
-                        let name_value = if value.last() == Some(&(b'n' as u16)) {
-                            &value[..value.len() - 1]
-                        } else {
-                            &value
-                        };
-                        name = self.builder.create_identifier(self.span_from(entry_start), name_value);
-                        name_type = 1;
+                if self.allow_member_expressions && is_rest {
+                    // Destructuring assignment: rest target can be MemberExpression or Identifier
+                    let expr_start = self.position();
+                    let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                    if self.builder.is_member_expression(expression) {
+                        alias = expression;
+                        alias_type = 3; // MemberExpression
+                    } else if self.builder.is_identifier(expression) {
+                        name = expression;
+                        name_type = 1; // Identifier
                     } else {
-                        // Identifier name or numeric literal
-                        let tok = self.consume();
-                        let value = self.token_value(&tok).to_vec();
-                        name = self.builder.create_identifier(self.span_from(entry_start), &value);
-                        name_type = 1;
-                    }
-                } else if self.match_token(TokenType::BracketOpen) {
-                    // Computed property name [expr]
-                    self.consume();
-                    name = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
-                    name_type = 2; // Expression
-                    self.consume_token(TokenType::BracketClose);
-                } else {
-                    self.expected("identifier or computed property name");
-                    break;
-                }
-
-                // Check for alias after ':'
-                if !is_rest && self.match_token(TokenType::Colon) {
-                    self.consume();
-                    if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
-                        // Nested binding pattern
-                        alias = self.parse_binding_pattern();
-                        alias_type = 2; // BindingPattern
-                    } else if self.match_identifier_name() {
-                        let alias_start = self.position();
-                        let tok = self.consume();
-                        let value = self.token_value(&tok).to_vec();
-                        alias = self.builder.create_identifier(self.span_from(alias_start), &value);
-                        alias_type = 1; // Identifier
-                    } else {
-                        self.expected("identifier or binding pattern");
+                        self.syntax_error("Invalid destructuring assignment target");
                         break;
                     }
-                } else if needs_alias {
-                    self.expected("alias for string or numeric literal name");
-                    break;
+                } else {
+                    // Object binding pattern entry
+                    let mut needs_alias = false;
+                    let mut entry_name_value: Vec<u16> = Vec::new();
+
+                    if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
+                        let entry_start = self.position();
+
+                        if self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) {
+                            needs_alias = true;
+                        }
+
+                        if self.match_token(TokenType::StringLiteral) {
+                            let tok = self.consume();
+                            let value = self.parse_string_value(&tok);
+                            name = self.builder.create_identifier(self.span_from(entry_start), &value);
+                            name_type = 1;
+                        } else if self.match_token(TokenType::BigIntLiteral) {
+                            let tok = self.consume();
+                            let value = self.token_value(&tok).to_vec();
+                            // Strip trailing 'n' for the identifier name
+                            let name_value = if value.last() == Some(&(b'n' as u16)) {
+                                &value[..value.len() - 1]
+                            } else {
+                                &value
+                            };
+                            name = self.builder.create_identifier(self.span_from(entry_start), name_value);
+                            name_type = 1;
+                        } else {
+                            // Identifier name or numeric literal
+                            let tok = self.consume();
+                            let value = self.token_value(&tok).to_vec();
+                            entry_name_value = value.clone();
+                            name = self.builder.create_identifier(self.span_from(entry_start), &value);
+                            name_type = 1;
+                        }
+                    } else if self.match_token(TokenType::BracketOpen) {
+                        // Computed property name [expr]
+                        self.consume();
+                        name = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
+                        name_type = 2; // Expression
+                        self.consume_token(TokenType::BracketClose);
+                    } else {
+                        self.expected("identifier or computed property name");
+                        break;
+                    }
+
+                    // Check for alias after ':'
+                    if !is_rest && self.match_token(TokenType::Colon) {
+                        self.consume();
+                        if self.allow_member_expressions {
+                            // Destructuring assignment: alias can be expression
+                            let expr_start = self.position();
+                            let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                            if self.builder.is_object_expression(expression) || self.builder.is_array_expression(expression) {
+                                alias = self.synthesize_binding_pattern(expr_start);
+                                alias_type = 2; // BindingPattern
+                            } else if self.builder.is_member_expression(expression) {
+                                alias = expression;
+                                alias_type = 3; // MemberExpression
+                            } else if self.builder.is_identifier(expression) {
+                                alias = expression;
+                                alias_type = 1; // Identifier
+                            } else {
+                                self.syntax_error("Invalid destructuring assignment target");
+                                break;
+                            }
+                        } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                            // Nested binding pattern
+                            alias = self.parse_binding_pattern();
+                            alias_type = 2; // BindingPattern
+                        } else if self.match_identifier_name() {
+                            let alias_start = self.position();
+                            let tok = self.consume();
+                            let value = self.token_value(&tok).to_vec();
+                            alias = self.builder.create_identifier(self.span_from(alias_start), &value);
+                            self.pattern_bound_names.push((value, alias));
+                            alias_type = 1; // Identifier
+                        } else {
+                            self.expected("identifier or binding pattern");
+                            break;
+                        }
+                    } else if needs_alias {
+                        self.expected("alias for string or numeric literal name");
+                        break;
+                    } else if !entry_name_value.is_empty() {
+                        // Shorthand: name is the bound identifier.
+                        self.pattern_bound_names.push((entry_name_value, name));
+                    }
                 }
             } else {
                 // Array binding pattern entry (name is always Empty)
-                if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                if self.allow_member_expressions {
+                    // Destructuring assignment: element can be expression
+                    let expr_start = self.position();
+                    let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                    if self.builder.is_object_expression(expression) || self.builder.is_array_expression(expression) {
+                        alias = self.synthesize_binding_pattern(expr_start);
+                        alias_type = 2; // BindingPattern
+                    } else if self.builder.is_member_expression(expression) {
+                        alias = expression;
+                        alias_type = 3; // MemberExpression
+                    } else if self.builder.is_identifier(expression) {
+                        alias = expression;
+                        alias_type = 1; // Identifier
+                    } else {
+                        self.syntax_error("Invalid destructuring assignment target");
+                        break;
+                    }
+                } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                     alias = self.parse_binding_pattern();
                     alias_type = 2; // BindingPattern
                 } else if self.match_identifier_name() {
@@ -673,6 +800,7 @@ impl<'a> Parser<'a> {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     alias = self.builder.create_identifier(self.span_from(alias_start), &value);
+                    self.pattern_bound_names.push((value, alias));
                     alias_type = 1; // Identifier
                 } else {
                     self.expected("identifier or binding pattern");

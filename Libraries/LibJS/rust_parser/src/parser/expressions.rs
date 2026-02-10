@@ -130,6 +130,7 @@ impl<'a> Parser<'a> {
             return self.continue_parse_expression(start, expr, min_precedence, associativity, forbidden);
         }
 
+        let lhs_start = self.position();
         let (expr, should_continue) = self.parse_primary_expression();
         if !should_continue {
             return expr;
@@ -145,12 +146,12 @@ impl<'a> Parser<'a> {
             expr
         };
 
-        self.continue_parse_expression(self.position(), expr, min_precedence, associativity, forbidden)
+        self.continue_parse_expression(lhs_start, expr, min_precedence, associativity, forbidden)
     }
 
     fn continue_parse_expression(
         &mut self,
-        _start: (u32, u32, u32),
+        lhs_start: (u32, u32, u32),
         mut expr: NodeHandle,
         min_precedence: i32,
         associativity: Associativity,
@@ -165,7 +166,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            let result = self.parse_secondary_expression(expr, new_precedence, forbidden);
+            let result = self.parse_secondary_expression(lhs_start, expr, new_precedence, forbidden);
             expr = result.0;
             let new_forbidden = result.1;
             let _ = new_forbidden; // Forbidden tokens from secondary expression (e.g., ?? forbids &&/||)
@@ -180,6 +181,7 @@ impl<'a> Parser<'a> {
                 expressions.push(self.parse_expression(2, Associativity::Right, forbidden));
             }
             let span = self.span_from(start);
+            self.last_parsed_identifier_is_eval = false;
             return self.builder.create_sequence_expression(span, &expressions);
         }
 
@@ -189,6 +191,7 @@ impl<'a> Parser<'a> {
     // === Primary expression parsing ===
 
     fn parse_primary_expression(&mut self) -> (NodeHandle, bool) {
+        self.last_parsed_identifier_is_eval = false;
         let start = self.position();
         let token = self.current_token().clone();
 
@@ -212,6 +215,7 @@ impl<'a> Parser<'a> {
 
             TokenType::This => {
                 self.consume();
+                self.scope_collector.set_uses_this();
                 (self.builder.create_this_expression(self.span_from(start)), true)
             }
 
@@ -408,11 +412,24 @@ impl<'a> Parser<'a> {
                     }
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    (self.create_identifier_with_scope_analysis(self.span_from(start), &value), true)
+                    let id = self.builder.create_identifier(self.span_from(start), &value);
+                    self.scope_collector.register_identifier(id, &value, None);
+                    if value == super::utf16_lit("eval") {
+                        self.last_parsed_identifier_is_eval = true;
+                    }
+                    if value == super::utf16_lit("arguments")
+                        && !self.strict_mode
+                        && !self.scope_collector.has_declaration_in_current_function(&value)
+                    {
+                        self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();
+                    }
+                    (id, true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    (self.builder.create_identifier(self.span_from(start), &value), true)
+                    let id = self.builder.create_identifier(self.span_from(start), &value);
+                    self.scope_collector.register_identifier(id, &value, None);
+                    (id, true)
                 } else {
                     self.expected("expression");
                     self.consume();
@@ -424,7 +441,9 @@ impl<'a> Parser<'a> {
 
     // === Secondary expression parsing ===
 
-    fn parse_secondary_expression(&mut self, lhs: NodeHandle, min_precedence: i32, forbidden: ForbiddenTokens) -> (NodeHandle, ForbiddenTokens) {
+    fn parse_secondary_expression(&mut self, lhs_start: (u32, u32, u32), lhs: NodeHandle, min_precedence: i32, forbidden: ForbiddenTokens) -> (NodeHandle, ForbiddenTokens) {
+        let callee_is_eval = self.last_parsed_identifier_is_eval;
+        self.last_parsed_identifier_is_eval = false;
         let start = self.position();
         let tt = self.current_token_type();
 
@@ -479,6 +498,16 @@ impl<'a> Parser<'a> {
             | TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals
             | TokenType::DoubleQuestionMarkEquals => {
                 let op = token_to_assignment_op(tt);
+                // For plain '=', check if LHS is object/array expression (destructuring assignment)
+                if op == 0 && (self.builder.is_object_expression(lhs) || self.builder.is_array_expression(lhs)) {
+                    let binding_pattern = self.synthesize_binding_pattern(lhs_start);
+                    if binding_pattern != NULL_HANDLE {
+                        self.consume();
+                        let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
+                        let span = self.span_from(lhs_start);
+                        return (self.builder.create_assignment_expression_with_pattern(span, op, binding_pattern, rhs), ForbiddenTokens::none());
+                    }
+                }
                 self.consume();
                 let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                 let span = self.span_from(start);
@@ -527,7 +556,7 @@ impl<'a> Parser<'a> {
 
             // === Call ===
             TokenType::ParenOpen => {
-                let expr = self.parse_call_expression(lhs);
+                let expr = self.parse_call_expression(lhs, callee_is_eval);
                 (expr, ForbiddenTokens::none())
             }
 
@@ -666,11 +695,16 @@ impl<'a> Parser<'a> {
 
     // === Call expression ===
 
-    pub(crate) fn parse_call_expression(&mut self, callee: NodeHandle) -> NodeHandle {
+    pub(crate) fn parse_call_expression(&mut self, callee: NodeHandle, callee_is_eval: bool) -> NodeHandle {
         let start = self.position();
         let (arg_values, arg_spreads) = self.parse_arguments();
         let span = self.span_from(start);
-        self.builder.create_call_expression(span, callee, &arg_values, &arg_spreads)
+        let expr = self.builder.create_call_expression(span, callee, &arg_values, &arg_spreads);
+        if callee_is_eval {
+            self.scope_collector.set_contains_direct_call_to_eval();
+            self.scope_collector.set_uses_this();
+        }
+        expr
     }
 
     /// Parse function call arguments: (arg1, arg2, ...rest)
@@ -826,6 +860,7 @@ impl<'a> Parser<'a> {
         // Shorthand property: { x } is equivalent to { x: x }
         if let Some(kv) = key_value {
             let value = self.builder.create_identifier(self.span_from(start), &kv);
+            self.scope_collector.register_identifier(value, &kv, None);
             return self.builder.create_object_property(self.span_from(start), key, value, 0, false);
         }
 
@@ -1103,7 +1138,11 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let (params, function_length, parameter_names);
+        // Open function scope before parsing parameters so that default
+        // parameter expressions can resolve identifiers in the function scope.
+        self.scope_collector.open_function_scope(None);
+
+        let (params, function_length, param_info);
 
         if expect_parens {
             // '(' already consumed (by caller or above for async case).
@@ -1111,13 +1150,15 @@ impl<'a> Parser<'a> {
             let result = self.parse_formal_parameters_without_parens();
             params = result.0;
             function_length = result.1;
-            parameter_names = result.2;
+            param_info = result.2;
             // If there were new syntax errors during parameter parsing, abort.
             if self.errors.len() > previous_errors {
+                self.scope_collector.close_scope();
                 self.load_state();
                 return None;
             }
             if !self.match_token(TokenType::ParenClose) {
+                self.scope_collector.close_scope();
                 self.load_state();
                 return None;
             }
@@ -1131,8 +1172,9 @@ impl<'a> Parser<'a> {
                 let binding = self.builder.create_identifier(self.span_from(param_start), &value);
                 params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false], &[false]);
                 function_length = 1;
-                parameter_names = vec![value];
+                param_info = vec![(value, binding, false, false)];
             } else {
+                self.scope_collector.close_scope();
                 self.load_state();
                 return None;
             }
@@ -1140,6 +1182,7 @@ impl<'a> Parser<'a> {
 
         // Check for =>
         if !self.match_token(TokenType::Arrow) || self.current_token.trivia_has_line_terminator {
+            self.scope_collector.close_scope();
             self.load_state();
             return None;
         }
@@ -1151,7 +1194,7 @@ impl<'a> Parser<'a> {
         let kind = if is_async { FunctionKind::Async as u8 } else { FunctionKind::Normal as u8 };
 
         if self.match_token(TokenType::CurlyOpen) {
-            let body = self.parse_function_body(is_async, false, &parameter_names);
+            let body = self.parse_function_body(is_async, false, &param_info);
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
@@ -1162,11 +1205,14 @@ impl<'a> Parser<'a> {
                 true, true, false, false,
             ))
         } else {
-            // Expression body
+            // Expression body: set scope node and parameters for scope analysis.
             let body = self.builder.create_function_body(self.span_from(start));
+            self.scope_collector.set_scope_node(body);
+            self.scope_collector.set_function_parameters(&param_info);
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             let return_stmt = self.builder.create_return_statement(self.span_from(start), expr);
             self.builder.scope_node_append(body, return_stmt);
+            self.scope_collector.close_scope();
 
             let span = self.span_from(start);
             Some(self.builder.create_function_expression(
@@ -1190,9 +1236,11 @@ impl<'a> Parser<'a> {
             (false, false) => FunctionKind::Normal as u8,
         };
 
-        let (params, function_length, parameter_names) = self.parse_formal_parameters();
+        self.scope_collector.open_function_scope(None);
 
-        let body = self.parse_function_body(is_async, is_generator, &parameter_names);
+        let (params, function_length, param_info) = self.parse_formal_parameters();
+
+        let body = self.parse_function_body(is_async, is_generator, &param_info);
 
         let span = self.span_from(start);
         self.builder.create_function_expression(

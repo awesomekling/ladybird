@@ -413,6 +413,24 @@ void ast_scope_node_add_lexical_declaration(ASTNodeHandle scope_node, ASTNodeHan
 void ast_scope_node_add_hoisted_function(ASTNodeHandle scope_node, ASTNodeHandle function_declaration);
 void ast_scope_node_shrink_to_fit(ASTNodeHandle scope_node);
 
+// Build FunctionScopeData for a function scope, using scope variable information.
+// var_names_data: concatenated UTF-16 variable names
+// var_name_offsets: start offset of each name in var_names_data
+// var_name_lengths: length of each name
+// var_identifiers: Identifier handle for each var
+// var_is_parameter: whether each var shadows a parameter
+// var_count: number of variables
+// has_argument_parameter: whether "arguments" is a parameter name
+void ast_scope_build_function_scope_data(
+    ASTNodeHandle scope_node,
+    uint16_t const* var_names_data,
+    uint32_t const* var_name_offsets,
+    uint32_t const* var_name_lengths,
+    ASTNodeHandle const* var_identifiers,
+    uint8_t const* var_is_parameter,
+    size_t var_count,
+    uint8_t has_argument_parameter);
+
 // === SwitchCase ===
 void ast_switch_case_append(ASTNodeHandle switch_case, ASTNodeHandle statement);
 
@@ -453,6 +471,17 @@ ASTNodeHandle ast_create_for_await_of_statement_with_pattern(ASTArenaHandle aren
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     ASTNodeHandle pattern, ASTNodeHandle rhs, ASTNodeHandle body);
+
+ASTNodeHandle ast_create_assignment_expression_with_pattern(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    uint8_t op, ASTNodeHandle pattern, ASTNodeHandle rhs);
+
+// Node type checking (returns true if the handle is the given type)
+bool ast_is_identifier(ASTNodeHandle handle);
+bool ast_is_member_expression(ASTNodeHandle handle);
+bool ast_is_object_expression(ASTNodeHandle handle);
+bool ast_is_array_expression(ASTNodeHandle handle);
 
 #ifdef __cplusplus
 }

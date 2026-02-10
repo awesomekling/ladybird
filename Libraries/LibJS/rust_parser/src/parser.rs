@@ -8,8 +8,9 @@
 
 use std::collections::HashMap;
 
-use crate::ast_bridge::{AstBuilder, NodeHandle, SourceCodeHandle, Span};
+use crate::ast_bridge::{AstBuilder, NodeHandle, NULL_HANDLE, SourceCodeHandle, Span};
 use crate::lexer::Lexer;
+use crate::scope_collector::ScopeCollector;
 use crate::token::{Token, TokenType};
 
 mod declarations;
@@ -124,29 +125,6 @@ pub struct ParserError {
     pub column: u32,
 }
 
-/// Function parameter entry for scope analysis.
-struct FunctionParameter {
-    name: Vec<u16>,
-    index: u32, // Parameter index (0, 1, 2, ...)
-}
-
-/// Local variable entry for scope analysis.
-struct LocalVariable {
-    name: Vec<u16>,
-    index: u32, // Local variable index from add_local_variable()
-}
-
-/// A scope in the scope stack. Tracks whether it's function-like (var hoisting target).
-struct ScopeEntry {
-    node: NodeHandle,
-    is_function_like: bool, // true for Program, FunctionBody
-    lexical_names: std::collections::HashSet<Vec<u16>>,
-    function_names: std::collections::HashSet<Vec<u16>>,
-    parameters: Vec<FunctionParameter>, // Function parameters (only in function scopes)
-    local_variables: Vec<LocalVariable>, // Optimizable vars/lets
-}
-
-
 /// Parser state that can be saved/restored for backtracking.
 struct SavedState {
     token: Token,
@@ -177,7 +155,7 @@ pub struct Parser<'a> {
     saved_states: Vec<SavedState>,
     program_type: ProgramType,
     source: &'a [u16],
-    scope_stack: Vec<ScopeEntry>,
+    pub(crate) scope_collector: ScopeCollector,
 
     // Parser state flags (mirrors C++ ParserState)
     pub(crate) strict_mode: bool,
@@ -206,12 +184,23 @@ pub struct Parser<'a> {
     /// through nested labels (e.g., `a: b: for(...)`).
     last_inner_label_is_iteration: bool,
 
-    /// Temporary storage for declared names collected during variable
-    /// declaration parsing, used by parse_declaration to track lexical names.
-    declared_names: Vec<Vec<u16>>,
-
     /// Last function declaration name, set by parse_function_declaration.
     last_function_name: Vec<u16>,
+    last_function_name_id: NodeHandle,
+
+    /// Bound names collected during parse_binding_pattern.
+    /// Caller drains this after calling parse_binding_pattern.
+    pub(crate) pattern_bound_names: Vec<(Vec<u16>, NodeHandle)>,
+    last_function_kind: FunctionKind,
+    last_class_name: Vec<u16>,
+    last_class_name_id: NodeHandle,
+
+    /// Set by parse_primary_expression when the result is a bare Identifier("eval").
+    /// Read and cleared by parse_secondary_expression for the ParenOpen (call) case.
+    last_parsed_identifier_is_eval: bool,
+
+    /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
+    allow_member_expressions: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -231,7 +220,7 @@ impl<'a> Parser<'a> {
             saved_states: Vec::new(),
             program_type,
             source,
-            scope_stack: Vec::new(),
+            scope_collector: ScopeCollector::new(),
             strict_mode: false,
             allow_super_property_lookup: false,
             allow_super_constructor_call: false,
@@ -251,8 +240,14 @@ impl<'a> Parser<'a> {
             previous_token_was_period: false,
             labels_in_scope: HashMap::new(),
             last_inner_label_is_iteration: false,
-            declared_names: Vec::new(),
             last_function_name: Vec::new(),
+            last_function_name_id: NULL_HANDLE,
+            last_function_kind: FunctionKind::Normal,
+            last_parsed_identifier_is_eval: false,
+            last_class_name: Vec::new(),
+            last_class_name_id: NULL_HANDLE,
+            pattern_bound_names: Vec::new(),
+            allow_member_expressions: false,
         }
     }
 
@@ -430,172 +425,6 @@ impl<'a> Parser<'a> {
         !self.errors.is_empty()
     }
 
-    // === Scope management ===
-
-    pub(crate) fn push_scope(&mut self, node: NodeHandle, is_function_like: bool) {
-        self.scope_stack.push(ScopeEntry {
-            node,
-            is_function_like,
-            lexical_names: std::collections::HashSet::new(),
-            function_names: std::collections::HashSet::new(),
-            parameters: Vec::new(),
-            local_variables: Vec::new(),
-        });
-    }
-
-    pub(crate) fn pop_scope(&mut self) {
-        self.scope_stack.pop();
-    }
-
-    /// Register a var-scoped declaration (var, function declaration).
-    /// Goes to the nearest function-like scope.
-    pub(crate) fn register_var_scoped_declaration(&self, declaration: NodeHandle) {
-        for entry in self.scope_stack.iter().rev() {
-            if entry.is_function_like {
-                self.builder.scope_node_add_var_scoped_declaration(entry.node, declaration);
-                return;
-            }
-        }
-    }
-
-    /// Register a lexical declaration (let, const).
-    /// Goes to the nearest scope (any scope).
-    pub(crate) fn register_lexical_declaration(&self, declaration: NodeHandle) {
-        if let Some(entry) = self.scope_stack.last() {
-            self.builder.scope_node_add_lexical_declaration(entry.node, declaration);
-        }
-    }
-
-    /// Check if the current scope is function-like (program/function body).
-    pub(crate) fn current_scope_is_function_like(&self) -> bool {
-        self.scope_stack.last().is_some_and(|e| e.is_function_like)
-    }
-
-    /// Add a name to the current scope's lexical names set.
-    pub(crate) fn add_lexical_name(&mut self, name: &[u16]) {
-        if let Some(entry) = self.scope_stack.last_mut() {
-            entry.lexical_names.insert(name.to_vec());
-        }
-    }
-
-    /// Add a name to the current scope's function names set.
-    pub(crate) fn add_function_name(&mut self, name: &[u16]) {
-        if let Some(entry) = self.scope_stack.last_mut() {
-            entry.function_names.insert(name.to_vec());
-        }
-    }
-
-    /// Add a local variable (parameter or optimizable var/let/const) to the current scope.
-    /// Calls the C++ ScopeNode::add_local_variable and tracks the result.
-    /// Add a function parameter to the current function scope.
-    /// Parameters use set_argument_index, NOT set_local_variable_index.
-    pub(crate) fn add_parameter(&mut self, name: &[u16], index: u32) {
-        if let Some(entry) = self.scope_stack.last_mut() {
-            entry.parameters.push(FunctionParameter {
-                name: name.to_vec(),
-                index,
-            });
-        }
-    }
-
-    /// Add a local variable (var/let/const) to the current scope.
-    /// Local variables use set_local_variable_index, NOT set_argument_index.
-    pub(crate) fn add_local_variable(&mut self, name: &[u16]) -> u32 {
-        if let Some(entry) = self.scope_stack.last_mut() {
-            // Add to the C++ ScopeNode's local variables list
-            // Declaration kind: 0=Var (for now; will extend for let/const later)
-            let declaration_kind = 0u8; // Var
-            let index = unsafe {
-                crate::ast_bridge::ast_scope_node_add_local_variable(
-                    entry.node,
-                    name.as_ptr(),
-                    name.len(),
-                    declaration_kind,
-                )
-            };
-            // Track in Rust for identifier lookup
-            entry.local_variables.push(LocalVariable {
-                name: name.to_vec(),
-                index,
-            });
-            index
-        } else {
-            0
-        }
-    }
-
-    /// Look up a name in the scope stack.
-    /// Returns Some((index, true)) if it's a parameter (use set_argument_index).
-    /// Returns Some((index, false)) if it's a local variable (use set_local_variable_index).
-    pub(crate) fn lookup_local(&self, name: &[u16]) -> Option<(u32, bool)> {
-        for entry in self.scope_stack.iter().rev() {
-            // Check parameters first
-            for param in &entry.parameters {
-                if param.name == name {
-                    return Some((param.index, true)); // is_parameter = true
-                }
-            }
-            // Then check local variables
-            for local in &entry.local_variables {
-                if local.name == name {
-                    return Some((local.index, false)); // is_parameter = false
-                }
-            }
-            // Only look in the current function scope, not outer functions
-            if entry.is_function_like {
-                break;
-            }
-        }
-        None
-    }
-
-    /// Mark an identifier as a local variable or argument if it matches a local in scope.
-    pub(crate) fn try_mark_identifier_as_local(&self, _identifier: NodeHandle, _name: &[u16]) {
-        // TEMPORARILY DISABLED - scope analysis not ready yet
-        // if let Some((index, is_parameter)) = self.lookup_local(name) {
-        //     unsafe {
-        //         if is_parameter {
-        //             // Parameters use set_argument_index
-        //             crate::ast_bridge::ast_identifier_set_argument_index(identifier, index);
-        //         } else {
-        //             // Local variables use set_local_variable_index
-        //             crate::ast_bridge::ast_identifier_set_local_variable_index(identifier, index);
-        //         }
-        //     }
-        // }
-    }
-
-    /// Register a hoisted function declaration (Annex B).
-    /// Bubbles through scopes toward the nearest function-like scope,
-    /// stopping if any intermediate scope has a conflicting lexical or
-    /// function name (mirroring the C++ ScopePusher destructor logic).
-    pub(crate) fn register_hoisted_function(&self, declaration: NodeHandle, name: &[u16]) {
-        let name_vec = name.to_vec();
-        let mut first = true;
-        for entry in self.scope_stack.iter().rev() {
-            if entry.lexical_names.contains(&name_vec) {
-                return;
-            }
-            // Check function_names at intermediate scopes (not the declaring scope,
-            // since that scope's function_names includes the function being hoisted).
-            if !first && entry.function_names.contains(&name_vec) {
-                return;
-            }
-            first = false;
-            if entry.is_function_like {
-                self.builder.scope_node_add_hoisted_function(entry.node, declaration);
-                return;
-            }
-        }
-    }
-
-    /// Create an identifier and mark it as local if it matches a local variable in scope.
-    pub(crate) fn create_identifier_with_scope_analysis(&self, span: crate::ast_bridge::Span, name: &[u16]) -> NodeHandle {
-        let identifier = self.builder.create_identifier(span, name);
-        self.try_mark_identifier_as_local(identifier, name);
-        identifier
-    }
-
     // === State save/restore for backtracking ===
 
     pub(crate) fn save_state(&mut self) {
@@ -757,6 +586,28 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Re-parse the source range starting at `start` as a binding pattern
+    /// with member expressions allowed (for destructuring assignment patterns).
+    pub(crate) fn synthesize_binding_pattern(&mut self, start: (u32, u32, u32)) -> NodeHandle {
+        let saved_lexer = std::mem::replace(
+            &mut self.lexer,
+            Lexer::new_at_offset(self.source, start.2 as usize, start.0, start.1),
+        );
+        let saved_token = std::mem::replace(&mut self.current_token, Token::new(TokenType::Eof));
+        let saved_allow = self.allow_member_expressions;
+
+        self.current_token = self.lexer.next();
+        self.allow_member_expressions = true;
+
+        let pattern = self.parse_binding_pattern();
+
+        self.lexer = saved_lexer;
+        self.current_token = saved_token;
+        self.allow_member_expressions = saved_allow;
+
+        pattern
+    }
+
     // === Main entry point ===
 
     /// Parse the complete program.
@@ -764,7 +615,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let program = self.builder.create_program(self.span_from(start), self.program_type as u8);
 
-        self.push_scope(program, true);
+        self.scope_collector.open_program_scope(program, self.program_type);
 
         if self.program_type == ProgramType::Script {
             self.parse_script(program, starts_in_strict_mode);
@@ -773,7 +624,8 @@ impl<'a> Parser<'a> {
         }
 
         self.builder.scope_node_shrink_to_fit(program);
-        self.pop_scope();
+        self.scope_collector.close_scope();
+        self.scope_collector.analyze(self.initiated_by_eval);
         program
     }
 
