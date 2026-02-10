@@ -114,7 +114,7 @@ pub enum Associativity {
 /// - `forbid_paren_open`: prevents consuming `(` as call in `new Foo()` callee position
 /// - `forbid_question_mark_period`: prevents `?.` in `new Foo?.bar`
 /// - `forbid_equals`: prevents `=` from being consumed as assignment in certain contexts
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ForbiddenTokens {
     pub forbid_in: bool,
     pub forbid_logical: bool,
@@ -126,20 +126,11 @@ pub struct ForbiddenTokens {
 
 impl ForbiddenTokens {
     pub fn none() -> Self {
-        Self {
-            forbid_in: false,
-            forbid_logical: false,
-            forbid_coalesce: false,
-            forbid_paren_open: false,
-            forbid_question_mark_period: false,
-            forbid_equals: false,
-        }
+        Self::default()
     }
 
     pub fn with_in() -> Self {
-        let mut f = Self::none();
-        f.forbid_in = true;
-        f
+        Self { forbid_in: true, ..Self::default() }
     }
 
     pub fn allows(&self, token: TokenType) -> bool {

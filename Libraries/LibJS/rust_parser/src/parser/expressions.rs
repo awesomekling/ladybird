@@ -688,35 +688,19 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
                 self.builder.create_update_expression(self.span_from(start), UpdateOp::DECREMENT, expr, true)
             }
-            TokenType::ExclamationMark => {
+            TokenType::ExclamationMark | TokenType::Tilde | TokenType::Plus
+            | TokenType::Minus | TokenType::Typeof | TokenType::Void => {
+                let op = match tt {
+                    TokenType::ExclamationMark => UnaryOp::NOT,
+                    TokenType::Tilde => UnaryOp::BITWISE_NOT,
+                    TokenType::Plus => UnaryOp::PLUS,
+                    TokenType::Minus => UnaryOp::MINUS,
+                    TokenType::Typeof => UnaryOp::TYPEOF,
+                    _ => UnaryOp::VOID,
+                };
                 self.consume();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::NOT, expr)
-            }
-            TokenType::Tilde => {
-                self.consume();
-                let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::BITWISE_NOT, expr)
-            }
-            TokenType::Plus => {
-                self.consume();
-                let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::PLUS, expr)
-            }
-            TokenType::Minus => {
-                self.consume();
-                let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::MINUS, expr)
-            }
-            TokenType::Typeof => {
-                self.consume();
-                let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::TYPEOF, expr)
-            }
-            TokenType::Void => {
-                self.consume();
-                let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                self.builder.create_unary_expression(self.span_from(start), UnaryOp::VOID, expr)
+                self.builder.create_unary_expression(self.span_from(start), op, expr)
             }
             TokenType::Delete => {
                 self.consume();
