@@ -326,8 +326,10 @@ impl<'a> Parser<'a> {
         }
 
         // Parse init
+        let init_start = self.position();
         let is_var_init = self.match_token(TokenType::Var);
-        let init = if is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const) {
+        let is_declaration = is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
+        let init = if is_declaration {
             // Scope collector registration happens inside parse_variable_declaration.
             self.parse_variable_declaration(true)
         } else {
@@ -350,6 +352,13 @@ impl<'a> Parser<'a> {
             self.in_continue_context = continue_before;
 
             self.scope_collector.close_scope();
+            // Synthesize binding pattern for destructuring assignment in for-in LHS.
+            if !is_declaration && (self.builder.is_array_expression(init) || self.builder.is_object_expression(init)) {
+                let pattern = self.synthesize_binding_pattern(init_start);
+                if pattern != NULL_HANDLE {
+                    return self.builder.create_for_in_statement_with_pattern(self.span_from(start), pattern, rhs, body);
+                }
+            }
             return self.builder.create_for_in_statement(self.span_from(start), init, rhs, body);
         }
 
@@ -369,6 +378,16 @@ impl<'a> Parser<'a> {
                 self.in_continue_context = continue_before;
 
                 self.scope_collector.close_scope();
+                // Synthesize binding pattern for destructuring assignment in for-of LHS.
+                if !is_declaration && (self.builder.is_array_expression(init) || self.builder.is_object_expression(init)) {
+                    let pattern = self.synthesize_binding_pattern(init_start);
+                    if pattern != NULL_HANDLE {
+                        if is_await {
+                            return self.builder.create_for_await_of_statement_with_pattern(self.span_from(start), pattern, rhs, body);
+                        }
+                        return self.builder.create_for_of_statement_with_pattern(self.span_from(start), pattern, rhs, body);
+                    }
+                }
                 if is_await {
                     return self.builder.create_for_await_of_statement(self.span_from(start), init, rhs, body);
                 }
