@@ -774,7 +774,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Extract the original value (trivia + value) of a token.
-    pub(crate) fn token_original_value(&self, token: &Token) -> &[u16] {
+    pub(crate) fn token_original_value(&self, token: &Token) -> &'a [u16] {
         let start = token.value_start as usize;
         let end = (token.value_start + token.value_len) as usize;
         if end <= self.source.len() {
@@ -898,7 +898,7 @@ impl<'a> Parser<'a> {
     fn parse_directive(&mut self, body: NodeHandle) -> bool {
         let mut found_use_strict = false;
         while !self.done() && self.match_token(TokenType::StringLiteral) {
-            let raw_value = self.token_original_value(&self.current_token).to_vec();
+            let raw_value = self.token_original_value(&self.current_token);
             let statement = self.parse_statement(false);
             self.builder.scope_node_append(body, statement);
 
