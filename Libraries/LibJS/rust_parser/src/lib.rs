@@ -75,6 +75,32 @@
 //! - `ast_bridge.rs` — Safe Rust wrappers around C++ factory FFI
 //! - `scope_collector.rs` — Scope analysis (identifier resolution, hoisting)
 
+/// Compile-time conversion of an ASCII string literal to `&'static [u16]`.
+///
+/// Replaces the old `utf16_lit()` function which allocated a `Vec<u16>` on
+/// every call. This macro produces a static array, so comparisons like
+/// `value == utf16!("eval")` involve zero heap allocation.
+///
+/// # Panics (at compile time)
+/// Panics if the string contains non-ASCII characters. All JS keywords
+/// and identifiers we compare against are pure ASCII.
+macro_rules! utf16 {
+    ($s:literal) => {{
+        const VALUE: &[u16; $s.len()] = &{
+            let bytes = $s.as_bytes();
+            let mut arr = [0u16; $s.len()];
+            let mut i = 0;
+            while i < bytes.len() {
+                assert!(bytes[i] < 128, "utf16! only supports ASCII literals");
+                arr[i] = bytes[i] as u16;
+                i += 1;
+            }
+            arr
+        };
+        VALUE.as_slice()
+    }};
+}
+
 pub mod ast_bridge;
 pub mod ffi_enums;
 pub mod lexer;

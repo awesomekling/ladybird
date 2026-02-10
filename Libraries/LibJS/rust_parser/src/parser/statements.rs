@@ -397,7 +397,7 @@ impl<'a> Parser<'a> {
 
         if self.match_identifier_name() {
             let value = self.token_value(&self.current_token).to_vec();
-            if value == super::utf16_lit("of") {
+            if value == utf16!("of") {
                 self.consume();
                 let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::ParenClose);

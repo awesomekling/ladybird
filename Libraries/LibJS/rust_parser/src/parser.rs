@@ -405,9 +405,7 @@ impl<'a> Parser<'a> {
                 let end = start + token.value_len as usize;
                 if end <= self.source.len() { &self.source[start..end] } else { &[] }
             };
-            const ARGUMENTS: [u16; 9] = [b'a' as u16, b'r' as u16, b'g' as u16, b'u' as u16, b'm' as u16, b'e' as u16, b'n' as u16, b't' as u16, b's' as u16];
-            const EVAL: [u16; 4] = [b'e' as u16, b'v' as u16, b'a' as u16, b'l' as u16];
-            if value == ARGUMENTS || value == EVAL {
+            if value == utf16!("arguments") || value == utf16!("eval") {
                 self.function_might_need_arguments_object = true;
             }
         }
@@ -639,24 +637,25 @@ impl<'a> Parser<'a> {
             return false;
         }
         let value = self.token_value(&self.current_token);
-        if value == utf16_lit("await") {
+        if value == utf16!("await") {
             return self.program_type == ProgramType::Module || self.await_expression_is_valid;
         }
-        if value == utf16_lit("async") {
+        if value == utf16!("async") {
             return false;
         }
-        if value == utf16_lit("yield") {
+        if value == utf16!("yield") {
             return self.in_generator_function_context;
         }
         if self.strict_mode {
             return true;
         }
         // Non-strict: only some escaped keywords are invalid
-        let strict_reserved = [
-            "implements", "interface", "package", "private", "protected", "public",
+        let non_strict_valid = [
+            utf16!("implements"), utf16!("interface"), utf16!("package"),
+            utf16!("private"), utf16!("protected"), utf16!("public"),
         ];
-        for &kw in &strict_reserved {
-            if value == utf16_lit(kw) {
+        for kw in &non_strict_valid {
+            if value == *kw {
                 return false;
             }
         }
@@ -680,7 +679,7 @@ impl<'a> Parser<'a> {
     /// as are strict reserved words like "implements", "interface", etc.
     pub(crate) fn check_identifier_name_for_assignment_validity(&mut self, name: &[u16], force_strict: bool) {
         if self.strict_mode || force_strict {
-            if name == utf16_lit("arguments") || name == utf16_lit("eval") {
+            if name == utf16!("arguments") || name == utf16!("eval") {
                 self.syntax_error("Binding pattern target may not be called 'arguments' or 'eval' in strict mode");
             } else if is_strict_reserved_word(name) {
                 let name_str = String::from_utf16_lossy(name);
@@ -941,7 +940,7 @@ impl<'a> Parser<'a> {
             TokenType::Identifier => {
                 // "using" declaration
                 let value = self.token_value(&self.current_token);
-                value == utf16_lit("using")
+                value == utf16!("using")
             }
             _ => false,
         }
@@ -949,7 +948,7 @@ impl<'a> Parser<'a> {
 
     fn try_match_let_declaration(&mut self) -> bool {
         let next = self.next_token();
-        if next.token_type.is_identifier_name() && self.token_value(&next) != utf16_lit("in") {
+        if next.token_type.is_identifier_name() && self.token_value(&next) != utf16!("in") {
             return true;
         }
         if next.token_type == TokenType::CurlyOpen || next.token_type == TokenType::BracketOpen {
@@ -1060,24 +1059,19 @@ impl<'a> Parser<'a> {
 
 /// Check if a raw token value is 'use strict' or "use strict".
 fn is_use_strict(raw: &[u16]) -> bool {
-    raw == utf16_lit("'use strict'") || raw == utf16_lit("\"use strict\"")
+    raw == utf16!("'use strict'") || raw == utf16!("\"use strict\"")
 }
 
 /// Check if a name is a strict-mode reserved word.
 fn is_strict_reserved_word(name: &[u16]) -> bool {
-    name == utf16_lit("implements")
-        || name == utf16_lit("interface")
-        || name == utf16_lit("let")
-        || name == utf16_lit("package")
-        || name == utf16_lit("private")
-        || name == utf16_lit("protected")
-        || name == utf16_lit("public")
-        || name == utf16_lit("static")
-        || name == utf16_lit("yield")
+    name == utf16!("implements")
+        || name == utf16!("interface")
+        || name == utf16!("let")
+        || name == utf16!("package")
+        || name == utf16!("private")
+        || name == utf16!("protected")
+        || name == utf16!("public")
+        || name == utf16!("static")
+        || name == utf16!("yield")
 }
 
-/// Convert an ASCII string literal to a UTF-16 slice at compile time.
-/// This is a runtime conversion helper (not actually compile-time in this impl).
-fn utf16_lit(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
-}

@@ -554,13 +554,13 @@ impl<'a> Parser<'a> {
         // Check modifiers
         if self.match_identifier_name() {
             let value = self.token_value(&self.current_token).to_vec();
-            if value == super::utf16_lit("get") && self.match_property_key_ahead() {
+            if value == utf16!("get") && self.match_property_key_ahead() {
                 is_getter = true;
                 self.consume();
-            } else if value == super::utf16_lit("set") && self.match_property_key_ahead() {
+            } else if value == utf16!("set") && self.match_property_key_ahead() {
                 is_setter = true;
                 self.consume();
-            } else if value == super::utf16_lit("async") && self.match_property_key_ahead() && !self.current_token.trivia_has_line_terminator {
+            } else if value == utf16!("async") && self.match_property_key_ahead() && !self.current_token.trivia_has_line_terminator {
                 is_async = true;
                 self.consume();
             }
@@ -577,10 +577,10 @@ impl<'a> Parser<'a> {
         // Method
         if self.match_token(TokenType::ParenOpen) {
             // Check if this is the constructor before parsing the method body.
-            let ctor_name = super::utf16_lit("constructor");
+            let ctor_name = utf16!("constructor");
             let is_constructor = !is_static
                 && !is_getter && !is_setter
-                && key_value.as_deref() == Some(ctor_name.as_slice());
+                && key_value.as_deref() == Some(ctor_name);
 
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
             let method_kind = if is_getter {

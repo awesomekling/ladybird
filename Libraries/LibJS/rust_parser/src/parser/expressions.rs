@@ -311,7 +311,7 @@ impl<'a> Parser<'a> {
             TokenType::BoolLiteral => {
                 let tok = self.consume();
                 let value = self.token_value(&tok);
-                let is_true = value == super::utf16_lit("true");
+                let is_true = value == utf16!("true");
                 (self.builder.create_boolean_literal(self.span_from(start), is_true), true)
             }
 
@@ -483,10 +483,10 @@ impl<'a> Parser<'a> {
                     let value = self.token_value(&tok).to_vec();
                     let id = self.builder.create_identifier(self.span_from(start), &value);
                     self.scope_collector.register_identifier(id, &value, None);
-                    if value == super::utf16_lit("eval") {
+                    if value == utf16!("eval") {
                         self.last_parsed_identifier_is_eval = true;
                     }
-                    if value == super::utf16_lit("arguments")
+                    if value == utf16!("arguments")
                         && !self.strict_mode
                         && !self.scope_collector.has_declaration_in_current_function(&value)
                     {
@@ -983,13 +983,13 @@ impl<'a> Parser<'a> {
         // Check for async/get/set/generator modifiers
         if self.match_identifier_name() {
             let value = self.token_value(&self.current_token).to_vec();
-            if value == super::utf16_lit("get") && self.match_property_key_ahead() {
+            if value == utf16!("get") && self.match_property_key_ahead() {
                 is_getter = true;
                 self.consume();
-            } else if value == super::utf16_lit("set") && self.match_property_key_ahead() {
+            } else if value == utf16!("set") && self.match_property_key_ahead() {
                 is_setter = true;
                 self.consume();
-            } else if value == super::utf16_lit("async") && self.match_property_key_ahead() && !self.current_token.trivia_has_line_terminator {
+            } else if value == utf16!("async") && self.match_property_key_ahead() && !self.current_token.trivia_has_line_terminator {
                 is_async = true;
                 self.consume();
                 if self.match_token(TokenType::Asterisk) {
@@ -1054,7 +1054,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a property key, returning (key_handle, shorthand_identifier_value, is_proto).
     pub(crate) fn parse_property_key(&mut self) -> (NodeHandle, Option<Vec<u16>>, bool) {
-        let proto_name = super::utf16_lit("__proto__");
+        let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {
             TokenType::BracketOpen => {
