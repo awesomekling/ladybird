@@ -706,7 +706,7 @@ impl ScopeCollector {
     /// to their parent, and eval poisoning propagates outward.
     fn analyze_recursive(&mut self, idx: usize, initiated_by_eval: bool) {
         // Process children first (bottom-up traversal).
-        let children: Vec<usize> = self.records[idx].children.clone();
+        let children = std::mem::take(&mut self.records[idx].children);
         for child_idx in children {
             self.analyze_recursive(child_idx, initiated_by_eval);
         }
