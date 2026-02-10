@@ -972,7 +972,7 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.parse_string_value(&tok);
                 let is_proto = value == proto_name;
-                (self.builder.create_string_literal(self.span_from(start), &value), None, is_proto)
+                (self.builder.create_string_literal(self.span_from(start), &value), Some(value), is_proto)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
