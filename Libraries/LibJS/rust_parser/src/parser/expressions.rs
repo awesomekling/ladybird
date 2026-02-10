@@ -505,6 +505,10 @@ impl<'a> Parser<'a> {
                 // For plain '=', check if LHS is object/array expression (destructuring assignment)
                 if op == 0 && (self.builder.is_object_expression(lhs) || self.builder.is_array_expression(lhs)) {
                     let binding_pattern = self.synthesize_binding_pattern(lhs_start);
+                    // Register bound names from the binding pattern with the scope collector.
+                    for (name, id) in std::mem::take(&mut self.pattern_bound_names) {
+                        self.scope_collector.register_identifier(id, &name, None);
+                    }
                     if binding_pattern != NULL_HANDLE {
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);

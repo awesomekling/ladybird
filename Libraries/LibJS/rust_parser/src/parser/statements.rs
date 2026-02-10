@@ -355,6 +355,9 @@ impl<'a> Parser<'a> {
             // Synthesize binding pattern for destructuring assignment in for-in LHS.
             if !is_declaration && (self.builder.is_array_expression(init) || self.builder.is_object_expression(init)) {
                 let pattern = self.synthesize_binding_pattern(init_start);
+                for (name, id) in std::mem::take(&mut self.pattern_bound_names) {
+                    self.scope_collector.register_identifier(id, &name, None);
+                }
                 if pattern != NULL_HANDLE {
                     return self.builder.create_for_in_statement_with_pattern(self.span_from(start), pattern, rhs, body);
                 }
@@ -381,6 +384,9 @@ impl<'a> Parser<'a> {
                 // Synthesize binding pattern for destructuring assignment in for-of LHS.
                 if !is_declaration && (self.builder.is_array_expression(init) || self.builder.is_object_expression(init)) {
                     let pattern = self.synthesize_binding_pattern(init_start);
+                    for (name, id) in std::mem::take(&mut self.pattern_bound_names) {
+                        self.scope_collector.register_identifier(id, &name, None);
+                    }
                     if pattern != NULL_HANDLE {
                         if is_await {
                             return self.builder.create_for_await_of_statement_with_pattern(self.span_from(start), pattern, rhs, body);
