@@ -533,10 +533,33 @@ impl<'a> Parser<'a> {
             if self.match_token(TokenType::CurlyOpen) {
                 let body = self.builder.create_function_body(self.span_from(start));
                 self.consume_token(TokenType::CurlyOpen);
-                let in_function_before = self.in_function_context;
-                self.in_function_context = true;
+                let saved_break = self.in_break_context;
+                let saved_continue = self.in_continue_context;
+                let saved_function = self.in_function_context;
+                let saved_generator = self.in_generator_function_context;
+                let saved_await = self.await_expression_is_valid;
+                let saved_field_init = self.in_class_field_initializer;
+                let saved_static_init = self.in_class_static_init_block;
+                let saved_super = self.allow_super_property_lookup;
+                self.in_break_context = false;
+                self.in_continue_context = false;
+                self.in_function_context = false;
+                self.in_generator_function_context = false;
+                self.await_expression_is_valid = false;
+                self.in_class_field_initializer = true;
+                self.in_class_static_init_block = true;
+                self.allow_super_property_lookup = true;
+                self.scope_collector.open_static_init_scope(body);
                 self.parse_statement_list(body, false);
-                self.in_function_context = in_function_before;
+                self.scope_collector.close_scope();
+                self.in_break_context = saved_break;
+                self.in_continue_context = saved_continue;
+                self.in_function_context = saved_function;
+                self.in_generator_function_context = saved_generator;
+                self.await_expression_is_valid = saved_await;
+                self.in_class_field_initializer = saved_field_init;
+                self.in_class_static_init_block = saved_static_init;
+                self.allow_super_property_lookup = saved_super;
                 self.consume_token(TokenType::CurlyClose);
                 return (self.builder.create_static_initializer(self.span_from(start), body), None);
             }
