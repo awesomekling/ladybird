@@ -227,6 +227,12 @@ ASTNodeHandle ast_create_regexp_literal(ASTArenaHandle arena_handle, SourceCodeH
 
     auto parsed_regex = Regex<ECMA262>::parse_pattern(parsed_pattern, parsed_flags);
 
+    if (parsed_regex.error != regex::Error::NoError) {
+        // If the regex failed to compile, use an empty pattern to avoid VERIFY failures at runtime.
+        parsed_pattern = ""_string;
+        parsed_regex = Regex<ECMA262>::parse_pattern(parsed_pattern, parsed_flags);
+    }
+
     return arena_add(arena, create_ast_node<RegExpLiteral>(range, move(parsed_regex), move(parsed_pattern), parsed_flags, move(pattern_utf16), move(flags_utf16)));
 }
 
