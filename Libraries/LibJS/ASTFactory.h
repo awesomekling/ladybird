@@ -321,6 +321,11 @@ ASTNodeHandle ast_create_variable_declarator(ASTArenaHandle arena, SourceCodeHan
     uint32_t end_line, uint32_t end_column, uint32_t end_offset,
     ASTNodeHandle target, ASTNodeHandle init); // init may be null
 
+ASTNodeHandle ast_create_using_declaration(ASTArenaHandle arena, SourceCodeHandle source_code,
+    uint32_t start_line, uint32_t start_column, uint32_t start_offset,
+    uint32_t end_line, uint32_t end_column, uint32_t end_offset,
+    ASTNodeHandle const* declarators, size_t declarator_count);
+
 // === Object/Array expressions ===
 ASTNodeHandle ast_create_object_expression(ASTArenaHandle arena, SourceCodeHandle source_code,
     uint32_t start_line, uint32_t start_column, uint32_t start_offset,

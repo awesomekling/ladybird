@@ -354,8 +354,11 @@ impl<'a> Parser<'a> {
         // Parse the init expression/declaration.
         let init_start = self.position();
         let is_var_init = self.match_token(TokenType::Var);
-        let is_declaration = is_var_init || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
-        let init = if is_declaration {
+        let is_using = self.match_for_using_declaration();
+        let is_declaration = is_var_init || is_using || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
+        let init = if is_using {
+            self.parse_using_declaration(true)
+        } else if is_declaration {
             self.parse_variable_declaration(true)
         } else {
             // Forbid `in` as a binary operator here so that `for (x in y)`
@@ -366,7 +369,9 @@ impl<'a> Parser<'a> {
 
         // Check for in/of
         if self.match_token(TokenType::In) && !is_await {
-            if is_declaration {
+            if is_using {
+                self.syntax_error("Using declaration not allowed in for-in loop");
+            } else if is_declaration {
                 if self.for_loop_declaration_count > 1 {
                     self.syntax_error("Multiple declarations not allowed in for..in/of");
                 }
@@ -719,5 +724,28 @@ impl<'a> Parser<'a> {
         self.last_inner_label_is_iteration = is_iteration;
 
         Some(self.builder.create_labelled_statement(self.span_from(start), &label, body))
+    }
+
+    /// Check if current position matches a `using` declaration in a for-loop context.
+    /// Returns true if it's `using <identifier>` with no line terminator.
+    fn match_for_using_declaration(&mut self) -> bool {
+        if !self.match_token(TokenType::Identifier) {
+            return false;
+        }
+        if self.token_value(&self.current_token) != utf16!("using") {
+            return false;
+        }
+        let next = self.next_token();
+        if next.trivia_has_line_terminator {
+            return false;
+        }
+        // `using of` is not a using declaration in for context.
+        if next.token_type == TokenType::Identifier {
+            let next_val = self.token_original_value(&next);
+            if next_val == utf16!("of") {
+                return false;
+            }
+        }
+        next.token_type.is_identifier_name()
     }
 }

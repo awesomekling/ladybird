@@ -971,7 +971,12 @@ impl<'a> Parser<'a> {
             TokenType::Identifier => {
                 // "using" declaration
                 let value = self.token_value(&self.current_token);
-                value == utf16!("using")
+                if value != utf16!("using") {
+                    return false;
+                }
+                // Must be followed by an identifier name with no line terminator.
+                let next = self.next_token();
+                !next.trivia_has_line_terminator && next.token_type.is_identifier_name()
             }
             _ => false,
         }

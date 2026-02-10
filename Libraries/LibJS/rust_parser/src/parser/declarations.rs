@@ -80,6 +80,12 @@ impl<'a> Parser<'a> {
                 // Scope collector registration happens inside parse_variable_declaration.
                 self.parse_variable_declaration(false)
             }
+            TokenType::Identifier if self.token_value(&self.current_token) == utf16!("using") => {
+                if !self.scope_collector.can_have_using_declaration() {
+                    self.syntax_error("'using' not allowed outside of block, for loop or function");
+                }
+                self.parse_using_declaration(false)
+            }
             _ => {
                 self.expected("declaration");
                 self.consume();
@@ -211,6 +217,76 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+
+        decl
+    }
+
+    // === Using declaration ===
+
+    pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> NodeHandle {
+        let start = self.position();
+
+        // Consume "using" identifier.
+        self.consume(); // consume 'using'
+
+        let mut declarators = Vec::new();
+        let mut bound_names: Vec<Vec<u16>> = Vec::new();
+
+        loop {
+            let decl_start = self.position();
+
+            // Parse binding: must be a simple identifier.
+            if !self.match_identifier() {
+                self.expected("identifier");
+                break;
+            }
+            let tok = self.consume();
+            let name = self.token_value(&tok).to_vec();
+
+            self.check_identifier_name_for_assignment_validity(&name, false);
+            if name == utf16!("let") {
+                self.syntax_error("Lexical binding may not be called 'let'");
+            }
+
+            let identifier = self.builder.create_identifier(self.span_from(decl_start), &name);
+            self.scope_collector.register_identifier(identifier, &name, Some(DeclarationKind::Const));
+            bound_names.push(name);
+
+            // Parse initializer.
+            let init = if self.match_token(TokenType::Equals) {
+                self.consume();
+                if is_for_loop {
+                    self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in())
+                } else {
+                    self.parse_expression(2, Associativity::Right, ForbiddenTokens::none())
+                }
+            } else if !is_for_loop {
+                // Initializer is required outside of for-loop context.
+                self.consume_token(TokenType::Equals);
+                NULL_HANDLE
+            } else {
+                NULL_HANDLE
+            };
+
+            declarators.push(self.builder.create_variable_declarator(
+                self.span_from(decl_start), identifier, init));
+
+            if self.match_token(TokenType::Comma) {
+                self.consume();
+                continue;
+            }
+            break;
+        }
+
+        if !is_for_loop {
+            self.consume_or_insert_semicolon();
+        }
+
+        let decl = self.builder.create_using_declaration(self.span_from(start), &declarators);
+
+        // Register with scope collector as a lexical declaration.
+        let names: Vec<&[u16]> = bound_names.iter().map(|n| n.as_slice()).collect();
+        self.scope_collector.add_lexical_declaration(decl, &names, start.line, start.column);
 
         decl
     }

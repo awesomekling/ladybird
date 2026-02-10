@@ -824,6 +824,20 @@ ASTNodeHandle ast_create_variable_declarator(ASTArenaHandle arena_handle, Source
         move(target_variant), as_nullable_ref<Expression>(init)));
 }
 
+ASTNodeHandle ast_create_using_declaration(ASTArenaHandle arena_handle, SourceCodeHandle source_code,
+    u32 start_line, u32 start_column, u32 start_offset,
+    u32 end_line, u32 end_column, u32 end_offset,
+    ASTNodeHandle const* declarators, size_t declarator_count)
+{
+    auto& arena = *static_cast<ASTArena*>(arena_handle);
+    auto range = make_range(source_code, start_line, start_column, start_offset, end_line, end_column, end_offset);
+    Vector<NonnullRefPtr<VariableDeclarator const>> decls;
+    decls.ensure_capacity(declarator_count);
+    for (size_t i = 0; i < declarator_count; ++i)
+        decls.unchecked_append(as_ref<VariableDeclarator>(declarators[i]));
+    return arena_add(arena, create_ast_node<UsingDeclaration>(range, move(decls)));
+}
+
 // === Object/Array expressions ===
 
 ASTNodeHandle ast_create_object_expression(ASTArenaHandle arena_handle, SourceCodeHandle source_code,

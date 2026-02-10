@@ -418,6 +418,12 @@ extern "C" {
         end_line: u32, end_column: u32, end_offset: u32,
         kind: u8, declarators: *const NodeHandle, declarator_count: usize,
     ) -> NodeHandle;
+    fn ast_create_using_declaration(
+        arena: ArenaHandle, source_code: SourceCodeHandle,
+        start_line: u32, start_column: u32, start_offset: u32,
+        end_line: u32, end_column: u32, end_offset: u32,
+        declarators: *const NodeHandle, declarator_count: usize,
+    ) -> NodeHandle;
     fn ast_create_variable_declarator(
         arena: ArenaHandle, source_code: SourceCodeHandle,
         start_line: u32, start_column: u32, start_offset: u32,
@@ -1069,6 +1075,11 @@ impl AstBuilder {
     pub fn create_variable_declarator(&self, span: Span, target: NodeHandle, init: NodeHandle) -> NodeHandle {
         let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
         unsafe { ast_create_variable_declarator(a, sc, sl, scol, so, el, ecol, eo, target, init) }
+    }
+
+    pub fn create_using_declaration(&self, span: Span, declarators: &[NodeHandle]) -> NodeHandle {
+        let (a, sc, sl, scol, so, el, ecol, eo) = self.s(span);
+        unsafe { ast_create_using_declaration(a, sc, sl, scol, so, el, ecol, eo, declarators.as_ptr(), declarators.len()) }
     }
 
     // === Object/Array ===
