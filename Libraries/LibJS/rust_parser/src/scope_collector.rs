@@ -765,8 +765,6 @@ impl ScopeCollector {
     fn resolve_identifiers(records: &mut [ScopeRecord], idx: usize, initiated_by_eval: bool) {
         let groups = std::mem::take(&mut records[idx].identifier_groups);
         let mut propagate_to_parent: Vec<(Vec<u16>, IdentifierGroup)> = Vec::new();
-        let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
-
         for (name, mut group) in groups {
             // Annotate each Identifier AST node with its declaration kind,
             // so the bytecode generator knows how to handle TDZ checks, etc.
@@ -798,7 +796,7 @@ impl ScopeCollector {
             // Arrow functions inherit `arguments` from their enclosing function.
             if records[idx].scope_type == ScopeType::Function
                 && !records[idx].is_arrow_function
-                && name == arguments_name
+                && name == utf16!("arguments")
             {
                 local_var_kind = Some(LV::ARGUMENTS_OBJECT);
             }
@@ -952,8 +950,7 @@ impl ScopeCollector {
             return;
         }
 
-        let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
-        let has_argument_parameter = record.variables.get(&arguments_name)
+        let has_argument_parameter = record.variables.get(utf16!("arguments") as &[u16])
             .is_some_and(|v| v.flags & FLAG_IS_FORBIDDEN_LEXICAL != 0);
 
         // Collect IS_VAR variables.
