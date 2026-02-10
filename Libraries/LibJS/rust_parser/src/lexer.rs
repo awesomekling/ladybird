@@ -509,6 +509,56 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Check if a multi-code-unit identifier character is a surrogate pair
+    /// (a real multi-code-unit character) rather than a unicode escape sequence.
+    fn is_surrogate_pair(&self, len: usize) -> bool {
+        // Surrogate pairs consume exactly 2 code units; escape sequences
+        // consume more (e.g., \uXXXX = 6, \u{XXXX} = 4+).
+        len == 2
+    }
+
+    /// Re-scan the source from `scan_start` (1-based position) to `self.position`
+    /// and build a decoded identifier value. Only called when escapes are present.
+    fn build_identifier_value(&self, scan_start: usize) -> Vec<u16> {
+        let raw = &self.source[scan_start - 1 .. self.position - 1];
+        let mut result = Vec::with_capacity(raw.len());
+        let mut i = 0;
+        while i < raw.len() {
+            if raw[i] == b'\\' as u16 {
+                // Unicode escape: \uXXXX or \u{XXXX}
+                i += 1; // skip '\'
+                if i < raw.len() && raw[i] == b'u' as u16 {
+                    i += 1; // skip 'u'
+                    if i < raw.len() && raw[i] == b'{' as u16 {
+                        i += 1; // skip '{'
+                        let mut cp: u32 = 0;
+                        while i < raw.len() && raw[i] != b'}' as u16 {
+                            cp = cp * 16 + hex_value(raw[i]);
+                            i += 1;
+                        }
+                        if i < raw.len() {
+                            i += 1; // skip '}'
+                        }
+                        encode_utf16(cp, &mut result);
+                    } else {
+                        let mut cp: u32 = 0;
+                        for _ in 0..4 {
+                            if i < raw.len() {
+                                cp = cp * 16 + hex_value(raw[i]);
+                                i += 1;
+                            }
+                        }
+                        encode_utf16(cp, &mut result);
+                    }
+                }
+            } else {
+                result.push(raw[i]);
+                i += 1;
+            }
+        }
+        result
+    }
+
     /// Check if the current position starts an identifier start character.
     /// Returns (code_point, number_of_code_units_to_consume).
     fn is_identifier_start(&self) -> Option<(u32, usize)> {
@@ -837,58 +887,62 @@ impl<'a> Lexer<'a> {
             }
         } else if self.current_code_unit == b'#' as u16 {
             self.consume();
-            if let Some((cp, len)) = self.is_identifier_start() {
-                let mut builder: Vec<u16> = Vec::new();
-                builder.push(b'#' as u16);
-                let mut code_point = cp;
+            if let Some((_cp, len)) = self.is_identifier_start() {
+                let mut has_escape = false;
                 let mut ident_len = len;
                 loop {
-                    encode_utf16(code_point, &mut builder);
+                    has_escape |= ident_len > 1 && !self.is_surrogate_pair(ident_len);
                     for _ in 0..ident_len {
                         self.consume();
                     }
-                    if let Some((next_cp, next_len)) = self.is_identifier_middle() {
-                        code_point = next_cp;
+                    if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
                         ident_len = next_len;
                     } else {
                         break;
                     }
                 }
-                identifier_value = Some(builder);
+                if has_escape {
+                    // Re-scan to build decoded value.
+                    identifier_value = Some(self.build_identifier_value(value_start));
+                }
                 token_type = TokenType::PrivateIdentifier;
             } else {
                 token_type = TokenType::Invalid;
                 // token_message = StartOfPrivateNameNotFollowedByValidIdentifier
             }
-        } else if let Some((cp, len)) = self.is_identifier_start() {
-            let mut has_escaped_character = false;
-            let mut builder: Vec<u16> = Vec::new();
-            let mut code_point = cp;
+        } else if let Some((_cp, len)) = self.is_identifier_start() {
+            let mut has_escape = false;
             let mut ident_len = len;
             loop {
-                encode_utf16(code_point, &mut builder);
+                has_escape |= ident_len > 1 && !self.is_surrogate_pair(ident_len);
                 for _ in 0..ident_len {
                     self.consume();
                 }
-                has_escaped_character |= ident_len > 1 && code_point != 0 && code_point <= 0x10FFFF && ident_len != (if code_point > 0xFFFF { 2 } else { 1 });
-                if let Some((next_cp, next_len)) = self.is_identifier_middle() {
-                    code_point = next_cp;
+                if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
                     ident_len = next_len;
                 } else {
                     break;
                 }
             }
 
-            if let Some(kw) = keyword_from_str(&builder) {
-                if has_escaped_character {
+            if has_escape {
+                // Escapes present: build decoded value, then check keywords.
+                let decoded = self.build_identifier_value(value_start);
+                if keyword_from_str(&decoded).is_some() {
                     token_type = TokenType::EscapedKeyword;
                 } else {
-                    token_type = kw;
+                    token_type = TokenType::Identifier;
                 }
+                identifier_value = Some(decoded);
             } else {
-                token_type = TokenType::Identifier;
+                // No escapes: use source slice directly for keyword check.
+                let source_slice = &self.source[value_start - 1 .. self.position - 1];
+                if let Some(kw) = keyword_from_str(source_slice) {
+                    token_type = kw;
+                } else {
+                    token_type = TokenType::Identifier;
+                }
             }
-            identifier_value = Some(builder);
         } else if self.is_numeric_literal_start() {
             token_type = TokenType::NumericLiteral;
             let mut is_invalid = false;
