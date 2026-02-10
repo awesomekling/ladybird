@@ -95,69 +95,116 @@ block0_split0:
 block0_split1:
     Return v4:unknown
 
-=== Before optimization ===
+=== After InlineCalls ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal helper
     Jump block1
 block0_split0:
-    v4:unknown = Call v1:unknown, undefined, 42
-    Jump block2
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
 block0_split1:
-    Return v4:unknown
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal helper
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal helper
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Add v0:unknown, 1
-    Jump block1
-block0_split0:
-    Return v3:unknown
-
-=== After SCCP ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Add v0:unknown, 1
-    Jump block1
-block0_split0:
-    Return v3:unknown
+    Return v11:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:number = Add 42, 1
+    Jump block4
+inline_block0_split0:
+    Jump block5
+inline_merge:
+    v11:unknown = Phi [block6:v8:unknown, block4:v10:number]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block5
 
 === Before optimization ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Add v0:unknown, 1
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal helper
     Jump block1
 block0_split0:
-    Return v3:unknown
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
+block0_split1:
+    Return v11:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:number = Add 42, 1
+    Jump block4
+inline_block0_split0:
+    Jump block5
+inline_merge:
+    v11:unknown = Phi [block6:v8:unknown, block4:v10:number]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block5
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal helper
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
+block0_split1:
+    Return v11:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:number = Add 42, 1
+    Jump block4
+inline_block0_split0:
+    Jump block5
+inline_merge:
+    v11:unknown = Phi [block6:v8:unknown, block4:v12:int32]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block5
 
 === After SimplifyCFG ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Add v0:unknown, 1
-    Return v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal helper
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:number = Add 42, 1
+    Return 43
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown
 
-function(v0:unknown):
+=== After DeadCodeElimination ===
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Add v0:unknown, 1
-    Return v3:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal helper
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    Return 43
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal helper
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block6, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    Return 43
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown

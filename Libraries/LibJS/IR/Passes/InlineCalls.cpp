@@ -33,13 +33,6 @@ static bool is_unsupported_opcode(Opcode opcode)
 {
     switch (opcode) {
     // Environment ops
-    case Opcode::CreateLexicalEnvironment:
-    case Opcode::GetLexicalEnvironment:
-    case Opcode::SetLexicalEnvironment:
-    case Opcode::CreateVariable:
-    case Opcode::GetBinding:
-    case Opcode::SetBinding:
-    case Opcode::InitializeBinding:
     case Opcode::EnterObjectEnvironment:
     case Opcode::CreatePrivateEnvironment:
     case Opcode::LeavePrivateEnvironment:

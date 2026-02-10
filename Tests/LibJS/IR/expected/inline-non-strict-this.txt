@@ -143,6 +143,44 @@ block0_split1:
 block0_split2:
     Return v3:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    Jump block1
+block0_split0:
+    v2:unknown = GetById v1:unknown.getX
+    Jump block2
+block0_split1:
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+block0_split2:
+    Return v13:unknown
+inline_block0:
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v13:unknown = Phi [block7:v10:unknown, block5:v12:unknown]
+    Jump block3
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Jump block6
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block9, block10
+inline_this_global:
+    Jump block11
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v7:unknown = Phi [block9:v5:object, block10:v6:object]
+    Jump block4
+
 === Before optimization ===
 function():
 block0:
@@ -153,10 +191,33 @@ block0_split0:
     v2:unknown = GetById v1:unknown.getX
     Jump block2
 block0_split1:
-    v3:unknown = Call v2:unknown, v1:unknown
-    Jump block3
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
 block0_split2:
-    Return v3:unknown
+    Return v13:unknown
+inline_block0:
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v13:unknown = Phi [block7:v10:unknown, block5:v12:unknown]
+    Jump block3
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Jump block6
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block9, block10
+inline_this_global:
+    Jump block11
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v7:unknown = Phi [block9:v5:object, block10:v6:object]
+    Jump block4
 
 === After SimplifyCFG ===
 function():
@@ -164,53 +225,119 @@ block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal obj
     v2:unknown = GetById v1:unknown.getX
-    v3:unknown = Call v2:unknown, v1:unknown
-    Return v3:unknown
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Return v10:unknown
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block11, block10
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v7:unknown = Phi [block10:v6:object, block8:v5:object]
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Return v12:unknown
+
+=== After SplitCriticalEdges ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    v2:unknown = GetById v1:unknown.getX
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Return v10:unknown
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block12, block10
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v7:unknown = Phi [block10:v6:object, block12:v5:object]
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Return v12:unknown
+split_inline_this_check_inline_this_merge:
+    Jump block11
+
+=== After SsaDestructionPass ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    v2:unknown = GetById v1:unknown.getX
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Return v10:unknown
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block12, block10
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    ParallelCopy [v7:unknown <- v6:object]
+    Jump block11
+inline_this_merge:
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Return v12:unknown
+split_inline_this_check_inline_this_merge:
+    ParallelCopy [v7:unknown <- v5:object]
+    Jump block11
+
+=== After CopyCoalescing ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal obj
+    v2:unknown = GetById v1:unknown.getX
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Return v10:unknown
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block12, block10
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Return v12:unknown
+split_inline_this_check_inline_this_merge:
+    ParallelCopy [v7:unknown <- v5:object]
+    Jump block11
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal obj
     v2:unknown = GetById v1:unknown.getX
-    v3:unknown = Call v2:unknown, v1:unknown
-    Return v3:unknown
-
-=== After SSAConstruction ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v2:unknown = GetById v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v2:unknown
-
-=== After SCCP ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v2:unknown = GetById v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v2:unknown
-
-=== Before optimization ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v2:unknown = GetById v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v2:unknown
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v2:unknown = GetById v1:unknown.x
-    Return v2:unknown
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v2:unknown = GetById v1:unknown.x
-    Return v2:unknown
+    v9:boolean = StrictlyInequals v2:unknown, v8:object
+    Branch v9:boolean, block7, block8
+inline_slow:
+    v10:unknown = Call v2:unknown, v1:unknown
+    Return v10:unknown
+inline_this_check:
+    v4:boolean = IsNullish v1:unknown
+    Branch v4:boolean, block12, block10
+inline_this_object:
+    v6:object = ToObject v1:unknown
+    Jump block11
+inline_this_merge:
+    v11:unknown = GetLexicalEnvironment
+    v12:unknown = GetById v7:unknown.x
+    Return v12:unknown
+split_inline_this_check_inline_this_merge:
+    ParallelCopy [v7:unknown <- v5:object]
+    Jump block11

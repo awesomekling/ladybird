@@ -95,74 +95,120 @@ block0_split0:
 block0_split1:
     Return v4:unknown
 
-=== Before optimization ===
+=== After InlineCalls ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal isEven
     Jump block1
 block0_split0:
-    v4:unknown = Call v1:unknown, undefined, 42
-    Jump block2
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
 block0_split1:
-    Return v4:unknown
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal isEven
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal isEven
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Mod v0:unknown, 2
-    Jump block1
-block0_split0:
-    v5:boolean = StrictlyEquals v3:unknown, 0
-    Return v5:boolean
-
-=== After SCCP ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Mod v0:unknown, 2
-    Jump block1
-block0_split0:
-    v5:boolean = StrictlyEquals v3:unknown, 0
-    Return v5:boolean
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:number = Mod 42, 2
+    Jump block4
+inline_block0_split0:
+    v12:boolean = StrictlyEquals v11:number, 0
+    Jump block5
+inline_merge:
+    v13:unknown = Phi [block6:v9:unknown, block4:v12:boolean]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Jump block5
 
 === Before optimization ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Mod v0:unknown, 2
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isEven
     Jump block1
 block0_split0:
-    v5:boolean = StrictlyEquals v3:unknown, 0
-    Return v5:boolean
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:number = Mod 42, 2
+    Jump block4
+inline_block0_split0:
+    v12:boolean = StrictlyEquals v11:number, 0
+    Jump block5
+inline_merge:
+    v13:unknown = Phi [block6:v9:unknown, block4:v12:boolean]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Jump block5
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isEven
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:number = Mod 42, 2
+    Jump block4
+inline_block0_split0:
+    v12:boolean = StrictlyEquals 0, 0
+    Jump block5
+inline_merge:
+    v13:unknown = Phi [block6:v9:unknown, block4:v15:boolean]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Jump block5
 
 === After SimplifyCFG ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Mod v0:unknown, 2
-    v5:boolean = StrictlyEquals v3:unknown, 0
-    Return v5:boolean
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isEven
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:number = Mod 42, 2
+    v12:boolean = StrictlyEquals 0, 0
+    Return true
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Return v9:unknown
 
-function(v0:unknown):
+=== After DeadCodeElimination ===
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:unknown = Mod v0:unknown, 2
-    v5:boolean = StrictlyEquals v3:unknown, 0
-    Return v5:boolean
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isEven
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    Return true
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Return v9:unknown
+
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isEven
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block6, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    Return true
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 42
+    Return v9:unknown

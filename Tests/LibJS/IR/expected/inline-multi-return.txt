@@ -95,6 +95,37 @@ block0_split0:
 block0_split1:
     Return v6:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal clamp
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:boolean = LessThan 5, 0
+    Branch v11:boolean, block4, block5
+inline_block1:
+    Jump block8
+inline_block2:
+    v12:boolean = GreaterThan 5, 10
+    Branch v12:boolean, block6, block7
+inline_block3:
+    Jump block8
+inline_block4:
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block9:v9:unknown, block4:v4:int32, block6:v5:int32, block7:v3:int32]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Jump block8
+
 === Before optimization ===
 function():
 block0:
@@ -102,85 +133,100 @@ block0:
     v1:unknown = GetGlobal clamp
     Jump block1
 block0_split0:
-    v6:unknown = Call v1:unknown, undefined, 5, 0, 10
-    Jump block2
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
 block0_split1:
-    Return v6:unknown
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:boolean = LessThan 5, 0
+    Branch v11:boolean, block4, block5
+inline_block1:
+    Jump block8
+inline_block2:
+    v12:boolean = GreaterThan 5, 10
+    Branch v12:boolean, block6, block7
+inline_block3:
+    Jump block8
+inline_block4:
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block9:v9:unknown, block4:v4:int32, block6:v5:int32, block7:v3:int32]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Jump block8
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal clamp
+    Jump block1
+block0_split0:
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
+block0_split1:
+    Return v13:unknown
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:boolean = LessThan 5, 0
+    Branch false, block4, block5
+inline_block1:
+    Jump block8
+inline_block2:
+    v12:boolean = GreaterThan 5, 10
+    Branch false, block6, block7
+inline_block3:
+    Jump block8
+inline_block4:
+    Jump block8
+inline_merge:
+    v13:unknown = Phi [block9:v9:unknown, block4:v4:int32, block6:v5:int32, block7:v3:int32]
+    Jump block2
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Jump block8
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal clamp
-    v6:unknown = Call v1:unknown, undefined, 5, 0, 10
-    Return v6:unknown
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    v11:boolean = LessThan 5, 0
+    v12:boolean = GreaterThan 5, 10
+    Return 5
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Return v9:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal clamp
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    Return 5
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Return v9:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal clamp
-    v6:unknown = Call v1:unknown, undefined, 5, 0, 10
-    Return v6:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown, v1:unknown, v2:unknown):
-block0:
-    v3:unknown = GetLexicalEnvironment
-    v4:boolean = LessThan v0:unknown, v1:unknown
-    Branch v4:boolean, block1, block2
-block1:
-    Return v1:unknown
-block2:
-    v5:boolean = GreaterThan v0:unknown, v2:unknown
-    Branch v5:boolean, block3, block4
-block3:
-    Return v2:unknown
-block4:
-    Return v0:unknown
-
-=== After SCCP ===
-function(v0:unknown, v1:unknown, v2:unknown):
-block0:
-    v3:unknown = GetLexicalEnvironment
-    v4:boolean = LessThan v0:unknown, v1:unknown
-    Branch v4:boolean, block1, block2
-block1:
-    Return v1:unknown
-block2:
-    v5:boolean = GreaterThan v0:unknown, v2:unknown
-    Branch v5:boolean, block3, block4
-block3:
-    Return v2:unknown
-block4:
-    Return v0:unknown
-
-=== Before optimization ===
-function(v0:unknown, v1:unknown, v2:unknown):
-block0:
-    v3:unknown = GetLexicalEnvironment
-    v4:boolean = LessThan v0:unknown, v1:unknown
-    Branch v4:boolean, block1, block2
-block1:
-    Return v1:unknown
-block2:
-    v5:boolean = GreaterThan v0:unknown, v2:unknown
-    Branch v5:boolean, block3, block4
-block3:
-    Return v2:unknown
-block4:
-    Return v0:unknown
-
-function(v0:unknown, v1:unknown, v2:unknown):
-block0:
-    v3:unknown = GetLexicalEnvironment
-    v4:boolean = LessThan v0:unknown, v1:unknown
-    Branch v4:boolean, block1, block2
-block1:
-    Return v1:unknown
-block2:
-    v5:boolean = GreaterThan v0:unknown, v2:unknown
-    Branch v5:boolean, block3, block4
-block3:
-    Return v2:unknown
-block4:
-    Return v0:unknown
+    v8:boolean = StrictlyInequals v1:unknown, v7:object
+    Branch v8:boolean, block9, block3
+inline_block0:
+    v10:unknown = GetLexicalEnvironment
+    Return 5
+inline_slow:
+    v9:unknown = Call v1:unknown, undefined, 5, 0, 10
+    Return v9:unknown

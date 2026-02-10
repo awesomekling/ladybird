@@ -95,6 +95,29 @@ block0_split0:
 block0_split1:
     Return v4:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isNumber
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:string = Typeof 42
+    v11:boolean = StrictlyEquals v10:string, v5:string
+    Jump block4
+inline_merge:
+    v12:unknown = Phi [block5:v8:unknown, block3:v11:boolean]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block4
+
 === Before optimization ===
 function():
 block0:
@@ -102,53 +125,107 @@ block0:
     v1:unknown = GetGlobal isNumber
     Jump block1
 block0_split0:
-    v4:unknown = Call v1:unknown, undefined, 42
-    Jump block2
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
 block0_split1:
-    Return v4:unknown
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:string = Typeof 42
+    v11:boolean = StrictlyEquals v10:string, v5:string
+    Jump block4
+inline_merge:
+    v12:unknown = Phi [block5:v8:unknown, block3:v11:boolean]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block4
+
+=== After TypeRefinement ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isNumber
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:string = Typeof 42
+    v11:boolean = StrictlyEquals v13:string, v5:string
+    Jump block4
+inline_merge:
+    v12:unknown = Phi [block5:v8:unknown, block3:v11:boolean]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block4
+
+=== After InstCombine ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isNumber
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:string = Typeof 42
+    v11:boolean = StrictlyEquals v13:string, v5:string
+    Jump block4
+inline_merge:
+    v12:unknown = Phi [block5:v8:unknown, block3:v15:boolean]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Jump block4
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal isNumber
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:string = Typeof 42
+    v11:boolean = StrictlyEquals v13:string, v5:string
+    Return true
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal isNumber
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    Return true
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal isNumber
-    v4:unknown = Call v1:unknown, undefined, 42
-    Return v4:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:string = Typeof v0:unknown
-    v4:boolean = StrictlyEquals v2:string, v3:string
-    Return v4:boolean
-
-=== After SCCP ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:string = Typeof v0:unknown
-    v4:boolean = StrictlyEquals v2:string, v3:string
-    Return v4:boolean
-
-=== Before optimization ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:string = Typeof v0:unknown
-    v4:boolean = StrictlyEquals v2:string, v3:string
-    Return v4:boolean
-
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:string = Typeof v0:unknown
-    v4:boolean = StrictlyEquals v2:string, v3:string
-    Return v4:boolean
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    Return true
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 42
+    Return v8:unknown

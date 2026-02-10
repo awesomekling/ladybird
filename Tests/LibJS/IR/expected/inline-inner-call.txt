@@ -95,6 +95,36 @@ block0_split0:
 block0_split1:
     Return v4:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal roundDown
+    Jump block1
+block0_split0:
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block8, block3
+block0_split1:
+    Return v12:unknown
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    v9:unknown = GetGlobal Math
+    Jump block4
+inline_block0_split0:
+    v10:unknown = GetById v9:unknown.floor
+    Jump block5
+inline_block0_split1:
+    v11:unknown = CallBuiltin v10:unknown, v9:unknown, 3.7
+    Jump block6
+inline_block0_split2:
+    Jump block7
+inline_merge:
+    v12:unknown = Phi [block8:v7:unknown, block6:v11:unknown]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined, 3.7
+    Jump block7
+
 === Before optimization ===
 function():
 block0:
@@ -102,84 +132,58 @@ block0:
     v1:unknown = GetGlobal roundDown
     Jump block1
 block0_split0:
-    v4:unknown = Call v1:unknown, undefined, 3.7
-    Jump block2
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block8, block3
 block0_split1:
-    Return v4:unknown
+    Return v12:unknown
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    v9:unknown = GetGlobal Math
+    Jump block4
+inline_block0_split0:
+    v10:unknown = GetById v9:unknown.floor
+    Jump block5
+inline_block0_split1:
+    v11:unknown = CallBuiltin v10:unknown, v9:unknown, 3.7
+    Jump block6
+inline_block0_split2:
+    Jump block7
+inline_merge:
+    v12:unknown = Phi [block8:v7:unknown, block6:v11:unknown]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined, 3.7
+    Jump block7
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal roundDown
-    v4:unknown = Call v1:unknown, undefined, 3.7
-    Return v4:unknown
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block8, block3
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    v9:unknown = GetGlobal Math
+    v10:unknown = GetById v9:unknown.floor
+    v11:unknown = CallBuiltin v10:unknown, v9:unknown, 3.7
+    Return v11:unknown
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined, 3.7
+    Return v7:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal roundDown
-    v4:unknown = Call v1:unknown, undefined, 3.7
-    Return v4:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:unknown = GetGlobal Math
-    Jump block1
-block0_split0:
-    v3:unknown = GetById v2:unknown.floor
-    Jump block2
-block0_split1:
-    v4:unknown = CallBuiltin v3:unknown, v2:unknown, v0:unknown
-    Jump block3
-block0_split2:
-    Return v4:unknown
-
-=== After SCCP ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:unknown = GetGlobal Math
-    Jump block1
-block0_split0:
-    v3:unknown = GetById v2:unknown.floor
-    Jump block2
-block0_split1:
-    v4:unknown = CallBuiltin v3:unknown, v2:unknown, v0:unknown
-    Jump block3
-block0_split2:
-    Return v4:unknown
-
-=== Before optimization ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:unknown = GetGlobal Math
-    Jump block1
-block0_split0:
-    v3:unknown = GetById v2:unknown.floor
-    Jump block2
-block0_split1:
-    v4:unknown = CallBuiltin v3:unknown, v2:unknown, v0:unknown
-    Jump block3
-block0_split2:
-    Return v4:unknown
-
-=== After SimplifyCFG ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:unknown = GetGlobal Math
-    v3:unknown = GetById v2:unknown.floor
-    v4:unknown = CallBuiltin v3:unknown, v2:unknown, v0:unknown
-    Return v4:unknown
-
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v2:unknown = GetGlobal Math
-    v3:unknown = GetById v2:unknown.floor
-    v4:unknown = CallBuiltin v3:unknown, v2:unknown, v0:unknown
-    Return v4:unknown
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block8, block3
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    v9:unknown = GetGlobal Math
+    v10:unknown = GetById v9:unknown.floor
+    v11:unknown = CallBuiltin v10:unknown, v9:unknown, 3.7
+    Return v11:unknown
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined, 3.7
+    Return v7:unknown

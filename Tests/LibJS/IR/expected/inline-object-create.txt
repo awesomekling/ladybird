@@ -95,6 +95,31 @@ block0_split0:
 block0_split1:
     Return v5:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal makePoint
+    Jump block1
+block0_split0:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+block0_split1:
+    Return v11:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:object = NewObject
+    InitObjectLiteralProperty v10:object, 3
+    InitObjectLiteralProperty v10:object, 4
+    CacheObjectShape v10:object
+    Jump block4
+inline_merge:
+    v11:unknown = Phi [block5:v8:unknown, block3:v10:object]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 3, 4
+    Jump block4
+
 === Before optimization ===
 function():
 block0:
@@ -102,61 +127,55 @@ block0:
     v1:unknown = GetGlobal makePoint
     Jump block1
 block0_split0:
-    v5:unknown = Call v1:unknown, undefined, 3, 4
-    Jump block2
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
 block0_split1:
-    Return v5:unknown
+    Return v11:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:object = NewObject
+    InitObjectLiteralProperty v10:object, 3
+    InitObjectLiteralProperty v10:object, 4
+    CacheObjectShape v10:object
+    Jump block4
+inline_merge:
+    v11:unknown = Phi [block5:v8:unknown, block3:v10:object]
+    Jump block2
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 3, 4
+    Jump block4
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal makePoint
-    v5:unknown = Call v1:unknown, undefined, 3, 4
-    Return v5:unknown
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:object = NewObject
+    InitObjectLiteralProperty v10:object, 3
+    InitObjectLiteralProperty v10:object, 4
+    CacheObjectShape v10:object
+    Return v10:object
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 3, 4
+    Return v8:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal makePoint
-    v5:unknown = Call v1:unknown, undefined, 3, 4
-    Return v5:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, v0:unknown
-    InitObjectLiteralProperty v3:object, v1:unknown
-    CacheObjectShape v3:object
-    Return v3:object
-
-=== After SCCP ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, v0:unknown
-    InitObjectLiteralProperty v3:object, v1:unknown
-    CacheObjectShape v3:object
-    Return v3:object
-
-=== Before optimization ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, v0:unknown
-    InitObjectLiteralProperty v3:object, v1:unknown
-    CacheObjectShape v3:object
-    Return v3:object
-
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:object = NewObject
-    InitObjectLiteralProperty v3:object, v0:unknown
-    InitObjectLiteralProperty v3:object, v1:unknown
-    CacheObjectShape v3:object
-    Return v3:object
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block5, block3
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:object = NewObject
+    InitObjectLiteralProperty v10:object, 3
+    InitObjectLiteralProperty v10:object, 4
+    CacheObjectShape v10:object
+    Return v10:object
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, 3, 4
+    Return v8:unknown

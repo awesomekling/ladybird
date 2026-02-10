@@ -127,6 +127,33 @@ block0_split1:
 block0_split2:
     Return v5:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal setX
+    Jump block1
+block0_split0:
+    v2:unknown = GetGlobal o
+    Jump block2
+block0_split1:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+block0_split2:
+    Return v10:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    PutById v2:unknown, 42.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v10:unknown = Phi [block7:v8:unknown, block5:v2:unknown]
+    Jump block3
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 42
+    Jump block6
+
 === Before optimization ===
 function():
 block0:
@@ -137,10 +164,22 @@ block0_split0:
     v2:unknown = GetGlobal o
     Jump block2
 block0_split1:
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 42
-    Jump block3
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
 block0_split2:
-    Return v5:unknown
+    Return v10:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    PutById v2:unknown, 42.x
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v10:unknown = Phi [block7:v8:unknown, block5:v2:unknown]
+    Jump block3
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 42
+    Jump block6
 
 === After SimplifyCFG ===
 function():
@@ -148,53 +187,27 @@ block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal setX
     v2:unknown = GetGlobal o
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 42
-    Return v5:unknown
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    PutById v2:unknown, 42.x
+    Return v2:unknown
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 42
+    Return v8:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal setX
     v2:unknown = GetGlobal o
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 42
-    Return v5:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    PutById v0:unknown, v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v0:unknown
-
-=== After SCCP ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    PutById v0:unknown, v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v0:unknown
-
-=== Before optimization ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    PutById v0:unknown, v1:unknown.x
-    Jump block1
-block0_split0:
-    Return v0:unknown
-
-=== After SimplifyCFG ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    PutById v0:unknown, v1:unknown.x
-    Return v0:unknown
-
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    PutById v0:unknown, v1:unknown.x
-    Return v0:unknown
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    PutById v2:unknown, 42.x
+    Return v2:unknown
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 42
+    Return v8:unknown

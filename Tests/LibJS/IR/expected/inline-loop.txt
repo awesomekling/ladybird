@@ -95,6 +95,46 @@ block0_split0:
 block0_split1:
     Return v4:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    Jump block1
+block0_split0:
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+block0_split1:
+    Return v29:unknown
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    v15:undefined = Move undefined
+    v16:undefined = Move undefined
+    v17:int32 = Move 0
+    v18:int32 = Move 1
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    Jump block5
+inline_block2:
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v28:unknown = Phi [block3:v8:undefined, block5:v20:unknown]
+    v27:unknown = Phi [block3:v9:int32, block5:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block5:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block7
+inline_block4:
+    Jump block8
+inline_merge:
+    v29:unknown = Phi [block9:v13:unknown, block7:v27:unknown]
+    Jump block2
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Jump block8
+
 === Before optimization ===
 function():
 block0:
@@ -102,201 +142,225 @@ block0:
     v1:unknown = GetGlobal sumTo
     Jump block1
 block0_split0:
-    v4:unknown = Call v1:unknown, undefined, 10
-    Jump block2
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
 block0_split1:
-    Return v4:unknown
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal sumTo
-    v4:unknown = Call v1:unknown, undefined, 10
-    Return v4:unknown
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal sumTo
-    v4:unknown = Call v1:unknown, undefined, 10
-    Return v4:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
+    Return v29:unknown
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    v15:undefined = Move undefined
+    v16:undefined = Move undefined
+    v17:int32 = Move 0
+    v18:int32 = Move 1
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    Jump block5
+inline_block2:
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v28:unknown = Phi [block3:v8:undefined, block5:v20:unknown]
+    v27:unknown = Phi [block3:v9:int32, block5:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block5:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block7
+inline_block4:
+    Jump block8
+inline_merge:
+    v29:unknown = Phi [block9:v13:unknown, block7:v27:unknown]
     Jump block2
-block2:
-    v10:number = ToNumeric v15:number
-    v11:number = Increment v10:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v8:int32, block2:v11:number]
-    v14:unknown = Phi [block0:v6:int32, block2:v9:unknown]
-    v13:unknown = Phi [block0:v16:undefined, block2:v10:number]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
-
-=== After SCCP ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    Jump block2
-block2:
-    v10:number = ToNumeric v15:number
-    v11:number = Increment v10:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v18:int32, block2:v11:number]
-    v14:unknown = Phi [block0:v17:int32, block2:v9:unknown]
-    v13:unknown = Phi [block0:v16:undefined, block2:v10:number]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
-
-=== Before optimization ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    v3:undefined = Move undefined
-    v4:undefined = Move undefined
-    v6:int32 = Move 0
-    v8:int32 = Move 1
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    Jump block2
-block2:
-    v10:number = ToNumeric v15:number
-    v11:number = Increment v10:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v18:int32, block2:v11:number]
-    v14:unknown = Phi [block0:v17:int32, block2:v9:unknown]
-    v13:unknown = Phi [block0:v16:undefined, block2:v10:number]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Jump block8
 
 === After DeadCodeElimination ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    Jump block1
+block0_split0:
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+block0_split1:
+    Return v29:unknown
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    Jump block5
+inline_block2:
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v27:unknown = Phi [block3:v9:int32, block5:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block5:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block7
+inline_block4:
+    Jump block8
+inline_merge:
+    v29:unknown = Phi [block9:v13:unknown, block7:v27:unknown]
     Jump block2
-block2:
-    v10:number = ToNumeric v15:number
-    v11:number = Increment v10:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v18:int32, block2:v11:number]
-    v14:unknown = Phi [block0:v17:int32, block2:v9:unknown]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
-
-=== After RedundantCheckElimination ===
-function(v0:unknown):
-block0:
-    v1:unknown = GetLexicalEnvironment
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    Jump block2
-block2:
-    v11:number = Increment v15:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v18:int32, block2:v11:number]
-    v14:unknown = Phi [block0:v17:int32, block2:v9:unknown]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Jump block8
 
 === After SimplifyCFG ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    v11:number = Increment v15:number
-    Jump block3
-block3:
-    v15:number = Phi [block0:v18:int32, block1:v11:number]
-    v14:unknown = Phi [block0:v17:int32, block1:v9:unknown]
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v27:unknown = Phi [block3:v9:int32, block4:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block4:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    v29:unknown = Phi [block6:v27:unknown]
+    Return v29:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown
+
+=== After CopyPropagation ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v27:unknown = Phi [block3:v9:int32, block4:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block4:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    v29:unknown = Phi [block6:v27:unknown]
+    Return v27:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown
+
+=== After DeadCodeElimination ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v27:unknown = Phi [block3:v9:int32, block4:v19:unknown]
+    v26:unknown = Phi [block3:v10:int32, block4:v21:unknown]
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    Return v27:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown
 
 === After SsaDestructionPass ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    ParallelCopy [v15:number <- v18:int32, v14:unknown <- v17:int32]
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    v11:number = Increment v15:number
-    ParallelCopy [v15:number <- v11:number, v14:unknown <- v9:unknown]
-    Jump block3
-block3:
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    ParallelCopy [v27:unknown <- v9:int32, v26:unknown <- v10:int32]
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    ParallelCopy [v27:unknown <- v19:unknown, v26:unknown <- v21:unknown]
+    Jump block6
+inline_block3:
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    Return v27:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown
 
 === After CopyCoalescing ===
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    ParallelCopy [v15:number <- v18:int32, v14:unknown <- v17:int32]
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    v11:number = Increment v15:number
-    Jump block3
-block3:
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    ParallelCopy [v27:unknown <- v9:int32, v26:unknown <- v10:int32]
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    Return v27:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown
 
-function(v0:unknown):
+function():
 block0:
-    v1:unknown = GetLexicalEnvironment
-    ParallelCopy [v15:number <- v18:int32, v14:unknown <- v17:int32]
-    Jump block3
-block1:
-    v9:unknown = Add v14:unknown, v15:number
-    v11:number = Increment v15:number
-    Jump block3
-block3:
-    v12:boolean = LessThanEquals v15:number, v0:unknown
-    Branch v12:boolean, block1, block4
-block4:
-    Return v14:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal sumTo
+    v12:boolean = StrictlyInequals v1:unknown, v11:object
+    Branch v12:boolean, block9, block3
+inline_block0:
+    v14:unknown = GetLexicalEnvironment
+    ParallelCopy [v27:unknown <- v9:int32, v26:unknown <- v10:int32]
+    Jump block6
+inline_block1:
+    v19:unknown = Add v27:unknown, v26:unknown
+    v20:unknown = ToNumeric v26:unknown
+    v21:unknown = Increment v20:unknown
+    Jump block6
+inline_block3:
+    v25:boolean = LessThanEquals v26:unknown, 10
+    Branch v25:boolean, block4, block8
+inline_merge:
+    Return v27:unknown
+inline_slow:
+    v13:unknown = Call v1:unknown, undefined, 10
+    Return v13:unknown

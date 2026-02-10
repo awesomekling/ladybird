@@ -95,6 +95,27 @@ block0_split0:
 block0_split1:
     Return v3:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal constant
+    Jump block1
+block0_split0:
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block5, block3
+block0_split1:
+    Return v9:unknown
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    Jump block4
+inline_merge:
+    v9:unknown = Phi [block5:v7:unknown, block3:v4:int32]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined
+    Jump block4
+
 === Before optimization ===
 function():
 block0:
@@ -102,45 +123,43 @@ block0:
     v1:unknown = GetGlobal constant
     Jump block1
 block0_split0:
-    v3:unknown = Call v1:unknown, undefined
-    Jump block2
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block5, block3
 block0_split1:
-    Return v3:unknown
+    Return v9:unknown
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    Jump block4
+inline_merge:
+    v9:unknown = Phi [block5:v7:unknown, block3:v4:int32]
+    Jump block2
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined
+    Jump block4
 
 === After SimplifyCFG ===
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal constant
-    v3:unknown = Call v1:unknown, undefined
-    Return v3:unknown
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block5, block3
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
+    Return 42
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined
+    Return v7:unknown
 
 function():
 block0:
     v0:unknown = GetLexicalEnvironment
     v1:unknown = GetGlobal constant
-    v3:unknown = Call v1:unknown, undefined
-    Return v3:unknown
-
-=== After SSAConstruction ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
+    v6:boolean = StrictlyInequals v1:unknown, v5:object
+    Branch v6:boolean, block5, block3
+inline_block0:
+    v8:unknown = GetLexicalEnvironment
     Return 42
-
-=== After SCCP ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    Return 42
-
-=== Before optimization ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    Return 42
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    Return 42
+inline_slow:
+    v7:unknown = Call v1:unknown, undefined
+    Return v7:unknown

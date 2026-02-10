@@ -117,6 +117,34 @@ block0_split1:
 block0_split2:
     Return v5:unknown
 
+=== After InlineCalls ===
+function():
+block0:
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal getAt
+    Jump block1
+block0_split0:
+    v2:unknown = GetGlobal a
+    Jump block2
+block0_split1:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+block0_split2:
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:int32 = Move 1
+    v11:unknown = GetByValue v2:unknown, 1
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v8:unknown, block5:v11:unknown]
+    Jump block3
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 1
+    Jump block6
+
 === Before optimization ===
 function():
 block0:
@@ -127,76 +155,78 @@ block0_split0:
     v2:unknown = GetGlobal a
     Jump block2
 block0_split1:
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 1
-    Jump block3
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
 block0_split2:
-    Return v5:unknown
-
-=== After SimplifyCFG ===
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal getAt
-    v2:unknown = GetGlobal a
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 1
-    Return v5:unknown
-
-function():
-block0:
-    v0:unknown = GetLexicalEnvironment
-    v1:unknown = GetGlobal getAt
-    v2:unknown = GetGlobal a
-    v5:unknown = Call v1:unknown, undefined, v2:unknown, 1
-    Return v5:unknown
-
-=== After SSAConstruction ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:unknown = Move v1:unknown
-    v4:unknown = GetByValue v0:unknown, v1:unknown
-    Jump block1
-block0_split0:
-    Return v4:unknown
-
-=== After SCCP ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:unknown = Move v1:unknown
-    v4:unknown = GetByValue v0:unknown, v1:unknown
-    Jump block1
-block0_split0:
-    Return v4:unknown
-
-=== Before optimization ===
-function(v0:unknown, v1:unknown):
-block0:
-    v2:unknown = GetLexicalEnvironment
-    v3:unknown = Move v1:unknown
-    v4:unknown = GetByValue v0:unknown, v1:unknown
-    Jump block1
-block0_split0:
-    Return v4:unknown
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v10:int32 = Move 1
+    v11:unknown = GetByValue v2:unknown, 1
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v8:unknown, block5:v11:unknown]
+    Jump block3
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 1
+    Jump block6
 
 === After DeadCodeElimination ===
-function(v0:unknown, v1:unknown):
+function():
 block0:
-    v2:unknown = GetLexicalEnvironment
-    v4:unknown = GetByValue v0:unknown, v1:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal getAt
     Jump block1
 block0_split0:
-    Return v4:unknown
+    v2:unknown = GetGlobal a
+    Jump block2
+block0_split1:
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+block0_split2:
+    Return v12:unknown
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v11:unknown = GetByValue v2:unknown, 1
+    Jump block5
+inline_block0_split0:
+    Jump block6
+inline_merge:
+    v12:unknown = Phi [block7:v8:unknown, block5:v11:unknown]
+    Jump block3
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 1
+    Jump block6
 
 === After SimplifyCFG ===
-function(v0:unknown, v1:unknown):
+function():
 block0:
-    v2:unknown = GetLexicalEnvironment
-    v4:unknown = GetByValue v0:unknown, v1:unknown
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal getAt
+    v2:unknown = GetGlobal a
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v11:unknown = GetByValue v2:unknown, 1
+    Return v11:unknown
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 1
+    Return v8:unknown
 
-function(v0:unknown, v1:unknown):
+function():
 block0:
-    v2:unknown = GetLexicalEnvironment
-    v4:unknown = GetByValue v0:unknown, v1:unknown
-    Return v4:unknown
+    v0:unknown = GetLexicalEnvironment
+    v1:unknown = GetGlobal getAt
+    v2:unknown = GetGlobal a
+    v7:boolean = StrictlyInequals v1:unknown, v6:object
+    Branch v7:boolean, block7, block4
+inline_block0:
+    v9:unknown = GetLexicalEnvironment
+    v11:unknown = GetByValue v2:unknown, 1
+    Return v11:unknown
+inline_slow:
+    v8:unknown = Call v1:unknown, undefined, v2:unknown, 1
+    Return v8:unknown
