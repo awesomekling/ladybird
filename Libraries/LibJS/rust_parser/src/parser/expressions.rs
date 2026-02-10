@@ -1501,7 +1501,7 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(None);
         self.scope_collector.set_is_arrow_function();
 
-        let (params, function_length, param_info);
+        let (params, function_length, param_info, is_simple);
 
         if expect_parens {
             // '(' already consumed (by caller or above for async case).
@@ -1510,6 +1510,7 @@ impl<'a> Parser<'a> {
             params = result.0;
             function_length = result.1;
             param_info = result.2;
+            is_simple = result.3;
             // If there were new syntax errors during parameter parsing, abort.
             if self.errors.len() > previous_errors {
                 self.scope_collector.close_scope();
@@ -1532,6 +1533,7 @@ impl<'a> Parser<'a> {
                 params = self.builder.create_function_parameters(&[binding], &[NULL_HANDLE], &[false], &[false]);
                 function_length = 1;
                 param_info = vec![(value, binding, false, false)];
+                is_simple = true;
             } else {
                 self.scope_collector.close_scope();
                 self.load_state();
@@ -1560,7 +1562,7 @@ impl<'a> Parser<'a> {
         // 2. Expression body: `(x) => x + 1`  (implicit return)
         if self.match_token(TokenType::CurlyOpen) {
             // Block body — parsed like a regular function body.
-            let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info);
+            let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, &param_info, is_simple);
 
             if has_use_strict || fn_kind != FunctionKind::Normal {
                 self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
@@ -1629,7 +1631,7 @@ impl<'a> Parser<'a> {
         self.in_generator_function_context = is_generator;
         self.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info) = self.parse_formal_parameters();
+        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
         // Getter must have no arguments, setter must have exactly one.
         if is_getter && !param_info.is_empty() {
@@ -1655,7 +1657,7 @@ impl<'a> Parser<'a> {
             self.allow_super_constructor_call = false;
         }
 
-        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info, is_simple);
         self.allow_super_constructor_call = saved_allow_super_call;
 
         // Retroactive strict mode checks on parameters.

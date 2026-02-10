@@ -266,7 +266,7 @@ impl<'a> Parser<'a> {
         self.in_generator_function_context = is_generator;
         self.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info) = self.parse_formal_parameters();
+        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
         // Restore before parse_function_body (which saves/restores these itself).
         self.in_generator_function_context = in_generator_before;
@@ -278,7 +278,7 @@ impl<'a> Parser<'a> {
         let saved_fn_name_id = self.last_function_name_id;
         let saved_fn_kind = self.last_function_kind;
 
-        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info, is_simple);
 
         // Retroactive strict mode checks on function name and parameters.
         if has_use_strict || kind != FunctionKind::Normal {
@@ -358,12 +358,12 @@ impl<'a> Parser<'a> {
         self.in_generator_function_context = is_generator;
         self.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info) = self.parse_formal_parameters();
+        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;
 
-        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info);
+        let (body, has_use_strict, insights) = self.parse_function_body(is_async, is_generator, &param_info, is_simple);
 
         // Retroactive strict mode checks on function name and parameters.
         if has_use_strict || kind != FunctionKind::Normal {
@@ -664,7 +664,7 @@ impl<'a> Parser<'a> {
     /// scope (via open_function_scope) before parsing formal parameters, so that
     /// default parameter expressions can resolve identifiers in the function scope.
     /// Returns (body, has_use_strict, parsing_insights).
-    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, param_info: &[(Vec<u16>, NodeHandle, bool, bool)]) -> (NodeHandle, bool, FunctionParsingInsights) {
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, param_info: &[(Vec<u16>, NodeHandle, bool, bool)], is_simple_parameters: bool) -> (NodeHandle, bool, FunctionParsingInsights) {
         let start = self.position();
         let body = self.builder.create_function_body(self.span_from(start));
         self.consume_token(TokenType::CurlyOpen);
@@ -688,6 +688,9 @@ impl<'a> Parser<'a> {
         let strict_before = self.strict_mode;
         if has_use_strict {
             self.strict_mode = true;
+            if !is_simple_parameters {
+                self.syntax_error("Illegal 'use strict' directive in function with non-simple parameter list");
+            }
         }
 
         self.parse_statement_list(body, false);
@@ -716,7 +719,7 @@ impl<'a> Parser<'a> {
 
     /// Returns (params_node, function_length, param_info).
     /// param_info entries: (name, identifier_handle, is_rest, is_from_pattern).
-    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>) {
+    pub(crate) fn parse_formal_parameters(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>, bool) {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
         self.consume_token(TokenType::ParenClose);
@@ -725,9 +728,9 @@ impl<'a> Parser<'a> {
 
     /// Parse formal parameters assuming the opening '(' has already been consumed.
     /// Does NOT consume the closing ')'.
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>) {
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (NodeHandle, i32, Vec<(Vec<u16>, NodeHandle, bool, bool)>, bool) {
         if self.match_token(TokenType::ParenClose) {
-            return (self.builder.create_function_parameters_empty(), 0, Vec::new());
+            return (self.builder.create_function_parameters_empty(), 0, Vec::new(), true);
         }
 
         let mut bindings = Vec::new();
@@ -813,8 +816,9 @@ impl<'a> Parser<'a> {
             }
         }
 
+        let is_simple = !has_seen_default && !has_seen_rest && !is_pattern.iter().any(|&p| p);
         let params = self.builder.create_function_parameters(&bindings, &default_values, &is_rest, &is_pattern);
-        (params, function_length, param_info)
+        (params, function_length, param_info, is_simple)
     }
 
     // === Binding pattern ===
