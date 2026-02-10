@@ -331,6 +331,9 @@ impl<'a> Parser<'a> {
                     if self.token_original_value(&meta_token) != meta_utf16 {
                         self.syntax_error("Expected 'meta' after 'import.'");
                     }
+                    if self.program_type != super::ProgramType::Module {
+                        self.syntax_error("import.meta is only allowed in modules");
+                    }
                     (self.builder.create_meta_property(self.span_from(start), 1), true)
                 } else if self.match_token(TokenType::ParenOpen) {
                     // import()
