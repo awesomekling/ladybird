@@ -341,6 +341,11 @@ impl<'a> Parser<'a> {
         let saved_class_name = self.last_class_name.clone();
         let saved_class_name_id = self.last_class_name_id;
 
+        // Open class declaration scope — makes the class name available as a const
+        // binding inside the class body (for both class declarations and expressions).
+        let class_name_for_scope = if !saved_class_name.is_empty() { Some(saved_class_name.as_slice()) } else { None };
+        self.scope_collector.open_class_declaration_scope(class_name_for_scope);
+
         // Optional extends
         let super_class = if self.match_token(TokenType::Extends) {
             self.consume();
@@ -404,6 +409,9 @@ impl<'a> Parser<'a> {
                 );
             }
         }
+
+        // Close the class declaration scope.
+        self.scope_collector.close_scope();
 
         // Restore class name so parse_class_declaration can use it.
         self.last_class_name = saved_class_name;
