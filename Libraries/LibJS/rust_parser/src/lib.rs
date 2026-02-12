@@ -71,6 +71,7 @@ macro_rules! utf16 {
 
 pub mod ast;
 pub mod ast_bridge;
+pub mod bytecode;
 pub mod ffi_enums;
 pub mod lexer;
 pub mod parser;
