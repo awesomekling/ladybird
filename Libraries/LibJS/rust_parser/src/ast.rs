@@ -1,0 +1,854 @@
+/*
+ * Copyright (c) 2026, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! Rust AST types for JavaScript.
+//!
+//! This module defines the Abstract Syntax Tree using idiomatic Rust enums
+//! instead of the C++ class hierarchy. Every node carries a `SourceRange`
+//! for error messages and source maps.
+//!
+//! ## Design
+//!
+//! - `Expression` and `Statement` are flat enums — pattern matching replaces
+//!   virtual dispatch.
+//! - `Node<T>` wraps every AST node with source location info.
+//! - `Identifier` uses `Cell` fields for scope analysis results that are
+//!   written after parsing (by the scope collector).
+//! - Operator enums use `#[repr(u8)]` with values matching the C++ enums
+//!   for trivial FFI conversion.
+//! - `ScopeData` replaces the C++ `ScopeNode` base class, carried by
+//!   block-like constructs (Program, BlockStatement, FunctionBody, etc.).
+
+use std::cell::Cell;
+
+// =============================================================================
+// Source location
+// =============================================================================
+
+/// UTF-16 encoded string (matches C++ Utf16String / Utf16FlyString).
+pub type Utf16String = Vec<u16>;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Position {
+    pub line: u32,
+    pub column: u32,
+    pub offset: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceRange {
+    pub start: Position,
+    pub end: Position,
+}
+
+// =============================================================================
+// Node wrapper
+// =============================================================================
+
+/// Every AST node wraps its payload with source location.
+pub struct Node<T> {
+    pub range: SourceRange,
+    pub inner: T,
+}
+
+/// Expression node: `Node<Expression>`.
+pub type Expr = Node<Expression>;
+
+/// Statement node: `Node<Statement>`.
+pub type Stmt = Node<Statement>;
+
+impl<T> Node<T> {
+    pub fn new(range: SourceRange, inner: T) -> Self {
+        Self { range, inner }
+    }
+}
+
+// =============================================================================
+// Operator enums — values match C++ AST.h enums
+// =============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum BinaryOp {
+    Addition = 0,
+    Subtraction = 1,
+    Multiplication = 2,
+    Division = 3,
+    Modulo = 4,
+    Exponentiation = 5,
+    StrictlyEquals = 6,
+    StrictlyInequals = 7,
+    LooselyEquals = 8,
+    LooselyInequals = 9,
+    GreaterThan = 10,
+    GreaterThanEquals = 11,
+    LessThan = 12,
+    LessThanEquals = 13,
+    BitwiseAnd = 14,
+    BitwiseOr = 15,
+    BitwiseXor = 16,
+    LeftShift = 17,
+    RightShift = 18,
+    UnsignedRightShift = 19,
+    In = 20,
+    InstanceOf = 21,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LogicalOp {
+    And = 0,
+    Or = 1,
+    NullishCoalescing = 2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum UnaryOp {
+    BitwiseNot = 0,
+    Not = 1,
+    Plus = 2,
+    Minus = 3,
+    Typeof = 4,
+    Void = 5,
+    Delete = 6,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum UpdateOp {
+    Increment = 0,
+    Decrement = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AssignmentOp {
+    Assignment = 0,
+    AdditionAssignment = 1,
+    SubtractionAssignment = 2,
+    MultiplicationAssignment = 3,
+    DivisionAssignment = 4,
+    ModuloAssignment = 5,
+    ExponentiationAssignment = 6,
+    BitwiseAndAssignment = 7,
+    BitwiseOrAssignment = 8,
+    BitwiseXorAssignment = 9,
+    LeftShiftAssignment = 10,
+    RightShiftAssignment = 11,
+    UnsignedRightShiftAssignment = 12,
+    AndAssignment = 13,
+    OrAssignment = 14,
+    NullishAssignment = 15,
+}
+
+// =============================================================================
+// Kind enums
+// =============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DeclarationKind {
+    Var = 1,
+    Let = 2,
+    Const = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FunctionKind {
+    Normal = 0,
+    Generator = 1,
+    Async = 2,
+    AsyncGenerator = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramType {
+    Script,
+    Module,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MetaPropertyType {
+    NewTarget,
+    ImportMeta,
+}
+
+// =============================================================================
+// Identifier
+// =============================================================================
+
+/// Scope analysis result: how this identifier is resolved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalType {
+    None,
+    Argument,
+    Variable,
+}
+
+/// Declaration kind as seen from an identifier reference.
+/// Values match C++ `DeclarationKind` (with None=0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum IdentDeclarationKind {
+    None = 0,
+    Var = 1,
+    Let = 2,
+    Const = 3,
+}
+
+/// An identifier reference or binding name.
+///
+/// Scope analysis results are stored in `Cell` fields because the scope
+/// collector writes them after parsing through shared references.
+pub struct Identifier {
+    pub range: SourceRange,
+    pub name: Utf16String,
+    // Scope analysis results — set by scope collector after parsing.
+    pub local_type: Cell<LocalType>,
+    pub local_index: Cell<u32>,
+    pub is_global: Cell<bool>,
+    pub is_inside_scope_with_eval: Cell<bool>,
+    pub declaration_kind: Cell<IdentDeclarationKind>,
+}
+
+impl Identifier {
+    pub fn new(range: SourceRange, name: Utf16String) -> Self {
+        Self {
+            range,
+            name,
+            local_type: Cell::new(LocalType::None),
+            local_index: Cell::new(0),
+            is_global: Cell::new(false),
+            is_inside_scope_with_eval: Cell::new(false),
+            declaration_kind: Cell::new(IdentDeclarationKind::None),
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.local_type.get() != LocalType::None
+    }
+}
+
+/// A private identifier (`#name`).
+pub struct PrivateIdentifier {
+    pub range: SourceRange,
+    pub name: Utf16String,
+}
+
+// =============================================================================
+// Function support types
+// =============================================================================
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FunctionParsingInsights {
+    pub uses_this: bool,
+    pub uses_this_from_environment: bool,
+    pub contains_direct_call_to_eval: bool,
+    pub might_need_arguments_object: bool,
+}
+
+/// A formal parameter in a function declaration/expression.
+pub struct FunctionParameter {
+    pub binding: FunctionParameterBinding,
+    pub default_value: Option<Expr>,
+    pub is_rest: bool,
+}
+
+pub enum FunctionParameterBinding {
+    Identifier(Identifier),
+    BindingPattern(BindingPattern),
+}
+
+/// Shared data for FunctionDeclaration and FunctionExpression.
+pub struct FunctionData {
+    pub name: Option<Identifier>,
+    pub source_text_start: u32,
+    pub source_text_end: u32,
+    pub body: Box<Stmt>,
+    pub parameters: Vec<FunctionParameter>,
+    pub function_length: i32,
+    pub kind: FunctionKind,
+    pub is_strict_mode: bool,
+    pub is_arrow_function: bool,
+    pub parsing_insights: FunctionParsingInsights,
+    pub is_hoisted: bool,
+}
+
+// =============================================================================
+// Class support types
+// =============================================================================
+
+/// Shared data for ClassDeclaration and ClassExpression.
+pub struct ClassData {
+    pub name: Option<Identifier>,
+    pub source_text_start: u32,
+    pub source_text_end: u32,
+    pub constructor: Option<Box<Expr>>,
+    pub super_class: Option<Box<Expr>>,
+    pub elements: Vec<Node<ClassElement>>,
+}
+
+pub enum ClassElement {
+    Method {
+        key: Box<Expr>,
+        function: Box<Expr>,
+        kind: ClassMethodKind,
+        is_static: bool,
+    },
+    Field {
+        key: Box<Expr>,
+        initializer: Option<Box<Expr>>,
+        is_static: bool,
+    },
+    StaticInitializer {
+        body: Box<Stmt>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ClassMethodKind {
+    Method = 0,
+    Getter = 1,
+    Setter = 2,
+}
+
+// =============================================================================
+// Binding pattern types
+// =============================================================================
+
+/// Destructuring pattern for array/object bindings.
+pub struct BindingPattern {
+    pub kind: BindingPatternKind,
+    pub entries: Vec<BindingEntry>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingPatternKind {
+    Array,
+    Object,
+}
+
+pub struct BindingEntry {
+    pub name: BindingEntryName,
+    pub alias: BindingEntryAlias,
+    pub initializer: Option<Expr>,
+    pub is_rest: bool,
+}
+
+/// The "name" part of a binding entry.
+/// - `Empty`: elision in array patterns (`[, , x]`)
+/// - `Identifier`: object property shorthand (`{ x }`)
+/// - `Expression`: computed property key (`{ [expr]: x }`)
+pub enum BindingEntryName {
+    Empty,
+    Identifier(Identifier),
+    Expression(Box<Expr>),
+}
+
+/// The "alias" (target) of a binding entry.
+/// - `Empty`: name is the binding target (`{ x }` — x is both name and alias)
+/// - `Identifier`: simple binding (`{ x: y }`)
+/// - `BindingPattern`: nested destructuring (`{ x: { a, b } }`)
+/// - `MemberExpression`: assignment target (`{ x: obj.prop }`)
+pub enum BindingEntryAlias {
+    Empty,
+    Identifier(Identifier),
+    BindingPattern(Box<BindingPattern>),
+    MemberExpression(Box<Expr>),
+}
+
+// =============================================================================
+// Variable declaration types
+// =============================================================================
+
+pub struct VariableDeclarator {
+    pub range: SourceRange,
+    pub target: VariableDeclaratorTarget,
+    pub init: Option<Expr>,
+}
+
+pub enum VariableDeclaratorTarget {
+    Identifier(Identifier),
+    BindingPattern(BindingPattern),
+}
+
+// =============================================================================
+// Object literal types
+// =============================================================================
+
+pub struct ObjectProperty {
+    pub range: SourceRange,
+    pub property_type: ObjectPropertyType,
+    pub key: Box<Expr>,
+    pub value: Option<Box<Expr>>,
+    pub is_method: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ObjectPropertyType {
+    KeyValue = 0,
+    Getter = 1,
+    Setter = 2,
+    Spread = 3,
+    ProtoSetter = 4,
+}
+
+// =============================================================================
+// Call expression types
+// =============================================================================
+
+pub struct CallArgument {
+    pub value: Expr,
+    pub is_spread: bool,
+}
+
+pub struct CallExpressionData {
+    pub callee: Box<Expr>,
+    pub arguments: Vec<CallArgument>,
+    pub is_parenthesized: bool,
+    pub is_inside_parens: bool,
+}
+
+pub struct SuperCallData {
+    pub arguments: Vec<CallArgument>,
+    pub is_synthetic: bool,
+}
+
+// =============================================================================
+// Optional chain types
+// =============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionalChainMode {
+    Optional,
+    NotOptional,
+}
+
+pub enum OptionalChainReference {
+    Call {
+        arguments: Vec<CallArgument>,
+        mode: OptionalChainMode,
+    },
+    ComputedReference {
+        expression: Box<Expr>,
+        mode: OptionalChainMode,
+    },
+    MemberReference {
+        identifier: Identifier,
+        mode: OptionalChainMode,
+    },
+    PrivateMemberReference {
+        private_identifier: PrivateIdentifier,
+        mode: OptionalChainMode,
+    },
+}
+
+// =============================================================================
+// Template literal types
+// =============================================================================
+
+pub struct TemplateLiteralData {
+    pub expressions: Vec<Expr>,
+    pub raw_strings: Vec<Utf16String>,
+}
+
+// =============================================================================
+// RegExp literal
+// =============================================================================
+
+pub struct RegExpLiteralData {
+    pub pattern: Utf16String,
+    pub flags: Utf16String,
+}
+
+// =============================================================================
+// Try/Catch types
+// =============================================================================
+
+pub struct TryStatementData {
+    pub block: Box<Stmt>,
+    pub handler: Option<CatchClause>,
+    pub finalizer: Option<Box<Stmt>>,
+}
+
+pub struct CatchClause {
+    pub range: SourceRange,
+    pub parameter: CatchParameter,
+    pub body: Box<Stmt>,
+}
+
+pub enum CatchParameter {
+    None,
+    Identifier(Identifier),
+    BindingPattern(BindingPattern),
+}
+
+// =============================================================================
+// Switch types
+// =============================================================================
+
+pub struct SwitchStatementData {
+    pub scope: ScopeData,
+    pub discriminant: Box<Expr>,
+    pub cases: Vec<SwitchCase>,
+}
+
+pub struct SwitchCase {
+    pub range: SourceRange,
+    pub scope: ScopeData,
+    pub test: Option<Expr>,
+}
+
+// =============================================================================
+// Module types (import/export)
+// =============================================================================
+
+pub struct ModuleRequest {
+    pub module_specifier: Utf16String,
+    pub attributes: Vec<ImportAttribute>,
+}
+
+pub struct ImportAttribute {
+    pub key: Utf16String,
+    pub value: Utf16String,
+}
+
+pub struct ImportEntry {
+    /// `None` means namespace import (`import * as x`).
+    pub import_name: Option<Utf16String>,
+    pub local_name: Utf16String,
+}
+
+pub struct ImportStatementData {
+    pub module_request: ModuleRequest,
+    pub entries: Vec<ImportEntry>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ExportEntryKind {
+    NamedExport = 0,
+    ModuleRequestAll = 1,
+    ModuleRequestAllButDefault = 2,
+    EmptyNamedExport = 3,
+}
+
+pub struct ExportEntry {
+    pub kind: ExportEntryKind,
+    pub export_name: Option<Utf16String>,
+    pub local_or_import_name: Option<Utf16String>,
+}
+
+pub struct ExportStatementData {
+    pub statement: Option<Box<Stmt>>,
+    pub entries: Vec<ExportEntry>,
+    pub is_default_export: bool,
+    pub module_request: Option<ModuleRequest>,
+}
+
+// =============================================================================
+// For-in/of LHS
+// =============================================================================
+
+/// Left-hand side of for-in, for-of, for-await-of.
+pub enum ForInOfLhs {
+    /// A variable declaration (`for (let x of ...)`)
+    Declaration(Box<Stmt>),
+    /// A binding pattern (`for ({a, b} of ...)`)
+    Pattern(BindingPattern),
+}
+
+// =============================================================================
+// Assignment LHS
+// =============================================================================
+
+/// Left-hand side of an assignment expression.
+pub enum AssignmentLhs {
+    Expression(Box<Expr>),
+    Pattern(BindingPattern),
+}
+
+// =============================================================================
+// Scope data (replaces C++ ScopeNode base class)
+// =============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LocalVarKind {
+    Var = 0,
+    LetOrConst = 1,
+    Function = 2,
+    ArgumentsObject = 3,
+    CatchClauseParameter = 4,
+}
+
+pub struct LocalVariable {
+    pub name: Utf16String,
+    pub kind: LocalVarKind,
+}
+
+/// Data shared by all scope-bearing nodes (Program, BlockStatement,
+/// FunctionBody, SwitchStatement, SwitchCase).
+pub struct ScopeData {
+    pub children: Vec<Stmt>,
+    pub local_variables: Vec<LocalVariable>,
+    pub function_scope_data: Option<Box<FunctionScopeData>>,
+}
+
+impl ScopeData {
+    pub fn new() -> Self {
+        Self {
+            children: Vec::new(),
+            local_variables: Vec::new(),
+            function_scope_data: None,
+        }
+    }
+}
+
+/// Scope analysis data for function bodies, populated by the scope collector.
+pub struct FunctionScopeData {
+    pub functions_to_initialize: Vec<FunctionToInit>,
+    pub vars_to_initialize: Vec<VarToInit>,
+    pub var_names: Vec<Utf16String>,
+    pub has_function_named_arguments: bool,
+    pub has_argument_parameter: bool,
+    pub has_lexically_declared_arguments: bool,
+    pub non_local_var_count: usize,
+    pub non_local_var_count_for_parameter_expressions: usize,
+}
+
+/// Reference to a function declaration that needs hoisting/initialization.
+/// Stores the index within the parent ScopeData.children.
+pub struct FunctionToInit {
+    pub child_index: usize,
+}
+
+/// A `var` binding that needs initialization during function entry.
+pub struct VarToInit {
+    pub name: Utf16String,
+    pub is_parameter: bool,
+    pub is_function_name: bool,
+}
+
+// =============================================================================
+// Expression enum
+// =============================================================================
+
+pub enum Expression {
+    // Literals
+    NumericLiteral(f64),
+    StringLiteral(Utf16String),
+    BooleanLiteral(bool),
+    NullLiteral,
+    BigIntLiteral(String),
+    RegExpLiteral(RegExpLiteralData),
+
+    // Identifiers
+    Identifier(Identifier),
+    PrivateIdentifier(PrivateIdentifier),
+
+    // Operators
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Logical {
+        op: LogicalOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+    Update {
+        op: UpdateOp,
+        argument: Box<Expr>,
+        prefixed: bool,
+    },
+    Assignment {
+        op: AssignmentOp,
+        lhs: AssignmentLhs,
+        rhs: Box<Expr>,
+    },
+    Conditional {
+        test: Box<Expr>,
+        consequent: Box<Expr>,
+        alternate: Box<Expr>,
+    },
+    Sequence(Vec<Expr>),
+
+    // Member access
+    Member {
+        object: Box<Expr>,
+        property: Box<Expr>,
+        computed: bool,
+    },
+    OptionalChain {
+        base: Box<Expr>,
+        references: Vec<OptionalChainReference>,
+    },
+
+    // Calls
+    Call(CallExpressionData),
+    New(CallExpressionData),
+    SuperCall(SuperCallData),
+
+    // Spread
+    Spread(Box<Expr>),
+
+    // This / Super
+    This,
+    Super,
+
+    // Functions
+    Function(Box<FunctionData>),
+
+    // Classes
+    Class(Box<ClassData>),
+
+    // Collections
+    Array(Vec<Option<Expr>>),
+    Object(Vec<ObjectProperty>),
+
+    // Templates
+    TemplateLiteral(TemplateLiteralData),
+    TaggedTemplateLiteral {
+        tag: Box<Expr>,
+        template_literal: Box<Expr>,
+    },
+
+    // Meta
+    MetaProperty(MetaPropertyType),
+    ImportCall {
+        specifier: Box<Expr>,
+        options: Option<Box<Expr>>,
+    },
+
+    // Async / Generator
+    Yield {
+        argument: Option<Box<Expr>>,
+        is_yield_from: bool,
+    },
+    Await(Box<Expr>),
+
+    // Error recovery
+    Error,
+}
+
+// =============================================================================
+// Statement enum
+// =============================================================================
+
+pub enum Statement {
+    // Basic
+    Empty,
+    Error,
+    Expression(Box<Expr>),
+    Debugger,
+
+    // Blocks (carry ScopeData like C++ ScopeNode)
+    Block(ScopeData),
+    FunctionBody {
+        scope: ScopeData,
+        in_strict_mode: bool,
+    },
+    Program(ProgramData),
+
+    // Control flow
+    If {
+        predicate: Box<Expr>,
+        consequent: Box<Stmt>,
+        alternate: Option<Box<Stmt>>,
+    },
+    While {
+        test: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    DoWhile {
+        test: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    For {
+        init: Option<Box<Stmt>>,
+        test: Option<Box<Expr>>,
+        update: Option<Box<Expr>>,
+        body: Box<Stmt>,
+    },
+    ForIn {
+        lhs: ForInOfLhs,
+        rhs: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    ForOf {
+        lhs: ForInOfLhs,
+        rhs: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    ForAwaitOf {
+        lhs: ForInOfLhs,
+        rhs: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    Switch(SwitchStatementData),
+    With {
+        object: Box<Expr>,
+        body: Box<Stmt>,
+    },
+    Labelled {
+        label: Utf16String,
+        item: Box<Stmt>,
+    },
+
+    // Jumps
+    Break {
+        target_label: Option<Utf16String>,
+    },
+    Continue {
+        target_label: Option<Utf16String>,
+    },
+    Return(Option<Box<Expr>>),
+    Throw(Box<Expr>),
+    Try(TryStatementData),
+
+    // Declarations
+    VariableDeclaration {
+        kind: DeclarationKind,
+        declarations: Vec<VariableDeclarator>,
+    },
+    UsingDeclaration {
+        declarations: Vec<VariableDeclarator>,
+    },
+    FunctionDeclaration(Box<FunctionData>),
+    ClassDeclaration(Box<ClassData>),
+    ErrorDeclaration,
+
+    // Module
+    Import(ImportStatementData),
+    Export(ExportStatementData),
+
+    // Special
+    ClassFieldInitializer {
+        expression: Box<Expr>,
+        field_name: Utf16String,
+    },
+}
+
+// =============================================================================
+// Program data
+// =============================================================================
+
+pub struct ProgramData {
+    pub scope: ScopeData,
+    pub program_type: ProgramType,
+    pub is_strict_mode: bool,
+    pub has_top_level_await: bool,
+}
