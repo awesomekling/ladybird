@@ -550,9 +550,26 @@ pub fn generate_stmt(
         // === ClassDeclaration ===
         Statement::ClassDeclaration(data) => {
             let value = generate_class_expression(gen, data, None);
-            // Bind the class name in the current scope (classes are lexically scoped)
+            // Bind the class name in the outer scope (classes are lexically scoped).
+            // Use InitializeLexicalBinding since the name was registered as
+            // an uninitialized lexical binding by the scope collector.
             if let (Some(name_ident), Some(val)) = (&data.name, &value) {
-                emit_set_variable(gen, name_ident, &val);
+                if name_ident.is_local() {
+                    let local_index = name_ident.local_index.get();
+                    let local = match name_ident.local_type.get() {
+                        LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+                        LocalType::Variable => gen.local(local_index),
+                        LocalType::None => unreachable!(),
+                    };
+                    gen.emit_mov(&local, &val);
+                } else {
+                    let id = gen.intern_identifier(name_ident.name.clone());
+                    gen.emit(Instruction::InitializeLexicalBinding {
+                        identifier: id,
+                        src: val.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
             }
             None
         }
@@ -562,7 +579,14 @@ pub fn generate_stmt(
         Statement::Export(_) => None, // Handled by module loading
 
         // === ClassFieldInitializer ===
-        Statement::ClassFieldInitializer { .. } => None,
+        Statement::ClassFieldInitializer { expression, .. } => {
+            let value = generate_expr(expression, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::Return {
+                value: value.operand(),
+            });
+            None
+        }
     }
 }
 
@@ -2098,6 +2122,40 @@ fn generate_class_expression(
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
     let has_super = data.super_class.is_some();
+    let has_name = data.name.is_some();
+
+    // Step 2: Save parent environment, create class lexical environment.
+    let parent_env = gen.allocate_register();
+    gen.emit(Instruction::GetLexicalEnvironment {
+        dst: parent_env.operand(),
+    });
+    let class_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: class_env.operand(),
+        parent: parent_env.operand(),
+        capacity: 0,
+    });
+
+    // Step 3.a: Create binding for the class name in the class environment.
+    // For named classes, this is the class name (e.g. "A" in "class A {}").
+    // For anonymous classes without lhs_name, create binding for empty name.
+    // FIXME: When lhs_name support is added, only create for named classes
+    //        or classes without lhs_name (matching C++ logic).
+    {
+        let name = if let Some(name_ident) = &data.name {
+            name_ident.name.clone()
+        } else {
+            Vec::new()
+        };
+        let name_id = gen.intern_identifier(name);
+        gen.emit(Instruction::CreateVariable {
+            identifier: name_id,
+            mode: 0, // Lexical
+            is_immutable: true,
+            is_global: false,
+            is_strict: false,
+        });
+    }
 
     // Evaluate super class if present
     let super_class = if let Some(super_expr) = &data.super_class {
@@ -2106,11 +2164,28 @@ fn generate_class_expression(
         None
     };
 
-    // Create class environment (for named class expressions and private members)
-    let class_env = gen.allocate_register();
-    gen.emit(Instruction::GetLexicalEnvironment {
-        dst: class_env.operand(),
-    });
+    // Create private environment for private class elements.
+    let mut has_private_env = false;
+    for elem_node in &data.elements {
+        let priv_name = match &elem_node.inner {
+            ClassElement::Method { key, .. } | ClassElement::Field { key, .. } => {
+                if let Expression::PrivateIdentifier(ident) = &key.inner {
+                    Some(ident.name.clone())
+                } else {
+                    None
+                }
+            }
+            ClassElement::StaticInitializer { .. } => None,
+        };
+        if let Some(name) = priv_name {
+            if !has_private_env {
+                gen.emit(Instruction::CreatePrivateEnvironment);
+                has_private_env = true;
+            }
+            let name_id = gen.intern_identifier(name);
+            gen.emit(Instruction::AddPrivateName { name: name_id });
+        }
+    }
 
     // Create SharedFunctionInstanceData for constructor
     let constructor_sfd_index = if let Some(ctor_expr) = &data.constructor {
@@ -2126,7 +2201,7 @@ fn generate_class_expression(
         emit_default_constructor(gen, has_super)
     };
 
-    // Process class elements
+    // Process class elements.
     let mut ffi_elements = Vec::new();
     let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
 
@@ -2163,7 +2238,7 @@ fn generate_class_expression(
                 };
 
                 // Handle computed vs static keys
-                let (is_private, priv_name) = check_private_key(key);
+                let (is_private, _priv_name) = check_private_key(key);
 
                 // Evaluate the key for non-private elements
                 if !is_private {
@@ -2173,15 +2248,15 @@ fn generate_class_expression(
                     element_keys.push(None);
                 }
 
+                // Point directly into the AST's PrivateIdentifier name (stable address).
+                let (priv_ptr, priv_len) = get_private_identifier_ptr(key);
+
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: ffi_kind,
                     is_static: *is_static,
                     is_private,
-                    private_identifier: priv_name
-                        .as_ref()
-                        .map(|n| n.as_ptr())
-                        .unwrap_or(std::ptr::null()),
-                    private_identifier_len: priv_name.as_ref().map(|n| n.len()).unwrap_or(0),
+                    private_identifier: priv_ptr,
+                    private_identifier_len: priv_len,
                     shared_function_data_index: sfd_index,
                     has_initializer: false,
                 });
@@ -2191,18 +2266,54 @@ fn generate_class_expression(
                 initializer,
                 is_static,
             } => {
-                // For fields with initializers, wrap the initializer in a function
+                // For fields with initializers, wrap the initializer in a
+                // synthetic function so the runtime can call it to get the
+                // initial value. This mirrors how C++ wraps initializers in
+                // ClassFieldInitializerStatement.
                 let sfd_index = if let Some(init_expr) = initializer {
-                    if let Expression::Function(func_data) = &init_expr.inner {
-                        emit_new_function(gen, func_data, None) as i32
-                    } else {
-                        -1i32
-                    }
+                    // Determine field name for anonymous function naming.
+                    let field_name = match &key.inner {
+                        Expression::Identifier(ident) => ident.name.clone(),
+                        Expression::StringLiteral(s) => s.clone(),
+                        _ => Vec::new(),
+                    };
+
+                    // Wrap the expression in a ClassFieldInitializer statement.
+                    let body_stmt = Stmt::new(
+                        init_expr.range,
+                        Statement::ClassFieldInitializer {
+                            expression: Box::new(init_expr.as_ref().clone()),
+                            field_name,
+                        },
+                    );
+                    let wrapper_body = Stmt::new(
+                        init_expr.range,
+                        Statement::Block(Box::new(ScopeData::with_children(vec![body_stmt]))),
+                    );
+
+                    let func_data = FunctionData {
+                        name: None,
+                        source_text_start: init_expr.range.start.offset,
+                        source_text_end: init_expr.range.end.offset,
+                        body: Box::new(wrapper_body),
+                        parameters: Vec::new(),
+                        function_length: 0,
+                        kind: FunctionKind::Normal,
+                        is_strict_mode: gen.strict,
+                        is_arrow_function: false,
+                        parsing_insights: FunctionParsingInsights {
+                            uses_this: true,
+                            uses_this_from_environment: true,
+                            ..Default::default()
+                        },
+                        is_hoisted: false,
+                    };
+                    emit_new_function(gen, &func_data, Some(utf16!("field"))) as i32
                 } else {
                     -1i32
                 };
 
-                let (is_private, priv_name) = check_private_key(key);
+                let (is_private, _priv_name) = check_private_key(key);
 
                 if !is_private {
                     let key_val = generate_expr(key, gen, None);
@@ -2211,21 +2322,39 @@ fn generate_class_expression(
                     element_keys.push(None);
                 }
 
+                let (priv_ptr, priv_len) = get_private_identifier_ptr(key);
+
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: 3u8, // Field
                     is_static: *is_static,
                     is_private,
-                    private_identifier: priv_name
-                        .as_ref()
-                        .map(|n| n.as_ptr())
-                        .unwrap_or(std::ptr::null()),
-                    private_identifier_len: priv_name.as_ref().map(|n| n.len()).unwrap_or(0),
+                    private_identifier: priv_ptr,
+                    private_identifier_len: priv_len,
                     shared_function_data_index: sfd_index,
                     has_initializer: initializer.is_some(),
                 });
             }
-            ClassElement::StaticInitializer { body: _ } => {
-                // Static initializer blocks are wrapped as functions by the parser
+            ClassElement::StaticInitializer { body } => {
+                // Wrap the static block body in a function.
+                let func_data = FunctionData {
+                    name: None,
+                    source_text_start: body.range.start.offset,
+                    source_text_end: body.range.end.offset,
+                    body: body.clone(),
+                    parameters: Vec::new(),
+                    function_length: 0,
+                    kind: FunctionKind::Normal,
+                    is_strict_mode: gen.strict,
+                    is_arrow_function: false,
+                    parsing_insights: FunctionParsingInsights {
+                        uses_this: true,
+                        uses_this_from_environment: true,
+                        ..Default::default()
+                    },
+                    is_hoisted: false,
+                };
+                let sfd_index = emit_new_function(gen, &func_data, None) as i32;
+
                 element_keys.push(None);
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: 4u8, // StaticInitializer
@@ -2233,7 +2362,7 @@ fn generate_class_expression(
                     is_private: false,
                     private_identifier: std::ptr::null(),
                     private_identifier_len: 0,
-                    shared_function_data_index: -1,
+                    shared_function_data_index: sfd_index,
                     has_initializer: false,
                 });
             }
@@ -2275,23 +2404,23 @@ fn generate_class_expression(
         .map(|k| k.as_ref().map(|s| s.operand()))
         .collect();
 
-    // Emit NewClass instruction
-    let lhs_name = if !has_name {
-        // Anonymous class — allow lhs_name to provide the name
-        None
-    } else {
-        None
-    };
+    // Restore parent environment before emitting NewClass.
+    gen.emit(Instruction::SetLexicalEnvironment { environment: parent_env.operand() });
 
+    // Emit NewClass instruction
     gen.emit(Instruction::NewClass {
         dst: dst.operand(),
         super_class: super_class.as_ref().map(|s| s.operand()),
         class_environment: class_env.operand(),
         class_blueprint_index: blueprint_index,
-        lhs_name,
+        lhs_name: None,
         element_keys_count: element_key_ops.len() as u32,
         element_keys: element_key_ops,
     });
+
+    if has_private_env {
+        gen.emit(Instruction::LeavePrivateEnvironment);
+    }
 
     Some(dst)
 }
@@ -2331,6 +2460,16 @@ fn check_private_key(key: &Expr) -> (bool, Option<Vec<u16>>) {
         (true, Some(ident.name.clone()))
     } else {
         (false, None)
+    }
+}
+
+/// Get a pointer directly into the AST's PrivateIdentifier name.
+/// The pointer remains valid as long as the AST is alive.
+fn get_private_identifier_ptr(key: &Expr) -> (*const u16, usize) {
+    if let Expression::PrivateIdentifier(ident) = &key.inner {
+        (ident.name.as_ptr(), ident.name.len())
+    } else {
+        (std::ptr::null(), 0)
     }
 }
 
