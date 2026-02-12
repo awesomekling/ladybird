@@ -244,6 +244,10 @@ pub struct PrivateIdentifier {
 // Function support types
 // =============================================================================
 
+/// Parsing insights collected during function body parsing.
+///
+/// Without scope collector, these default to `false`. They'll be
+/// populated properly once the Rust scope collector is implemented.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FunctionParsingInsights {
     pub uses_this: bool,
@@ -608,6 +612,14 @@ impl ScopeData {
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
+            local_variables: Vec::new(),
+            function_scope_data: None,
+        }
+    }
+
+    pub fn with_children(children: Vec<Stmt>) -> Self {
+        Self {
+            children,
             local_variables: Vec::new(),
             function_scope_data: None,
         }

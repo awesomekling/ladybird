@@ -6,8 +6,10 @@
 
 //! # LibJS Rust Parser
 //!
-//! A JavaScript parser written in Rust that produces C++ AST nodes via FFI.
-//! It is a slot-in replacement for the C++ `Parser` class in LibJS.
+//! A JavaScript parser written in Rust that produces a Rust AST.
+//! Currently, the Rust AST cannot yet be consumed by the C++ bytecode
+//! generator, so this entry point always signals errors to cause the
+//! C++ caller (Script.cpp) to fall back to the C++ parser.
 //!
 //! ## Architecture
 //!
@@ -24,44 +26,9 @@
 //! ┌─────────────────────────────────────────────────────┐
 //! │  Parser (parser.rs + parser/*.rs)                   │
 //! │  Recursive descent with precedence climbing         │
-//! │  Calls AstBuilder to create C++ AST nodes           │
-//! │  Drives ScopeCollector for scope analysis           │
-//! └───────┬─────────────────────┬───────────────────────┘
-//!         │                     │
-//!         ▼                     ▼
-//! ┌───────────────┐   ┌─────────────────────────────────┐
-//! │  AstBuilder    │   │  ScopeCollector                 │
-//! │  (ast_bridge)  │   │  (scope_collector.rs)           │
-//! │  FFI to C++    │   │  Builds scope tree during parse │
-//! │  ASTFactory    │   │  Resolves identifiers after     │
-//! └───────┬────────┘   └─────────────────────────────────┘
-//!         │
-//!         ▼
-//! ┌─────────────────────────────────────────────────────┐
-//! │  C++ ASTFactory (ASTFactory.cpp)                    │
-//! │  Creates actual AST nodes (RefCounted C++ objects)  │
-//! │  Nodes have generate_bytecode() methods             │
+//! │  Builds Rust AST (ast.rs)                           │
 //! └─────────────────────────────────────────────────────┘
 //! ```
-//!
-//! ## Key design decisions
-//!
-//! - **Raw `extern "C"` FFI** rather than cxx, because the AK types
-//!   (Vector, Variant, NonnullRefPtr, Utf16FlyString) are too complex
-//!   for cxx bindings.
-//!
-//! - **No intermediate Rust AST.** The parser calls C++ factory functions
-//!   directly during parsing. AST nodes are created as C++ objects and
-//!   passed around as opaque `NodeHandle` pointers (`*mut c_void`).
-//!
-//! - **UTF-16 throughout.** Source code is received as `*const u16` and
-//!   string values are passed to the C++ factory the same way. The C++
-//!   side creates `Utf16FlyString` from these.
-//!
-//! - **Arena-based memory management.** The `AstBuilder` creates an arena
-//!   on the C++ side. All AST nodes created during parsing are ref-held
-//!   by the arena. The final Program node gets an extra ref before the
-//!   arena is destroyed, so it (and its tree) survive.
 //!
 //! ## Module overview
 //!
@@ -72,8 +39,9 @@
 //! - `parser/expressions.rs` — Expression parsing (precedence climbing)
 //! - `parser/statements.rs` — Statement parsing (if, for, while, etc.)
 //! - `parser/declarations.rs` — Functions, classes, variables, modules
-//! - `ast_bridge.rs` — Safe Rust wrappers around C++ factory FFI
-//! - `scope_collector.rs` — Scope analysis (identifier resolution, hoisting)
+//! - `ast.rs` — Rust AST type definitions
+//! - `ast_bridge.rs` — (Legacy) Safe Rust wrappers around C++ factory FFI
+//! - `scope_collector.rs` — (Legacy) Scope analysis
 
 /// Compile-time conversion of an ASCII string literal to `&'static [u16]`.
 ///
@@ -115,16 +83,19 @@ use std::ffi::c_void;
 
 /// Parse a JavaScript program from UTF-16 source code.
 ///
+/// The Rust parser now builds a Rust AST, which cannot yet be consumed
+/// by the C++ bytecode generator. This function always sets
+/// `out_has_errors = true` so that Script.cpp falls back to the C++
+/// parser. The Rust parser is still exercised (parsing runs to
+/// completion), which lets us verify it compiles and doesn't panic.
+///
 /// # Safety
 /// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
-/// - `source_code` must be a valid SourceCode C++ object pointer.
-/// - The returned NodeHandle is an opaque pointer to a C++ AST node owned by
-///   the arena inside the parser. The caller must keep the arena alive.
 #[no_mangle]
 pub unsafe extern "C" fn rust_parse_program(
     source: *const u16,
     source_len: usize,
-    source_code: *const c_void,
+    _source_code: *const c_void,
     program_type: u8,
     starts_in_strict_mode: bool,
     initiated_by_eval: bool,
@@ -140,7 +111,7 @@ pub unsafe extern "C" fn rust_parse_program(
     } else {
         ProgramType::Script
     };
-    let mut parser = Parser::new(source_slice, source_code, pt);
+    let mut parser = Parser::new(source_slice, pt);
     if initiated_by_eval {
         parser.initiated_by_eval = true;
         parser.in_eval_function_context = in_eval_function_context;
@@ -148,12 +119,14 @@ pub unsafe extern "C" fn rust_parse_program(
         parser.allow_super_constructor_call = allow_super_constructor_call;
         parser.in_class_field_initializer = in_class_field_initializer;
     }
-    let program = parser.parse_program(starts_in_strict_mode);
-    // Add an extra ref so the program node survives arena destruction.
-    // The C++ caller adopts this ref.
-    parser.builder.ref_node(program);
+
+    // Run the parser to build the Rust AST (exercises the parser code).
+    let _program = parser.parse_program(starts_in_strict_mode);
+
+    // Always signal errors so the C++ caller falls back to the C++ parser.
+    // The Rust AST is not yet bridged to C++ bytecode generation.
     if !out_has_errors.is_null() {
-        *out_has_errors = parser.has_errors();
+        *out_has_errors = true;
     }
-    program
+    std::ptr::null_mut()
 }
