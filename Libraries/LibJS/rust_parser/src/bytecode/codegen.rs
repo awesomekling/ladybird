@@ -259,17 +259,14 @@ pub fn generate_expr(
             } else {
                 gen.add_constant_undefined()
             };
-            let continuation = gen.make_block();
-            gen.emit(Instruction::Yield {
-                continuation_label: Some(Label(continuation as u32)),
-                value: value.operand(),
-            });
-            gen.switch_to_basic_block(continuation);
-            // After resuming, the received value is in the accumulator.
-            let dst = choose_dst(gen, preferred_dst);
-            let acc = gen.accumulator();
-            gen.emit_mov(&dst, &acc);
-            Some(dst)
+
+            if !gen.is_in_async_generator_function() {
+                // Regular generator: yield + completion protocol.
+                Some(generate_regular_yield(gen, value, preferred_dst))
+            } else {
+                // Async generator: full yield protocol.
+                Some(generate_async_generator_yield(gen, value, preferred_dst))
+            }
         }
 
         // === Await ===
@@ -497,9 +494,8 @@ pub fn generate_stmt(
         }
 
         // === Labelled ===
-        Statement::Labelled { label: _, item } => {
-            // Just generate the labelled statement's body
-            generate_stmt(item, gen, preferred_dst)
+        Statement::Labelled { label, item } => {
+            generate_labelled_statement(gen, label, item, preferred_dst)
         }
 
         // === Switch ===
@@ -537,8 +533,7 @@ pub fn generate_stmt(
 
         // === ForAwaitOf ===
         Statement::ForAwaitOf { lhs, rhs, body } => {
-            // Treat as for-of for now (async iteration needs more work)
-            generate_for_of_statement(gen, lhs, rhs, body, preferred_dst)
+            generate_for_await_of_statement(gen, lhs, rhs, body, preferred_dst)
         }
 
         // === UsingDeclaration ===
@@ -601,6 +596,31 @@ pub fn generate_stmt(
 /// - Normal: continue with the received value
 /// - Throw: re-throw the received value
 fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand {
+    let received_completion = gen.allocate_register();
+    let received_completion_type = gen.allocate_register();
+    let received_completion_value = gen.allocate_register();
+    generate_await_with_completions(
+        gen, argument,
+        &received_completion, &received_completion_type, &received_completion_value,
+    )
+}
+
+// Completion::Type constants matching C++ enum.
+const COMPLETION_TYPE_NORMAL: f64 = 1.0;
+const COMPLETION_TYPE_RETURN: f64 = 4.0;
+const COMPLETION_TYPE_THROW: f64 = 5.0;
+
+/// Like generate_await but uses caller-provided completion registers.
+///
+/// Returns the received_completion_value on the normal path.
+/// Emits a Throw on the throw path.
+fn generate_await_with_completions(
+    gen: &mut Generator,
+    argument: ScopedOperand,
+    received_completion: &ScopedOperand,
+    received_completion_type: &ScopedOperand,
+    received_completion_value: &ScopedOperand,
+) -> ScopedOperand {
     let continuation = gen.make_block();
     gen.emit(Instruction::Await {
         continuation_label: Label(continuation as u32),
@@ -608,23 +628,18 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
     });
     gen.switch_to_basic_block(continuation);
 
-    // The completion is in the accumulator after resuming.
-    let received_completion = gen.allocate_register();
-    let received_completion_type = gen.allocate_register();
-    let received_completion_value = gen.allocate_register();
     let acc = gen.accumulator();
-    gen.emit_mov(&received_completion, &acc);
+    gen.emit_mov(received_completion, &acc);
     gen.emit(Instruction::GetCompletionFields {
         type_dst: received_completion_type.operand(),
         value_dst: received_completion_value.operand(),
         completion: received_completion.operand(),
     });
 
-    // Check if completion type is normal (1 = Normal in C++ Completion::Type).
     let normal_block = gen.make_block();
     let throw_block = gen.make_block();
     let is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(1.0); // Completion::Type::Normal = 1
+    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
     gen.emit(Instruction::StrictlyEquals {
         dst: is_normal.operand(),
         lhs: received_completion_type.operand(),
@@ -636,15 +651,248 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
         false_target: Label(throw_block as u32),
     });
 
-    // Throw path: re-throw the received value.
     gen.switch_to_basic_block(throw_block);
     gen.emit(Instruction::Throw {
         src: received_completion_value.operand(),
     });
 
-    // Normal path: the value is the result.
     gen.switch_to_basic_block(normal_block);
-    received_completion_value
+    received_completion_value.clone()
+}
+
+/// Regular generator yield with completion protocol.
+///
+/// After the yield resumes, the accumulator contains a CompletionCell.
+/// We extract the completion type and value, then branch:
+/// - Normal: continue with the extracted value
+/// - Throw: throw the value
+/// - Return: yield the value without continuation (done)
+fn generate_regular_yield(
+    gen: &mut Generator,
+    value: ScopedOperand,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    let continuation = gen.make_block();
+    gen.emit(Instruction::Yield {
+        continuation_label: Some(Label(continuation as u32)),
+        value: value.operand(),
+    });
+    gen.switch_to_basic_block(continuation);
+
+    // Save the accumulator (CompletionCell) and extract type + value.
+    let received_completion = gen.allocate_register();
+    let received_completion_type = gen.allocate_register();
+    let received_completion_value = gen.allocate_register();
+    let acc = gen.accumulator();
+    gen.emit_mov(&received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+
+    // Check: type == Normal(1)?
+    let normal_block = gen.make_block();
+    let not_normal_block = gen.make_block();
+    let type_is_normal = gen.allocate_register();
+    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    gen.emit(Instruction::StrictlyEquals {
+        dst: type_is_normal.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: normal_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: type_is_normal.operand(),
+        true_target: Label(normal_block as u32),
+        false_target: Label(not_normal_block as u32),
+    });
+
+    // Not normal: check Throw(5) vs Return(4).
+    gen.switch_to_basic_block(not_normal_block);
+    let throw_block = gen.make_block();
+    let return_block = gen.make_block();
+    let type_is_throw = gen.allocate_register();
+    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    gen.emit(Instruction::StrictlyEquals {
+        dst: type_is_throw.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: throw_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: type_is_throw.operand(),
+        true_target: Label(throw_block as u32),
+        false_target: Label(return_block as u32),
+    });
+
+    // Throw block: throw the value.
+    gen.switch_to_basic_block(throw_block);
+    gen.emit(Instruction::Throw {
+        src: received_completion_value.operand(),
+    });
+
+    // Return block: yield the value without continuation (done).
+    gen.switch_to_basic_block(return_block);
+    gen.emit(Instruction::Yield {
+        continuation_label: None,
+        value: received_completion_value.operand(),
+    });
+
+    // Normal block: the yield expression evaluates to the extracted value.
+    gen.switch_to_basic_block(normal_block);
+    let dst = choose_dst(gen, preferred_dst);
+    gen.emit_mov(&dst, &received_completion_value);
+    dst
+}
+
+/// Full async generator yield protocol (AsyncGeneratorYield + UnwrapYieldResumption).
+///
+/// 1. Await the value before yielding
+/// 2. Yield the awaited value
+/// 3. On resume, handle AsyncGeneratorUnwrapYieldResumption:
+///    - If not return: jump to main continuation with the completion
+///    - If return: await the return value, then handle throw/normal
+/// 4. At main continuation, extract completion type/value
+/// 5. Normal → return value, Throw → throw, Return → yield-return
+fn generate_async_generator_yield(
+    gen: &mut Generator,
+    value: ScopedOperand,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    let received_completion = gen.allocate_register();
+    let received_completion_type = gen.allocate_register();
+    let received_completion_value = gen.allocate_register();
+
+    // Step 1: Await the value before yielding.
+    let awaited_value = generate_await_with_completions(
+        gen, value,
+        &received_completion, &received_completion_type, &received_completion_value,
+    );
+
+    // Step 2: Yield the awaited value.
+    let unwrap_block = gen.make_block();
+    gen.emit(Instruction::Yield {
+        continuation_label: Some(Label(unwrap_block as u32)),
+        value: awaited_value.operand(),
+    });
+    gen.switch_to_basic_block(unwrap_block);
+
+    // Step 3: AsyncGeneratorUnwrapYieldResumption.
+    // Get the completion from the accumulator.
+    let acc = gen.accumulator();
+    gen.emit_mov(&received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+
+    // If resumptionValue.[[Type]] is not return, jump to main continuation.
+    let main_continuation = gen.make_block();
+    let return_block = gen.make_block();
+    let is_not_return = gen.allocate_register();
+    let return_type = gen.add_constant_number(COMPLETION_TYPE_RETURN);
+    gen.emit(Instruction::StrictlyInequals {
+        dst: is_not_return.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: return_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_not_return.operand(),
+        true_target: Label(main_continuation as u32),
+        false_target: Label(return_block as u32),
+    });
+
+    // Return path: Await(resumptionValue.[[Value]]).
+    gen.switch_to_basic_block(return_block);
+    generate_await_with_completions(
+        gen, received_completion_value.clone(),
+        &received_completion, &received_completion_type, &received_completion_value,
+    );
+
+    // If awaited.[[Type]] is throw, jump to main continuation (which will handle it).
+    let awaited_normal_block = gen.make_block();
+    let is_throw = gen.allocate_register();
+    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_throw.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: throw_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_throw.operand(),
+        true_target: Label(main_continuation as u32),
+        false_target: Label(awaited_normal_block as u32),
+    });
+
+    // awaited.[[Type]] is normal: set type to Return and jump to main continuation.
+    gen.switch_to_basic_block(awaited_normal_block);
+    gen.emit(Instruction::SetCompletionType {
+        completion: received_completion.operand(),
+        completion_type: 4, // Completion::Type::Return
+    });
+    gen.emit(Instruction::Jump {
+        target: Label(main_continuation as u32),
+    });
+
+    // Step 4: Main continuation.
+    gen.switch_to_basic_block(main_continuation);
+    gen.emit_mov(&received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+
+    // Step 5: Check completion type.
+    let normal_cont = gen.make_block();
+    let throw_cont = gen.make_block();
+    let is_normal = gen.allocate_register();
+    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_normal.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: normal_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_normal.operand(),
+        true_target: Label(normal_cont as u32),
+        false_target: Label(throw_cont as u32),
+    });
+
+    // Throw/return path.
+    gen.switch_to_basic_block(throw_cont);
+    let return_value_block = gen.make_block();
+    let throw_value_block = gen.make_block();
+    let is_throw2 = gen.allocate_register();
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_throw2.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: throw_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_throw2.operand(),
+        true_target: Label(throw_value_block as u32),
+        false_target: Label(return_value_block as u32),
+    });
+
+    // Throw: re-throw the value.
+    gen.switch_to_basic_block(throw_value_block);
+    gen.emit(Instruction::Throw {
+        src: received_completion_value.operand(),
+    });
+
+    // Return: yield with no continuation (done).
+    gen.switch_to_basic_block(return_value_block);
+    gen.emit(Instruction::Yield {
+        continuation_label: None,
+        value: received_completion_value.operand(),
+    });
+
+    // Normal: return the value.
+    gen.switch_to_basic_block(normal_cont);
+    let dst = choose_dst(gen, preferred_dst);
+    gen.emit_mov(&dst, &received_completion_value);
+    dst
 }
 
 // =============================================================================
@@ -869,7 +1117,7 @@ fn generate_if_statement(
 
     gen.switch_to_basic_block(true_block);
     let _cons_result = generate_stmt(consequent, gen, preferred_dst);
-    if !gen.is_current_block_terminated() && has_alternate {
+    if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
             target: Label(end_block as u32),
         });
@@ -985,10 +1233,59 @@ fn generate_for_statement(
     body: &Stmt,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    // Check if init is a lexical declaration (let/const) with non-local variables.
+    // If so, we need to create a lexical environment for the loop variables and
+    // implement per-iteration copy semantics (CreatePerIterationEnvironment).
+    let mut has_lexical_environment = false;
+    let mut per_iteration_binding_names: Vec<Vec<u16>> = Vec::new();
+
+    if let Some(init) = init {
+        if let Statement::VariableDeclaration { kind, declarations } = &init.inner {
+            if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                let mut non_local_names: Vec<(Vec<u16>, bool)> = Vec::new();
+                for decl in declarations {
+                    collect_target_names(&decl.target, &mut non_local_names);
+                }
+                if !non_local_names.is_empty() {
+                    has_lexical_environment = true;
+                    let is_const = *kind == DeclarationKind::Const;
+
+                    // begin_variable_scope: CreateLexicalEnvironment
+                    let parent = gen.lexical_environment_register_stack.last().cloned()
+                        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                    let new_env = gen.allocate_register();
+                    gen.emit(Instruction::CreateLexicalEnvironment {
+                        dst: new_env.operand(),
+                        parent: parent.operand(),
+                        capacity: non_local_names.len() as u32,
+                    });
+                    gen.lexical_environment_register_stack.push(new_env);
+
+                    for (name, _) in &non_local_names {
+                        let id = gen.intern_identifier(name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: is_const,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                        if !is_const {
+                            per_iteration_binding_names.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Init
     if let Some(init) = init {
         generate_stmt(init, gen, None);
     }
+
+    // CreatePerIterationEnvironment after init (first iteration setup).
+    emit_per_iteration_bindings(gen, &per_iteration_binding_names);
 
     let test_block = gen.make_block();
     let body_block = gen.make_block();
@@ -1022,6 +1319,8 @@ fn generate_for_statement(
     gen.end_breakable_scope();
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
+        // CreatePerIterationEnvironment at end of each iteration.
+        emit_per_iteration_bindings(gen, &per_iteration_binding_names);
         gen.emit(Instruction::Jump {
             target: Label(update_block as u32),
         });
@@ -1039,7 +1338,71 @@ fn generate_for_statement(
     }
 
     gen.switch_to_basic_block(end_block);
+
+    // end_variable_scope: restore parent environment
+    if has_lexical_environment {
+        gen.lexical_environment_register_stack.pop();
+        if !gen.is_current_block_terminated() {
+            let parent = gen.lexical_environment_register_stack.last().cloned()
+                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        }
+    }
+
     None
+}
+
+/// Emit CreatePerIterationEnvironment: save current binding values, pop env,
+/// push new env, re-create variables, and re-initialize from saved values.
+/// This implements per-iteration lexical scoping for `for (let ...)` loops.
+fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Vec<u16>]) {
+    if bindings.is_empty() {
+        return;
+    }
+
+    // Save current values into registers.
+    let mut saved: Vec<(ScopedOperand, IdentifierTableIndex)> = Vec::with_capacity(bindings.len());
+    for name in bindings {
+        let id = gen.intern_identifier(name.clone());
+        let reg = gen.allocate_register();
+        gen.emit(Instruction::GetBinding {
+            dst: reg.operand(),
+            identifier: id,
+            cache: EnvironmentCoordinate::empty(),
+        });
+        saved.push((reg, id));
+    }
+
+    // Pop current environment (end_variable_scope).
+    gen.lexical_environment_register_stack.pop();
+    let parent = gen.lexical_environment_register_stack.last().cloned()
+        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+
+    // Push new environment (begin_variable_scope).
+    let new_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: new_env.operand(),
+        parent: parent.operand(),
+        capacity: bindings.len() as u32,
+    });
+    gen.lexical_environment_register_stack.push(new_env);
+
+    // Re-create variables and initialize from saved values.
+    for (reg, id) in &saved {
+        gen.emit(Instruction::CreateVariable {
+            identifier: *id,
+            mode: ENV_MODE_LEXICAL,
+            is_immutable: false,
+            is_global: false,
+            is_strict: false,
+        });
+        gen.emit(Instruction::InitializeLexicalBinding {
+            identifier: *id,
+            src: reg.operand(),
+            cache: EnvironmentCoordinate::empty(),
+        });
+    }
 }
 
 // =============================================================================
@@ -1195,8 +1558,16 @@ fn generate_variable_declaration(
                     }
                 }
             }
-            VariableDeclaratorTarget::BindingPattern(_pattern) => {
-                // Destructuring: full implementation in M4e
+            VariableDeclaratorTarget::BindingPattern(pattern) => {
+                if let Some(value) = init_value {
+                    let mode = match kind {
+                        DeclarationKind::Var => BindingMode::Set,
+                        DeclarationKind::Let | DeclarationKind::Const => {
+                            BindingMode::InitializeLexical
+                        }
+                    };
+                    generate_binding_pattern_bytecode(gen, pattern, mode, &value);
+                }
             }
         }
     }
@@ -1515,9 +1886,9 @@ fn generate_assignment_expression(
             let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
             Some(rhs_val)
         }
-        AssignmentLhs::Pattern(_pattern) => {
-            // Destructuring assignment: full implementation in M4e
+        AssignmentLhs::Pattern(pattern) => {
             let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+            generate_binding_pattern_bytecode(gen, pattern, BindingMode::Set, &rhs_val);
             Some(rhs_val)
         }
     }
@@ -1564,11 +1935,20 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
         gen.emit_mov(&local, value);
     } else {
         let id = gen.intern_identifier(ident.name.clone());
-        gen.emit(Instruction::SetVariableBinding {
-            identifier: id,
-            src: value.operand(),
-            cache: EnvironmentCoordinate::empty(),
-        });
+        let dk = ident.declaration_kind.get();
+        if dk == IdentDeclarationKind::Let || dk == IdentDeclarationKind::Const {
+            gen.emit(Instruction::SetLexicalBinding {
+                identifier: id,
+                src: value.operand(),
+                cache: EnvironmentCoordinate::empty(),
+            });
+        } else {
+            gen.emit(Instruction::SetVariableBinding {
+                identifier: id,
+                src: value.operand(),
+                cache: EnvironmentCoordinate::empty(),
+            });
+        }
     }
 }
 
@@ -2495,17 +2875,53 @@ fn for_in_of_needs_lexical_env(lhs: &ForInOfLhs) -> bool {
     if let ForInOfLhs::Declaration(stmt) = lhs {
         if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
             if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                let mut names = Vec::new();
                 for decl in declarations {
-                    if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                        if !ident.is_local() {
-                            return true;
-                        }
-                    }
+                    collect_target_names(&decl.target, &mut names);
                 }
+                return !names.is_empty();
             }
         }
     }
     false
+}
+
+/// Collect all non-local binding names from a variable declarator target.
+fn collect_target_names(target: &VariableDeclaratorTarget, names: &mut Vec<(Vec<u16>, bool)>) {
+    match target {
+        VariableDeclaratorTarget::Identifier(ident) => {
+            if !ident.is_local() {
+                names.push((ident.name.clone(), false));
+            }
+        }
+        VariableDeclaratorTarget::BindingPattern(pattern) => {
+            collect_pattern_binding_names(pattern, names);
+        }
+    }
+}
+
+/// Collect all non-local binding names from a binding pattern (recursive).
+fn collect_pattern_binding_names(pattern: &BindingPattern, names: &mut Vec<(Vec<u16>, bool)>) {
+    for entry in &pattern.entries {
+        match &entry.alias {
+            BindingEntryAlias::Identifier(ident) => {
+                if !ident.is_local() {
+                    names.push((ident.name.clone(), false));
+                }
+            }
+            BindingEntryAlias::BindingPattern(sub) => {
+                collect_pattern_binding_names(sub, names);
+            }
+            BindingEntryAlias::Empty => {
+                if let BindingEntryName::Identifier(ident) = &entry.name {
+                    if !ident.is_local() {
+                        names.push((ident.name.clone(), false));
+                    }
+                }
+            }
+            BindingEntryAlias::MemberExpression(_) => {}
+        }
+    }
 }
 
 /// Create a per-iteration lexical environment for for-in/for-of `let`/`const` declarations.
@@ -2513,33 +2929,37 @@ fn for_in_of_needs_lexical_env(lhs: &ForInOfLhs) -> bool {
 fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> ScopedOperand {
     let parent = gen.lexical_environment_register_stack.last().cloned()
         .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+
+    // Collect all binding names to determine capacity.
+    let mut binding_names: Vec<(Vec<u16>, bool)> = Vec::new();
+    let mut is_constant = false;
+    if let ForInOfLhs::Declaration(stmt) = lhs {
+        if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
+            is_constant = *kind == DeclarationKind::Const;
+            for decl in declarations {
+                collect_target_names(&decl.target, &mut binding_names);
+            }
+        }
+    }
+
     let new_env = gen.allocate_register();
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: new_env.operand(),
         parent: parent.operand(),
-        capacity: 1,
+        capacity: binding_names.len().max(1) as u32,
     });
     gen.lexical_environment_register_stack.push(new_env);
 
-    // Create the variable binding in the new environment.
-    if let ForInOfLhs::Declaration(stmt) = lhs {
-        if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
-            let is_constant = *kind == DeclarationKind::Const;
-            for decl in declarations {
-                if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                    if !ident.is_local() {
-                        let id = gen.intern_identifier(ident.name.clone());
-                        gen.emit(Instruction::CreateVariable {
-                            identifier: id,
-                            mode: ENV_MODE_LEXICAL,
-                            is_immutable: is_constant,
-                            is_global: false,
-                            is_strict: is_constant,
-                        });
-                    }
-                }
-            }
-        }
+    // Create variable bindings in the new environment.
+    for (name, _) in &binding_names {
+        let id = gen.intern_identifier(name.clone());
+        gen.emit(Instruction::CreateVariable {
+            identifier: id,
+            mode: ENV_MODE_LEXICAL,
+            is_immutable: is_constant,
+            is_global: false,
+            is_strict: is_constant,
+        });
     }
 
     parent
@@ -2670,6 +3090,58 @@ fn generate_for_in_statement(
 }
 
 // =============================================================================
+// Labelled statement
+// =============================================================================
+
+fn generate_labelled_statement(
+    gen: &mut Generator,
+    label: &[u16],
+    item: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    // Collect all labels from nested Labelled statements.
+    let mut labels = vec![label.to_vec()];
+    let mut inner = item;
+    while let Statement::Labelled { label: next_label, item: next_item } = &inner.inner {
+        labels.push(next_label.clone());
+        inner = next_item;
+    }
+
+    // For iteration/switch statements, set pending_labels so that
+    // begin_breakable_scope/begin_continuable_scope pick them up.
+    let is_iteration_or_switch = matches!(
+        &inner.inner,
+        Statement::For { .. }
+            | Statement::ForOf { .. }
+            | Statement::ForIn { .. }
+            | Statement::ForAwaitOf { .. }
+            | Statement::While { .. }
+            | Statement::DoWhile { .. }
+            | Statement::Switch(_)
+    );
+
+    if is_iteration_or_switch {
+        let prev_labels = std::mem::replace(&mut gen.pending_labels, labels);
+        let result = generate_stmt(inner, gen, preferred_dst);
+        gen.pending_labels = prev_labels;
+        result
+    } else {
+        // Non-iteration: wrap in a breakable scope so `break label;` works.
+        let end_block = gen.make_block();
+        gen.begin_breakable_scope(Label(end_block as u32), labels);
+        let result = generate_stmt(inner, gen, preferred_dst);
+        gen.end_breakable_scope();
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+        }
+        gen.switch_to_basic_block(end_block);
+        result
+    }
+}
+
+// =============================================================================
 // For-of statement
 // =============================================================================
 
@@ -2776,6 +3248,123 @@ fn generate_for_of_statement(
     None
 }
 
+fn generate_for_await_of_statement(
+    gen: &mut Generator,
+    lhs: &ForInOfLhs,
+    rhs: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let end_block = gen.make_block();
+    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
+
+    // GetIterator with Async hint
+    let iterator_object = gen.allocate_register();
+    let iterator_next_method = gen.allocate_register();
+    let iterator_done = gen.allocate_register();
+    gen.emit(Instruction::GetIterator {
+        dst_iterator_object: iterator_object.operand(),
+        dst_iterator_next: iterator_next_method.operand(),
+        dst_iterator_done: iterator_done.operand(),
+        iterable: object.operand(),
+        hint: 1, // Async
+    });
+
+    let update_block = gen.make_block();
+    let loop_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(update_block as u32),
+    });
+
+    // Update: call .next(), await the result, extract done/value
+    gen.switch_to_basic_block(update_block);
+
+    // a. Let nextResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]]).
+    let next_result = gen.allocate_register();
+    gen.emit(Instruction::IteratorNext {
+        dst: next_result.operand(),
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next_method.operand(),
+        iterator_done: iterator_done.operand(),
+    });
+
+    // b. Set nextResult to ? Await(nextResult).
+    let awaited_result = generate_await(gen, next_result);
+
+    // c. If Type(nextResult) is not Object, throw a TypeError exception.
+    gen.emit(Instruction::ThrowIfNotObject {
+        src: awaited_result.operand(),
+    });
+
+    // d. Let done be ? IteratorComplete(nextResult).
+    let done = gen.allocate_register();
+    emit_get_by_id(gen, &done, &awaited_result, utf16!("done"), None);
+
+    let loop_continue_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(end_block as u32),
+        false_target: Label(loop_continue_block as u32),
+    });
+    gen.switch_to_basic_block(loop_continue_block);
+
+    // f. Let nextValue be ? IteratorValue(nextResult).
+    let next_value = gen.allocate_register();
+    emit_get_by_id(gen, &next_value, &awaited_result, utf16!("value"), None);
+
+    // Create per-iteration lexical environment for let/const declarations.
+    let parent_env = if needs_lexical_env {
+        Some(create_for_in_of_lexical_env(gen, lhs))
+    } else {
+        None
+    };
+
+    // Assign to LHS
+    assign_to_for_in_of_lhs(gen, lhs, &next_value);
+
+    gen.emit(Instruction::Jump {
+        target: Label(loop_block as u32),
+    });
+
+    // Body
+    gen.switch_to_basic_block(loop_block);
+    let (break_target, continue_target) = if needs_lexical_env {
+        (gen.make_block(), gen.make_block())
+    } else {
+        (end_block, update_block)
+    };
+    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
+    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
+    generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+
+    if needs_lexical_env {
+        let parent = parent_env.as_ref().unwrap();
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
+        gen.lexical_environment_register_stack.pop();
+
+        gen.switch_to_basic_block(break_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+
+        gen.switch_to_basic_block(continue_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+    } else {
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
 fn assign_to_for_in_of_lhs(
     gen: &mut Generator,
     lhs: &ForInOfLhs,
@@ -2786,34 +3375,18 @@ fn assign_to_for_in_of_lhs(
             // The declaration is a VariableDeclaration with a single declarator
             if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
                 if let Some(decl) = declarations.first() {
-                    if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                        if ident.is_local() {
-                            let local_index = ident.local_index.get();
-                            let local = match ident.local_type.get() {
-                                LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-                                LocalType::Variable => gen.local(local_index),
-                                LocalType::None => unreachable!(),
-                            };
-                            gen.emit_mov(&local, value);
-                            gen.mark_local_initialized(local_index);
-                        } else {
-                            let id = gen.intern_identifier(ident.name.clone());
-                            match kind {
-                                DeclarationKind::Var => {
-                                    gen.emit(Instruction::InitializeVariableBinding {
-                                        identifier: id,
-                                        src: value.operand(),
-                                        cache: EnvironmentCoordinate::empty(),
-                                    });
-                                }
-                                DeclarationKind::Let | DeclarationKind::Const => {
-                                    gen.emit(Instruction::InitializeLexicalBinding {
-                                        identifier: id,
-                                        src: value.operand(),
-                                        cache: EnvironmentCoordinate::empty(),
-                                    });
-                                }
-                            }
+                    let mode = match kind {
+                        DeclarationKind::Var => BindingMode::InitializeVariable,
+                        DeclarationKind::Let | DeclarationKind::Const => {
+                            BindingMode::InitializeLexical
+                        }
+                    };
+                    match &decl.target {
+                        VariableDeclaratorTarget::Identifier(ident) => {
+                            emit_set_variable_with_mode(gen, ident, value, mode);
+                        }
+                        VariableDeclaratorTarget::BindingPattern(pattern) => {
+                            generate_binding_pattern_bytecode(gen, pattern, mode, value);
                         }
                     }
                 }
@@ -2822,10 +3395,373 @@ fn assign_to_for_in_of_lhs(
         ForInOfLhs::Expression(expr) => {
             emit_store_to_reference(gen, expr, value);
         }
-        ForInOfLhs::Pattern(_pattern) => {
-            // Destructuring pattern in for-in/of
-            // TODO: implement destructuring
+        ForInOfLhs::Pattern(pattern) => {
+            generate_binding_pattern_bytecode(gen, pattern, BindingMode::Set, value);
         }
+    }
+}
+
+// =============================================================================
+// Binding pattern destructuring
+// =============================================================================
+
+/// Whether we are initializing a new binding or setting an existing one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindingMode {
+    /// `const` or `let` declarations: emit InitializeLexicalBinding.
+    InitializeLexical,
+    /// `var` declarations: emit InitializeVariableBinding.
+    InitializeVariable,
+    /// Assignment expressions: emit SetVariableBinding.
+    Set,
+}
+
+fn generate_binding_pattern_bytecode(
+    gen: &mut Generator,
+    pattern: &BindingPattern,
+    mode: BindingMode,
+    input_value: &ScopedOperand,
+) {
+    match pattern.kind {
+        BindingPatternKind::Array => {
+            generate_array_binding_pattern(gen, pattern, mode, input_value);
+        }
+        BindingPatternKind::Object => {
+            generate_object_binding_pattern(gen, pattern, mode, input_value);
+        }
+    }
+}
+
+fn emit_set_variable_with_mode(
+    gen: &mut Generator,
+    ident: &Identifier,
+    value: &ScopedOperand,
+    mode: BindingMode,
+) {
+    if ident.is_local() {
+        let local_index = ident.local_index.get();
+        let local = match ident.local_type.get() {
+            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+            LocalType::Variable => gen.local(local_index),
+            LocalType::None => unreachable!(),
+        };
+        gen.emit_mov(&local, value);
+        if mode != BindingMode::Set {
+            gen.mark_local_initialized(local_index);
+        }
+    } else {
+        let id = gen.intern_identifier(ident.name.clone());
+        match mode {
+            BindingMode::InitializeLexical => {
+                gen.emit(Instruction::InitializeLexicalBinding {
+                    identifier: id,
+                    src: value.operand(),
+                    cache: EnvironmentCoordinate::empty(),
+                });
+            }
+            BindingMode::InitializeVariable => {
+                gen.emit(Instruction::InitializeVariableBinding {
+                    identifier: id,
+                    src: value.operand(),
+                    cache: EnvironmentCoordinate::empty(),
+                });
+            }
+            BindingMode::Set => {
+                gen.emit(Instruction::SetVariableBinding {
+                    identifier: id,
+                    src: value.operand(),
+                    cache: EnvironmentCoordinate::empty(),
+                });
+            }
+        }
+    }
+}
+
+fn assign_binding_entry_alias(
+    gen: &mut Generator,
+    entry: &BindingEntry,
+    value: &ScopedOperand,
+    mode: BindingMode,
+) {
+    match &entry.alias {
+        BindingEntryAlias::Empty => {
+            // Name IS the binding target (e.g., `{ x }` or array element).
+            if let BindingEntryName::Identifier(ident) = &entry.name {
+                emit_set_variable_with_mode(gen, ident, value, mode);
+            }
+        }
+        BindingEntryAlias::Identifier(ident) => {
+            emit_set_variable_with_mode(gen, ident, value, mode);
+        }
+        BindingEntryAlias::BindingPattern(sub_pattern) => {
+            generate_binding_pattern_bytecode(gen, sub_pattern, mode, value);
+        }
+        BindingEntryAlias::MemberExpression(expr) => {
+            emit_store_to_reference(gen, expr, value);
+        }
+    }
+}
+
+fn generate_array_binding_pattern(
+    gen: &mut Generator,
+    pattern: &BindingPattern,
+    mode: BindingMode,
+    input_array: &ScopedOperand,
+) {
+    let is_exhausted = gen.allocate_register();
+    let false_val = gen.add_constant_boolean(false);
+    gen.emit_mov(&is_exhausted, &false_val);
+
+    let iterator_object = gen.allocate_register();
+    let iterator_next = gen.allocate_register();
+    let iterator_done = gen.allocate_register();
+    gen.emit(Instruction::GetIterator {
+        dst_iterator_object: iterator_object.operand(),
+        dst_iterator_next: iterator_next.operand(),
+        dst_iterator_done: iterator_done.operand(),
+        iterable: input_array.operand(),
+        hint: 0, // Sync
+    });
+
+    let mut first = true;
+    for entry in &pattern.entries {
+        if entry.is_rest {
+            // Rest element: collect remaining into array.
+            let value = gen.allocate_register();
+            if first {
+                gen.emit(Instruction::IteratorToArray {
+                    dst: value.operand(),
+                    iterator_object: iterator_object.operand(),
+                    iterator_next_method: iterator_next.operand(),
+                    iterator_done_property: iterator_done.operand(),
+                });
+            } else {
+                let if_exhausted = gen.make_block();
+                let if_not_exhausted = gen.make_block();
+                let continuation = gen.make_block();
+
+                gen.emit(Instruction::JumpIf {
+                    condition: is_exhausted.operand(),
+                    true_target: Label(if_exhausted as u32),
+                    false_target: Label(if_not_exhausted as u32),
+                });
+
+                gen.switch_to_basic_block(if_exhausted);
+                gen.emit(Instruction::NewArray {
+                    dst: value.operand(),
+                    element_count: 0,
+                    elements: Vec::new(),
+                });
+                gen.emit(Instruction::Jump {
+                    target: Label(continuation as u32),
+                });
+
+                gen.switch_to_basic_block(if_not_exhausted);
+                gen.emit(Instruction::IteratorToArray {
+                    dst: value.operand(),
+                    iterator_object: iterator_object.operand(),
+                    iterator_next_method: iterator_next.operand(),
+                    iterator_done_property: iterator_done.operand(),
+                });
+                gen.emit(Instruction::Jump {
+                    target: Label(continuation as u32),
+                });
+
+                gen.switch_to_basic_block(continuation);
+            }
+
+            assign_binding_entry_alias(gen, entry, &value, mode);
+            return; // rest consumes the iterator
+        }
+
+        // For elisions (BindingEntryName::Empty), we still advance the iterator
+        // but don't bind anything.
+        let is_elision = matches!(entry.name, BindingEntryName::Empty)
+            && matches!(entry.alias, BindingEntryAlias::Empty);
+
+        let exhausted_block = gen.make_block();
+
+        if !first {
+            let not_exhausted_block = gen.make_block();
+            gen.emit(Instruction::JumpIf {
+                condition: is_exhausted.operand(),
+                true_target: Label(exhausted_block as u32),
+                false_target: Label(not_exhausted_block as u32),
+            });
+            gen.switch_to_basic_block(not_exhausted_block);
+        }
+
+        let value = gen.allocate_register();
+        gen.emit(Instruction::IteratorNextUnpack {
+            dst_value: value.operand(),
+            dst_done: is_exhausted.operand(),
+            iterator_object: iterator_object.operand(),
+            iterator_next: iterator_next.operand(),
+            iterator_done: iterator_done.operand(),
+        });
+
+        // Check if iterator got exhausted by this step.
+        let no_bail_block = gen.make_block();
+        gen.emit(Instruction::JumpIf {
+            condition: is_exhausted.operand(),
+            true_target: Label(exhausted_block as u32),
+            false_target: Label(no_bail_block as u32),
+        });
+
+        gen.switch_to_basic_block(no_bail_block);
+        let create_binding_block = gen.make_block();
+        gen.emit(Instruction::Jump {
+            target: Label(create_binding_block as u32),
+        });
+
+        // Exhausted: load undefined.
+        gen.switch_to_basic_block(exhausted_block);
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&value, &undef);
+        gen.emit(Instruction::Jump {
+            target: Label(create_binding_block as u32),
+        });
+
+        gen.switch_to_basic_block(create_binding_block);
+
+        // Handle default initializer.
+        if let Some(ref initializer) = entry.initializer {
+            let if_undefined = gen.make_block();
+            let if_not_undefined = gen.make_block();
+            gen.emit(Instruction::JumpUndefined {
+                condition: value.operand(),
+                true_target: Label(if_undefined as u32),
+                false_target: Label(if_not_undefined as u32),
+            });
+            gen.switch_to_basic_block(if_undefined);
+            if let Some(default_value) = generate_expr(initializer, gen, None) {
+                gen.emit_mov(&value, &default_value);
+            }
+            gen.emit(Instruction::Jump {
+                target: Label(if_not_undefined as u32),
+            });
+            gen.switch_to_basic_block(if_not_undefined);
+        }
+
+        if !is_elision {
+            assign_binding_entry_alias(gen, entry, &value, mode);
+        }
+
+        first = false;
+    }
+
+    // Close iterator if not exhausted.
+    let done_block = gen.make_block();
+    let not_done_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: is_exhausted.operand(),
+        true_target: Label(done_block as u32),
+        false_target: Label(not_done_block as u32),
+    });
+    gen.switch_to_basic_block(not_done_block);
+    let undef = gen.add_constant_undefined();
+    gen.emit(Instruction::IteratorClose {
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next.operand(),
+        iterator_done: iterator_done.operand(),
+        completion_type: COMPLETION_TYPE_NORMAL as u32,
+        completion_value: undef.operand(),
+    });
+    gen.emit(Instruction::Jump {
+        target: Label(done_block as u32),
+    });
+    gen.switch_to_basic_block(done_block);
+}
+
+fn generate_object_binding_pattern(
+    gen: &mut Generator,
+    pattern: &BindingPattern,
+    mode: BindingMode,
+    object: &ScopedOperand,
+) {
+    gen.emit(Instruction::ThrowIfNullish {
+        src: object.operand(),
+    });
+
+    let mut excluded_names: Vec<ScopedOperand> = Vec::new();
+    let has_rest = pattern
+        .entries
+        .last()
+        .map_or(false, |e| e.is_rest);
+
+    for entry in &pattern.entries {
+        if entry.is_rest {
+            // Rest element: copy object excluding already-destructured properties.
+            let copy = gen.allocate_register();
+            gen.emit(Instruction::CopyObjectExcludingProperties {
+                dst: copy.operand(),
+                from_object: object.operand(),
+                excluded_names_count: excluded_names.len() as u32,
+                excluded_names: excluded_names.iter().map(|o| o.operand()).collect(),
+            });
+            assign_binding_entry_alias(gen, entry, &copy, mode);
+            return;
+        }
+
+        let value = gen.allocate_register();
+
+        match &entry.name {
+            BindingEntryName::Identifier(ident) => {
+                let key = gen.intern_property_key(ident.name.clone());
+                let cache_index = gen.next_property_lookup_cache();
+                gen.emit(Instruction::GetById {
+                    dst: value.operand(),
+                    base: object.operand(),
+                    property: key,
+                    cache_index,
+                    base_identifier: None,
+                });
+                if has_rest {
+                    let name_val = gen.add_constant_string(ident.name.clone());
+                    excluded_names.push(name_val);
+                }
+            }
+            BindingEntryName::Expression(expr) => {
+                let property_name = generate_expr(expr, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                if has_rest {
+                    let excluded_name = gen.allocate_register();
+                    gen.emit_mov(&excluded_name, &property_name);
+                    excluded_names.push(excluded_name);
+                }
+                gen.emit(Instruction::GetByValue {
+                    dst: value.operand(),
+                    base: object.operand(),
+                    property: property_name.operand(),
+                    base_identifier: None,
+                });
+            }
+            BindingEntryName::Empty => {
+                // Should not happen for object patterns
+                continue;
+            }
+        }
+
+        // Handle default initializer.
+        if let Some(ref initializer) = entry.initializer {
+            let if_undefined = gen.make_block();
+            let if_not_undefined = gen.make_block();
+            gen.emit(Instruction::JumpUndefined {
+                condition: value.operand(),
+                true_target: Label(if_undefined as u32),
+                false_target: Label(if_not_undefined as u32),
+            });
+            gen.switch_to_basic_block(if_undefined);
+            if let Some(default_value) = generate_expr(initializer, gen, None) {
+                gen.emit_mov(&value, &default_value);
+            }
+            gen.emit(Instruction::Jump {
+                target: Label(if_not_undefined as u32),
+            });
+            gen.switch_to_basic_block(if_not_undefined);
+        }
+
+        assign_binding_entry_alias(gen, entry, &value, mode);
     }
 }
 
@@ -3287,8 +4223,14 @@ pub fn emit_function_declaration_instantiation(
                     }
                 }
             }
-            FunctionParameterBinding::BindingPattern(_pattern) => {
-                // TODO: Binding pattern parameter initialization
+            FunctionParameterBinding::BindingPattern(pattern) => {
+                let arg = gen.scoped_operand(Operand::argument(param_idx));
+                let mode = if has_duplicates {
+                    BindingMode::Set
+                } else {
+                    BindingMode::InitializeLexical
+                };
+                generate_binding_pattern_bytecode(gen, pattern, mode, &arg);
             }
         }
     }
@@ -3413,17 +4355,17 @@ pub fn emit_function_declaration_instantiation(
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                     let is_constant = *kind == DeclarationKind::Const;
                     for decl in declarations {
-                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                            if !ident.is_local() {
-                                let id = gen.intern_identifier(ident.name.clone());
-                                gen.emit(Instruction::CreateVariable {
-                                    identifier: id,
-                                    mode: ENV_MODE_LEXICAL,
-                                    is_immutable: is_constant,
-                                    is_global: false,
-                                    is_strict: is_constant,
-                                });
-                            }
+                        let mut names = Vec::new();
+                        collect_target_names(&decl.target, &mut names);
+                        for (name, _) in names {
+                            let id = gen.intern_identifier(name);
+                            gen.emit(Instruction::CreateVariable {
+                                identifier: id,
+                                mode: ENV_MODE_LEXICAL,
+                                is_immutable: is_constant,
+                                is_global: false,
+                                is_strict: is_constant,
+                            });
                         }
                     }
                 }
@@ -3495,10 +4437,10 @@ fn has_non_local_lexical_decls(scope: &ScopeData) -> bool {
             Statement::VariableDeclaration { kind, declarations } => {
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                     for decl in declarations {
-                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                            if !ident.is_local() {
-                                return true;
-                            }
+                        let mut names = Vec::new();
+                        collect_target_names(&decl.target, &mut names);
+                        if !names.is_empty() {
+                            return true;
                         }
                     }
                 }

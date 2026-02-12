@@ -162,6 +162,7 @@ pub struct Generator {
     pub boundaries: Vec<BlockBoundaryType>,
     pub continuable_scopes: Vec<LabelableScope>,
     pub breakable_scopes: Vec<LabelableScope>,
+    pub pending_labels: Vec<Vec<u16>>,
     pub lexical_environment_register_stack: Vec<ScopedOperand>,
     pub home_objects: Vec<ScopedOperand>,
 
@@ -245,6 +246,7 @@ impl Generator {
             boundaries: Vec::new(),
             continuable_scopes: Vec::new(),
             breakable_scopes: Vec::new(),
+            pending_labels: Vec::new(),
             lexical_environment_register_stack: Vec::new(),
             home_objects: Vec::new(),
             current_finally_context: None,
@@ -301,6 +303,10 @@ impl Generator {
 
     pub fn is_in_async_function(&self) -> bool {
         matches!(self.enclosing_function_kind, FunctionKind::Async | FunctionKind::AsyncGenerator)
+    }
+
+    pub fn is_in_async_generator_function(&self) -> bool {
+        self.enclosing_function_kind == FunctionKind::AsyncGenerator
     }
 
     pub fn is_in_generator_or_async_function(&self) -> bool {
@@ -507,6 +513,7 @@ impl Generator {
         self.basic_blocks[index].terminated
     }
 
+    /// Dump all basic blocks and their instructions to a writer (for debugging).
     // --- Instruction emission ---
 
     /// Emit an instruction to the current basic block.
@@ -578,7 +585,8 @@ impl Generator {
 
     // --- Break/continue scope management ---
 
-    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+    pub fn begin_breakable_scope(&mut self, target: Label, mut label_set: Vec<Vec<u16>>) {
+        label_set.extend(self.pending_labels.iter().cloned());
         self.breakable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
@@ -590,7 +598,8 @@ impl Generator {
         self.breakable_scopes.pop();
     }
 
-    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+    pub fn begin_continuable_scope(&mut self, target: Label, mut label_set: Vec<Vec<u16>>) {
+        label_set.extend(self.pending_labels.iter().cloned());
         self.continuable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
