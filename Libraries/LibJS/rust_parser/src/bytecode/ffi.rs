@@ -29,9 +29,9 @@ struct FFISourceMapEntry {
 }
 
 #[repr(C)]
-struct FFIUtf16Slice {
-    data: *const u16,
-    length: usize,
+pub struct FFIUtf16Slice {
+    pub data: *const u16,
+    pub length: usize,
 }
 
 #[repr(C)]
@@ -78,6 +78,9 @@ extern "C" {
         shared_function_data_count: usize,
         class_blueprints: *const *mut c_void,
         class_blueprint_count: usize,
+        regex_patterns: *const FFIUtf16Slice,
+        regex_flags: *const FFIUtf16Slice,
+        regex_count: usize,
     ) -> *mut c_void;
 
     pub fn rust_create_shared_function_data(
@@ -88,6 +91,24 @@ extern "C" {
         name: *const u16,
         name_len: usize,
         strict_mode: bool,
+    ) -> *mut c_void;
+
+    pub fn rust_create_sfd(
+        vm_ptr: *mut c_void,
+        source_code_ptr: *const c_void,
+        name: *const u16,
+        name_len: usize,
+        function_kind: u8,
+        function_length: i32,
+        formal_parameter_count: u32,
+        strict: bool,
+        is_arrow: bool,
+        has_simple_parameter_list: bool,
+        param_names: *const FFIUtf16Slice,
+        param_name_count: usize,
+        source_text: *const u16,
+        source_text_len: usize,
+        rust_function_ast: *mut c_void,
     ) -> *mut c_void;
 
     pub fn rust_create_class_blueprint(
@@ -220,6 +241,24 @@ pub unsafe fn create_executable(
     // Collect class blueprint pointers
     let bp_ptrs: Vec<*mut c_void> = gen.class_blueprints.clone();
 
+    // Build regex table slices
+    let regex_pattern_slices: Vec<FFIUtf16Slice> = gen
+        .regex_table
+        .iter()
+        .map(|(pattern, _)| FFIUtf16Slice {
+            data: pattern.as_ptr(),
+            length: pattern.len(),
+        })
+        .collect();
+    let regex_flags_slices: Vec<FFIUtf16Slice> = gen
+        .regex_table
+        .iter()
+        .map(|(_, flags)| FFIUtf16Slice {
+            data: flags.as_ptr(),
+            length: flags.len(),
+        })
+        .collect();
+
     rust_create_executable(
         vm_ptr,
         source_code_ptr,
@@ -252,5 +291,8 @@ pub unsafe fn create_executable(
         sfd_ptrs.len(),
         bp_ptrs.as_ptr(),
         bp_ptrs.len(),
+        regex_pattern_slices.as_ptr(),
+        regex_flags_slices.as_ptr(),
+        regex_pattern_slices.len(),
     )
 }

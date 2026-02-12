@@ -217,6 +217,16 @@ pub unsafe extern "C" fn rust_compile_program(
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
+    // Initialize the lexical environment register.
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
+    }
+
     let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
 
     if !gen.is_current_block_terminated() {
@@ -231,4 +241,191 @@ pub unsafe extern "C" fn rust_compile_program(
 
     // Create C++ Executable via FFI
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
+}
+
+/// Free a Rust `Box<FunctionData>` stored in a C++ SharedFunctionInstanceData.
+///
+/// Called from the SFD's `finalize()` or `clear_compile_inputs()` when the
+/// Rust AST is no longer needed.
+///
+/// # Safety
+/// `ast` must be a valid pointer returned by `Box::into_raw(Box<FunctionData>)`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
+    if !ast.is_null() {
+        drop(Box::from_raw(ast as *mut ast::FunctionData));
+    }
+}
+
+/// Compile a function body using the Rust pipeline.
+///
+/// Takes ownership of the Rust `Box<FunctionData>` and compiles it into a
+/// C++ `Bytecode::Executable`. Also populates FDI runtime metadata on the
+/// `SharedFunctionInstanceData`.
+///
+/// # Safety
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `sfd_ptr` must be a valid `JS::SharedFunctionInstanceData*`.
+/// - `rust_function_ast` must be a valid `Box<FunctionData>` pointer.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_function(
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    source: *const u16,
+    source_len: usize,
+    sfd_ptr: *mut c_void,
+    rust_function_ast: *mut c_void,
+) -> *mut c_void {
+    let func_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
+
+    // Extract local variables from the function body's scope data.
+    let body_scope = match &func_data.body.inner {
+        Statement::FunctionBody { ref scope, .. } => Some(scope),
+        _ => None,
+    };
+
+    let mut gen = bytecode::generator::Generator::new();
+    gen.strict = func_data.is_strict_mode;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
+    gen.enclosing_function_kind = match func_data.kind {
+        ast::FunctionKind::Normal => bytecode::generator::FunctionKind::Normal,
+        ast::FunctionKind::Generator => bytecode::generator::FunctionKind::Generator,
+        ast::FunctionKind::Async => bytecode::generator::FunctionKind::Async,
+        ast::FunctionKind::AsyncGenerator => bytecode::generator::FunctionKind::AsyncGenerator,
+    };
+
+    if let Some(scope) = body_scope {
+        gen.local_variables = scope.local_variables.iter().map(|lv| {
+            bytecode::generator::LocalVariable {
+                name: lv.name.clone(),
+                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+                is_initialized_during_declaration_instantiation: false,
+            }
+        }).collect();
+    }
+
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Initialize the lexical environment register (like C++ ensure_lexical_environment_register_initialized).
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
+    }
+
+    // Emit FDI (FunctionDeclarationInstantiation) bytecode.
+    if let Some(scope) = body_scope {
+        bytecode::codegen::emit_function_declaration_instantiation(
+            &mut gen, &func_data, scope,
+        );
+    }
+
+    // For async and generator functions, emit an initial Yield suspension point.
+    // The runtime resumes from here on the first call to .next() / await.
+    if gen.is_in_generator_or_async_function() {
+        let start_block = gen.make_block();
+        let undef = gen.add_constant_undefined();
+        gen.emit(bytecode::instruction::Instruction::Yield {
+            continuation_label: Some(bytecode::operand::Label(start_block as u32)),
+            value: undef.operand(),
+        });
+        gen.switch_to_basic_block(start_block);
+    }
+
+    // Generate bytecode for the function body.
+    let _result = bytecode::codegen::generate_stmt(&func_data.body, &mut gen, None);
+
+    if !gen.is_current_block_terminated() {
+        let undef = gen.add_constant_undefined();
+        if gen.is_in_generator_or_async_function() {
+            // Generator/async functions end with Yield (no continuation = done).
+            gen.emit(bytecode::instruction::Instruction::Yield {
+                continuation_label: None,
+                value: undef.operand(),
+            });
+        } else {
+            gen.emit(bytecode::instruction::Instruction::End {
+                value: undef.operand(),
+            });
+        }
+    }
+
+    // For generator/async functions, terminate all unterminated blocks with Yield.
+    if gen.is_in_generator_or_async_function() {
+        let block_count = gen.basic_block_count();
+        for i in 0..block_count {
+            if gen.is_block_terminated(i) {
+                continue;
+            }
+            gen.switch_to_basic_block(i);
+            let undef = gen.add_constant_undefined();
+            gen.emit(bytecode::instruction::Instruction::Yield {
+                continuation_label: None,
+                value: undef.operand(),
+            });
+        }
+    }
+
+    // Assemble
+    let assembled = gen.assemble();
+
+    // Write FDI runtime metadata to the SFD.
+    // For now, set conservative defaults. Full FDI will be implemented
+    // when we port emit_function_declaration_instantiation to Rust.
+    write_sfd_metadata(sfd_ptr, &func_data);
+
+    // Create C++ Executable via FFI
+    bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
+}
+
+/// Write FDI runtime metadata to a C++ SharedFunctionInstanceData.
+///
+/// This sets fields that `prepare_for_ordinary_call()` and `internal_call()`
+/// read at runtime. Reads scope analysis insights from the function body's
+/// ScopeData (populated by the scope collector after analyze()).
+unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData) {
+    let body_scope = match &func_data.body.inner {
+        ast::Statement::FunctionBody { ref scope, .. } => Some(scope.as_ref()),
+        _ => None,
+    };
+
+    let (uses_this, contains_eval, might_need_arguments) = if let Some(scope) = body_scope {
+        (
+            scope.uses_this,
+            scope.contains_direct_call_to_eval,
+            scope.contains_access_to_arguments_object,
+        )
+    } else {
+        // Conservative defaults if no scope data.
+        (true, false, true)
+    };
+
+    rust_sfd_set_metadata(
+        sfd_ptr,
+        uses_this,
+        // Conservative: always create function environment.
+        true,
+        0,
+        might_need_arguments,
+        contains_eval,
+    );
+}
+
+extern "C" {
+    fn rust_sfd_set_metadata(
+        sfd_ptr: *mut c_void,
+        uses_this: bool,
+        function_environment_needed: bool,
+        function_environment_bindings_count: usize,
+        might_need_arguments_object: bool,
+        contains_direct_call_to_eval: bool,
+    );
 }

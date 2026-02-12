@@ -127,7 +127,11 @@ void* rust_create_executable(
     size_t shared_function_data_count,
     // Class blueprints (heap-allocated ClassBlueprint*, ownership transfers)
     void* const* class_blueprints,
-    size_t class_blueprint_count);
+    size_t class_blueprint_count,
+    // Regex table: parallel arrays of pattern and flags strings
+    FFIUtf16Slice const* regex_patterns,
+    FFIUtf16Slice const* regex_flags,
+    size_t regex_count);
 
 // Create a SharedFunctionInstanceData by re-parsing a function's source text
 // with the C++ parser. The function body is NOT compiled — it will compile
@@ -145,6 +149,58 @@ void* rust_create_shared_function_data(
     size_t name_len,
     // Whether to parse in strict mode context
     bool strict_mode);
+
+// Create a SharedFunctionInstanceData from pre-computed metadata (Rust pipeline).
+// Stores an opaque Rust AST pointer for lazy compilation.
+//
+// Returns a SharedFunctionInstanceData* cast to void*.
+void* rust_create_sfd(
+    void* vm_ptr,
+    void const* source_code_ptr,
+    // Function name
+    uint16_t const* name,
+    size_t name_len,
+    // Metadata
+    uint8_t function_kind,
+    int32_t function_length,
+    uint32_t formal_parameter_count,
+    bool strict,
+    bool is_arrow,
+    bool has_simple_parameter_list,
+    // Parameter names for mapped arguments (only for simple parameter lists)
+    FFIUtf16Slice const* param_names,
+    size_t param_name_count,
+    // Source text range (for Function.prototype.toString)
+    uint16_t const* source_text,
+    size_t source_text_len,
+    // Opaque Rust AST pointer (Box<FunctionData>)
+    void* rust_function_ast);
+
+// Compile a function body using the Rust pipeline.
+// Takes ownership of the Rust AST (frees it after compilation).
+//
+// Writes FDI runtime metadata to the SFD via the sfd_ptr parameter.
+// Returns a Bytecode::Executable* cast to void*, or nullptr on failure.
+void* rust_compile_function(
+    void* vm_ptr,
+    void const* source_code_ptr,
+    uint16_t const* source,
+    size_t source_len,
+    void* sfd_ptr,
+    void* rust_function_ast);
+
+// Free a Rust Box<FunctionData> (called from SFD destructor).
+void rust_free_function_ast(void* ast);
+
+// Set FDI runtime metadata on a SharedFunctionInstanceData.
+// Called from Rust after compiling a function body.
+void rust_sfd_set_metadata(
+    void* sfd_ptr,
+    bool uses_this,
+    bool function_environment_needed,
+    size_t function_environment_bindings_count,
+    bool might_need_arguments_object,
+    bool contains_direct_call_to_eval);
 
 // Create a ClassBlueprint on the heap. Ownership transfers to the
 // caller; pass the pointer to rust_create_executable which will move

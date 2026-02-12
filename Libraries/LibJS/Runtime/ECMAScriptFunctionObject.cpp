@@ -213,11 +213,28 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
+extern "C" void* rust_compile_function(void* vm_ptr, void const* source_code_ptr, uint16_t const* source, size_t source_len, void* sfd_ptr, void* rust_function_ast);
+
 void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals_count, size_t& constants_count, size_t& argument_count)
 {
     auto& executable = shared_data().m_executable;
     if (!executable) {
-        if (is_module_wrapper()) {
+        if (m_shared_data->m_use_rust_compilation) {
+            VERIFY(m_shared_data->m_rust_function_ast);
+            auto const& code_view = m_shared_data->m_source_code->code_view();
+            auto const* source_ptr = code_view.is_ascii()
+                ? reinterpret_cast<uint16_t const*>(code_view.ascii_span().data())
+                : reinterpret_cast<uint16_t const*>(code_view.utf16_span().data());
+            auto* exec = static_cast<Bytecode::Executable*>(rust_compile_function(
+                &vm(),
+                m_shared_data->m_source_code.ptr(),
+                source_ptr,
+                code_view.length_in_code_units(),
+                m_shared_data.ptr(),
+                m_shared_data->m_rust_function_ast));
+            m_shared_data->m_rust_function_ast = nullptr;
+            executable = exec;
+        } else if (is_module_wrapper()) {
             executable = Bytecode::compile(vm(), ecmascript_code(), kind(), name());
         } else {
             executable = Bytecode::compile(vm(), shared_data(), Bytecode::BuiltinAbstractOperationsEnabled::No);

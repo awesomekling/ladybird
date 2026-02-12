@@ -651,6 +651,11 @@ pub struct ScopeData {
     pub local_variables: Vec<LocalVariable>,
     pub function_scope_data: Option<Box<FunctionScopeData>>,
     pub hoisted_functions: Vec<usize>,
+    // Scope analysis insights, written by the scope collector after analyze().
+    pub uses_this: bool,
+    pub uses_this_from_environment: bool,
+    pub contains_direct_call_to_eval: bool,
+    pub contains_access_to_arguments_object: bool,
 }
 
 impl ScopeData {
@@ -660,6 +665,10 @@ impl ScopeData {
             local_variables: Vec::new(),
             function_scope_data: None,
             hoisted_functions: Vec::new(),
+            uses_this: false,
+            uses_this_from_environment: false,
+            contains_direct_call_to_eval: false,
+            contains_access_to_arguments_object: false,
         }
     }
 
@@ -669,6 +678,10 @@ impl ScopeData {
             local_variables: Vec::new(),
             function_scope_data: None,
             hoisted_functions: Vec::new(),
+            uses_this: false,
+            uses_this_from_environment: false,
+            contains_direct_call_to_eval: false,
+            contains_access_to_arguments_object: false,
         }
     }
 }

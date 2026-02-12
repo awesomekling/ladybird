@@ -18,6 +18,7 @@
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/SourceCode.h>
@@ -78,7 +79,17 @@ static JS::Value decode_constant(JS::VM& vm, uint8_t const*& cursor, uint8_t con
         VERIFY(cursor + len <= end);
         auto ascii = StringView(reinterpret_cast<char const*>(cursor), len);
         cursor += len;
-        auto integer = MUST(Crypto::SignedBigInteger::from_base(10, ascii));
+        auto integer = [&] {
+            if (len >= 3 && ascii[0] == '0') {
+                if (ascii[1] == 'x' || ascii[1] == 'X')
+                    return MUST(Crypto::SignedBigInteger::from_base(16, ascii.substring_view(2)));
+                if (ascii[1] == 'o' || ascii[1] == 'O')
+                    return MUST(Crypto::SignedBigInteger::from_base(8, ascii.substring_view(2)));
+                if (ascii[1] == 'b' || ascii[1] == 'B')
+                    return MUST(Crypto::SignedBigInteger::from_base(2, ascii.substring_view(2)));
+            }
+            return MUST(Crypto::SignedBigInteger::from_base(10, ascii));
+        }();
         return JS::BigInt::create(vm, move(integer));
     }
     default:
@@ -117,7 +128,10 @@ extern "C" void* rust_create_executable(
     void const* const* shared_function_data,
     size_t shared_function_data_count,
     void* const* class_blueprints,
-    size_t class_blueprint_count)
+    size_t class_blueprint_count,
+    FFIUtf16Slice const* regex_patterns,
+    FFIUtf16Slice const* regex_flags,
+    size_t regex_count)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
@@ -144,8 +158,18 @@ extern "C" void* rust_create_executable(
         str_table->insert(utf16_from_ffi(string_table_entries[i]));
     }
 
-    // Build regex table (empty for now — regex compilation needs more FFI work)
+    // Build regex table
     auto regex_tbl = make<JS::Bytecode::RegexTable>();
+    for (size_t i = 0; i < regex_count; ++i) {
+        auto pattern = Utf16View(reinterpret_cast<char16_t const*>(regex_patterns[i].data), regex_patterns[i].length);
+        auto flags_view = Utf16View(reinterpret_cast<char16_t const*>(regex_flags[i].data), regex_flags[i].length);
+        auto parsed_flags = JS::regex_flags_from_string(flags_view);
+        auto ecma_flags = parsed_flags.is_error() ? regex::RegexOptions<ECMAScriptFlags> {} : parsed_flags.release_value();
+        auto parsed_pattern = JS::parse_regex_pattern(pattern, ecma_flags.has_flag_set(ECMAScriptFlags::Unicode), ecma_flags.has_flag_set(ECMAScriptFlags::UnicodeSets));
+        auto pattern_str = parsed_pattern.is_error() ? String {} : parsed_pattern.release_value();
+        auto parsed_regex = Regex<ECMA262>::parse_pattern(pattern_str, ecma_flags);
+        regex_tbl->insert(JS::Bytecode::ParsedRegex { move(parsed_regex), move(pattern_str), ecma_flags });
+    }
 
     // Decode constants
     Vector<JS::Value> constants_vec;
@@ -358,6 +382,79 @@ extern "C" void* rust_create_shared_function_data(
     }
 
     return shared.ptr();
+}
+
+extern "C" void* rust_create_sfd(
+    void* vm_ptr,
+    void const* source_code_ptr,
+    uint16_t const* name,
+    size_t name_len,
+    uint8_t function_kind,
+    int32_t function_length,
+    uint32_t formal_parameter_count,
+    bool strict,
+    bool is_arrow,
+    bool has_simple_parameter_list,
+    FFIUtf16Slice const* param_names,
+    size_t param_name_count,
+    uint16_t const* source_text,
+    size_t source_text_len,
+    void* rust_function_ast)
+{
+    auto& vm = *static_cast<JS::VM*>(vm_ptr);
+    auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
+
+    auto fn_name = name_len > 0
+        ? Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len))
+        : Utf16FlyString {};
+
+    Vector<Utf16FlyString> mapped_param_names;
+    if (has_simple_parameter_list) {
+        mapped_param_names.ensure_capacity(param_name_count);
+        for (size_t i = 0; i < param_name_count; ++i)
+            mapped_param_names.append(utf16_fly_from_ffi(param_names[i]));
+    }
+
+    auto shared = vm.heap().allocate<JS::SharedFunctionInstanceData>(
+        vm,
+        static_cast<JS::FunctionKind>(function_kind),
+        move(fn_name),
+        function_length,
+        formal_parameter_count,
+        strict,
+        is_arrow,
+        has_simple_parameter_list,
+        move(mapped_param_names),
+        rust_function_ast);
+
+    // Set source text as a view into the original source buffer.
+    shared->m_source_code = &source_code;
+    auto const& code_view = source_code.code_view();
+    auto original_start = reinterpret_cast<uint16_t const*>(
+        code_view.is_ascii() ? static_cast<void const*>(code_view.ascii_span().data())
+                             : static_cast<void const*>(code_view.utf16_span().data()));
+    if (source_text >= original_start && source_text + source_text_len <= original_start + code_view.length_in_code_units()) {
+        auto offset = source_text - original_start;
+        shared->m_source_text = code_view.substring_view(offset, source_text_len);
+    }
+
+    return shared.ptr();
+}
+
+extern "C" void rust_sfd_set_metadata(
+    void* sfd_ptr,
+    bool uses_this,
+    bool function_environment_needed,
+    size_t function_environment_bindings_count,
+    bool might_need_arguments_object,
+    bool contains_direct_call_to_eval)
+{
+    auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    shared.m_uses_this = uses_this;
+    shared.m_function_environment_needed = function_environment_needed;
+    shared.m_function_environment_bindings_count = function_environment_bindings_count;
+    shared.m_might_need_arguments_object = might_need_arguments_object;
+    shared.m_contains_direct_call_to_eval = contains_direct_call_to_eval;
 }
 
 extern "C" void* rust_create_class_blueprint(

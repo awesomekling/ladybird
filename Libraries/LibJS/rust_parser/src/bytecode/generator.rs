@@ -293,6 +293,20 @@ impl Generator {
         gen
     }
 
+    // --- Function kind queries ---
+
+    pub fn is_in_generator_function(&self) -> bool {
+        matches!(self.enclosing_function_kind, FunctionKind::Generator | FunctionKind::AsyncGenerator)
+    }
+
+    pub fn is_in_async_function(&self) -> bool {
+        matches!(self.enclosing_function_kind, FunctionKind::Async | FunctionKind::AsyncGenerator)
+    }
+
+    pub fn is_in_generator_or_async_function(&self) -> bool {
+        self.enclosing_function_kind != FunctionKind::Normal
+    }
+
     // --- Register management ---
 
     /// Allocate a new register (or reuse a freed one).
@@ -483,14 +497,23 @@ impl Generator {
         self.basic_blocks[self.current_block_index].terminated
     }
 
+    /// Number of basic blocks.
+    pub fn basic_block_count(&self) -> usize {
+        self.basic_blocks.len()
+    }
+
+    /// Is a specific block terminated?
+    pub fn is_block_terminated(&self, index: usize) -> bool {
+        self.basic_blocks[index].terminated
+    }
+
     // --- Instruction emission ---
 
     /// Emit an instruction to the current basic block.
     pub fn emit(&mut self, instruction: Instruction) {
-        assert!(
-            !self.is_current_block_terminated(),
-            "Emitting into terminated block"
-        );
+        if self.is_current_block_terminated() {
+            return;
+        }
         let source_map = SourceMapEntry {
             bytecode_offset: 0, // filled during flattening
             source_start: self.current_source_start,
@@ -507,6 +530,12 @@ impl Generator {
                 dst: dst.operand(),
                 src: src.operand(),
             });
+        }
+    }
+
+    pub fn emit_mov_raw(&mut self, dst: Operand, src: Operand) {
+        if dst != src {
+            self.emit(Instruction::Mov { dst, src });
         }
     }
 

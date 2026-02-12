@@ -59,8 +59,7 @@ pub fn generate_expr(
 
         // === This ===
         Expression::This => {
-            // For now, just return the this_value register.
-            // Full ResolveThisBinding logic will be added later.
+            gen.emit(Instruction::ResolveThisBinding);
             Some(gen.this_value())
         }
 
@@ -248,11 +247,16 @@ pub fn generate_expr(
             } else {
                 gen.add_constant_undefined()
             };
-            let dst = choose_dst(gen, preferred_dst);
+            let continuation = gen.make_block();
             gen.emit(Instruction::Yield {
-                continuation_label: Some(Label(0)),
+                continuation_label: Some(Label(continuation as u32)),
                 value: value.operand(),
             });
+            gen.switch_to_basic_block(continuation);
+            // After resuming, the received value is in the accumulator.
+            let dst = choose_dst(gen, preferred_dst);
+            let acc = gen.accumulator();
+            gen.emit_mov(&dst, &acc);
             Some(dst)
         }
 
@@ -260,12 +264,7 @@ pub fn generate_expr(
         Expression::Await(inner) => {
             let value = generate_expr(inner, gen, None)
                 .unwrap_or_else(|| gen.add_constant_undefined());
-            let dst = choose_dst(gen, preferred_dst);
-            gen.emit(Instruction::Await {
-                continuation_label: Label(0),
-                argument: value.operand(),
-            });
-            Some(dst)
+            Some(generate_await(gen, value))
         }
 
         // === MetaProperty ===
@@ -431,12 +430,24 @@ pub fn generate_stmt(
 
         // === Return ===
         Statement::Return(value) => {
-            let val = match value {
+            let mut val = match value {
                 Some(expr) => generate_expr(expr, gen, None)
                     .unwrap_or_else(|| gen.add_constant_undefined()),
                 None => gen.add_constant_undefined(),
             };
-            gen.emit(Instruction::Return { value: val.operand() });
+            // Async functions implicitly await the return value.
+            if gen.is_in_async_function() {
+                val = generate_await(gen, val);
+            }
+            if gen.is_in_generator_or_async_function() {
+                // Generator/async returns use Yield with no continuation (= done).
+                gen.emit(Instruction::Yield {
+                    continuation_label: None,
+                    value: val.operand(),
+                });
+            } else {
+                gen.emit(Instruction::Return { value: val.operand() });
+            }
             None
         }
 
@@ -540,6 +551,62 @@ pub fn generate_stmt(
         // === ClassFieldInitializer ===
         Statement::ClassFieldInitializer { .. } => None,
     }
+}
+
+// =============================================================================
+// Await helper
+// =============================================================================
+
+/// Emit an Await instruction and handle the received completion.
+///
+/// After the await resumes, checks the completion type:
+/// - Normal: continue with the received value
+/// - Throw: re-throw the received value
+fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand {
+    let continuation = gen.make_block();
+    gen.emit(Instruction::Await {
+        continuation_label: Label(continuation as u32),
+        argument: argument.operand(),
+    });
+    gen.switch_to_basic_block(continuation);
+
+    // The completion is in the accumulator after resuming.
+    let received_completion = gen.allocate_register();
+    let received_completion_type = gen.allocate_register();
+    let received_completion_value = gen.allocate_register();
+    let acc = gen.accumulator();
+    gen.emit_mov(&received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+
+    // Check if completion type is normal (1 = Normal in C++ Completion::Type).
+    let normal_block = gen.make_block();
+    let throw_block = gen.make_block();
+    let is_normal = gen.allocate_register();
+    let normal_type = gen.add_constant_number(1.0); // Completion::Type::Normal = 1
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_normal.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: normal_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_normal.operand(),
+        true_target: Label(normal_block as u32),
+        false_target: Label(throw_block as u32),
+    });
+
+    // Throw path: re-throw the received value.
+    gen.switch_to_basic_block(throw_block);
+    gen.emit(Instruction::Throw {
+        src: received_completion_value.operand(),
+    });
+
+    // Normal path: the value is the result.
+    gen.switch_to_basic_block(normal_block);
+    received_completion_value
 }
 
 // =============================================================================
@@ -987,7 +1054,9 @@ fn generate_variable_declaration(
                     let id = gen.intern_identifier(ident.name.clone());
                     match kind {
                         DeclarationKind::Var => {
-                            gen.emit(Instruction::InitializeVariableBinding {
+                            // Var declarations use Set mode (not Initialize) because
+                            // FDI already initialized the binding.
+                            gen.emit(Instruction::SetVariableBinding {
                                 identifier: id,
                                 src: value.operand(),
                                 cache: EnvironmentCoordinate::empty(),
@@ -1067,11 +1136,14 @@ fn generate_call_expression(
         (callee, None)
     };
 
-    let mut args = Vec::new();
+    // Keep ScopedOperands alive until the Call instruction is emitted,
+    // so argument registers don't get freed and reused between evaluations.
+    let mut arg_holders = Vec::new();
     for arg in &data.arguments {
         let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
-        args.push(val.operand());
+        arg_holders.push(val);
     }
+    let args: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
 
     if is_new {
         gen.emit(Instruction::CallConstruct {
@@ -1107,24 +1179,154 @@ fn generate_update_expression(
     prefixed: bool,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let value = generate_expr(argument, gen, None)?;
-    let dst = choose_dst(gen, preferred_dst);
-
-    if prefixed {
-        match op {
-            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: dst.operand() }),
-            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: dst.operand() }),
+    // Load the value, keeping track of the base for member expressions
+    // so we can store back without re-evaluating.
+    match &argument.inner {
+        Expression::Identifier(ident) => {
+            let value = generate_identifier(ident, gen, None)?;
+            if prefixed {
+                match op {
+                    UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                    UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                }
+                emit_set_variable(gen, ident, &value);
+                Some(value)
+            } else {
+                let dst = choose_dst(gen, preferred_dst);
+                match op {
+                    UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    }),
+                    UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    }),
+                }
+                emit_set_variable(gen, ident, &value);
+                Some(dst)
+            }
         }
-        gen.emit_mov(&dst, &value);
-    } else {
-        gen.emit_mov(&dst, &value);
-        match op {
-            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+        Expression::Member { object, property, computed } => {
+            let base = generate_expr(object, gen, None)?;
+            let value = gen.allocate_register();
+            // Load the member value
+            if *computed {
+                let prop = generate_expr(property, gen, None)?;
+                gen.emit(Instruction::GetByValue {
+                    dst: value.operand(),
+                    base: base.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+                if prefixed {
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                    }
+                    gen.emit(Instruction::PutNormalByValue {
+                        base: base.operand(),
+                        property: prop.operand(),
+                        src: value.operand(),
+                        base_identifier: None,
+                    });
+                    Some(value)
+                } else {
+                    let dst = choose_dst(gen, preferred_dst);
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                    }
+                    gen.emit(Instruction::PutNormalByValue {
+                        base: base.operand(),
+                        property: prop.operand(),
+                        src: value.operand(),
+                        base_identifier: None,
+                    });
+                    Some(dst)
+                }
+            } else if let Expression::Identifier(prop_ident) = &property.inner {
+                let key = gen.intern_property_key(prop_ident.name.clone());
+                let cache = gen.next_property_lookup_cache();
+                gen.emit(Instruction::GetById {
+                    dst: value.operand(),
+                    base: base.operand(),
+                    property: key,
+                    base_identifier: None,
+                    cache_index: cache,
+                });
+                if prefixed {
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                    }
+                } else {
+                    let dst = choose_dst(gen, preferred_dst);
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                    }
+                    let cache2 = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::PutNormalById {
+                        base: base.operand(),
+                        property: key,
+                        src: value.operand(),
+                        cache_index: cache2,
+                        base_identifier: None,
+                    });
+                    return Some(dst);
+                }
+                let cache2 = gen.next_property_lookup_cache();
+                gen.emit(Instruction::PutNormalById {
+                    base: base.operand(),
+                    property: key,
+                    src: value.operand(),
+                    cache_index: cache2,
+                    base_identifier: None,
+                });
+                Some(value)
+            } else {
+                // Fallback: just evaluate, no store-back
+                Some(value)
+            }
+        }
+        _ => {
+            // Fallback for other expressions (shouldn't normally happen)
+            let value = generate_expr(argument, gen, None)?;
+            if prefixed {
+                match op {
+                    UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                    UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                }
+                Some(value)
+            } else {
+                let dst = choose_dst(gen, preferred_dst);
+                match op {
+                    UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    }),
+                    UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    }),
+                }
+                Some(dst)
+            }
         }
     }
-
-    Some(dst)
 }
 
 // =============================================================================
@@ -1333,6 +1535,11 @@ fn generate_template_literal(
 ) -> Option<ScopedOperand> {
     if data.expressions.is_empty() && data.raw_strings.len() == 1 {
         return Some(gen.add_constant_string(data.raw_strings[0].clone()));
+    }
+
+    if data.raw_strings.is_empty() {
+        // Tagged templates may have no raw strings when processed as standalone.
+        return Some(gen.add_constant_undefined());
     }
 
     let dst = choose_dst(gen, preferred_dst);
@@ -2236,10 +2443,43 @@ fn generate_try_statement(
             environment: saved_env.operand(),
         });
 
-        // Bind the catch parameter
+        // Bind the catch parameter in a new lexical scope (if non-local).
+        let mut created_catch_scope = false;
         match &catch.parameter {
             CatchParameter::Identifier(ident) => {
-                emit_set_variable(gen, ident, &caught_value);
+                if ident.is_local() {
+                    let local = gen.local(ident.local_index.get());
+                    gen.emit_mov(&local, &caught_value);
+                    gen.mark_local_initialized(ident.local_index.get());
+                } else {
+                    // Create a new lexical environment for the catch parameter.
+                    let parent = gen.lexical_environment_register_stack.last().cloned();
+                    let parent = parent.unwrap_or_else(|| {
+                        gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
+                    });
+                    let new_env = gen.allocate_register();
+                    gen.emit(Instruction::CreateLexicalEnvironment {
+                        dst: new_env.operand(),
+                        parent: parent.operand(),
+                        capacity: 1,
+                    });
+                    gen.lexical_environment_register_stack.push(new_env);
+                    created_catch_scope = true;
+
+                    let id = gen.intern_identifier(ident.name.clone());
+                    gen.emit(Instruction::CreateVariable {
+                        identifier: id,
+                        mode: ENV_MODE_LEXICAL,
+                        is_immutable: false,
+                        is_global: false,
+                        is_strict: false,
+                    });
+                    gen.emit(Instruction::InitializeLexicalBinding {
+                        identifier: id,
+                        src: caught_value.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
             }
             CatchParameter::BindingPattern(_) => {
                 // Destructuring catch: TODO
@@ -2248,6 +2488,10 @@ fn generate_try_statement(
         }
 
         generate_stmt(&catch.body, gen, None);
+
+        if created_catch_scope {
+            gen.lexical_environment_register_stack.pop();
+        }
 
         if !gen.is_current_block_terminated() {
             gen.emit(Instruction::Jump {
@@ -2296,8 +2540,10 @@ fn generate_try_statement(
 }
 
 /// Create a SharedFunctionInstanceData for a function expression/declaration
-/// via FFI (re-parsing the source with the C++ parser for lazy compilation)
 /// and register it with the generator.
+///
+/// Clones the FunctionData and stores it in the SFD for lazy compilation
+/// through the Rust pipeline. No C++ AST is created.
 ///
 /// Returns the shared_function_data_index for use in NewFunction instructions.
 fn emit_new_function(
@@ -2308,7 +2554,7 @@ fn emit_new_function(
     let source_start = data.source_text_start as usize;
     let source_end = data.source_text_end as usize;
 
-    // Get the function source text from the original source buffer.
+    // Get the function source text pointer from the original source buffer.
     assert!(
         !gen.source.is_null() && gen.source_len > 0,
         "Generator must have source set for function compilation"
@@ -2324,7 +2570,7 @@ fn emit_new_function(
     let source_text_ptr = unsafe { gen.source.add(source_start) };
     let source_text_len = source_end - source_start;
 
-    // Get function name
+    // Get function name.
     let (name_ptr, name_len) = if let Some(name) = name_override {
         (name.as_ptr(), name.len())
     } else if let Some(name_ident) = &data.name {
@@ -2333,23 +2579,547 @@ fn emit_new_function(
         (std::ptr::null(), 0)
     };
 
-    // Call FFI to create SharedFunctionInstanceData (lazy — no bytecode compiled)
+    // Compute has_simple_parameter_list (IsSimpleParameterList).
+    let has_simple_parameter_list = data.parameters.iter().all(|p| {
+        !p.is_rest
+            && p.default_value.is_none()
+            && matches!(p.binding, FunctionParameterBinding::Identifier(_))
+    });
+
+    // Extract parameter names for mapped arguments (only if simple params).
+    let param_name_slices: Vec<super::ffi::FFIUtf16Slice> = if has_simple_parameter_list {
+        data.parameters
+            .iter()
+            .map(|p| {
+                if let FunctionParameterBinding::Identifier(ref id) = p.binding {
+                    super::ffi::FFIUtf16Slice {
+                        data: id.name.as_ptr(),
+                        length: id.name.len(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Clone the FunctionData into a Box for storage in the SFD.
+    let cloned = Box::new(data.clone());
+    let rust_ast_ptr = Box::into_raw(cloned) as *mut std::ffi::c_void;
+
+    let function_kind = data.kind as u8;
+    let strict = data.is_strict_mode || gen.strict;
+
+    // Create SFD via FFI with pre-computed metadata + Rust AST.
     let sfd_ptr = unsafe {
-        super::ffi::rust_create_shared_function_data(
+        super::ffi::rust_create_sfd(
             gen.vm_ptr,
             gen.source_code_ptr,
-            source_text_ptr,
-            source_text_len,
             name_ptr,
             name_len,
-            data.is_strict_mode || gen.strict,
+            function_kind,
+            data.function_length,
+            data.parameters.len() as u32,
+            strict,
+            data.is_arrow_function,
+            has_simple_parameter_list,
+            param_name_slices.as_ptr(),
+            param_name_slices.len(),
+            source_text_ptr,
+            source_text_len,
+            rust_ast_ptr,
         )
     };
 
-    assert!(
-        !sfd_ptr.is_null(),
-        "rust_create_shared_function_data returned null"
-    );
+    assert!(!sfd_ptr.is_null(), "rust_create_sfd returned null");
 
     gen.register_shared_function_data(sfd_ptr)
+}
+
+// =============================================================================
+// FunctionDeclarationInstantiation (FDI)
+// =============================================================================
+
+const ENV_MODE_LEXICAL: u32 = 0;
+const ENV_MODE_VAR: u32 = 1;
+const ARGUMENTS_KIND_MAPPED: u32 = 0;
+const ARGUMENTS_KIND_UNMAPPED: u32 = 1;
+
+/// Emit FDI bytecode for a function body.
+///
+/// This is a port of `Generator::emit_function_declaration_instantiation`
+/// from C++. It creates environment bindings, initializes parameters,
+/// creates arguments objects, and hoists function declarations.
+pub fn emit_function_declaration_instantiation(
+    gen: &mut Generator,
+    func_data: &FunctionData,
+    body_scope: &ScopeData,
+) {
+    let strict = func_data.is_strict_mode || gen.strict;
+    let is_arrow = func_data.is_arrow_function;
+
+    // --- Compute FDI metadata ---
+
+    // Check for parameter expressions (default values or binding patterns with defaults).
+    let has_parameter_expressions = func_data.parameters.iter().any(|p| {
+        p.default_value.is_some()
+            || matches!(p.binding, FunctionParameterBinding::BindingPattern(_))
+    });
+
+    // Build parameter_names map and check for duplicates.
+    let mut parameter_names: Vec<(Vec<u16>, bool)> = Vec::new(); // (name, is_local)
+    let mut has_duplicates = false;
+
+    for param in &func_data.parameters {
+        match &param.binding {
+            FunctionParameterBinding::Identifier(ident) => {
+                let name = ident.name.clone();
+                let is_local = ident.is_local();
+                let already_exists = parameter_names.iter().any(|(n, _)| *n == name);
+                if already_exists {
+                    has_duplicates = true;
+                } else {
+                    parameter_names.push((name, is_local));
+                }
+            }
+            FunctionParameterBinding::BindingPattern(pattern) => {
+                collect_binding_pattern_names(pattern, &mut parameter_names, &mut has_duplicates);
+            }
+        }
+    }
+
+    // Determine if arguments object is needed (from scope analysis).
+    let mut arguments_object_needed = body_scope.contains_access_to_arguments_object;
+
+    if is_arrow {
+        arguments_object_needed = false;
+    } else if parameter_names.iter().any(|(n, _)| *n == utf16!("arguments")) {
+        arguments_object_needed = false;
+    }
+
+    let function_scope_data = body_scope.function_scope_data.as_ref();
+
+    if let Some(fsd) = function_scope_data {
+        if !has_parameter_expressions && fsd.has_function_named_arguments {
+            arguments_object_needed = false;
+        }
+        if !has_parameter_expressions && arguments_object_needed && fsd.has_lexically_declared_arguments
+        {
+            arguments_object_needed = false;
+        }
+    }
+
+    // Check if arguments object needs an environment binding (not a local variable).
+    let _arguments_object_needs_binding = arguments_object_needed
+        && !gen
+            .local_variables
+            .iter()
+            .any(|lv| lv.name == utf16!("arguments") && !lv.is_lexically_declared);
+
+    // --- Step 1: Parameter scope for parameter expressions ---
+
+    if has_parameter_expressions {
+        let has_non_local_params = parameter_names.iter().any(|(_, is_local)| !is_local);
+        if has_non_local_params {
+            let parent = gen.lexical_environment_register_stack.last().cloned();
+            let parent = parent.unwrap_or_else(|| {
+                gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
+            });
+            let new_env = gen.allocate_register();
+            gen.emit(Instruction::CreateLexicalEnvironment {
+                dst: new_env.operand(),
+                parent: parent.operand(),
+                capacity: 0,
+            });
+            gen.lexical_environment_register_stack.push(new_env);
+        }
+    }
+
+    // --- Step 2: Create bindings for non-local parameters ---
+
+    for (name, is_local) in &parameter_names {
+        if !is_local {
+            let id = gen.intern_identifier(name.clone());
+            gen.emit(Instruction::CreateVariable {
+                identifier: id,
+                mode: ENV_MODE_LEXICAL,
+                is_immutable: false,
+                is_global: false,
+                is_strict: false,
+            });
+            if has_duplicates {
+                let undef = gen.add_constant_undefined();
+                gen.emit(Instruction::InitializeLexicalBinding {
+                    identifier: id,
+                    src: undef.operand(),
+                    cache: EnvironmentCoordinate::empty(),
+                });
+            }
+        }
+    }
+
+    // --- Step 3: Create arguments object ---
+
+    if arguments_object_needed {
+        // Find local variable index for ArgumentsObject, if any.
+        let args_local_index = gen.local_variables.iter().position(|lv| {
+            lv.name == utf16!("arguments") && !lv.is_lexically_declared
+        });
+
+        let dst = args_local_index.map(|idx| Operand::local(idx as u32));
+
+        let kind = if strict || !func_data.parameters.iter().all(|p| {
+            !p.is_rest
+                && p.default_value.is_none()
+                && matches!(p.binding, FunctionParameterBinding::Identifier(_))
+        }) {
+            ARGUMENTS_KIND_UNMAPPED
+        } else {
+            ARGUMENTS_KIND_MAPPED
+        };
+
+        gen.emit(Instruction::CreateArguments {
+            dst,
+            kind,
+            is_immutable: strict,
+        });
+
+        if let Some(idx) = args_local_index {
+            gen.mark_local_initialized(idx as u32);
+        }
+    }
+
+    // --- Step 4: Bind formal parameters ---
+
+    for (param_index, param) in func_data.parameters.iter().enumerate() {
+        let param_idx = param_index as u32;
+
+        if param.is_rest {
+            let dst = gen.scoped_operand(Operand::argument(param_idx));
+            gen.emit(Instruction::CreateRestParams {
+                dst: dst.operand(),
+                rest_index: param_idx,
+            });
+        } else if param.default_value.is_some() {
+            let if_undefined_block = gen.make_block();
+            let if_not_undefined_block = gen.make_block();
+
+            gen.emit(Instruction::JumpUndefined {
+                condition: Operand::argument(param_idx),
+                true_target: Label(if_undefined_block as u32),
+                false_target: Label(if_not_undefined_block as u32),
+            });
+
+            gen.switch_to_basic_block(if_undefined_block);
+            if let Some(value) = generate_expr(param.default_value.as_ref().unwrap(), gen, None) {
+                gen.emit_mov_raw(Operand::argument(param_idx), value.operand());
+            }
+            gen.emit(Instruction::Jump {
+                target: Label(if_not_undefined_block as u32),
+            });
+
+            gen.switch_to_basic_block(if_not_undefined_block);
+        }
+
+        match &param.binding {
+            FunctionParameterBinding::Identifier(ident) => {
+                if ident.is_local() {
+                    let local_idx = ident.local_index.get();
+                    match ident.local_type.get() {
+                        LocalType::Variable => gen.mark_local_initialized(local_idx),
+                        LocalType::Argument => gen.mark_local_initialized(local_idx),
+                        _ => {}
+                    }
+                } else {
+                    let id = gen.intern_identifier(ident.name.clone());
+                    if has_duplicates {
+                        gen.emit(Instruction::SetLexicalBinding {
+                            identifier: id,
+                            src: Operand::argument(param_idx),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                    } else {
+                        gen.emit(Instruction::InitializeLexicalBinding {
+                            identifier: id,
+                            src: Operand::argument(param_idx),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                    }
+                }
+            }
+            FunctionParameterBinding::BindingPattern(_pattern) => {
+                // TODO: Binding pattern parameter initialization
+            }
+        }
+    }
+
+    // --- Step 5: Initialize var bindings ---
+
+    if let Some(fsd) = function_scope_data {
+        if !has_parameter_expressions {
+            // Simple case: vars share the parameter environment.
+            for var in &fsd.vars_to_initialize {
+                if var.is_parameter {
+                    continue;
+                }
+                if arguments_object_needed && var.name == utf16!("arguments") {
+                    continue;
+                }
+
+                // Check if this var is a local variable.
+                if let Some(local_idx) = find_local_var(gen, &var.name) {
+                    let undef = gen.add_constant_undefined();
+                    let local = gen.local(local_idx);
+                    gen.emit_mov(&local, &undef);
+                } else {
+                    let id = gen.intern_identifier(var.name.clone());
+                    let undef = gen.add_constant_undefined();
+                    gen.emit(Instruction::CreateVariable {
+                        identifier: id,
+                        mode: ENV_MODE_VAR,
+                        is_immutable: false,
+                        is_global: false,
+                        is_strict: false,
+                    });
+                    gen.emit(Instruction::InitializeVariableBinding {
+                        identifier: id,
+                        src: undef.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
+            }
+        } else {
+            // Parameter expressions: vars get a separate environment.
+            let has_non_local_vars = fsd.vars_to_initialize.iter().any(|v| {
+                find_local_var(gen, &v.name).is_none()
+            });
+
+            if has_non_local_vars {
+                gen.emit(Instruction::CreateVariableEnvironment {
+                    capacity: fsd.non_local_var_count_for_parameter_expressions as u32,
+                });
+            }
+
+            for var in &fsd.vars_to_initialize {
+                let is_in_parameter_bindings = var.is_parameter
+                    || (arguments_object_needed && var.name == utf16!("arguments"));
+
+                let initial_value = if !is_in_parameter_bindings || var.is_function_name {
+                    gen.add_constant_undefined()
+                } else if let Some(local_idx) = find_local_var(gen, &var.name) {
+                    let local = gen.local(local_idx);
+                    let tmp = gen.allocate_register();
+                    gen.emit_mov(&tmp, &local);
+                    tmp
+                } else {
+                    let id = gen.intern_identifier(var.name.clone());
+                    let tmp = gen.allocate_register();
+                    gen.emit(Instruction::GetBinding {
+                        dst: tmp.operand(),
+                        identifier: id,
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                    tmp
+                };
+
+                if let Some(local_idx) = find_local_var(gen, &var.name) {
+                    let local = gen.local(local_idx);
+                    gen.emit_mov(&local, &initial_value);
+                } else {
+                    let id = gen.intern_identifier(var.name.clone());
+                    gen.emit(Instruction::CreateVariable {
+                        identifier: id,
+                        mode: ENV_MODE_VAR,
+                        is_immutable: false,
+                        is_global: false,
+                        is_strict: false,
+                    });
+                    gen.emit(Instruction::InitializeVariableBinding {
+                        identifier: id,
+                        src: initial_value.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
+            }
+        }
+    }
+
+    // --- Step 6: AnnexB function name bindings (non-strict only) ---
+    // TODO: Implement AnnexB function hoisting once scope collector tracks it.
+
+    // --- Step 7: Lexical environment for non-local declarations ---
+
+    let has_non_local_lexical_declarations = has_non_local_lexical_decls(body_scope);
+
+    if !strict && has_non_local_lexical_declarations {
+        let parent = gen.lexical_environment_register_stack.last().cloned();
+        let parent = parent.unwrap_or_else(|| {
+            gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
+        });
+        let new_env = gen.allocate_register();
+        gen.emit(Instruction::CreateLexicalEnvironment {
+            dst: new_env.operand(),
+            parent: parent.operand(),
+            capacity: 0,
+        });
+        gen.lexical_environment_register_stack.push(new_env);
+    }
+
+    // --- Step 8: Create lexical bindings ---
+
+    for child in &body_scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations } => {
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    let is_constant = *kind == DeclarationKind::Const;
+                    for decl in declarations {
+                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                            if !ident.is_local() {
+                                let id = gen.intern_identifier(ident.name.clone());
+                                gen.emit(Instruction::CreateVariable {
+                                    identifier: id,
+                                    mode: ENV_MODE_LEXICAL,
+                                    is_immutable: is_constant,
+                                    is_global: false,
+                                    is_strict: is_constant,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                // Class declarations are lexically scoped (like const).
+                if let Some(ref name_ident) = class_data.name {
+                    if !name_ident.is_local() {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // --- Step 9: Initialize hoisted function declarations ---
+
+    if let Some(fsd) = function_scope_data {
+        for func_to_init in &fsd.functions_to_initialize {
+            let child = &body_scope.children[func_to_init.child_index];
+            if let Statement::FunctionDeclaration(ref inner_func_data) = child.inner {
+                let sfd_index = emit_new_function(gen, inner_func_data, None);
+
+                // Check if the function name identifier is local.
+                if let Some(ref name_ident) = inner_func_data.name {
+                    if name_ident.is_local() {
+                        let local_idx = name_ident.local_index.get();
+                        let local = gen.local(local_idx);
+                        gen.emit(Instruction::NewFunction {
+                            dst: local.operand(),
+                            shared_function_data_index: sfd_index,
+                            home_object: None,
+                            lhs_name: None,
+                        });
+                        gen.mark_local_initialized(local_idx);
+                    } else {
+                        let func_reg = gen.allocate_register();
+                        gen.emit(Instruction::NewFunction {
+                            dst: func_reg.operand(),
+                            shared_function_data_index: sfd_index,
+                            home_object: None,
+                            lhs_name: None,
+                        });
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::SetVariableBinding {
+                            identifier: id,
+                            src: func_reg.operand(),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Check if a scope has any non-local lexical declarations.
+fn has_non_local_lexical_decls(scope: &ScopeData) -> bool {
+    for child in &scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations } => {
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    for decl in declarations {
+                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                            if !ident.is_local() {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name_ident) = class_data.name {
+                    if !name_ident.is_local() {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Find a local variable index by name.
+fn find_local_var(gen: &Generator, name: &[u16]) -> Option<u32> {
+    gen.local_variables
+        .iter()
+        .position(|lv| lv.name == name)
+        .map(|i| i as u32)
+}
+
+/// Collect bound names from a binding pattern into the parameter_names list.
+fn collect_binding_pattern_names(
+    pattern: &BindingPattern,
+    parameter_names: &mut Vec<(Vec<u16>, bool)>,
+    has_duplicates: &mut bool,
+) {
+    for entry in &pattern.entries {
+        // The bound name can be in the alias (for object patterns) or name (for array patterns).
+        match &entry.alias {
+            BindingEntryAlias::Identifier(ident) => {
+                let name = ident.name.clone();
+                let is_local = ident.is_local();
+                if parameter_names.iter().any(|(n, _)| *n == name) {
+                    *has_duplicates = true;
+                } else {
+                    parameter_names.push((name, is_local));
+                }
+            }
+            BindingEntryAlias::BindingPattern(sub_pattern) => {
+                collect_binding_pattern_names(sub_pattern, parameter_names, has_duplicates);
+            }
+            BindingEntryAlias::Empty => {
+                // No alias — the name itself is the binding.
+                if let BindingEntryName::Identifier(ident) = &entry.name {
+                    let name = ident.name.clone();
+                    let is_local = ident.is_local();
+                    if parameter_names.iter().any(|(n, _)| *n == name) {
+                        *has_duplicates = true;
+                    } else {
+                        parameter_names.push((name, is_local));
+                    }
+                }
+            }
+            BindingEntryAlias::MemberExpression(_) => {}
+        }
+    }
 }

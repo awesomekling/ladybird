@@ -239,7 +239,13 @@ impl<'a> Parser<'a> {
             TokenType::BigIntLiteral => {
                 let tok = self.consume();
                 let value = self.token_value(&tok);
-                let value_utf8: String = value.iter().map(|&c| c as u8 as char).collect();
+                // Strip trailing 'n' from the token value.
+                let digits = if value.last() == Some(&(b'n' as u16)) {
+                    &value[..value.len() - 1]
+                } else {
+                    &value[..]
+                };
+                let value_utf8: String = digits.iter().map(|&c| c as u8 as char).collect();
                 (self.expr(start, Expression::BigIntLiteral(value_utf8)), true)
             }
 
