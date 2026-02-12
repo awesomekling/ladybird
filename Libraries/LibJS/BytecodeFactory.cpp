@@ -7,6 +7,7 @@
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
 #include <LibJS/AST.h>
+#include <LibJS/Bytecode/ClassBlueprint.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
@@ -114,7 +115,9 @@ extern "C" void* rust_create_executable(
     uint32_t number_of_registers,
     bool is_strict,
     void const* const* shared_function_data,
-    size_t shared_function_data_count)
+    size_t shared_function_data_count,
+    void* const* class_blueprints,
+    size_t class_blueprint_count)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
@@ -213,6 +216,13 @@ extern "C" void* rust_create_executable(
         executable->shared_function_data.append(data);
     }
 
+    // Set class blueprints (move from heap-allocated objects)
+    for (size_t i = 0; i < class_blueprint_count; ++i) {
+        auto* bp = static_cast<JS::Bytecode::ClassBlueprint*>(class_blueprints[i]);
+        executable->class_blueprints.append(move(*bp));
+        delete bp;
+    }
+
     return executable.ptr();
 }
 
@@ -228,28 +238,97 @@ extern "C" void* rust_create_shared_function_data(
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& original_source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
 
-    // Build the source to re-parse: wrap in `(<source>)\n` to ensure it parses
-    // as an expression (handles function declarations, expressions, and arrows).
-    Vector<char16_t> wrapped;
-    wrapped.append(u'(');
-    wrapped.append(reinterpret_cast<char16_t const*>(source_text), source_text_len);
-    wrapped.append(u')');
-    wrapped.append(u'\n');
-
-    auto wrapped_utf16 = Utf16String::from_utf16(Utf16View(wrapped.data(), wrapped.size()));
-    auto temp_source_code = JS::SourceCode::create(""_string, move(wrapped_utf16));
-    auto parser = JS::Parser(JS::Lexer(temp_source_code));
-    auto program = parser.parse_program(strict_mode);
-
-    // The program should have one ExpressionStatement containing a FunctionExpression
-    // (the parentheses cause it to be parsed as an expression, not a declaration).
+    // Re-parse the source text to get a FunctionNode.
+    // We keep the parsed program alive so the function node pointer stays valid.
+    //
+    // Try two wrapping strategies:
+    //   1. `(<source>)\n`          — works for function expressions, declarations, arrows
+    //   2. `(function <source>)\n` — works for class methods (no "function" keyword in source)
     JS::FunctionNode const* function_node = nullptr;
+    NonnullRefPtr<JS::Program> program = [&]() {
+        // Strategy 1: wrap in `(<source>)`
+        Vector<char16_t> wrapped;
+        wrapped.append(u'(');
+        wrapped.append(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+        wrapped.append(u')');
+        wrapped.append(u'\n');
+
+        auto wrapped_utf16 = Utf16String::from_utf16(Utf16View(wrapped.data(), wrapped.size()));
+        auto temp_source_code = JS::SourceCode::create(""_string, move(wrapped_utf16));
+        auto parser = JS::Parser(JS::Lexer(temp_source_code));
+        return parser.parse_program(strict_mode);
+    }();
+
     for (auto const& child : program->children()) {
         if (is<JS::ExpressionStatement>(*child)) {
             auto const& expr_stmt = static_cast<JS::ExpressionStatement const&>(*child);
             auto const& expr = expr_stmt.expression();
             if (is<JS::FunctionExpression>(expr))
                 function_node = static_cast<JS::FunctionExpression const*>(&expr);
+        }
+    }
+
+    // Strategy 2: wrap in `(function <source>)` (for class methods without "function" keyword)
+    if (!function_node) {
+        Vector<char16_t> wrapped;
+        wrapped.append(u'(');
+        wrapped.append(u'f');
+        wrapped.append(u'u');
+        wrapped.append(u'n');
+        wrapped.append(u'c');
+        wrapped.append(u't');
+        wrapped.append(u'i');
+        wrapped.append(u'o');
+        wrapped.append(u'n');
+        wrapped.append(u' ');
+        wrapped.append(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+        wrapped.append(u')');
+        wrapped.append(u'\n');
+
+        auto wrapped_utf16 = Utf16String::from_utf16(Utf16View(wrapped.data(), wrapped.size()));
+        auto temp_source_code = JS::SourceCode::create(""_string, move(wrapped_utf16));
+        auto parser = JS::Parser(JS::Lexer(temp_source_code));
+        program = parser.parse_program(strict_mode);
+
+        for (auto const& child : program->children()) {
+            if (is<JS::ExpressionStatement>(*child)) {
+                auto const& expr_stmt = static_cast<JS::ExpressionStatement const&>(*child);
+                auto const& expr = expr_stmt.expression();
+                if (is<JS::FunctionExpression>(expr))
+                    function_node = static_cast<JS::FunctionExpression const*>(&expr);
+            }
+        }
+    }
+
+    // Strategy 3: wrap in `({ <source> })` (for getters/setters: "get x() {}" or "set x(v) {}")
+    if (!function_node) {
+        Vector<char16_t> wrapped;
+        wrapped.append(u'(');
+        wrapped.append(u'{');
+        wrapped.append(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+        wrapped.append(u'}');
+        wrapped.append(u')');
+        wrapped.append(u'\n');
+
+        auto wrapped_utf16 = Utf16String::from_utf16(Utf16View(wrapped.data(), wrapped.size()));
+        auto temp_source_code = JS::SourceCode::create(""_string, move(wrapped_utf16));
+        auto parser = JS::Parser(JS::Lexer(temp_source_code));
+        program = parser.parse_program(strict_mode);
+
+        // Walk children looking for ObjectExpression → ObjectProperty → FunctionExpression
+        for (auto const& child : program->children()) {
+            if (!is<JS::ExpressionStatement>(*child))
+                continue;
+            auto const& expr = static_cast<JS::ExpressionStatement const&>(*child).expression();
+            if (!is<JS::ObjectExpression>(expr))
+                continue;
+            auto const& obj = static_cast<JS::ObjectExpression const&>(expr);
+            for (auto const& prop : obj.properties()) {
+                if (is<JS::FunctionExpression>(prop->value())) {
+                    function_node = static_cast<JS::FunctionExpression const*>(&prop->value());
+                    break;
+                }
+            }
         }
     }
 
@@ -279,4 +358,44 @@ extern "C" void* rust_create_shared_function_data(
     }
 
     return shared.ptr();
+}
+
+extern "C" void* rust_create_class_blueprint(
+    uint16_t const* name,
+    size_t name_len,
+    uint16_t const* source_text,
+    size_t source_text_len,
+    uint32_t constructor_sfd_index,
+    bool has_super_class,
+    bool has_name,
+    FFIClassElement const* elements,
+    size_t element_count)
+{
+    auto* blueprint = new JS::Bytecode::ClassBlueprint();
+    blueprint->constructor_shared_function_data_index = constructor_sfd_index;
+    blueprint->has_super_class = has_super_class;
+    blueprint->has_name = has_name;
+
+    if (name_len > 0)
+        blueprint->name = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len));
+
+    // Store source text as a view into the original source buffer.
+    // The buffer is owned by SourceCode which lives for the script's lifetime.
+    blueprint->source_text = Utf16View(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+
+    for (size_t i = 0; i < element_count; ++i) {
+        auto const& elem = elements[i];
+        JS::Bytecode::ClassElementDescriptor desc;
+        desc.kind = static_cast<JS::Bytecode::ClassElementDescriptor::Kind>(elem.kind);
+        desc.is_static = elem.is_static;
+        desc.is_private = elem.is_private;
+        if (elem.private_identifier_len > 0)
+            desc.private_identifier = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(elem.private_identifier), elem.private_identifier_len));
+        if (elem.shared_function_data_index >= 0)
+            desc.shared_function_data_index = static_cast<u32>(elem.shared_function_data_index);
+        desc.has_initializer = elem.has_initializer;
+        blueprint->elements.append(desc);
+    }
+
+    return blueprint;
 }

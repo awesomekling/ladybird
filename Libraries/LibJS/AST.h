@@ -1923,6 +1923,8 @@ public:
     {
     }
 
+    Vector<NonnullRefPtr<ObjectProperty>> const& properties() const { return m_properties; }
+
     virtual void dump(ASTDumpState const& state = {}) const override;
     virtual Optional<Bytecode::ScopedOperand> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 

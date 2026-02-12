@@ -525,7 +525,11 @@ pub fn generate_stmt(
 
         // === ClassDeclaration ===
         Statement::ClassDeclaration(data) => {
-            generate_class_expression(gen, data, None);
+            let value = generate_class_expression(gen, data, None);
+            // Bind the class name in the current scope (classes are lexically scoped)
+            if let (Some(name_ident), Some(val)) = (&data.name, &value) {
+                emit_set_variable(gen, name_ident, &val);
+            }
             None
         }
 
@@ -1014,10 +1018,54 @@ fn generate_call_expression(
     gen: &mut Generator,
     data: &CallExpressionData,
     preferred_dst: Option<&ScopedOperand>,
-    _is_new: bool,
+    is_new: bool,
 ) -> Option<ScopedOperand> {
-    let callee = generate_expr(&data.callee, gen, None)?;
     let dst = choose_dst(gen, preferred_dst);
+
+    // For method calls (obj.method()), we need to use the object as `this`.
+    let (callee, this_value) = if !is_new {
+        match &data.callee.inner {
+            Expression::Member {
+                object,
+                property,
+                computed,
+            } => {
+                let obj = generate_expr(object, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let method = gen.allocate_register();
+                if *computed {
+                    let prop = generate_expr(property, gen, None)
+                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    gen.emit(Instruction::GetByValue {
+                        dst: method.operand(),
+                        base: obj.operand(),
+                        property: prop.operand(),
+                        base_identifier: None,
+                    });
+                } else if let Expression::Identifier(ident) = &property.inner {
+                    let key = gen.intern_property_key(ident.name.clone());
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::GetById {
+                        dst: method.operand(),
+                        base: obj.operand(),
+                        property: key,
+                        base_identifier: None,
+                        cache_index: cache,
+                    });
+                }
+                (method, Some(obj))
+            }
+            _ => {
+                let callee = generate_expr(&data.callee, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                (callee, None)
+            }
+        }
+    } else {
+        let callee = generate_expr(&data.callee, gen, None)
+            .unwrap_or_else(|| gen.add_constant_undefined());
+        (callee, None)
+    };
 
     let mut args = Vec::new();
     for arg in &data.arguments {
@@ -1025,15 +1073,25 @@ fn generate_call_expression(
         args.push(val.operand());
     }
 
-    let this_value = gen.add_constant_undefined();
-    gen.emit(Instruction::Call {
-        dst: dst.operand(),
-        callee: callee.operand(),
-        this_value: this_value.operand(),
-        argument_count: args.len() as u32,
-        expression_string: None,
-        arguments: args,
-    });
+    if is_new {
+        gen.emit(Instruction::CallConstruct {
+            dst: dst.operand(),
+            callee: callee.operand(),
+            argument_count: args.len() as u32,
+            expression_string: None,
+            arguments: args,
+        });
+    } else {
+        let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(Instruction::Call {
+            dst: dst.operand(),
+            callee: callee.operand(),
+            this_value: this_op.operand(),
+            argument_count: args.len() as u32,
+            expression_string: None,
+            arguments: args,
+        });
+    }
 
     Some(dst)
 }
@@ -1663,20 +1721,248 @@ fn generate_optional_chain(
 
 fn generate_class_expression(
     gen: &mut Generator,
-    _data: &ClassData,
+    data: &ClassData,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    // TODO: Full class support (methods, fields, static init, private, blueprints).
-    // For now, just evaluate the class as undefined.
     let dst = choose_dst(gen, preferred_dst);
-    let undef = gen.add_constant_undefined();
-    gen.emit(Instruction::Mov {
-        dst: dst.operand(),
-        src: undef.operand(),
+    let has_super = data.super_class.is_some();
+
+    // Evaluate super class if present
+    let super_class = if let Some(super_expr) = &data.super_class {
+        generate_expr(super_expr, gen, None)
+    } else {
+        None
+    };
+
+    // Create class environment (for named class expressions and private members)
+    let class_env = gen.allocate_register();
+    gen.emit(Instruction::GetLexicalEnvironment {
+        dst: class_env.operand(),
     });
+
+    // Create SharedFunctionInstanceData for constructor
+    let constructor_sfd_index = if let Some(ctor_expr) = &data.constructor {
+        // Explicit constructor — extract FunctionData from the expression
+        if let Expression::Function(func_data) = &ctor_expr.inner {
+            emit_new_function(gen, func_data, None)
+        } else {
+            // Fallback: synthesize a default constructor
+            emit_default_constructor(gen, has_super)
+        }
+    } else {
+        // No explicit constructor — synthesize a default one
+        emit_default_constructor(gen, has_super)
+    };
+
+    // Process class elements
+    let mut ffi_elements = Vec::new();
+    let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
+
+    for elem_node in &data.elements {
+        match &elem_node.inner {
+            ClassElement::Method {
+                key,
+                function,
+                kind,
+                is_static,
+            } => {
+                let ffi_kind = match kind {
+                    ClassMethodKind::Method => 0u8,
+                    ClassMethodKind::Getter => 1u8,
+                    ClassMethodKind::Setter => 2u8,
+                };
+
+                // Extract key name for the SFD (methods need their name set from the key)
+                let method_name = match &key.inner {
+                    Expression::Identifier(ident) => Some(ident.name.clone()),
+                    Expression::StringLiteral(s) => Some(s.clone()),
+                    _ => None,
+                };
+
+                // Create SFD for the method function
+                let sfd_index = if let Expression::Function(func_data) = &function.inner {
+                    emit_new_function(
+                        gen,
+                        func_data,
+                        method_name.as_deref(),
+                    ) as i32
+                } else {
+                    -1i32
+                };
+
+                // Handle computed vs static keys
+                let (is_private, priv_name) = check_private_key(key);
+
+                // Evaluate the key for non-private elements
+                if !is_private {
+                    let key_val = generate_expr(key, gen, None);
+                    element_keys.push(key_val);
+                } else {
+                    element_keys.push(None);
+                }
+
+                ffi_elements.push(super::ffi::FFIClassElement {
+                    kind: ffi_kind,
+                    is_static: *is_static,
+                    is_private,
+                    private_identifier: priv_name
+                        .as_ref()
+                        .map(|n| n.as_ptr())
+                        .unwrap_or(std::ptr::null()),
+                    private_identifier_len: priv_name.as_ref().map(|n| n.len()).unwrap_or(0),
+                    shared_function_data_index: sfd_index,
+                    has_initializer: false,
+                });
+            }
+            ClassElement::Field {
+                key,
+                initializer,
+                is_static,
+            } => {
+                // For fields with initializers, wrap the initializer in a function
+                let sfd_index = if let Some(init_expr) = initializer {
+                    if let Expression::Function(func_data) = &init_expr.inner {
+                        emit_new_function(gen, func_data, None) as i32
+                    } else {
+                        -1i32
+                    }
+                } else {
+                    -1i32
+                };
+
+                let (is_private, priv_name) = check_private_key(key);
+
+                if !is_private {
+                    let key_val = generate_expr(key, gen, None);
+                    element_keys.push(key_val);
+                } else {
+                    element_keys.push(None);
+                }
+
+                ffi_elements.push(super::ffi::FFIClassElement {
+                    kind: 3u8, // Field
+                    is_static: *is_static,
+                    is_private,
+                    private_identifier: priv_name
+                        .as_ref()
+                        .map(|n| n.as_ptr())
+                        .unwrap_or(std::ptr::null()),
+                    private_identifier_len: priv_name.as_ref().map(|n| n.len()).unwrap_or(0),
+                    shared_function_data_index: sfd_index,
+                    has_initializer: initializer.is_some(),
+                });
+            }
+            ClassElement::StaticInitializer { body: _ } => {
+                // Static initializer blocks are wrapped as functions by the parser
+                element_keys.push(None);
+                ffi_elements.push(super::ffi::FFIClassElement {
+                    kind: 4u8, // StaticInitializer
+                    is_static: true,
+                    is_private: false,
+                    private_identifier: std::ptr::null(),
+                    private_identifier_len: 0,
+                    shared_function_data_index: -1,
+                    has_initializer: false,
+                });
+            }
+        }
+    }
+
+    // Get class name and source text
+    let class_name = data.name.as_ref().map(|n| n.name.as_slice());
+    let has_name = data.name.is_some();
+    let (name_ptr, name_len) = class_name
+        .map(|n| (n.as_ptr(), n.len()))
+        .unwrap_or((std::ptr::null(), 0));
+
+    let source_start = data.source_text_start as usize;
+    let source_end = data.source_text_end as usize;
+    let source_text_ptr = unsafe { gen.source.add(source_start) };
+    let source_text_len = source_end - source_start;
+
+    // Create the ClassBlueprint via FFI
+    let bp_ptr = unsafe {
+        super::ffi::rust_create_class_blueprint(
+            name_ptr,
+            name_len,
+            source_text_ptr,
+            source_text_len,
+            constructor_sfd_index,
+            has_super,
+            has_name,
+            ffi_elements.as_ptr(),
+            ffi_elements.len(),
+        )
+    };
+    assert!(!bp_ptr.is_null(), "rust_create_class_blueprint returned null");
+    let blueprint_index = gen.register_class_blueprint(bp_ptr);
+
+    // Build element_keys operands for the NewClass instruction
+    let element_key_ops: Vec<Option<Operand>> = element_keys
+        .iter()
+        .map(|k| k.as_ref().map(|s| s.operand()))
+        .collect();
+
+    // Emit NewClass instruction
+    let lhs_name = if !has_name {
+        // Anonymous class — allow lhs_name to provide the name
+        None
+    } else {
+        None
+    };
+
+    gen.emit(Instruction::NewClass {
+        dst: dst.operand(),
+        super_class: super_class.as_ref().map(|s| s.operand()),
+        class_environment: class_env.operand(),
+        class_blueprint_index: blueprint_index,
+        lhs_name,
+        element_keys_count: element_key_ops.len() as u32,
+        element_keys: element_key_ops,
+    });
+
     Some(dst)
 }
 
+/// Synthesize a default constructor SharedFunctionInstanceData.
+fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
+    // Default constructor source:
+    // - Base class: "constructor() {}"
+    // - Derived class: "constructor(...args) { super(...args); }"
+    let source: &[u16] = if has_super {
+        &utf16!("constructor(...args) { super(...args); }")[..]
+    } else {
+        &utf16!("constructor() {}")[..]
+    };
+
+    let sfd_ptr = unsafe {
+        super::ffi::rust_create_shared_function_data(
+            gen.vm_ptr,
+            gen.source_code_ptr,
+            source.as_ptr(),
+            source.len(),
+            std::ptr::null(),
+            0,
+            gen.strict,
+        )
+    };
+    assert!(
+        !sfd_ptr.is_null(),
+        "default constructor creation returned null"
+    );
+    gen.register_shared_function_data(sfd_ptr)
+}
+
+/// Check if a key expression is a private identifier, return (is_private, private_name).
+fn check_private_key(key: &Expr) -> (bool, Option<Vec<u16>>) {
+    if let Expression::PrivateIdentifier(ident) = &key.inner {
+        (true, Some(ident.name.clone()))
+    } else {
+        (false, None)
+    }
+}
+
+/// Check if a key is a "static" key (identifier or string literal — not computed).
 // =============================================================================
 // For-in statement
 // =============================================================================
@@ -1903,15 +2189,31 @@ fn generate_try_statement(
     data: &TryStatementData,
     _preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    // Save old unwind handler so we can restore it after the try body.
+    let old_handler = gen.current_unwind_handler;
+
+    // Create the handler block BEFORE setting the unwind handler
+    // (the handler block itself should NOT have its own handler).
     let handler_block = gen.make_block();
     let end_block = gen.make_block();
 
-    // Set handler for the try block
-    let try_block_idx = gen.current_block_index();
-    gen.basic_blocks[try_block_idx].handler = Some(handler_block);
+    // Save lexical environment for restoration in catch handler.
+    let saved_env = gen.allocate_register();
+    gen.emit(Instruction::GetLexicalEnvironment {
+        dst: saved_env.operand(),
+    });
+
+    // Set handler on current block and propagate to all blocks
+    // created during try body generation.
+    let current = gen.current_block_index();
+    gen.basic_blocks[current].handler = Some(handler_block);
+    gen.current_unwind_handler = Some(handler_block);
 
     // Generate try body
     generate_stmt(&data.block, gen, None);
+
+    // Restore old unwind handler
+    gen.current_unwind_handler = old_handler;
 
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
@@ -1920,17 +2222,27 @@ fn generate_try_statement(
     }
 
     // Generate catch handler
+    gen.switch_to_basic_block(handler_block);
+
     if let Some(catch) = &data.handler {
-        gen.switch_to_basic_block(handler_block);
-        let exception = gen.scoped_operand(Operand::register(Register::EXCEPTION));
+        // Catch the exception value
+        let caught_value = gen.allocate_register();
+        gen.emit(Instruction::Catch {
+            dst: caught_value.operand(),
+        });
+
+        // Restore lexical environment
+        gen.emit(Instruction::SetLexicalEnvironment {
+            environment: saved_env.operand(),
+        });
 
         // Bind the catch parameter
         match &catch.parameter {
             CatchParameter::Identifier(ident) => {
-                emit_set_variable(gen, ident, &exception);
+                emit_set_variable(gen, ident, &caught_value);
             }
             CatchParameter::BindingPattern(_) => {
-                // Destructuring catch: full implementation in M4e
+                // Destructuring catch: TODO
             }
             CatchParameter::None => {}
         }
@@ -1942,19 +2254,41 @@ fn generate_try_statement(
                 target: Label(end_block as u32),
             });
         }
+    } else {
+        // No catch handler — just catch and discard (try-finally pattern)
+        let discarded = gen.allocate_register();
+        gen.emit(Instruction::Catch {
+            dst: discarded.operand(),
+        });
+        gen.emit(Instruction::SetLexicalEnvironment {
+            environment: saved_env.operand(),
+        });
     }
 
-    // Generate finally block
+    // Generate finally block (simplified — full FinallyContext needed later)
     if let Some(finalizer) = &data.finalizer {
-        // Simplified: in a full impl, this uses FinallyContext
-        let finally_block = gen.make_block();
-        gen.switch_to_basic_block(finally_block);
-        generate_stmt(finalizer, gen, None);
+        if data.handler.is_some() {
+            // try-catch-finally: finally runs after both try and catch paths
+            // For now, generate finally inline at the end block
+            gen.switch_to_basic_block(end_block);
+            generate_stmt(finalizer, gen, None);
+            // The end_block now contains finally code, so we don't
+            // need to jump to it. Just leave the generator pointing here.
+            return None;
+        }
+        // try-finally (no catch): generate finally after catch-and-discard
+        if !gen.is_current_block_terminated() {
+            generate_stmt(finalizer, gen, None);
+        }
         if !gen.is_current_block_terminated() {
             gen.emit(Instruction::Jump {
                 target: Label(end_block as u32),
             });
         }
+    } else if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
     }
 
     gen.switch_to_basic_block(end_block);

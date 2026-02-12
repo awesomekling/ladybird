@@ -229,6 +229,7 @@ fn keyword_from_str(s: &[u16]) -> Option<TokenType> {
             if s == utf16!("export") { return Some(TokenType::Export); }
             if s == utf16!("import") { return Some(TokenType::Import); }
             if s == utf16!("return") { return Some(TokenType::Return); }
+            if s == utf16!("static") { return Some(TokenType::Static); }
             if s == utf16!("switch") { return Some(TokenType::Switch); }
             if s == utf16!("typeof") { return Some(TokenType::Typeof); }
         }

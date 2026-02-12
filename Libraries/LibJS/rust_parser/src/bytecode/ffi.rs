@@ -34,6 +34,17 @@ struct FFIUtf16Slice {
     length: usize,
 }
 
+#[repr(C)]
+pub struct FFIClassElement {
+    pub kind: u8, // 0=Method, 1=Getter, 2=Setter, 3=Field, 4=StaticInitializer
+    pub is_static: bool,
+    pub is_private: bool,
+    pub private_identifier: *const u16,
+    pub private_identifier_len: usize,
+    pub shared_function_data_index: i32, // -1 for none
+    pub has_initializer: bool,
+}
+
 extern "C" {
     fn rust_create_executable(
         vm_ptr: *mut c_void,
@@ -65,6 +76,8 @@ extern "C" {
         is_strict: bool,
         shared_function_data: *const *const c_void,
         shared_function_data_count: usize,
+        class_blueprints: *const *mut c_void,
+        class_blueprint_count: usize,
     ) -> *mut c_void;
 
     pub fn rust_create_shared_function_data(
@@ -75,6 +88,18 @@ extern "C" {
         name: *const u16,
         name_len: usize,
         strict_mode: bool,
+    ) -> *mut c_void;
+
+    pub fn rust_create_class_blueprint(
+        name: *const u16,
+        name_len: usize,
+        source_text: *const u16,
+        source_text_len: usize,
+        constructor_sfd_index: u32,
+        has_super_class: bool,
+        has_name: bool,
+        elements: *const FFIClassElement,
+        element_count: usize,
     ) -> *mut c_void;
 }
 
@@ -192,6 +217,9 @@ pub unsafe fn create_executable(
         .map(|ptr| *ptr as *const c_void)
         .collect();
 
+    // Collect class blueprint pointers
+    let bp_ptrs: Vec<*mut c_void> = gen.class_blueprints.clone();
+
     rust_create_executable(
         vm_ptr,
         source_code_ptr,
@@ -222,5 +250,7 @@ pub unsafe fn create_executable(
         gen.strict,
         sfd_ptrs.as_ptr(),
         sfd_ptrs.len(),
+        bp_ptrs.as_ptr(),
+        bp_ptrs.len(),
     )
 }

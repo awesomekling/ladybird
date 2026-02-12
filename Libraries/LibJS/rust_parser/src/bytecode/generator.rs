@@ -194,10 +194,18 @@ pub struct Generator {
     // --- Shared function data ---
     // Opaque pointers to C++ SharedFunctionInstanceData objects.
     pub shared_function_data: Vec<*mut std::ffi::c_void>,
-    pub class_blueprint_count: u32,
+
+    // --- Class blueprints ---
+    // Opaque pointers to heap-allocated C++ ClassBlueprint objects.
+    // Ownership transfers to the Executable during creation.
+    pub class_blueprints: Vec<*mut std::ffi::c_void>,
 
     // --- Length identifier cache ---
     pub length_identifier: Option<PropertyKeyTableIndex>,
+
+    // --- Unwind context ---
+    // When set, newly created basic blocks inherit this handler index.
+    pub current_unwind_handler: Option<usize>,
 
     // --- Generator finished flag ---
     pub finished: bool,
@@ -265,8 +273,9 @@ impl Generator {
                 }),
             },
             shared_function_data: Vec::new(),
-            class_blueprint_count: 0,
+            class_blueprints: Vec::new(),
             length_identifier: None,
+            current_unwind_handler: None,
             finished: false,
             vm_ptr: std::ptr::null_mut(),
             source_code_ptr: std::ptr::null(),
@@ -429,6 +438,13 @@ impl Generator {
         index
     }
 
+    /// Register a ClassBlueprint (opaque C++ pointer) and return its index.
+    pub fn register_class_blueprint(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
+        let index = self.class_blueprints.len() as u32;
+        self.class_blueprints.push(ptr);
+        index
+    }
+
     pub fn intern_regex(&mut self, pattern: Vec<u16>, flags: Vec<u16>) -> RegexTableIndex {
         let index = self.regex_table.len() as u32;
         self.regex_table.push((pattern, flags));
@@ -442,10 +458,10 @@ impl Generator {
         let index = self.basic_blocks.len();
         let mut block = BasicBlock::new(index as u32);
 
-        // If there's an active unwind context with a handler, propagate it.
-        // (Handler is the basic block index of the exception handler.)
-        // For now, handler propagation is managed by the codegen methods.
-        let _ = &mut block;
+        // Propagate exception handler from active unwind context.
+        if let Some(handler) = self.current_unwind_handler {
+            block.handler = Some(handler);
+        }
 
         self.basic_blocks.push(block);
         self.next_block_id += 1;

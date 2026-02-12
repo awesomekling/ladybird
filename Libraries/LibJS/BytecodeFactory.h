@@ -43,6 +43,18 @@ struct FFIUtf16Slice {
     size_t length;
 };
 
+// Class element descriptor for FFI (matches ClassElementDescriptor::Kind).
+// Kind values: 0=Method, 1=Getter, 2=Setter, 3=Field, 4=StaticInitializer
+struct FFIClassElement {
+    uint8_t kind;
+    bool is_static;
+    bool is_private;
+    uint16_t const* private_identifier;
+    size_t private_identifier_len;
+    int32_t shared_function_data_index; // -1 for none
+    bool has_initializer;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -112,7 +124,10 @@ void* rust_create_executable(
     // Shared function data (inner functions)
     // Array of SharedFunctionInstanceData* cast to void*.
     void const* const* shared_function_data,
-    size_t shared_function_data_count);
+    size_t shared_function_data_count,
+    // Class blueprints (heap-allocated ClassBlueprint*, ownership transfers)
+    void* const* class_blueprints,
+    size_t class_blueprint_count);
 
 // Create a SharedFunctionInstanceData by re-parsing a function's source text
 // with the C++ parser. The function body is NOT compiled — it will compile
@@ -130,6 +145,26 @@ void* rust_create_shared_function_data(
     size_t name_len,
     // Whether to parse in strict mode context
     bool strict_mode);
+
+// Create a ClassBlueprint on the heap. Ownership transfers to the
+// caller; pass the pointer to rust_create_executable which will move
+// the blueprint into the Executable.
+//
+// Returns a heap-allocated ClassBlueprint* cast to void*.
+void* rust_create_class_blueprint(
+    // Class name (empty for anonymous)
+    uint16_t const* name,
+    size_t name_len,
+    // Source text of the entire class (for Function.prototype.toString)
+    uint16_t const* source_text,
+    size_t source_text_len,
+    // Index into shared_function_data for the constructor
+    uint32_t constructor_sfd_index,
+    bool has_super_class,
+    bool has_name,
+    // Array of class element descriptors
+    FFIClassElement const* elements,
+    size_t element_count);
 
 #ifdef __cplusplus
 }
