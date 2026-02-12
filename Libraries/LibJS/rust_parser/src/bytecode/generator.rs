@@ -139,7 +139,7 @@ pub struct Generator {
     free_registers: Vec<Register>,
 
     // --- Constant pool ---
-    constants: Vec<ConstantValue>,
+    pub constants: Vec<ConstantValue>,
 
     // Cached constants for deduplication
     true_constant: Option<ScopedOperand>,
