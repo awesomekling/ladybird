@@ -260,13 +260,13 @@ pub struct FunctionParameter {
 }
 
 pub enum FunctionParameterBinding {
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     BindingPattern(BindingPattern),
 }
 
 /// Shared data for FunctionDeclaration and FunctionExpression.
 pub struct FunctionData {
-    pub name: Option<Identifier>,
+    pub name: Option<Box<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
     pub body: Box<Stmt>,
@@ -285,7 +285,7 @@ pub struct FunctionData {
 
 /// Shared data for ClassDeclaration and ClassExpression.
 pub struct ClassData {
-    pub name: Option<Identifier>,
+    pub name: Option<Box<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
     pub constructor: Option<Box<Expr>>,
@@ -347,7 +347,7 @@ pub struct BindingEntry {
 /// - `Expression`: computed property key (`{ [expr]: x }`)
 pub enum BindingEntryName {
     Empty,
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     Expression(Box<Expr>),
 }
 
@@ -358,7 +358,7 @@ pub enum BindingEntryName {
 /// - `MemberExpression`: assignment target (`{ x: obj.prop }`)
 pub enum BindingEntryAlias {
     Empty,
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     BindingPattern(Box<BindingPattern>),
     MemberExpression(Box<Expr>),
 }
@@ -374,7 +374,7 @@ pub struct VariableDeclarator {
 }
 
 pub enum VariableDeclaratorTarget {
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     BindingPattern(BindingPattern),
 }
 
@@ -441,7 +441,7 @@ pub enum OptionalChainReference {
         mode: OptionalChainMode,
     },
     MemberReference {
-        identifier: Identifier,
+        identifier: Box<Identifier>,
         mode: OptionalChainMode,
     },
     PrivateMemberReference {
@@ -486,7 +486,7 @@ pub struct CatchClause {
 
 pub enum CatchParameter {
     None,
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     BindingPattern(BindingPattern),
 }
 
@@ -561,6 +561,8 @@ pub struct ExportStatementData {
 pub enum ForInOfLhs {
     /// A variable declaration (`for (let x of ...)`)
     Declaration(Box<Stmt>),
+    /// An expression (`for (x in obj)`)
+    Expression(Box<Expr>),
     /// A binding pattern (`for ({a, b} of ...)`)
     Pattern(BindingPattern),
 }
@@ -651,7 +653,7 @@ pub enum Expression {
     RegExpLiteral(RegExpLiteralData),
 
     // Identifiers
-    Identifier(Identifier),
+    Identifier(Box<Identifier>),
     PrivateIdentifier(PrivateIdentifier),
 
     // Operators
