@@ -6,14 +6,18 @@
 
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
+#include <LibJS/AST.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/IdentifierTable.h>
 #include <LibJS/Bytecode/PropertyKeyTable.h>
 #include <LibJS/Bytecode/RegexTable.h>
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/BytecodeFactory.h>
+#include <LibJS/Lexer.h>
+#include <LibJS/Parser.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/SharedFunctionInstanceData.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/SourceCode.h>
 
@@ -108,7 +112,9 @@ extern "C" void* rust_create_executable(
     uint32_t template_object_cache_count,
     uint32_t object_shape_cache_count,
     uint32_t number_of_registers,
-    bool is_strict)
+    bool is_strict,
+    void const* const* shared_function_data,
+    size_t shared_function_data_count)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
@@ -200,5 +206,77 @@ extern "C" void* rust_create_executable(
     executable->registers_and_locals_count = number_of_registers + local_var_count;
     executable->registers_and_locals_and_constants_count = number_of_registers + local_var_count + constants_count;
 
+    // Set shared function data (inner function definitions)
+    for (size_t i = 0; i < shared_function_data_count; ++i) {
+        auto* data = const_cast<JS::SharedFunctionInstanceData*>(
+            static_cast<JS::SharedFunctionInstanceData const*>(shared_function_data[i]));
+        executable->shared_function_data.append(data);
+    }
+
     return executable.ptr();
+}
+
+extern "C" void* rust_create_shared_function_data(
+    void* vm_ptr,
+    void const* source_code_ptr,
+    uint16_t const* source_text,
+    size_t source_text_len,
+    uint16_t const* name,
+    size_t name_len,
+    bool strict_mode)
+{
+    auto& vm = *static_cast<JS::VM*>(vm_ptr);
+    auto& original_source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
+
+    // Build the source to re-parse: wrap in `(<source>)\n` to ensure it parses
+    // as an expression (handles function declarations, expressions, and arrows).
+    Vector<char16_t> wrapped;
+    wrapped.append(u'(');
+    wrapped.append(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+    wrapped.append(u')');
+    wrapped.append(u'\n');
+
+    auto wrapped_utf16 = Utf16String::from_utf16(Utf16View(wrapped.data(), wrapped.size()));
+    auto temp_source_code = JS::SourceCode::create(""_string, move(wrapped_utf16));
+    auto parser = JS::Parser(JS::Lexer(temp_source_code));
+    auto program = parser.parse_program(strict_mode);
+
+    // The program should have one ExpressionStatement containing a FunctionExpression
+    // (the parentheses cause it to be parsed as an expression, not a declaration).
+    JS::FunctionNode const* function_node = nullptr;
+    for (auto const& child : program->children()) {
+        if (is<JS::ExpressionStatement>(*child)) {
+            auto const& expr_stmt = static_cast<JS::ExpressionStatement const&>(*child);
+            auto const& expr = expr_stmt.expression();
+            if (is<JS::FunctionExpression>(expr))
+                function_node = static_cast<JS::FunctionExpression const*>(&expr);
+        }
+    }
+
+    if (!function_node) {
+        dbgln("rust_create_shared_function_data: failed to extract function node from re-parsed source");
+        return nullptr;
+    }
+
+    // Create SharedFunctionInstanceData from the extracted FunctionNode.
+    auto fn_name = name_len > 0
+        ? Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len))
+        : function_node->name();
+    auto shared = JS::SharedFunctionInstanceData::create_for_function_node(vm, *function_node, move(fn_name));
+
+    // Fix up source_code to point to the original source (not our temp wrapper),
+    // so that Function.prototype.toString() returns the correct source text.
+    shared->m_source_code = &original_source_code;
+    auto const& code_view = original_source_code.code_view();
+    // The source_text pointer is into the original source buffer (a UTF-16 array
+    // passed from Rust). Compute the offset and create a view into the SourceCode.
+    auto original_start = reinterpret_cast<uint16_t const*>(
+        code_view.is_ascii() ? static_cast<void const*>(code_view.ascii_span().data())
+                             : static_cast<void const*>(code_view.utf16_span().data()));
+    if (source_text >= original_start && source_text + source_text_len <= original_start + code_view.length_in_code_units()) {
+        auto offset = source_text - original_start;
+        shared->m_source_text = code_view.substring_view(offset, source_text_len);
+    }
+
+    return shared.ptr();
 }

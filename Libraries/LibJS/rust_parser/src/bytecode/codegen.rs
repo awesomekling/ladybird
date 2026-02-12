@@ -144,13 +144,12 @@ pub fn generate_expr(
         }
 
         // === Function expressions ===
-        Expression::Function(_data) => {
+        Expression::Function(data) => {
             let dst = choose_dst(gen, preferred_dst);
-            let shared_function_index = gen.shared_function_data_count;
-            gen.shared_function_data_count += 1;
+            let shared_function_data_index = emit_new_function(gen, data, None);
             gen.emit(Instruction::NewFunction {
                 dst: dst.operand(),
-                shared_function_data_index: shared_function_index,
+                shared_function_data_index,
                 lhs_name: None,
                 home_object: None,
             });
@@ -1667,16 +1666,13 @@ fn generate_class_expression(
     _data: &ClassData,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    // For now, create a minimal class via NewFunction for the constructor.
-    // Full class support (methods, fields, static init, private) needs more work.
+    // TODO: Full class support (methods, fields, static init, private, blueprints).
+    // For now, just evaluate the class as undefined.
     let dst = choose_dst(gen, preferred_dst);
-    let shared_function_index = gen.shared_function_data_count;
-    gen.shared_function_data_count += 1;
-    gen.emit(Instruction::NewFunction {
+    let undef = gen.add_constant_undefined();
+    gen.emit(Instruction::Mov {
         dst: dst.operand(),
-        shared_function_data_index: shared_function_index,
-        lhs_name: None,
-        home_object: None,
+        src: undef.operand(),
     });
     Some(dst)
 }
@@ -1963,4 +1959,63 @@ fn generate_try_statement(
 
     gen.switch_to_basic_block(end_block);
     None
+}
+
+/// Create a SharedFunctionInstanceData for a function expression/declaration
+/// via FFI (re-parsing the source with the C++ parser for lazy compilation)
+/// and register it with the generator.
+///
+/// Returns the shared_function_data_index for use in NewFunction instructions.
+fn emit_new_function(
+    gen: &mut Generator,
+    data: &FunctionData,
+    name_override: Option<&[u16]>,
+) -> u32 {
+    let source_start = data.source_text_start as usize;
+    let source_end = data.source_text_end as usize;
+
+    // Get the function source text from the original source buffer.
+    assert!(
+        !gen.source.is_null() && gen.source_len > 0,
+        "Generator must have source set for function compilation"
+    );
+    assert!(
+        source_end <= gen.source_len,
+        "Function source range out of bounds: {}..{} (source len {})",
+        source_start,
+        source_end,
+        gen.source_len
+    );
+
+    let source_text_ptr = unsafe { gen.source.add(source_start) };
+    let source_text_len = source_end - source_start;
+
+    // Get function name
+    let (name_ptr, name_len) = if let Some(name) = name_override {
+        (name.as_ptr(), name.len())
+    } else if let Some(name_ident) = &data.name {
+        (name_ident.name.as_ptr(), name_ident.name.len())
+    } else {
+        (std::ptr::null(), 0)
+    };
+
+    // Call FFI to create SharedFunctionInstanceData (lazy — no bytecode compiled)
+    let sfd_ptr = unsafe {
+        super::ffi::rust_create_shared_function_data(
+            gen.vm_ptr,
+            gen.source_code_ptr,
+            source_text_ptr,
+            source_text_len,
+            name_ptr,
+            name_len,
+            data.is_strict_mode || gen.strict,
+        )
+    };
+
+    assert!(
+        !sfd_ptr.is_null(),
+        "rust_create_shared_function_data returned null"
+    );
+
+    gen.register_shared_function_data(sfd_ptr)
 }

@@ -191,6 +191,10 @@ pub unsafe extern "C" fn rust_compile_program(
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = starts_in_strict_mode;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
 
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);

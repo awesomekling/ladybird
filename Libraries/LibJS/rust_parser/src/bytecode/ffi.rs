@@ -63,6 +63,18 @@ extern "C" {
         object_shape_cache_count: u32,
         number_of_registers: u32,
         is_strict: bool,
+        shared_function_data: *const *const c_void,
+        shared_function_data_count: usize,
+    ) -> *mut c_void;
+
+    pub fn rust_create_shared_function_data(
+        vm_ptr: *mut c_void,
+        source_code_ptr: *const c_void,
+        source_text: *const u16,
+        source_text_len: usize,
+        name: *const u16,
+        name_len: usize,
+        strict_mode: bool,
     ) -> *mut c_void;
 }
 
@@ -173,6 +185,13 @@ pub unsafe fn create_executable(
         })
         .collect();
 
+    // Collect shared function data pointers
+    let sfd_ptrs: Vec<*const c_void> = gen
+        .shared_function_data
+        .iter()
+        .map(|ptr| *ptr as *const c_void)
+        .collect();
+
     rust_create_executable(
         vm_ptr,
         source_code_ptr,
@@ -201,5 +220,7 @@ pub unsafe fn create_executable(
         gen.next_object_shape_cache,
         assembled.number_of_registers,
         gen.strict,
+        sfd_ptrs.as_ptr(),
+        sfd_ptrs.len(),
     )
 }

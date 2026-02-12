@@ -191,8 +191,9 @@ pub struct Generator {
     accumulator: ScopedOperand,
     this_value: ScopedOperand,
 
-    // --- Shared function data (indices) ---
-    pub shared_function_data_count: u32,
+    // --- Shared function data ---
+    // Opaque pointers to C++ SharedFunctionInstanceData objects.
+    pub shared_function_data: Vec<*mut std::ffi::c_void>,
     pub class_blueprint_count: u32,
 
     // --- Length identifier cache ---
@@ -200,6 +201,14 @@ pub struct Generator {
 
     // --- Generator finished flag ---
     pub finished: bool,
+
+    // --- FFI context ---
+    // These are set by the top-level compiler and passed through for
+    // creating SharedFunctionInstanceData via FFI callbacks.
+    pub vm_ptr: *mut std::ffi::c_void,
+    pub source_code_ptr: *const std::ffi::c_void,
+    pub source: *const u16,
+    pub source_len: usize,
 }
 
 impl Generator {
@@ -255,10 +264,14 @@ impl Generator {
                     generator: std::ptr::null_mut(),
                 }),
             },
-            shared_function_data_count: 0,
+            shared_function_data: Vec::new(),
             class_blueprint_count: 0,
             length_identifier: None,
             finished: false,
+            vm_ptr: std::ptr::null_mut(),
+            source_code_ptr: std::ptr::null(),
+            source: std::ptr::null(),
+            source_len: 0,
         };
 
         // Fix up the self-referential pointers.
@@ -407,6 +420,13 @@ impl Generator {
         let index = self.property_key_table.len() as u32;
         self.property_key_table.push(s);
         PropertyKeyTableIndex(index)
+    }
+
+    /// Register a SharedFunctionInstanceData (opaque C++ pointer) and return its index.
+    pub fn register_shared_function_data(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
+        let index = self.shared_function_data.len() as u32;
+        self.shared_function_data.push(ptr);
+        index
     }
 
     pub fn intern_regex(&mut self, pattern: Vec<u16>, flags: Vec<u16>) -> RegexTableIndex {

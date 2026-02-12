@@ -108,7 +108,28 @@ void* rust_create_executable(
     uint32_t object_shape_cache_count,
     // Register and mode
     uint32_t number_of_registers,
-    bool is_strict);
+    bool is_strict,
+    // Shared function data (inner functions)
+    // Array of SharedFunctionInstanceData* cast to void*.
+    void const* const* shared_function_data,
+    size_t shared_function_data_count);
+
+// Create a SharedFunctionInstanceData by re-parsing a function's source text
+// with the C++ parser. The function body is NOT compiled — it will compile
+// lazily on first call.
+//
+// Returns a SharedFunctionInstanceData* cast to void*.
+void* rust_create_shared_function_data(
+    void* vm_ptr,
+    void const* source_code_ptr,
+    // Source text of the function (e.g. "function foo(a) { return a; }")
+    uint16_t const* source_text,
+    size_t source_text_len,
+    // Function name override (empty for anonymous)
+    uint16_t const* name,
+    size_t name_len,
+    // Whether to parse in strict mode context
+    bool strict_mode);
 
 #ifdef __cplusplus
 }
