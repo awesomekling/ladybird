@@ -2220,12 +2220,27 @@ fn generate_class_expression(
                     ClassMethodKind::Setter => 2u8,
                 };
 
-                // Extract key name for the SFD (methods need their name set from the key)
+                // Extract key name for the SFD (methods need their name set from the key).
+                // Getters and setters have "get "/"set " prefixed to the name.
                 let method_name = match &key.inner {
                     Expression::Identifier(ident) => Some(ident.name.clone()),
                     Expression::StringLiteral(s) => Some(s.clone()),
                     _ => None,
-                };
+                }.map(|name| {
+                    match kind {
+                        ClassMethodKind::Getter => {
+                            let mut prefixed: Vec<u16> = utf16!("get ").to_vec();
+                            prefixed.extend_from_slice(&name);
+                            prefixed
+                        }
+                        ClassMethodKind::Setter => {
+                            let mut prefixed: Vec<u16> = utf16!("set ").to_vec();
+                            prefixed.extend_from_slice(&name);
+                            prefixed
+                        }
+                        ClassMethodKind::Method => name,
+                    }
+                });
 
                 // Create SFD for the method function
                 let sfd_index = if let Expression::Function(func_data) = &function.inner {
