@@ -359,12 +359,7 @@ pub fn generate_expr(
 
         // === Tagged template literals ===
         Expression::TaggedTemplateLiteral { tag, template_literal } => {
-            // Simplified: just generate the tag call with template args
-            let _tag_val = generate_expr(tag, gen, None);
-            let _template = generate_expr(template_literal, gen, None);
-            let dst = choose_dst(gen, preferred_dst);
-            // Full tagged template implementation needed for M4g
-            Some(dst)
+            generate_tagged_template_literal(gen, tag, template_literal, preferred_dst)
         }
 
         // === Object ===
@@ -534,10 +529,23 @@ pub fn generate_stmt(
         // === With ===
         Statement::With { object, body } => {
             let obj = generate_expr(object, gen, None)?;
-            let dst = gen.allocate_register();
-            gen.emit(Instruction::EnterObjectEnvironment { dst: dst.operand(), object: obj.operand() });
+            let object_environment = gen.allocate_register();
+            gen.emit(Instruction::EnterObjectEnvironment { dst: object_environment.operand(), object: obj.operand() });
+            gen.lexical_environment_register_stack.push(object_environment);
+            gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+
             let result = generate_stmt(body, gen, preferred_dst);
-            // Leave the object environment would happen here
+
+            gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+            gen.lexical_environment_register_stack.pop();
+
+            if !gen.is_current_block_terminated() {
+                let parent = gen.lexical_environment_register_stack.last().cloned()
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                gen.emit(Instruction::SetLexicalEnvironment {
+                    environment: parent.operand(),
+                });
+            }
             result
         }
 
@@ -2035,6 +2043,10 @@ fn emit_get_by_id(
 
 fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
     if ident.is_local() {
+        if ident.declaration_kind.get() == IdentDeclarationKind::Const {
+            gen.emit(Instruction::ThrowConstAssignment {});
+            return;
+        }
         let local_index = ident.local_index.get();
         let local = match ident.local_type.get() {
             LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
@@ -2042,22 +2054,23 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             LocalType::None => unreachable!(),
         };
         gen.emit_mov(&local, value);
-    } else {
+    } else if ident.is_global.get() {
         let id = gen.intern_identifier(ident.name.clone());
-        let dk = ident.declaration_kind.get();
-        if dk == IdentDeclarationKind::Let || dk == IdentDeclarationKind::Const {
-            gen.emit(Instruction::SetLexicalBinding {
-                identifier: id,
-                src: value.operand(),
-                cache: EnvironmentCoordinate::empty(),
-            });
-        } else {
-            gen.emit(Instruction::SetVariableBinding {
-                identifier: id,
-                src: value.operand(),
-                cache: EnvironmentCoordinate::empty(),
-            });
-        }
+        let cache = gen.next_global_variable_cache();
+        gen.emit(Instruction::SetGlobal {
+            identifier: id,
+            src: value.operand(),
+            cache_index: cache,
+        });
+    } else {
+        // Non-local, non-global: use SetLexicalBinding which searches
+        // the lexical environment chain (important for with-statement support).
+        let id = gen.intern_identifier(ident.name.clone());
+        gen.emit(Instruction::SetLexicalBinding {
+            identifier: id,
+            src: value.operand(),
+            cache: EnvironmentCoordinate::empty(),
+        });
     }
 }
 
@@ -2230,6 +2243,121 @@ fn generate_template_literal(
             });
         }
     }
+
+    Some(dst)
+}
+
+// =============================================================================
+// Tagged template literal
+// =============================================================================
+
+fn generate_tagged_template_literal(
+    gen: &mut Generator,
+    tag: &Expr,
+    template_literal: &Expr,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    // Resolve tag and this_value based on the tag expression type.
+    let (tag_reg, this_value) = match &tag.inner {
+        Expression::Member { object, property, computed } => {
+            let obj = generate_expr(object, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            let method = gen.allocate_register();
+            if *computed {
+                let prop = generate_expr(property, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                gen.emit(Instruction::GetByValue {
+                    dst: method.operand(),
+                    base: obj.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+            } else if let Expression::Identifier(ident) = &property.inner {
+                emit_get_by_id(gen, &method, &obj, &ident.name, None);
+            }
+            (method, Some(obj))
+        }
+        Expression::Identifier(ident) if ident.is_local() || ident.is_global.get() => {
+            let tag_val = generate_expr(tag, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            (tag_val, None)
+        }
+        Expression::Identifier(ident) => {
+            // Non-local, non-global identifier: use GetCalleeAndThisFromEnvironment
+            // to properly handle with-statement bindings.
+            let callee_reg = gen.allocate_register();
+            let this_reg = gen.allocate_register();
+            let id = gen.intern_identifier(ident.name.clone());
+            gen.emit(Instruction::GetCalleeAndThisFromEnvironment {
+                callee: callee_reg.operand(),
+                this_value: this_reg.operand(),
+                identifier: id,
+                cache: EnvironmentCoordinate::empty(),
+            });
+            (callee_reg, Some(this_reg))
+        }
+        _ => {
+            let tag_val = generate_expr(tag, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            (tag_val, None)
+        }
+    };
+
+    // Build template strings for GetTemplateObject.
+    // expressions has alternating: string_0, expr_0, string_1, expr_1, ..., string_n
+    let data = match &template_literal.inner {
+        Expression::TemplateLiteral(d) => d,
+        _ => unreachable!("TaggedTemplateLiteral template must be TemplateLiteral"),
+    };
+
+    // Collect cooked strings (even indices). NullLiteral means invalid escape → undefined.
+    let mut string_regs = Vec::new();
+    for i in (0..data.expressions.len()).step_by(2) {
+        if matches!(&data.expressions[i].inner, Expression::NullLiteral) {
+            string_regs.push(gen.add_constant_undefined());
+        } else {
+            let val = generate_expr(&data.expressions[i], gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            string_regs.push(val);
+        }
+    }
+
+    // Append raw strings.
+    for raw in &data.raw_strings {
+        let val = gen.add_constant_string(raw.clone());
+        string_regs.push(val);
+    }
+
+    // Emit GetTemplateObject.
+    let strings_array = gen.allocate_register();
+    let string_ops: Vec<Operand> = string_regs.iter().map(|s| s.operand()).collect();
+    let cache_index = gen.next_template_object_cache();
+    gen.emit(Instruction::GetTemplateObject {
+        dst: strings_array.operand(),
+        strings_count: string_ops.len() as u32,
+        cache_index,
+        strings: string_ops,
+    });
+
+    // Build arguments: [template_object, ...interpolated_expressions]
+    let mut arg_regs = vec![strings_array];
+    for i in (1..data.expressions.len()).step_by(2) {
+        let val = generate_expr(&data.expressions[i], gen, None)
+            .unwrap_or_else(|| gen.add_constant_undefined());
+        arg_regs.push(val);
+    }
+
+    let dst = choose_dst(gen, preferred_dst);
+    let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+    let args: Vec<Operand> = arg_regs.iter().map(|a| a.operand()).collect();
+    gen.emit(Instruction::Call {
+        dst: dst.operand(),
+        callee: tag_reg.operand(),
+        this_value: this_op.operand(),
+        argument_count: args.len() as u32,
+        expression_string: None,
+        arguments: args,
+    });
 
     Some(dst)
 }
@@ -3565,7 +3693,7 @@ enum BindingMode {
     InitializeLexical,
     /// `var` declarations: emit InitializeVariableBinding.
     InitializeVariable,
-    /// Assignment expressions: emit SetVariableBinding.
+    /// Assignment expressions: emit SetLexicalBinding or SetGlobal.
     Set,
 }
 
@@ -3620,11 +3748,20 @@ fn emit_set_variable_with_mode(
                 });
             }
             BindingMode::Set => {
-                gen.emit(Instruction::SetVariableBinding {
-                    identifier: id,
-                    src: value.operand(),
-                    cache: EnvironmentCoordinate::empty(),
-                });
+                if ident.is_global.get() {
+                    let cache = gen.next_global_variable_cache();
+                    gen.emit(Instruction::SetGlobal {
+                        identifier: id,
+                        src: value.operand(),
+                        cache_index: cache,
+                    });
+                } else {
+                    gen.emit(Instruction::SetLexicalBinding {
+                        identifier: id,
+                        src: value.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
             }
         }
     }
