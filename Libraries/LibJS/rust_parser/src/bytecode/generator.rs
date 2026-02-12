@@ -183,6 +183,10 @@ pub struct Generator {
     pub local_variables: Vec<LocalVariable>,
     pub initialized_locals: Vec<bool>,
 
+    /// When set, function/class expressions will use this as their `.name`.
+    /// Set by assignment/declaration codegen, consumed by function expression codegen.
+    pub pending_lhs_name: Option<IdentifierTableIndex>,
+
     // Source location tracking
     pub current_source_start: u32,
     pub current_source_end: u32,
@@ -260,6 +264,7 @@ impl Generator {
             enclosing_function_kind: FunctionKind::Normal,
             local_variables: Vec::new(),
             initialized_locals: Vec::new(),
+            pending_lhs_name: None,
             current_source_start: 0,
             current_source_end: 0,
             current_completion_register: None,

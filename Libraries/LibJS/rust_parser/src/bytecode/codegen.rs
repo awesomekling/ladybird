@@ -161,14 +161,70 @@ pub fn generate_expr(
 
         // === Function expressions ===
         Expression::Function(data) => {
+            let has_name = data.name.is_some();
+            let mut name_id = None;
+
+            // Named function expressions get an intermediate scope so the name
+            // is visible inside the function body but not outside.
+            if has_name {
+                let parent = gen.lexical_environment_register_stack.last().cloned()
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let new_env = gen.allocate_register();
+                gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+                gen.emit(Instruction::CreateLexicalEnvironment {
+                    dst: new_env.operand(),
+                    parent: parent.operand(),
+                    capacity: 0,
+                });
+                gen.lexical_environment_register_stack.push(new_env);
+
+                let id = gen.intern_identifier(data.name.as_ref().unwrap().name.clone());
+                gen.emit(Instruction::CreateVariable {
+                    identifier: id,
+                    mode: 0, // Lexical
+                    is_immutable: true,
+                    is_global: false,
+                    is_strict: false,
+                });
+                name_id = Some(id);
+            }
+
             let dst = choose_dst(gen, preferred_dst);
-            let shared_function_data_index = emit_new_function(gen, data, None);
+            // For anonymous function expressions, use the pending LHS name
+            // as the function's .name property.
+            let lhs_name = if !has_name { gen.pending_lhs_name.take() } else { None };
+            let lhs_name_str: Option<Vec<u16>> = lhs_name.map(|idx| gen.identifier_table[idx.0 as usize].clone());
+            let name_override = if !has_name {
+                lhs_name_str.as_deref()
+            } else {
+                None
+            };
+            let shared_function_data_index = emit_new_function(gen, data, name_override);
             gen.emit(Instruction::NewFunction {
                 dst: dst.operand(),
                 shared_function_data_index,
-                lhs_name: None,
+                lhs_name,
                 home_object: None,
             });
+
+            if has_name {
+                gen.emit(Instruction::InitializeLexicalBinding {
+                    identifier: name_id.unwrap(),
+                    src: dst.operand(),
+                    cache: EnvironmentCoordinate::empty(),
+                });
+
+                gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+                gen.lexical_environment_register_stack.pop();
+
+                if !gen.is_current_block_terminated() {
+                    let parent = gen.lexical_environment_register_stack.last().cloned()
+                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    gen.emit(Instruction::SetLexicalEnvironment {
+                        environment: parent.operand(),
+                    });
+                }
+            }
             Some(dst)
         }
 
@@ -1550,7 +1606,12 @@ fn generate_variable_declaration(
     declarations: &[VariableDeclarator],
 ) {
     for decl in declarations {
+        // Set pending LHS name for function name inference.
+        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+            gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
+        }
         let init_value = decl.init.as_ref().and_then(|init| generate_expr(init, gen, None));
+        gen.pending_lhs_name = None;
 
         match &decl.target {
             VariableDeclaratorTarget::Identifier(ident) => {
@@ -1940,7 +2001,11 @@ fn generate_assignment_expression(
         AssignmentLhs::Expression(lhs_expr) => {
             // Simple assignment to identifier
             if let Expression::Identifier(ident) = &lhs_expr.inner {
+                if op == AssignmentOp::Assignment {
+                    gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
+                }
                 let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+                gen.pending_lhs_name = None;
                 if op == AssignmentOp::Assignment {
                     emit_set_variable(gen, ident, &rhs_val);
                     return Some(rhs_val);
@@ -2484,8 +2549,17 @@ fn generate_object_expression(
             None
         };
 
+        // Set pending LHS name for function name inference on non-computed properties.
+        if !prop.is_computed && prop.property_type == ObjectPropertyType::KeyValue {
+            if let Expression::StringLiteral(s) = &prop.key.inner {
+                gen.pending_lhs_name = Some(gen.intern_identifier(s.clone()));
+            } else if let Expression::Identifier(ident) = &prop.key.inner {
+                gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
+            }
+        }
         let value = prop.value.as_ref().and_then(|v| generate_expr(v, gen, None))
             .unwrap_or_else(|| gen.add_constant_undefined());
+        gen.pending_lhs_name = None;
 
         match prop.property_type {
             ObjectPropertyType::Spread => unreachable!(),
