@@ -15,7 +15,7 @@
 
 use crate::ast::*;
 
-use super::generator::{choose_dst, Generator, ScopedOperand};
+use super::generator::{choose_dst, BlockBoundaryType, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
 use super::operand::*;
 
@@ -484,15 +484,7 @@ pub fn generate_stmt(
             if gen.is_in_async_function() {
                 val = generate_await(gen, val);
             }
-            if gen.is_in_generator_or_async_function() {
-                // Generator/async returns use Yield with no continuation (= done).
-                gen.emit(Instruction::Yield {
-                    continuation_label: None,
-                    value: val.operand(),
-                });
-            } else {
-                gen.emit(Instruction::Return { value: val.operand() });
-            }
+            gen.generate_return(&val);
             None
         }
 
@@ -511,20 +503,13 @@ pub fn generate_stmt(
 
         // === Break ===
         Statement::Break { target_label } => {
-            // Find the matching breakable scope and jump
-            if let Some(scope) = gen.find_breakable_scope(target_label.as_deref()) {
-                let target = scope.bytecode_target;
-                gen.emit(Instruction::Jump { target });
-            }
+            gen.generate_break(target_label.as_deref());
             None
         }
 
         // === Continue ===
         Statement::Continue { target_label } => {
-            if let Some(scope) = gen.find_continuable_scope(target_label.as_deref()) {
-                let target = scope.bytecode_target;
-                gen.emit(Instruction::Jump { target });
-            }
+            gen.generate_continue(target_label.as_deref());
             None
         }
 
@@ -3901,54 +3886,81 @@ fn generate_try_statement(
     data: &TryStatementData,
     _preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    // Save old unwind handler so we can restore it after the try body.
     let old_handler = gen.current_unwind_handler;
+    let saved_block = gen.current_block_index();
 
-    // Create the handler block BEFORE setting the unwind handler
-    // (the handler block itself should NOT have its own handler).
-    let handler_block = gen.make_block();
-    let end_block = gen.make_block();
+    // Save lexical environment for restoration in catch/exception handler.
+    let saved_env = gen.lexical_environment_register_stack.last().cloned()
+        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
 
-    // Save lexical environment for restoration in catch handler.
-    let saved_env = gen.allocate_register();
-    gen.emit(Instruction::GetLexicalEnvironment {
-        dst: saved_env.operand(),
-    });
+    let mut next_block: Option<usize> = None;
 
-    // Set handler on current block and propagate to all blocks
-    // created during try body generation.
-    let current = gen.current_block_index();
-    gen.basic_blocks[current].handler = Some(handler_block);
-    gen.current_unwind_handler = Some(handler_block);
+    // --- Set up FinallyContext if we have a finalizer ---
+    let has_finally = data.finalizer.is_some();
+    let mut finally_body_block: Option<usize> = None;
 
-    // Generate try body
-    generate_stmt(&data.block, gen, None);
+    if has_finally {
+        let completion_type = gen.allocate_register();
+        let completion_value = gen.allocate_register();
 
-    // Restore old unwind handler
-    gen.current_unwind_handler = old_handler;
+        let exception_preamble_block = gen.make_block();
+        let fb_block = gen.make_block();
+        finally_body_block = Some(fb_block);
 
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+        // Save the parent FinallyContext and install new one.
+        let parent = gen.current_finally_context.take();
+        gen.current_finally_context = Some(Box::new(FinallyContext {
+            completion_type,
+            completion_value,
+            finally_body: Label(fb_block as u32),
+            exception_preamble: Label(exception_preamble_block as u32),
+            parent,
+            registered_jumps: Vec::new(),
+            next_jump_index: FinallyContext::FIRST_JUMP_INDEX,
+            lexical_environment_at_entry: Some(saved_env.clone()),
+        }));
+
+        // Generate exception preamble block:
+        //   Catch → completion_value
+        //   SetLexicalEnvironment (restore to entry)
+        //   completion_type = THROW
+        //   Jump → finally_body
+        gen.switch_to_basic_block(exception_preamble_block);
+        let ctx = gen.current_finally_context.as_ref().unwrap();
+        let cv = ctx.completion_value.clone();
+        let ct = ctx.completion_type.clone();
+        gen.emit(Instruction::Catch { dst: cv.operand() });
+        gen.emit(Instruction::SetLexicalEnvironment {
+            environment: saved_env.operand(),
         });
+        let throw_const = gen.add_constant_i32(FinallyContext::THROW);
+        gen.emit_mov(&ct, &throw_const);
+        gen.emit(Instruction::Jump {
+            target: Label(fb_block as u32),
+        });
+
+        // Set exception_preamble as default handler for blocks created below.
+        // The catch body gets this as its handler (exceptions in catch → finally).
+        gen.current_unwind_handler = Some(exception_preamble_block);
+        gen.start_boundary(BlockBoundaryType::ReturnToFinally);
     }
 
-    // Generate catch handler
-    gen.switch_to_basic_block(handler_block);
-
+    // --- Generate catch handler block (if present) ---
+    let mut handler_block: Option<usize> = None;
     if let Some(catch) = &data.handler {
-        // Catch the exception value
+        let hb = gen.make_block();
+        handler_block = Some(hb);
+        gen.switch_to_basic_block(hb);
+
         let caught_value = gen.allocate_register();
         gen.emit(Instruction::Catch {
             dst: caught_value.operand(),
         });
-
-        // Restore lexical environment
         gen.emit(Instruction::SetLexicalEnvironment {
             environment: saved_env.operand(),
         });
 
-        // Bind the catch parameter in a new lexical scope (if non-local).
+        // Bind the catch parameter.
         let mut created_catch_scope = false;
         match &catch.parameter {
             CatchParameter::Identifier(ident) => {
@@ -3957,7 +3969,6 @@ fn generate_try_statement(
                     gen.emit_mov(&local, &caught_value);
                     gen.mark_local_initialized(ident.local_index.get());
                 } else {
-                    // Create a new lexical environment for the catch parameter.
                     let parent = gen.lexical_environment_register_stack.last().cloned();
                     let parent = parent.unwrap_or_else(|| {
                         gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
@@ -3999,48 +4010,187 @@ fn generate_try_statement(
         }
 
         if !gen.is_current_block_terminated() {
+            if has_finally {
+                // Normal exit from catch → completion_type = NORMAL, jump to finally.
+                let ctx = gen.current_finally_context.as_ref().unwrap();
+                let ct = ctx.completion_type.clone();
+                let fb = ctx.finally_body;
+                let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
+                gen.emit_mov(&ct, &normal_const);
+                gen.emit(Instruction::Jump { target: fb });
+            } else {
+                if next_block.is_none() {
+                    next_block = Some(gen.make_block());
+                }
+                gen.emit(Instruction::Jump {
+                    target: Label(next_block.unwrap() as u32),
+                });
+            }
+        }
+    }
+
+    if has_finally {
+        gen.end_boundary(BlockBoundaryType::ReturnToFinally);
+    }
+
+    // --- Generate try body ---
+
+    // Set handler BEFORE creating the try body block, so make_block()
+    // captures the correct handler for exception routing.
+    // For try-catch-finally: catch handler is inner (exceptions → catch → exception_preamble → finally).
+    // For try-catch: catch handler.
+    // For try-finally: exception_preamble.
+    if let Some(hb) = handler_block {
+        gen.current_unwind_handler = Some(hb);
+    } else if has_finally {
+        if let Some(ctx) = &gen.current_finally_context {
+            let ep = match ctx.exception_preamble {
+                Label(idx) => idx as usize,
+            };
+            gen.current_unwind_handler = Some(ep);
+        }
+    }
+
+    let try_body_block = gen.make_block();
+    gen.switch_to_basic_block(saved_block);
+    gen.emit(Instruction::Jump {
+        target: Label(try_body_block as u32),
+    });
+
+    if has_finally {
+        gen.start_boundary(BlockBoundaryType::ReturnToFinally);
+    }
+
+    gen.switch_to_basic_block(try_body_block);
+
+    generate_stmt(&data.block, gen, None);
+
+    if !gen.is_current_block_terminated() {
+        if has_finally {
+            // Normal exit from try → completion_type = NORMAL, jump to finally.
+            let ctx = gen.current_finally_context.as_ref().unwrap();
+            let ct = ctx.completion_type.clone();
+            let fb = ctx.finally_body;
+            let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
+            gen.emit_mov(&ct, &normal_const);
+            gen.emit(Instruction::Jump { target: fb });
+        } else {
+            gen.current_unwind_handler = old_handler;
+            if next_block.is_none() {
+                next_block = Some(gen.make_block());
+            }
             gen.emit(Instruction::Jump {
-                target: Label(end_block as u32),
+                target: Label(next_block.unwrap() as u32),
             });
         }
+    }
+
+    if has_finally {
+        gen.end_boundary(BlockBoundaryType::ReturnToFinally);
+    }
+
+    // Restore old unwind handler.
+    gen.current_unwind_handler = old_handler;
+
+    // --- Generate finally body and after-finally dispatch ---
+    if let Some(fb_block) = finally_body_block {
+        // Pop FinallyContext and save its data for dispatch.
+        let ctx = gen.current_finally_context.take().unwrap();
+        gen.current_finally_context = ctx.parent;
+
+        gen.switch_to_basic_block(fb_block);
+        gen.start_boundary(BlockBoundaryType::LeaveFinally);
+
+        // Generate the finally body.
+        if let Some(finalizer) = &data.finalizer {
+            generate_stmt(finalizer, gen, None);
+        }
+
+        gen.end_boundary(BlockBoundaryType::LeaveFinally);
+
+        if !gen.is_current_block_terminated() {
+            if next_block.is_none() {
+                next_block = Some(gen.make_block());
+            }
+            let nb = next_block.unwrap();
+
+            // After-finally dispatch chain:
+            // 1. NORMAL → next block
+            let after_normal_check = gen.make_block();
+            let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
+            gen.emit(Instruction::JumpStrictlyEquals {
+                lhs: ctx.completion_type.operand(),
+                rhs: normal_const.operand(),
+                true_target: Label(nb as u32),
+                false_target: Label(after_normal_check as u32),
+            });
+            gen.switch_to_basic_block(after_normal_check);
+
+            // 2. Registered break/continue jumps
+            for jump in &ctx.registered_jumps {
+                let after_jump_check = gen.make_block();
+                let jump_const = gen.add_constant_i32(jump.index);
+                gen.emit(Instruction::JumpStrictlyEquals {
+                    lhs: ctx.completion_type.operand(),
+                    rhs: jump_const.operand(),
+                    true_target: jump.target,
+                    false_target: Label(after_jump_check as u32),
+                });
+                gen.switch_to_basic_block(after_jump_check);
+            }
+
+            // 3. RETURN → actually return the completion_value
+            let return_block = gen.make_block();
+            let rethrow_block = gen.make_block();
+            let return_const = gen.add_constant_i32(FinallyContext::RETURN);
+            gen.emit(Instruction::JumpStrictlyEquals {
+                lhs: ctx.completion_type.operand(),
+                rhs: return_const.operand(),
+                true_target: Label(return_block as u32),
+                false_target: Label(rethrow_block as u32),
+            });
+
+            // Generate return block.
+            gen.switch_to_basic_block(return_block);
+            if let Some(ref parent_ctx) = gen.current_finally_context {
+                // Nested finally: copy completion record to outer and jump to outer finally.
+                let outer_ct = parent_ctx.completion_type.clone();
+                let outer_cv = parent_ctx.completion_value.clone();
+                let outer_fb = parent_ctx.finally_body;
+                gen.emit_mov(&outer_ct, &ctx.completion_type);
+                gen.emit_mov(&outer_cv, &ctx.completion_value);
+                gen.emit(Instruction::Jump { target: outer_fb });
+            } else {
+                if gen.is_in_generator_or_async_function() {
+                    gen.emit(Instruction::Yield {
+                        continuation_label: None,
+                        value: ctx.completion_value.operand(),
+                    });
+                } else {
+                    gen.emit(Instruction::Return {
+                        value: ctx.completion_value.operand(),
+                    });
+                }
+            }
+
+            // 4. Default → rethrow the exception.
+            gen.switch_to_basic_block(rethrow_block);
+            gen.emit(Instruction::Throw {
+                src: ctx.completion_value.operand(),
+            });
+        }
+    }
+
+    // Switch to the next block for code after the try statement.
+    if let Some(nb) = next_block {
+        gen.switch_to_basic_block(nb);
     } else {
-        // No catch handler — just catch and discard (try-finally pattern)
-        let discarded = gen.allocate_register();
-        gen.emit(Instruction::Catch {
-            dst: discarded.operand(),
-        });
-        gen.emit(Instruction::SetLexicalEnvironment {
-            environment: saved_env.operand(),
-        });
+        // No next block means all paths through try are terminated (return/throw).
+        // Create a dead block to keep the generator pointing somewhere valid.
+        let dead = gen.make_block();
+        gen.switch_to_basic_block(dead);
     }
 
-    // Generate finally block (simplified — full FinallyContext needed later)
-    if let Some(finalizer) = &data.finalizer {
-        if data.handler.is_some() {
-            // try-catch-finally: finally runs after both try and catch paths
-            // For now, generate finally inline at the end block
-            gen.switch_to_basic_block(end_block);
-            generate_stmt(finalizer, gen, None);
-            // The end_block now contains finally code, so we don't
-            // need to jump to it. Just leave the generator pointing here.
-            return None;
-        }
-        // try-finally (no catch): generate finally after catch-and-discard
-        if !gen.is_current_block_terminated() {
-            generate_stmt(finalizer, gen, None);
-        }
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::Jump {
-                target: Label(end_block as u32),
-            });
-        }
-    } else if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
-        });
-    }
-
-    gen.switch_to_basic_block(end_block);
     None
 }
 

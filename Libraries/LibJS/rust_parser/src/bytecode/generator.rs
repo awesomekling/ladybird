@@ -92,6 +92,7 @@ pub struct LabelableScope {
 }
 
 /// Codegen-time state for a try/finally scope.
+#[derive(Clone)]
 pub struct FinallyContext {
     pub completion_type: ScopedOperand,
     pub completion_value: ScopedOperand,
@@ -111,6 +112,7 @@ impl FinallyContext {
 }
 
 /// A break/continue target registered with a FinallyContext.
+#[derive(Clone)]
 pub struct FinallyJump {
     pub index: i32,
     pub target: Label,
@@ -592,9 +594,11 @@ impl Generator {
             language_label_set: label_set,
             completion_register: None,
         });
+        self.start_boundary(BlockBoundaryType::Break);
     }
 
     pub fn end_breakable_scope(&mut self) {
+        self.end_boundary(BlockBoundaryType::Break);
         self.breakable_scopes.pop();
     }
 
@@ -605,9 +609,11 @@ impl Generator {
             language_label_set: label_set,
             completion_register: None,
         });
+        self.start_boundary(BlockBoundaryType::Continue);
     }
 
     pub fn end_continuable_scope(&mut self) {
+        self.end_boundary(BlockBoundaryType::Continue);
         self.continuable_scopes.pop();
     }
 
@@ -631,6 +637,218 @@ impl Generator {
         } else {
             self.continuable_scopes.last()
         }
+    }
+
+    // --- FinallyContext support ---
+
+    /// Check if there is an outer ReturnToFinally boundary between `boundary_index`
+    /// and the matching break/continue boundary.
+    fn has_outer_finally_before_target(&self, is_break: bool, boundary_index: usize) -> bool {
+        for j in (0..boundary_index.saturating_sub(1)).rev() {
+            let inner = self.boundaries[j];
+            if (is_break && inner == BlockBoundaryType::Break)
+                || (!is_break && inner == BlockBoundaryType::Continue)
+            {
+                return false;
+            }
+            if inner == BlockBoundaryType::ReturnToFinally {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Register a jump target with the current FinallyContext.
+    /// Assigns a unique completion_type index and emits code to set it and jump to finally.
+    pub fn register_jump_in_finally_context(&mut self, target: Label) {
+        let ctx = self.current_finally_context.as_mut().unwrap();
+        let jump_index = ctx.next_jump_index;
+        ctx.next_jump_index += 1;
+        ctx.registered_jumps.push(FinallyJump {
+            index: jump_index,
+            target,
+        });
+        let completion_type = ctx.completion_type.clone();
+        let finally_body = ctx.finally_body;
+        let idx_const = self.add_constant_i32(jump_index);
+        self.emit_mov(&completion_type, &idx_const);
+        self.emit(Instruction::Jump {
+            target: finally_body,
+        });
+    }
+
+    /// For break/continue through nested finally: create a trampoline block.
+    fn emit_trampoline_through_finally(&mut self, is_break: bool) {
+        let trampoline_block = self.make_block();
+        self.register_jump_in_finally_context(Label(trampoline_block as u32));
+        self.switch_to_basic_block(trampoline_block);
+        // Pop to the parent FinallyContext (simulating the inner finally completing).
+        let parent = self
+            .current_finally_context
+            .as_ref()
+            .and_then(|c| c.parent.clone());
+        self.current_finally_context = parent;
+        // Continue the boundary walk from here (the caller will keep going).
+        let _ = is_break; // Used by caller to determine direction
+    }
+
+    /// Generate a break, walking boundaries and handling FinallyContext.
+    pub fn generate_break(&mut self, label: Option<&[u16]>) {
+        if let Some(label) = label {
+            self.generate_labelled_jump(true, label);
+        } else {
+            self.generate_scoped_jump(true);
+        }
+    }
+
+    /// Generate a continue, walking boundaries and handling FinallyContext.
+    pub fn generate_continue(&mut self, label: Option<&[u16]>) {
+        if let Some(label) = label {
+            self.generate_labelled_jump(false, label);
+        } else {
+            self.generate_scoped_jump(false);
+        }
+    }
+
+    /// Walk boundaries for unlabelled break/continue.
+    fn generate_scoped_jump(&mut self, is_break: bool) {
+        let saved_finally_context = self.current_finally_context.clone();
+        let env_stack_len = self.lexical_environment_register_stack.len();
+        let mut env_offset = env_stack_len;
+
+        let mut i = self.boundaries.len();
+        while i > 0 {
+            i -= 1;
+            let boundary = self.boundaries[i];
+            match boundary {
+                BlockBoundaryType::Break if is_break => {
+                    let target = self.breakable_scopes.last().unwrap().bytecode_target;
+                    self.emit(Instruction::Jump { target });
+                    self.current_finally_context = saved_finally_context;
+                    return;
+                }
+                BlockBoundaryType::Continue if !is_break => {
+                    let target = self.continuable_scopes.last().unwrap().bytecode_target;
+                    self.emit(Instruction::Jump { target });
+                    self.current_finally_context = saved_finally_context;
+                    return;
+                }
+                BlockBoundaryType::LeaveLexicalEnvironment => {
+                    env_offset -= 1;
+                    let env = self.lexical_environment_register_stack[env_offset - 1].clone();
+                    self.emit(Instruction::SetLexicalEnvironment {
+                        environment: env.operand(),
+                    });
+                }
+                BlockBoundaryType::ReturnToFinally => {
+                    if !self.has_outer_finally_before_target(is_break, i + 1) {
+                        let target = if is_break {
+                            self.breakable_scopes.last().unwrap().bytecode_target
+                        } else {
+                            self.continuable_scopes.last().unwrap().bytecode_target
+                        };
+                        self.register_jump_in_finally_context(target);
+                        self.current_finally_context = saved_finally_context;
+                        return;
+                    }
+                    self.emit_trampoline_through_finally(is_break);
+                }
+                _ => {}
+            }
+        }
+        self.current_finally_context = saved_finally_context;
+    }
+
+    /// Walk boundaries for labelled break/continue.
+    fn generate_labelled_jump(&mut self, is_break: bool, label: &[u16]) {
+        let saved_finally_context = self.current_finally_context.clone();
+        let env_stack_len = self.lexical_environment_register_stack.len();
+        let mut env_offset = env_stack_len;
+
+        let jumpable_scopes: Vec<(Label, Vec<Vec<u16>>)> = if is_break {
+            self.breakable_scopes
+                .iter()
+                .rev()
+                .map(|s| (s.bytecode_target, s.language_label_set.clone()))
+                .collect()
+        } else {
+            self.continuable_scopes
+                .iter()
+                .rev()
+                .map(|s| (s.bytecode_target, s.language_label_set.clone()))
+                .collect()
+        };
+
+        let mut current_boundary = self.boundaries.len();
+
+        for (target, label_set) in &jumpable_scopes {
+            while current_boundary > 0 {
+                current_boundary -= 1;
+                let boundary = self.boundaries[current_boundary];
+                match boundary {
+                    BlockBoundaryType::LeaveLexicalEnvironment => {
+                        env_offset -= 1;
+                        let env = self.lexical_environment_register_stack[env_offset - 1].clone();
+                        self.emit(Instruction::SetLexicalEnvironment {
+                            environment: env.operand(),
+                        });
+                    }
+                    BlockBoundaryType::ReturnToFinally => {
+                        if !self.has_outer_finally_before_target(is_break, current_boundary + 1)
+                            && label_set.iter().any(|l| l == label)
+                        {
+                            self.register_jump_in_finally_context(*target);
+                            self.current_finally_context = saved_finally_context;
+                            return;
+                        }
+                        self.emit_trampoline_through_finally(is_break);
+                    }
+                    b if (is_break && b == BlockBoundaryType::Break)
+                        || (!is_break && b == BlockBoundaryType::Continue) =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if label_set.iter().any(|l| l == label) {
+                self.emit(Instruction::Jump {
+                    target: *target,
+                });
+                self.current_finally_context = saved_finally_context;
+                return;
+            }
+        }
+        self.current_finally_context = saved_finally_context;
+    }
+
+    /// Generate a return, routing through FinallyContext if needed.
+    pub fn generate_return(&mut self, value: &ScopedOperand) {
+        if let Some(ref ctx) = self.current_finally_context {
+            let completion_value = ctx.completion_value.clone();
+            let completion_type = ctx.completion_type.clone();
+            let finally_body = ctx.finally_body;
+            self.emit_mov(&completion_value, value);
+            let ret_const = self.add_constant_i32(FinallyContext::RETURN);
+            self.emit_mov(&completion_type, &ret_const);
+            self.emit(Instruction::Jump {
+                target: finally_body,
+            });
+        } else if self.is_in_generator_or_async_function() {
+            self.emit(Instruction::Yield {
+                continuation_label: None,
+                value: value.operand(),
+            });
+        } else {
+            self.emit(Instruction::Return {
+                value: value.operand(),
+            });
+        }
+    }
+
+    pub fn add_constant_i32(&mut self, val: i32) -> ScopedOperand {
+        self.add_constant_number(val as f64)
     }
 
     // --- Local variable initialization tracking ---
