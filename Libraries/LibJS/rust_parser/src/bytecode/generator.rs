@@ -139,7 +139,7 @@ pub struct Generator {
     free_registers: Vec<Register>,
 
     // --- Constant pool ---
-    constants: Vec<u64>, // Raw Value bits (NaN-boxed)
+    constants: Vec<ConstantValue>,
 
     // Cached constants for deduplication
     true_constant: Option<ScopedOperand>,
@@ -148,6 +148,7 @@ pub struct Generator {
     undefined_constant: Option<ScopedOperand>,
     empty_constant: Option<ScopedOperand>,
     int32_constants: HashMap<i32, ScopedOperand>,
+    string_constants: HashMap<Vec<u16>, ScopedOperand>,
 
     // --- String/identifier/property tables ---
     // These are Vec<Vec<u16>> (UTF-16 strings) that will be passed to
@@ -219,6 +220,7 @@ impl Generator {
             undefined_constant: None,
             empty_constant: None,
             int32_constants: HashMap::new(),
+            string_constants: HashMap::new(),
             string_table: Vec::new(),
             identifier_table: Vec::new(),
             property_key_table: Vec::new(),
@@ -298,7 +300,7 @@ impl Generator {
         self.this_value.clone()
     }
 
-    fn scoped_operand(&mut self, operand: Operand) -> ScopedOperand {
+    pub fn scoped_operand(&mut self, operand: Operand) -> ScopedOperand {
         ScopedOperand {
             inner: std::rc::Rc::new(ScopedOperandInner {
                 operand,
@@ -309,12 +311,82 @@ impl Generator {
 
     // --- Constant pool ---
 
-    /// Add a constant to the pool and return a ScopedOperand referencing it.
-    /// Common values (true, false, null, undefined, i32) are deduplicated.
-    pub fn add_constant(&mut self, raw_bits: u64) -> ScopedOperand {
+    fn append_constant(&mut self, value: ConstantValue) -> ScopedOperand {
         let index = self.constants.len() as u32;
-        self.constants.push(raw_bits);
+        self.constants.push(value);
         self.scoped_operand(Operand::constant(index))
+    }
+
+    pub fn add_constant_number(&mut self, value: f64) -> ScopedOperand {
+        // Deduplicate i32 values
+        if value.fract() == 0.0 && value >= i32::MIN as f64 && value <= i32::MAX as f64 {
+            let as_i32 = value as i32;
+            if let Some(op) = self.int32_constants.get(&as_i32) {
+                return op.clone();
+            }
+            let op = self.append_constant(ConstantValue::Number(value));
+            self.int32_constants.insert(as_i32, op.clone());
+            return op;
+        }
+        self.append_constant(ConstantValue::Number(value))
+    }
+
+    pub fn add_constant_boolean(&mut self, value: bool) -> ScopedOperand {
+        if value {
+            if let Some(op) = &self.true_constant {
+                return op.clone();
+            }
+            let op = self.append_constant(ConstantValue::Boolean(true));
+            self.true_constant = Some(op.clone());
+            op
+        } else {
+            if let Some(op) = &self.false_constant {
+                return op.clone();
+            }
+            let op = self.append_constant(ConstantValue::Boolean(false));
+            self.false_constant = Some(op.clone());
+            op
+        }
+    }
+
+    pub fn add_constant_null(&mut self) -> ScopedOperand {
+        if let Some(op) = &self.null_constant {
+            return op.clone();
+        }
+        let op = self.append_constant(ConstantValue::Null);
+        self.null_constant = Some(op.clone());
+        op
+    }
+
+    pub fn add_constant_undefined(&mut self) -> ScopedOperand {
+        if let Some(op) = &self.undefined_constant {
+            return op.clone();
+        }
+        let op = self.append_constant(ConstantValue::Undefined);
+        self.undefined_constant = Some(op.clone());
+        op
+    }
+
+    pub fn add_constant_empty(&mut self) -> ScopedOperand {
+        if let Some(op) = &self.empty_constant {
+            return op.clone();
+        }
+        let op = self.append_constant(ConstantValue::Empty);
+        self.empty_constant = Some(op.clone());
+        op
+    }
+
+    pub fn add_constant_string(&mut self, value: Vec<u16>) -> ScopedOperand {
+        if let Some(op) = self.string_constants.get(&value) {
+            return op.clone();
+        }
+        let op = self.append_constant(ConstantValue::String(value.clone()));
+        self.string_constants.insert(value, op.clone());
+        op
+    }
+
+    pub fn add_constant_bigint(&mut self, value: String) -> ScopedOperand {
+        self.append_constant(ConstantValue::BigInt(value))
     }
 
     // --- Table interning ---
@@ -439,6 +511,71 @@ impl Generator {
         self.boundaries.pop();
     }
 
+    // --- Break/continue scope management ---
+
+    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+        self.breakable_scopes.push(LabelableScope {
+            bytecode_target: target,
+            language_label_set: label_set,
+            completion_register: None,
+        });
+    }
+
+    pub fn end_breakable_scope(&mut self) {
+        self.breakable_scopes.pop();
+    }
+
+    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+        self.continuable_scopes.push(LabelableScope {
+            bytecode_target: target,
+            language_label_set: label_set,
+            completion_register: None,
+        });
+    }
+
+    pub fn end_continuable_scope(&mut self) {
+        self.continuable_scopes.pop();
+    }
+
+    pub fn find_breakable_scope(&self, label: Option<&[u16]>) -> Option<&LabelableScope> {
+        if let Some(label) = label {
+            self.breakable_scopes
+                .iter()
+                .rev()
+                .find(|s| s.language_label_set.iter().any(|l| l == label))
+        } else {
+            self.breakable_scopes.last()
+        }
+    }
+
+    pub fn find_continuable_scope(&self, label: Option<&[u16]>) -> Option<&LabelableScope> {
+        if let Some(label) = label {
+            self.continuable_scopes
+                .iter()
+                .rev()
+                .find(|s| s.language_label_set.iter().any(|l| l == label))
+        } else {
+            self.continuable_scopes.last()
+        }
+    }
+
+    // --- Local variable initialization tracking ---
+
+    pub fn is_local_initialized(&self, index: u32) -> bool {
+        self.initialized_locals
+            .get(index as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn mark_local_initialized(&mut self, index: u32) {
+        let idx = index as usize;
+        if idx >= self.initialized_locals.len() {
+            self.initialized_locals.resize(idx + 1, false);
+        }
+        self.initialized_locals[idx] = true;
+    }
+
     // --- Compile/assemble/link pipeline ---
 
     /// Compile all basic blocks into a flat bytecode buffer.
@@ -555,5 +692,28 @@ pub struct ExceptionHandler {
     pub start_offset: u32,
     pub end_offset: u32,
     pub handler_offset: u32,
+}
+
+/// A typed constant value stored in the constant pool.
+///
+/// The actual NaN-boxed encoding happens at the FFI boundary when
+/// creating the C++ `Bytecode::Executable`.
+#[derive(Debug, Clone)]
+pub enum ConstantValue {
+    Number(f64),
+    Boolean(bool),
+    Null,
+    Undefined,
+    Empty,
+    String(Vec<u16>),
+    BigInt(String),
+}
+
+/// Use `preferred_dst` if available, otherwise allocate a fresh register.
+pub fn choose_dst(generator: &mut Generator, preferred_dst: Option<&ScopedOperand>) -> ScopedOperand {
+    match preferred_dst {
+        Some(dst) => dst.clone(),
+        None => generator.allocate_register(),
+    }
 }
 

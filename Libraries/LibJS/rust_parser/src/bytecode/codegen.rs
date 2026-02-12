@@ -1,0 +1,1269 @@
+/*
+ * Copyright (c) 2026, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! Bytecode generation from Rust AST.
+//!
+//! This module walks the Rust AST and emits bytecode instructions via
+//! the `Generator`, mirroring C++ `ASTCodegen.cpp`.
+//!
+//! Each AST node's codegen returns `Option<ScopedOperand>`:
+//! - `Some(op)` if the node produces a value (expressions)
+//! - `None` for statements that don't produce values
+
+use crate::ast::*;
+
+use super::generator::{choose_dst, Generator, ScopedOperand};
+use super::instruction::Instruction;
+use super::operand::*;
+
+/// Generate bytecode for an expression.
+pub fn generate_expr(
+    expr: &Expr,
+    gen: &mut Generator,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    gen.current_source_start = expr.range.start.offset;
+    gen.current_source_end = expr.range.end.offset;
+
+    match &expr.inner {
+        // === Literals ===
+        Expression::NumericLiteral(value) => Some(gen.add_constant_number(*value)),
+
+        Expression::BooleanLiteral(value) => Some(gen.add_constant_boolean(*value)),
+
+        Expression::NullLiteral => Some(gen.add_constant_null()),
+
+        Expression::StringLiteral(value) => Some(gen.add_constant_string(value.clone())),
+
+        Expression::BigIntLiteral(value) => Some(gen.add_constant_bigint(value.clone())),
+
+        Expression::RegExpLiteral(data) => {
+            let source_index = gen.intern_string(data.pattern.clone());
+            let flags_index = gen.intern_string(data.flags.clone());
+            let regex_index = gen.intern_regex(data.pattern.clone(), data.flags.clone());
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::NewRegExp {
+                dst: dst.operand(),
+                source_index,
+                flags_index,
+                regex_index,
+            });
+            Some(dst)
+        }
+
+        // === Identifiers ===
+        Expression::Identifier(ident) => generate_identifier(ident, gen, preferred_dst),
+
+        // === This ===
+        Expression::This => {
+            // For now, just return the this_value register.
+            // Full ResolveThisBinding logic will be added later.
+            Some(gen.this_value())
+        }
+
+        // === Unary ===
+        Expression::Unary { op, operand } => {
+            let value = generate_expr(operand, gen, None)?;
+            let dst = choose_dst(gen, preferred_dst);
+            match op {
+                UnaryOp::BitwiseNot => {
+                    gen.emit(Instruction::BitwiseNot {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    });
+                }
+                UnaryOp::Not => {
+                    gen.emit(Instruction::Not {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    });
+                }
+                UnaryOp::Plus => {
+                    gen.emit(Instruction::UnaryPlus {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    });
+                }
+                UnaryOp::Minus => {
+                    gen.emit(Instruction::UnaryMinus {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    });
+                }
+                UnaryOp::Typeof => {
+                    gen.emit(Instruction::Typeof {
+                        dst: dst.operand(),
+                        src: value.operand(),
+                    });
+                }
+                UnaryOp::Void => {
+                    return Some(gen.add_constant_undefined());
+                }
+                UnaryOp::Delete => {
+                    // delete on non-reference is always true
+                    return Some(gen.add_constant_boolean(true));
+                }
+            }
+            Some(dst)
+        }
+
+        // === Binary ===
+        Expression::Binary { op, lhs, rhs } => {
+            let lhs_val = generate_expr(lhs, gen, None)?;
+            let rhs_val = generate_expr(rhs, gen, None)?;
+            let dst = choose_dst(gen, preferred_dst);
+            emit_binary_op(gen, *op, &dst, &lhs_val, &rhs_val);
+            Some(dst)
+        }
+
+        // === Logical (short-circuit) ===
+        Expression::Logical { op, lhs, rhs } => {
+            generate_logical(gen, *op, lhs, rhs, preferred_dst)
+        }
+
+        // === Conditional (ternary) ===
+        Expression::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => generate_conditional(gen, test, consequent, alternate, preferred_dst),
+
+        // === Sequence ===
+        Expression::Sequence(exprs) => {
+            let mut last = None;
+            for expr in exprs {
+                last = generate_expr(expr, gen, None);
+                if gen.is_current_block_terminated() {
+                    break;
+                }
+            }
+            last
+        }
+
+        // === Function expressions ===
+        Expression::Function(_data) => {
+            let dst = choose_dst(gen, preferred_dst);
+            let shared_function_index = gen.shared_function_data_count;
+            gen.shared_function_data_count += 1;
+            gen.emit(Instruction::NewFunction {
+                dst: dst.operand(),
+                shared_function_data_index: shared_function_index,
+                lhs_name: None,
+                home_object: None,
+            });
+            Some(dst)
+        }
+
+        // === Array ===
+        Expression::Array(elements) => {
+            let dst = choose_dst(gen, preferred_dst);
+            let mut args = Vec::new();
+            for elem in elements {
+                match elem {
+                    Some(e) => {
+                        let val = generate_expr(e, gen, None).unwrap_or_else(|| {
+                            gen.add_constant_undefined()
+                        });
+                        args.push(val.operand());
+                    }
+                    None => {
+                        args.push(gen.add_constant_empty().operand());
+                    }
+                }
+            }
+            gen.emit(Instruction::NewArray {
+                dst: dst.operand(),
+                element_count: args.len() as u32,
+                elements: args,
+            });
+            Some(dst)
+        }
+
+        // === Member access ===
+        Expression::Member {
+            object,
+            property,
+            computed,
+        } => {
+            let obj = generate_expr(object, gen, None)?;
+            let dst = choose_dst(gen, preferred_dst);
+            if *computed {
+                let prop = generate_expr(property, gen, None)?;
+                gen.emit(Instruction::GetByValue {
+                    dst: dst.operand(),
+                    base: obj.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+            } else {
+                // Non-computed: property must be an Identifier
+                if let Expression::Identifier(ident) = &property.inner {
+                    let key = gen.intern_property_key(ident.name.clone());
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::GetById {
+                        dst: dst.operand(),
+                        base: obj.operand(),
+                        property: key,
+                        base_identifier: None,
+                        cache_index: cache,
+                    });
+                } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
+                    let id = gen.intern_identifier(priv_ident.name.clone());
+                    gen.emit(Instruction::GetPrivateById {
+                        dst: dst.operand(),
+                        base: obj.operand(),
+                        property: id,
+                    });
+                }
+            }
+            Some(dst)
+        }
+
+        // === Call ===
+        Expression::Call(data) => {
+            generate_call_expression(gen, data, preferred_dst, false)
+        }
+
+        // === New ===
+        Expression::New(data) => {
+            generate_call_expression(gen, data, preferred_dst, true)
+        }
+
+        // === Spread ===
+        Expression::Spread(inner) => {
+            // Spread is handled by the caller (Call, Array, Object)
+            generate_expr(inner, gen, preferred_dst)
+        }
+
+        // === Yield ===
+        Expression::Yield {
+            argument,
+            is_yield_from: _,
+        } => {
+            let value = if let Some(arg) = argument {
+                generate_expr(arg, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined())
+            } else {
+                gen.add_constant_undefined()
+            };
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::Yield {
+                continuation_label: Some(Label(0)),
+                value: value.operand(),
+            });
+            Some(dst)
+        }
+
+        // === Await ===
+        Expression::Await(inner) => {
+            let value = generate_expr(inner, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::Await {
+                continuation_label: Label(0),
+                argument: value.operand(),
+            });
+            Some(dst)
+        }
+
+        // === MetaProperty ===
+        Expression::MetaProperty(MetaPropertyType::NewTarget) => {
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::GetNewTarget { dst: dst.operand() });
+            Some(dst)
+        }
+
+        Expression::MetaProperty(MetaPropertyType::ImportMeta) => {
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::GetImportMeta { dst: dst.operand() });
+            Some(dst)
+        }
+
+        // === ImportCall ===
+        Expression::ImportCall { specifier, options } => {
+            let spec = generate_expr(specifier, gen, None)?;
+            let opts = match options {
+                Some(o) => generate_expr(o, gen, None)?,
+                None => gen.add_constant_undefined(),
+            };
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::ImportCall {
+                dst: dst.operand(),
+                specifier: spec.operand(),
+                options: opts.operand(),
+            });
+            Some(dst)
+        }
+
+        // === Update (++/--) ===
+        Expression::Update {
+            op,
+            argument,
+            prefixed,
+        } => generate_update_expression(gen, *op, argument, *prefixed, preferred_dst),
+
+        // === Assignment ===
+        Expression::Assignment { op, lhs, rhs } => {
+            generate_assignment_expression(gen, *op, lhs, rhs, preferred_dst)
+        }
+
+        // === Template literals ===
+        Expression::TemplateLiteral(data) => {
+            generate_template_literal(gen, data, preferred_dst)
+        }
+
+        // === Tagged template literals ===
+        Expression::TaggedTemplateLiteral { tag, template_literal } => {
+            // Simplified: just generate the tag call with template args
+            let _tag_val = generate_expr(tag, gen, None);
+            let _template = generate_expr(template_literal, gen, None);
+            let dst = choose_dst(gen, preferred_dst);
+            // Full tagged template implementation needed for M4g
+            Some(dst)
+        }
+
+        // Placeholder for nodes not yet fully implemented
+        Expression::Object(_)
+        | Expression::Class(_)
+        | Expression::OptionalChain { .. }
+        | Expression::SuperCall(_)
+        | Expression::Super
+        | Expression::PrivateIdentifier(_)
+        | Expression::Error => None,
+    }
+}
+
+/// Generate bytecode for a statement.
+pub fn generate_stmt(
+    stmt: &Stmt,
+    gen: &mut Generator,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    gen.current_source_start = stmt.range.start.offset;
+    gen.current_source_end = stmt.range.end.offset;
+
+    match &stmt.inner {
+        Statement::Empty | Statement::Error | Statement::ErrorDeclaration => None,
+        Statement::Debugger => None,
+
+        // === ExpressionStatement ===
+        Statement::Expression(expr) => generate_expr(expr, gen, preferred_dst),
+
+        // === Block ===
+        Statement::Block(scope) => generate_scope_children(gen, scope, preferred_dst),
+
+        // === FunctionBody ===
+        Statement::FunctionBody { scope, .. } => generate_scope_children(gen, scope, preferred_dst),
+
+        // === Program ===
+        Statement::Program(data) => generate_scope_children(gen, &data.scope, preferred_dst),
+
+        // === If ===
+        Statement::If {
+            predicate,
+            consequent,
+            alternate,
+        } => generate_if_statement(gen, predicate, consequent, alternate.as_deref(), preferred_dst),
+
+        // === While ===
+        Statement::While { test, body } => {
+            generate_while_statement(gen, test, body, preferred_dst)
+        }
+
+        // === DoWhile ===
+        Statement::DoWhile { test, body } => {
+            generate_do_while_statement(gen, test, body, preferred_dst)
+        }
+
+        // === For ===
+        Statement::For {
+            init,
+            test,
+            update,
+            body,
+        } => generate_for_statement(gen, init.as_deref(), test.as_deref(), update.as_deref(), body, preferred_dst),
+
+        // === Return ===
+        Statement::Return(value) => {
+            let val = match value {
+                Some(expr) => generate_expr(expr, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined()),
+                None => gen.add_constant_undefined(),
+            };
+            gen.emit(Instruction::Return { value: val.operand() });
+            None
+        }
+
+        // === Throw ===
+        Statement::Throw(expr) => {
+            let val = generate_expr(expr, gen, None)?;
+            gen.emit(Instruction::Throw { src: val.operand() });
+            None
+        }
+
+        // === Variable declarations ===
+        Statement::VariableDeclaration { kind, declarations } => {
+            generate_variable_declaration(gen, *kind, declarations);
+            None
+        }
+
+        // === Break ===
+        Statement::Break { target_label } => {
+            // Find the matching breakable scope and jump
+            if let Some(scope) = gen.find_breakable_scope(target_label.as_deref()) {
+                let target = scope.bytecode_target;
+                gen.emit(Instruction::Jump { target });
+            }
+            None
+        }
+
+        // === Continue ===
+        Statement::Continue { target_label } => {
+            if let Some(scope) = gen.find_continuable_scope(target_label.as_deref()) {
+                let target = scope.bytecode_target;
+                gen.emit(Instruction::Jump { target });
+            }
+            None
+        }
+
+        // === Labelled ===
+        Statement::Labelled { label: _, item } => {
+            // Just generate the labelled statement's body
+            generate_stmt(item, gen, preferred_dst)
+        }
+
+        // === Switch ===
+        Statement::Switch(data) => {
+            generate_switch_statement(gen, data, preferred_dst)
+        }
+
+        // === Try ===
+        Statement::Try(data) => {
+            generate_try_statement(gen, data, preferred_dst)
+        }
+
+        // === FunctionDeclaration (hoisted, noop at declaration site) ===
+        Statement::FunctionDeclaration(_) => None,
+
+        // === With ===
+        Statement::With { object, body } => {
+            let obj = generate_expr(object, gen, None)?;
+            let dst = gen.allocate_register();
+            gen.emit(Instruction::EnterObjectEnvironment { dst: dst.operand(), object: obj.operand() });
+            let result = generate_stmt(body, gen, preferred_dst);
+            // Leave the object environment would happen here
+            result
+        }
+
+        // Placeholder for nodes not yet fully implemented
+        Statement::ForIn { .. }
+        | Statement::ForOf { .. }
+        | Statement::ForAwaitOf { .. }
+        | Statement::UsingDeclaration { .. }
+        | Statement::ClassDeclaration(_)
+        | Statement::Import(_)
+        | Statement::Export(_)
+        | Statement::ClassFieldInitializer { .. } => None,
+    }
+}
+
+// =============================================================================
+// Identifier codegen
+// =============================================================================
+
+fn generate_identifier(
+    ident: &Identifier,
+    gen: &mut Generator,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    if ident.is_local() {
+        let local_index = ident.local_index.get();
+        let local = match ident.local_type.get() {
+            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+            LocalType::Variable => gen.local(local_index),
+            LocalType::None => unreachable!(),
+        };
+        // Check TDZ for uninitialized locals
+        if !gen.is_local_initialized(local_index)
+            && ident.declaration_kind.get() != IdentDeclarationKind::Var
+        {
+            gen.emit(Instruction::ThrowIfTDZ {
+                src: local.operand(),
+            });
+        }
+        return Some(local);
+    }
+
+    let dst = choose_dst(gen, preferred_dst);
+    if ident.is_global.get() {
+        let id = gen.intern_identifier(ident.name.clone());
+        let cache = gen.next_global_variable_cache();
+        gen.emit(Instruction::GetGlobal {
+            dst: dst.operand(),
+            identifier: id,
+            cache_index: cache,
+        });
+    } else {
+        let id = gen.intern_identifier(ident.name.clone());
+        gen.emit(Instruction::GetBinding {
+            dst: dst.operand(),
+            identifier: id,
+            cache: EnvironmentCoordinate::empty(),
+        });
+    }
+    Some(dst)
+}
+
+// =============================================================================
+// Binary operator emission
+// =============================================================================
+
+fn emit_binary_op(
+    gen: &mut Generator,
+    op: BinaryOp,
+    dst: &ScopedOperand,
+    lhs: &ScopedOperand,
+    rhs: &ScopedOperand,
+) {
+    let d = dst.operand();
+    let l = lhs.operand();
+    let r = rhs.operand();
+    match op {
+        BinaryOp::Addition => gen.emit(Instruction::Add { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Subtraction => gen.emit(Instruction::Sub { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Multiplication => gen.emit(Instruction::Mul { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Division => gen.emit(Instruction::Div { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Modulo => gen.emit(Instruction::Mod { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Exponentiation => gen.emit(Instruction::Exp { dst: d, lhs: l, rhs: r }),
+        BinaryOp::StrictlyEquals => gen.emit(Instruction::StrictlyEquals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::StrictlyInequals => gen.emit(Instruction::StrictlyInequals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::LooselyEquals => gen.emit(Instruction::LooselyEquals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::LooselyInequals => gen.emit(Instruction::LooselyInequals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::GreaterThan => gen.emit(Instruction::GreaterThan { dst: d, lhs: l, rhs: r }),
+        BinaryOp::GreaterThanEquals => gen.emit(Instruction::GreaterThanEquals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::LessThan => gen.emit(Instruction::LessThan { dst: d, lhs: l, rhs: r }),
+        BinaryOp::LessThanEquals => gen.emit(Instruction::LessThanEquals { dst: d, lhs: l, rhs: r }),
+        BinaryOp::BitwiseAnd => gen.emit(Instruction::BitwiseAnd { dst: d, lhs: l, rhs: r }),
+        BinaryOp::BitwiseOr => gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r }),
+        BinaryOp::BitwiseXor => gen.emit(Instruction::BitwiseXor { dst: d, lhs: l, rhs: r }),
+        BinaryOp::LeftShift => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
+        BinaryOp::RightShift => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
+        BinaryOp::UnsignedRightShift => gen.emit(Instruction::UnsignedRightShift { dst: d, lhs: l, rhs: r }),
+        BinaryOp::In => gen.emit(Instruction::In { dst: d, lhs: l, rhs: r }),
+        BinaryOp::InstanceOf => gen.emit(Instruction::InstanceOf { dst: d, lhs: l, rhs: r }),
+    }
+}
+
+// =============================================================================
+// Logical expression (short-circuit)
+// =============================================================================
+
+fn generate_logical(
+    gen: &mut Generator,
+    op: LogicalOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let dst = choose_dst(gen, preferred_dst);
+    let lhs_val = generate_expr(lhs, gen, Some(&dst))?;
+    gen.emit_mov(&dst, &lhs_val);
+
+    let end_block = gen.make_block();
+    let rhs_block = gen.make_block();
+
+    match op {
+        LogicalOp::And => {
+            // If lhs is falsy, short-circuit to end
+            gen.emit(Instruction::JumpIf {
+                condition: dst.operand(),
+                true_target: Label(rhs_block as u32),
+                false_target: Label(end_block as u32),
+            });
+        }
+        LogicalOp::Or => {
+            // If lhs is truthy, short-circuit to end
+            gen.emit(Instruction::JumpIf {
+                condition: dst.operand(),
+                true_target: Label(end_block as u32),
+                false_target: Label(rhs_block as u32),
+            });
+        }
+        LogicalOp::NullishCoalescing => {
+            gen.emit(Instruction::JumpNullish {
+                condition: dst.operand(),
+                true_target: Label(rhs_block as u32),
+                false_target: Label(end_block as u32),
+            });
+        }
+    }
+
+    gen.switch_to_basic_block(rhs_block);
+    let rhs_val = generate_expr(rhs, gen, Some(&dst));
+    if let Some(rhs_val) = &rhs_val {
+        gen.emit_mov(&dst, rhs_val);
+    }
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    Some(dst)
+}
+
+// =============================================================================
+// Conditional expression (ternary)
+// =============================================================================
+
+fn generate_conditional(
+    gen: &mut Generator,
+    test: &Expr,
+    consequent: &Expr,
+    alternate: &Expr,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let dst = choose_dst(gen, preferred_dst);
+    let predicate = generate_expr(test, gen, None)?;
+
+    let true_block = gen.make_block();
+    let false_block = gen.make_block();
+    let end_block = gen.make_block();
+
+    gen.emit(Instruction::JumpIf {
+        condition: predicate.operand(),
+        true_target: Label(true_block as u32),
+        false_target: Label(false_block as u32),
+    });
+
+    gen.switch_to_basic_block(true_block);
+    let cons_val = generate_expr(consequent, gen, Some(&dst));
+    if let Some(val) = &cons_val {
+        gen.emit_mov(&dst, val);
+    }
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(false_block);
+    let alt_val = generate_expr(alternate, gen, Some(&dst));
+    if let Some(val) = &alt_val {
+        gen.emit_mov(&dst, val);
+    }
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    Some(dst)
+}
+
+// =============================================================================
+// If statement
+// =============================================================================
+
+fn generate_if_statement(
+    gen: &mut Generator,
+    predicate: &Expr,
+    consequent: &Stmt,
+    alternate: Option<&Stmt>,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let pred = generate_expr(predicate, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+
+    let true_block = gen.make_block();
+    let false_block = gen.make_block();
+    let has_alternate = alternate.is_some();
+    let end_block = if has_alternate { gen.make_block() } else { false_block };
+
+    gen.emit(Instruction::JumpIf {
+        condition: pred.operand(),
+        true_target: Label(true_block as u32),
+        false_target: Label(false_block as u32),
+    });
+
+    gen.switch_to_basic_block(true_block);
+    let _cons_result = generate_stmt(consequent, gen, preferred_dst);
+    if !gen.is_current_block_terminated() && has_alternate {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    if let Some(alt) = alternate {
+        gen.switch_to_basic_block(false_block);
+        let _alt_result = generate_stmt(alt, gen, preferred_dst);
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+        }
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// While statement
+// =============================================================================
+
+fn generate_while_statement(
+    gen: &mut Generator,
+    test: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let test_block = gen.make_block();
+    let body_block = gen.make_block();
+    let end_block = gen.make_block();
+
+    gen.emit(Instruction::Jump {
+        target: Label(test_block as u32),
+    });
+
+    gen.switch_to_basic_block(test_block);
+    let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    gen.emit(Instruction::JumpIf {
+        condition: test_val.operand(),
+        true_target: Label(body_block as u32),
+        false_target: Label(end_block as u32),
+    });
+
+    gen.switch_to_basic_block(body_block);
+    gen.begin_continuable_scope(Label(test_block as u32), Vec::new());
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(test_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// DoWhile statement
+// =============================================================================
+
+fn generate_do_while_statement(
+    gen: &mut Generator,
+    test: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let body_block = gen.make_block();
+    let test_block = gen.make_block();
+    let end_block = gen.make_block();
+
+    gen.emit(Instruction::Jump {
+        target: Label(body_block as u32),
+    });
+
+    gen.switch_to_basic_block(body_block);
+    gen.begin_continuable_scope(Label(test_block as u32), Vec::new());
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(test_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(test_block);
+    let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    gen.emit(Instruction::JumpIf {
+        condition: test_val.operand(),
+        true_target: Label(body_block as u32),
+        false_target: Label(end_block as u32),
+    });
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// For statement
+// =============================================================================
+
+fn generate_for_statement(
+    gen: &mut Generator,
+    init: Option<&Stmt>,
+    test: Option<&Expr>,
+    update: Option<&Expr>,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    // Init
+    if let Some(init) = init {
+        generate_stmt(init, gen, None);
+    }
+
+    let test_block = gen.make_block();
+    let body_block = gen.make_block();
+    let update_block = gen.make_block();
+    let end_block = gen.make_block();
+
+    gen.emit(Instruction::Jump {
+        target: Label(test_block as u32),
+    });
+
+    // Test
+    gen.switch_to_basic_block(test_block);
+    if let Some(test) = test {
+        let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(Instruction::JumpIf {
+            condition: test_val.operand(),
+            true_target: Label(body_block as u32),
+            false_target: Label(end_block as u32),
+        });
+    } else {
+        gen.emit(Instruction::Jump {
+            target: Label(body_block as u32),
+        });
+    }
+
+    // Body
+    gen.switch_to_basic_block(body_block);
+    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(update_block as u32),
+        });
+    }
+
+    // Update
+    gen.switch_to_basic_block(update_block);
+    if let Some(update) = update {
+        generate_expr(update, gen, None);
+    }
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(test_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// Scope children (Block, FunctionBody, Program)
+// =============================================================================
+
+fn generate_scope_children(
+    gen: &mut Generator,
+    scope: &ScopeData,
+    _preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let mut last_result = None;
+    for child in &scope.children {
+        let result = generate_stmt(child, gen, None);
+        if result.is_some() {
+            last_result = result;
+        }
+        if gen.is_current_block_terminated() {
+            break;
+        }
+    }
+    last_result
+}
+
+// =============================================================================
+// Variable declaration
+// =============================================================================
+
+fn generate_variable_declaration(
+    gen: &mut Generator,
+    kind: DeclarationKind,
+    declarations: &[VariableDeclarator],
+) {
+    for decl in declarations {
+        let init_value = decl.init.as_ref().and_then(|init| generate_expr(init, gen, None));
+
+        match &decl.target {
+            VariableDeclaratorTarget::Identifier(ident) => {
+                let value = init_value.unwrap_or_else(|| gen.add_constant_undefined());
+                if ident.is_local() {
+                    let local_index = ident.local_index.get();
+                    let local = match ident.local_type.get() {
+                        LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+                        LocalType::Variable => gen.local(local_index),
+                        LocalType::None => unreachable!(),
+                    };
+                    gen.emit_mov(&local, &value);
+                    gen.mark_local_initialized(local_index);
+                } else {
+                    let id = gen.intern_identifier(ident.name.clone());
+                    match kind {
+                        DeclarationKind::Var => {
+                            gen.emit(Instruction::InitializeVariableBinding {
+                                identifier: id,
+                                src: value.operand(),
+                                cache: EnvironmentCoordinate::empty(),
+                            });
+                        }
+                        DeclarationKind::Let | DeclarationKind::Const => {
+                            gen.emit(Instruction::InitializeLexicalBinding {
+                                identifier: id,
+                                src: value.operand(),
+                                cache: EnvironmentCoordinate::empty(),
+                            });
+                        }
+                    }
+                }
+            }
+            VariableDeclaratorTarget::BindingPattern(_pattern) => {
+                // Destructuring: full implementation in M4e
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Call expression
+// =============================================================================
+
+fn generate_call_expression(
+    gen: &mut Generator,
+    data: &CallExpressionData,
+    preferred_dst: Option<&ScopedOperand>,
+    _is_new: bool,
+) -> Option<ScopedOperand> {
+    let callee = generate_expr(&data.callee, gen, None)?;
+    let dst = choose_dst(gen, preferred_dst);
+
+    let mut args = Vec::new();
+    for arg in &data.arguments {
+        let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+        args.push(val.operand());
+    }
+
+    let this_value = gen.add_constant_undefined();
+    gen.emit(Instruction::Call {
+        dst: dst.operand(),
+        callee: callee.operand(),
+        this_value: this_value.operand(),
+        argument_count: args.len() as u32,
+        expression_string: None,
+        arguments: args,
+    });
+
+    Some(dst)
+}
+
+// =============================================================================
+// Update expression (++/--)
+// =============================================================================
+
+fn generate_update_expression(
+    gen: &mut Generator,
+    op: UpdateOp,
+    argument: &Expr,
+    prefixed: bool,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let value = generate_expr(argument, gen, None)?;
+    let dst = choose_dst(gen, preferred_dst);
+
+    if prefixed {
+        match op {
+            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: dst.operand() }),
+            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: dst.operand() }),
+        }
+        gen.emit_mov(&dst, &value);
+    } else {
+        gen.emit_mov(&dst, &value);
+        match op {
+            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+        }
+    }
+
+    Some(dst)
+}
+
+// =============================================================================
+// Assignment expression
+// =============================================================================
+
+fn generate_assignment_expression(
+    gen: &mut Generator,
+    op: AssignmentOp,
+    lhs: &AssignmentLhs,
+    rhs: &Expr,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    match lhs {
+        AssignmentLhs::Expression(lhs_expr) => {
+            let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+            // Simple assignment to identifier
+            if let Expression::Identifier(ident) = &lhs_expr.inner {
+                if op == AssignmentOp::Assignment {
+                    emit_set_variable(gen, ident, &rhs_val);
+                    return Some(rhs_val);
+                }
+                // Compound assignment
+                let lhs_val = generate_identifier(ident, gen, None)?;
+                let dst = choose_dst(gen, preferred_dst);
+                emit_compound_assignment(gen, op, &dst, &lhs_val, &rhs_val);
+                emit_set_variable(gen, ident, &dst);
+                return Some(dst);
+            }
+            // Other LHS (member expressions, etc.)
+            Some(rhs_val)
+        }
+        AssignmentLhs::Pattern(_pattern) => {
+            // Destructuring assignment: full implementation in M4e
+            let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+            Some(rhs_val)
+        }
+    }
+}
+
+fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
+    if ident.is_local() {
+        let local_index = ident.local_index.get();
+        let local = match ident.local_type.get() {
+            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+            LocalType::Variable => gen.local(local_index),
+            LocalType::None => unreachable!(),
+        };
+        gen.emit_mov(&local, value);
+    } else {
+        let id = gen.intern_identifier(ident.name.clone());
+        gen.emit(Instruction::SetVariableBinding {
+            identifier: id,
+            src: value.operand(),
+            cache: EnvironmentCoordinate::empty(),
+        });
+    }
+}
+
+fn emit_compound_assignment(
+    gen: &mut Generator,
+    op: AssignmentOp,
+    dst: &ScopedOperand,
+    lhs: &ScopedOperand,
+    rhs: &ScopedOperand,
+) {
+    let d = dst.operand();
+    let l = lhs.operand();
+    let r = rhs.operand();
+    match op {
+        AssignmentOp::AdditionAssignment => gen.emit(Instruction::Add { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::SubtractionAssignment => gen.emit(Instruction::Sub { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::MultiplicationAssignment => gen.emit(Instruction::Mul { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::DivisionAssignment => gen.emit(Instruction::Div { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::ModuloAssignment => gen.emit(Instruction::Mod { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::ExponentiationAssignment => gen.emit(Instruction::Exp { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::BitwiseAndAssignment => gen.emit(Instruction::BitwiseAnd { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::BitwiseOrAssignment => gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::BitwiseXorAssignment => gen.emit(Instruction::BitwiseXor { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::LeftShiftAssignment => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::RightShiftAssignment => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::UnsignedRightShiftAssignment => gen.emit(Instruction::UnsignedRightShift { dst: d, lhs: l, rhs: r }),
+        // Logical assignments (these shouldn't reach here, handled separately)
+        AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment => {}
+        AssignmentOp::Assignment => unreachable!("plain assignment in compound path"),
+    }
+}
+
+// =============================================================================
+// Template literal
+// =============================================================================
+
+fn generate_template_literal(
+    gen: &mut Generator,
+    data: &TemplateLiteralData,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    if data.expressions.is_empty() && data.raw_strings.len() == 1 {
+        return Some(gen.add_constant_string(data.raw_strings[0].clone()));
+    }
+
+    let dst = choose_dst(gen, preferred_dst);
+    // Build the template by concatenating raw strings and expressions
+    let first_raw = gen.add_constant_string(data.raw_strings[0].clone());
+    gen.emit_mov(&dst, &first_raw);
+
+    for (i, expr) in data.expressions.iter().enumerate() {
+        let val = generate_expr(expr, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(Instruction::ConcatString {
+            dst: dst.operand(),
+            src: val.operand(),
+        });
+        if i + 1 < data.raw_strings.len() {
+            let raw = gen.add_constant_string(data.raw_strings[i + 1].clone());
+            gen.emit(Instruction::ConcatString {
+                dst: dst.operand(),
+                src: raw.operand(),
+            });
+        }
+    }
+
+    Some(dst)
+}
+
+// =============================================================================
+// Switch statement
+// =============================================================================
+
+fn generate_switch_statement(
+    gen: &mut Generator,
+    data: &SwitchStatementData,
+    _preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let discriminant = generate_expr(&data.discriminant, gen, None)?;
+    let end_block = gen.make_block();
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+
+    // Create blocks for each case
+    let case_blocks: Vec<usize> = data.cases.iter().map(|_| gen.make_block()).collect();
+    let mut default_block = None;
+
+    // Emit comparison chain
+    for (i, case) in data.cases.iter().enumerate() {
+        if let Some(test) = &case.test {
+            let test_val = generate_expr(test, gen, None)?;
+            let cmp = gen.allocate_register();
+            gen.emit(Instruction::StrictlyEquals {
+                dst: cmp.operand(),
+                lhs: discriminant.operand(),
+                rhs: test_val.operand(),
+            });
+            let next_case = if i + 1 < data.cases.len() {
+                gen.make_block()
+            } else {
+                default_block.unwrap_or(end_block)
+            };
+            gen.emit(Instruction::JumpIf {
+                condition: cmp.operand(),
+                true_target: Label(case_blocks[i] as u32),
+                false_target: Label(next_case as u32),
+            });
+            if i + 1 < data.cases.len() {
+                gen.switch_to_basic_block(next_case);
+            }
+        } else {
+            default_block = Some(case_blocks[i]);
+        }
+    }
+
+    // If no default, jump to end
+    if default_block.is_none() && !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    // Emit case bodies (fall-through by default)
+    for (i, case) in data.cases.iter().enumerate() {
+        gen.switch_to_basic_block(case_blocks[i]);
+        for child in &case.scope.children {
+            generate_stmt(child, gen, None);
+            if gen.is_current_block_terminated() {
+                break;
+            }
+        }
+        // Fall through to next case
+        if !gen.is_current_block_terminated() && i + 1 < case_blocks.len() {
+            gen.emit(Instruction::Jump {
+                target: Label(case_blocks[i + 1] as u32),
+            });
+        } else if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+        }
+    }
+
+    gen.end_breakable_scope();
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// Try statement
+// =============================================================================
+
+fn generate_try_statement(
+    gen: &mut Generator,
+    data: &TryStatementData,
+    _preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let handler_block = gen.make_block();
+    let end_block = gen.make_block();
+
+    // Set handler for the try block
+    let try_block_idx = gen.current_block_index();
+    gen.basic_blocks[try_block_idx].handler = Some(handler_block);
+
+    // Generate try body
+    generate_stmt(&data.block, gen, None);
+
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    // Generate catch handler
+    if let Some(catch) = &data.handler {
+        gen.switch_to_basic_block(handler_block);
+        let exception = gen.scoped_operand(Operand::register(Register::EXCEPTION));
+
+        // Bind the catch parameter
+        match &catch.parameter {
+            CatchParameter::Identifier(ident) => {
+                emit_set_variable(gen, ident, &exception);
+            }
+            CatchParameter::BindingPattern(_) => {
+                // Destructuring catch: full implementation in M4e
+            }
+            CatchParameter::None => {}
+        }
+
+        generate_stmt(&catch.body, gen, None);
+
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+        }
+    }
+
+    // Generate finally block
+    if let Some(finalizer) = &data.finalizer {
+        // Simplified: in a full impl, this uses FinallyContext
+        let finally_block = gen.make_block();
+        gen.switch_to_basic_block(finally_block);
+        generate_stmt(finalizer, gen, None);
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+        }
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
