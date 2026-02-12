@@ -1735,7 +1735,12 @@ fn generate_switch_statement(
 
     // Create blocks for each case
     let case_blocks: Vec<usize> = data.cases.iter().map(|_| gen.make_block()).collect();
-    let mut default_block = None;
+
+    // Find default block first (it may appear before or after other cases).
+    let default_block = data.cases.iter().enumerate()
+        .find(|(_, c)| c.test.is_none())
+        .map(|(i, _)| case_blocks[i]);
+    let fallthrough_target = default_block.unwrap_or(end_block);
 
     // Emit comparison chain
     for (i, case) in data.cases.iter().enumerate() {
@@ -1747,28 +1752,20 @@ fn generate_switch_statement(
                 lhs: discriminant.operand(),
                 rhs: test_val.operand(),
             });
-            let next_case = if i + 1 < data.cases.len() {
-                gen.make_block()
-            } else {
-                default_block.unwrap_or(end_block)
-            };
+            let next_check = gen.make_block();
             gen.emit(Instruction::JumpIf {
                 condition: cmp.operand(),
                 true_target: Label(case_blocks[i] as u32),
-                false_target: Label(next_case as u32),
+                false_target: Label(next_check as u32),
             });
-            if i + 1 < data.cases.len() {
-                gen.switch_to_basic_block(next_case);
-            }
-        } else {
-            default_block = Some(case_blocks[i]);
+            gen.switch_to_basic_block(next_check);
         }
     }
 
-    // If no default, jump to end
-    if default_block.is_none() && !gen.is_current_block_terminated() {
+    // After all comparisons fail, jump to default or end.
+    if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+            target: Label(fallthrough_target as u32),
         });
     }
 
