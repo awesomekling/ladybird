@@ -88,6 +88,7 @@ pub mod parser;
 pub mod scope_collector;
 pub mod token;
 
+use ast::Statement;
 use ast_bridge::NodeHandle;
 use parser::{Parser, ProgramType};
 use std::ffi::c_void;
@@ -185,8 +186,14 @@ pub unsafe extern "C" fn rust_compile_program(
 
     // Check for parse errors
     if parser.has_errors() {
+        for msg in parser.error_messages() {
+            eprintln!("[rust_compile_program] parse error: {}", msg);
+        }
         return std::ptr::null_mut();
     }
+
+    // Run scope analysis
+    parser.scope_collector.analyze(initiated_by_eval);
 
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
@@ -195,6 +202,17 @@ pub unsafe extern "C" fn rust_compile_program(
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
     gen.source_len = source_len;
+
+    // Copy program's local variables from scope analysis into the generator.
+    if let Statement::Program(ref data) = program.inner {
+        gen.local_variables = data.scope.local_variables.iter().map(|lv| {
+            bytecode::generator::LocalVariable {
+                name: lv.name.clone(),
+                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+                is_initialized_during_declaration_instantiation: false,
+            }
+        }).collect();
+    }
 
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);

@@ -39,6 +39,7 @@ use crate::ast::{
     SourceRange, Stmt, Statement, ScopeData, ProgramData,
 };
 use crate::lexer::Lexer;
+use crate::scope_collector::ScopeCollector;
 use crate::token::{Token, TokenType};
 
 mod declarations;
@@ -152,6 +153,7 @@ struct SavedState {
     in_class_static_init_block: bool,
     function_might_need_arguments_object: bool,
     previous_token_was_period: bool,
+    scope_collector_state: (usize, Option<usize>, usize),
 }
 
 /// The main JavaScript parser.
@@ -225,6 +227,9 @@ pub struct Parser<'a> {
     pub(crate) for_loop_declaration_count: usize,
     pub(crate) for_loop_declaration_has_init: bool,
     pub(crate) for_loop_declaration_is_var: bool,
+
+    /// Scope collector for scope analysis (variable resolution, local optimization).
+    pub scope_collector: ScopeCollector,
 }
 
 impl<'a> Parser<'a> {
@@ -272,6 +277,7 @@ impl<'a> Parser<'a> {
             for_loop_declaration_count: 0,
             for_loop_declaration_has_init: false,
             for_loop_declaration_is_var: false,
+            scope_collector: ScopeCollector::new(),
         }
     }
 
@@ -295,6 +301,41 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn make_identifier(&self, start: Position, name: Vec<u16>) -> Box<Identifier> {
         Box::new(Identifier::new(self.range_from(start), name))
+    }
+
+    /// Register function parameters with the scope collector.
+    pub(crate) fn register_function_params_with_scope(
+        &mut self,
+        params: &[crate::ast::FunctionParameter],
+        param_info: &[(Vec<u16>, bool, bool)],
+    ) {
+        use crate::ast::FunctionParameterBinding;
+        let mut entries: Vec<(Vec<u16>, *const Identifier, bool, bool)> = Vec::new();
+        let mut info_idx = 0;
+        for param in params {
+            match &param.binding {
+                FunctionParameterBinding::Identifier(id) => {
+                    let (name, is_rest, is_from_pattern) = if info_idx < param_info.len() {
+                        let pi = &param_info[info_idx];
+                        info_idx += 1;
+                        (pi.0.clone(), pi.1, pi.2)
+                    } else {
+                        (id.name.clone(), param.is_rest, false)
+                    };
+                    entries.push((name, &**id as *const Identifier, is_rest, is_from_pattern));
+                }
+                FunctionParameterBinding::BindingPattern(_pat) => {
+                    // Pattern parameters have multiple bound names in param_info.
+                    while info_idx < param_info.len() && param_info[info_idx].2 {
+                        let pi = &param_info[info_idx];
+                        // For pattern bound names, we don't have individual Identifier pointers.
+                        entries.push((pi.0.clone(), std::ptr::null(), pi.1, true));
+                        info_idx += 1;
+                    }
+                }
+            }
+        }
+        self.scope_collector.set_function_parameters(&entries);
     }
 
     // === Token access ===
@@ -348,7 +389,12 @@ impl<'a> Parser<'a> {
                 let end = start + token.value_len as usize;
                 if end <= self.source.len() { &self.source[start..end] } else { &[] }
             };
-            if value == utf16!("arguments") || value == utf16!("eval") {
+            if value == utf16!("arguments") {
+                self.function_might_need_arguments_object = true;
+                if !self.strict_mode {
+                    self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();
+                }
+            } else if value == utf16!("eval") {
                 self.function_might_need_arguments_object = true;
             }
         }
@@ -468,6 +514,13 @@ impl<'a> Parser<'a> {
         !self.errors.is_empty()
     }
 
+    pub fn error_messages(&self) -> Vec<String> {
+        self.errors
+            .iter()
+            .map(|e| format!("{}:{}: {}", e.line, e.column, e.message))
+            .collect()
+    }
+
     // === State save/restore for backtracking ===
 
     pub(crate) fn save_state(&mut self) {
@@ -490,6 +543,7 @@ impl<'a> Parser<'a> {
             in_class_static_init_block: self.in_class_static_init_block,
             function_might_need_arguments_object: self.function_might_need_arguments_object,
             previous_token_was_period: self.previous_token_was_period,
+            scope_collector_state: self.scope_collector.save_state(),
         });
     }
 
@@ -512,6 +566,7 @@ impl<'a> Parser<'a> {
         self.in_class_static_init_block = state.in_class_static_init_block;
         self.function_might_need_arguments_object = state.function_might_need_arguments_object;
         self.previous_token_was_period = state.previous_token_was_period;
+        self.scope_collector.load_state(state.scope_collector_state);
         self.lexer.load_state();
     }
 
@@ -721,16 +776,24 @@ impl<'a> Parser<'a> {
 
         if self.program_type == ProgramType::Script {
             let (children, is_strict) = self.parse_script(starts_in_strict_mode);
+            let mut scope = Box::new(ScopeData::with_children(children));
+            // Scope was opened in parse_script via open_program_scope.
+            // Now close it after children are set.
+            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+            self.scope_collector.close_scope();
             self.stmt(start, Statement::Program(ProgramData {
-                scope: ScopeData::with_children(children),
+                scope,
                 program_type: ProgramType::Script,
                 is_strict_mode: is_strict,
                 has_top_level_await: false,
             }))
         } else {
             let (children, has_top_level_await) = self.parse_module();
+            let mut scope = Box::new(ScopeData::with_children(children));
+            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+            self.scope_collector.close_scope();
             self.stmt(start, Statement::Program(ProgramData {
-                scope: ScopeData::with_children(children),
+                scope,
                 program_type: ProgramType::Module,
                 is_strict_mode: true,
                 has_top_level_await,
@@ -739,6 +802,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_script(&mut self, starts_in_strict_mode: bool) -> (Vec<Stmt>, bool) {
+        // Open program scope — will be closed in parse_program after ScopeData is created.
+        self.scope_collector.open_program_scope(std::ptr::null_mut(), ProgramType::Script);
+
         let strict_before = self.strict_mode;
         if starts_in_strict_mode {
             self.strict_mode = true;
@@ -762,6 +828,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_module(&mut self) -> (Vec<Stmt>, bool) {
+        // Open program scope — will be closed in parse_program after ScopeData is created.
+        self.scope_collector.open_program_scope(std::ptr::null_mut(), ProgramType::Module);
+
         let strict_before = self.strict_mode;
         let await_before = self.await_expression_is_valid;
         self.strict_mode = true;

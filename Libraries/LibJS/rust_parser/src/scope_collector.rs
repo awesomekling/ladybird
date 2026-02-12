@@ -280,6 +280,18 @@ impl ScopeCollector {
         self.current.is_some()
     }
 
+    /// Save scope collector state for speculative parsing.
+    pub fn save_state(&self) -> (usize, Option<usize>, usize) {
+        (self.records.len(), self.current, self.errors.len())
+    }
+
+    /// Restore scope collector state after failed speculative parse.
+    pub fn load_state(&mut self, state: (usize, Option<usize>, usize)) {
+        self.records.truncate(state.0);
+        self.current = state.1;
+        self.errors.truncate(state.2);
+    }
+
     // === Open/close scopes ===
 
     fn open_scope(&mut self, scope_type: ScopeType, scope_data: *mut ScopeData, scope_level: ScopeLevel) {

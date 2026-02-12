@@ -499,14 +499,14 @@ pub enum CatchParameter {
 // =============================================================================
 
 pub struct SwitchStatementData {
-    pub scope: ScopeData,
+    pub scope: Box<ScopeData>,
     pub discriminant: Box<Expr>,
     pub cases: Vec<SwitchCase>,
 }
 
 pub struct SwitchCase {
     pub range: SourceRange,
-    pub scope: ScopeData,
+    pub scope: Box<ScopeData>,
     pub test: Option<Expr>,
 }
 
@@ -595,6 +595,7 @@ pub enum LocalVarKind {
     CatchClauseParameter = 4,
 }
 
+#[derive(Clone)]
 pub struct LocalVariable {
     pub name: Utf16String,
     pub kind: LocalVarKind,
@@ -773,9 +774,9 @@ pub enum Statement {
     Debugger,
 
     // Blocks (carry ScopeData like C++ ScopeNode)
-    Block(ScopeData),
+    Block(Box<ScopeData>),
     FunctionBody {
-        scope: ScopeData,
+        scope: Box<ScopeData>,
         in_strict_mode: bool,
     },
     Program(ProgramData),
@@ -864,7 +865,7 @@ pub enum Statement {
 // =============================================================================
 
 pub struct ProgramData {
-    pub scope: ScopeData,
+    pub scope: Box<ScopeData>,
     pub program_type: ProgramType,
     pub is_strict_mode: bool,
     pub has_top_level_await: bool,

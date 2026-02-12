@@ -195,6 +195,7 @@ impl<'a> Parser<'a> {
 
             TokenType::This => {
                 self.consume();
+                self.scope_collector.set_uses_this();
                 (self.expr(start, Expression::This), true)
             }
 
@@ -205,6 +206,9 @@ impl<'a> Parser<'a> {
 
             TokenType::Super => {
                 self.consume();
+                if self.scope_collector.has_current_scope() {
+                    self.scope_collector.set_uses_new_target();
+                }
                 if self.match_token(TokenType::ParenOpen) {
                     if !self.allow_super_constructor_call {
                         self.syntax_error("'super' keyword unexpected here");
@@ -290,7 +294,8 @@ impl<'a> Parser<'a> {
                 }
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                let id = self.make_identifier(start, value);
+                let id = self.make_identifier(start, value.clone());
+                self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
                 (self.expr(start, Expression::Identifier(id)), true)
             }
 
@@ -411,12 +416,14 @@ impl<'a> Parser<'a> {
                     if value == utf16!("eval") {
                         self.last_parsed_identifier_is_eval = true;
                     }
-                    let id = self.make_identifier(start, value);
+                    let id = self.make_identifier(start, value.clone());
+                    self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
                     (self.expr(start, Expression::Identifier(id)), true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    let id = self.make_identifier(start, value);
+                    let id = self.make_identifier(start, value.clone());
+                    self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
                     (self.expr(start, Expression::Identifier(id)), true)
                 } else {
                     self.expected("expression");
@@ -713,6 +720,9 @@ impl<'a> Parser<'a> {
             if !self.in_function_context && !self.in_eval_function_context && !self.in_class_static_init_block {
                 self.syntax_error("'new.target' not allowed outside of a function");
             }
+            if self.scope_collector.has_current_scope() {
+                self.scope_collector.set_uses_new_target();
+            }
             return self.expr(start, Expression::MetaProperty(MetaPropertyType::NewTarget));
         }
 
@@ -747,8 +757,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let arguments = self.parse_arguments();
         if callee_is_eval {
-            // Without scope collector, we can't track this. The info will be
-            // populated later by the Rust scope collector.
+            self.scope_collector.set_contains_direct_call_to_eval();
         }
         self.expr(start, Expression::Call(CallExpressionData {
             callee: Box::new(callee),
@@ -933,6 +942,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Await);
         let argument = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
+        self.scope_collector.set_contains_await_expression();
         self.expr(start, Expression::Await(Box::new(argument)))
     }
 
@@ -1045,6 +1055,7 @@ impl<'a> Parser<'a> {
         // Shorthand property: { x }
         if let Some(kv) = key_value {
             let id = self.make_identifier(start, kv);
+            self.scope_collector.register_identifier(&*id as *const Identifier, &id.name, None);
             let value = self.expr(start, Expression::Identifier(id));
             return ObjectProperty {
                 range: self.range_from(start),
@@ -1522,11 +1533,21 @@ impl<'a> Parser<'a> {
 
         self.discard_saved_state();
 
+        // Open function scope for arrow function.
+        self.scope_collector.open_function_scope(None);
+        self.scope_collector.set_is_arrow_function();
+
+        // Register parameters with scope collector.
+        self.register_function_params_with_scope(&params, &param_info);
+
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
         let src_start = source_start_override.unwrap_or(start).offset;
 
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, _insights) = self.parse_function_body(is_async, false, is_simple);
+
+            // Close function scope.
+            self.scope_collector.close_scope();
 
             if has_use_strict || fn_kind != FunctionKind::Normal {
                 self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
@@ -1549,10 +1570,15 @@ impl<'a> Parser<'a> {
             let body_start = self.position();
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             let return_stmt = Stmt::new(self.range_from(body_start), Statement::Return(Some(Box::new(expr))));
+            let mut scope = Box::new(ScopeData::with_children(vec![return_stmt]));
+            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
             let body = Stmt::new(self.range_from(body_start), Statement::FunctionBody {
-                scope: ScopeData::with_children(vec![return_stmt]),
+                scope,
                 in_strict_mode: self.strict_mode,
             });
+
+            // Close function scope.
+            self.scope_collector.close_scope();
 
             Some(self.expr(start, Expression::Function(Box::new(FunctionData {
                 name: None,
@@ -1584,12 +1610,18 @@ impl<'a> Parser<'a> {
             (false, false) => FunctionKind::Normal,
         };
 
+        // Open function scope for method.
+        self.scope_collector.open_function_scope(None);
+
         let in_generator_before = self.in_generator_function_context;
         let await_before = self.await_expression_is_valid;
         self.in_generator_function_context = is_generator;
         self.await_expression_is_valid = is_async;
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
+
+        // Register parameters with scope collector.
+        self.register_function_params_with_scope(&params, &param_info);
 
         if is_getter && !param_info.is_empty() {
             self.syntax_error("Getter function must have no arguments");
@@ -1615,18 +1647,15 @@ impl<'a> Parser<'a> {
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
         self.allow_super_constructor_call = saved_allow_super_call;
 
+        // Close function scope.
+        self.scope_collector.close_scope();
+
         if has_use_strict || fn_kind != FunctionKind::Normal {
             self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
         }
 
         let might_need_arguments = self.function_might_need_arguments_object;
         self.function_might_need_arguments_object = saved_might_need_arguments;
-
-        let (uses_this, uses_this_from_env) = if is_constructor {
-            (true, true)
-        } else {
-            (false, false) // Without scope collector, default to false
-        };
 
         self.expr(start, Expression::Function(Box::new(FunctionData {
             name: None,
@@ -1639,10 +1668,8 @@ impl<'a> Parser<'a> {
             is_strict_mode: self.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: FunctionParsingInsights {
-                uses_this,
-                uses_this_from_environment: uses_this_from_env,
-                contains_direct_call_to_eval: false,
                 might_need_arguments_object: might_need_arguments,
+                ..FunctionParsingInsights::default()
             },
             is_hoisted: false,
         })))

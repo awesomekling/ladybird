@@ -108,6 +108,8 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Stmt {
         let start = self.position();
+        let decl_line = self.current_token().line_number;
+        let decl_column = self.current_token().line_column;
 
         let kind = match self.current_token_type() {
             TokenType::Var => DeclarationKind::Var,
@@ -130,11 +132,40 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
-                let id = self.make_identifier(decl_start, value);
+                let id = self.make_identifier(decl_start, value.clone());
+
+                // Register with scope collector.
+                if kind == DeclarationKind::Var {
+                    self.scope_collector.add_var_declaration(
+                        &[(&value, &*id as *const Identifier)],
+                        decl_line, decl_column,
+                    );
+                } else {
+                    self.scope_collector.add_lexical_declaration(
+                        &[&value as &[u16]],
+                        decl_line, decl_column,
+                    );
+                    self.scope_collector.register_identifier(
+                        &*id as *const Identifier, &value, Some(kind),
+                    );
+                }
+
                 VariableDeclaratorTarget::Identifier(id)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
-                self.pattern_bound_names.clear();
+                let bound_names = std::mem::take(&mut self.pattern_bound_names);
+
+                // Register bound names with scope collector.
+                if kind == DeclarationKind::Var {
+                    let entries: Vec<(&[u16], *const Identifier)> = bound_names.iter()
+                        .map(|n| (n.as_slice(), std::ptr::null::<Identifier>()))
+                        .collect();
+                    self.scope_collector.add_var_declaration(&entries, decl_line, decl_column);
+                } else {
+                    let refs: Vec<&[u16]> = bound_names.iter().map(|n| n.as_slice()).collect();
+                    self.scope_collector.add_lexical_declaration(&refs, decl_line, decl_column);
+                }
+
                 VariableDeclaratorTarget::BindingPattern(pat)
             } else {
                 self.expected("variable name");
@@ -188,6 +219,8 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Stmt {
         let start = self.position();
+        let decl_line = self.current_token().line_number;
+        let decl_column = self.current_token().line_column;
         self.consume(); // consume 'using'
 
         let mut declarators: Vec<VariableDeclarator> = Vec::new();
@@ -207,7 +240,13 @@ impl<'a> Parser<'a> {
                 self.syntax_error("Lexical binding may not be called 'let'");
             }
 
-            let id = self.make_identifier(decl_start, name);
+            let id = self.make_identifier(decl_start, name.clone());
+
+            // Register as lexical declaration.
+            self.scope_collector.add_lexical_declaration(&[&name as &[u16]], decl_line, decl_column);
+            self.scope_collector.register_identifier(
+                &*id as *const Identifier, &name, Some(DeclarationKind::Const),
+            );
 
             let init = if self.match_token(TokenType::Equals) {
                 self.consume();
@@ -249,6 +288,8 @@ impl<'a> Parser<'a> {
 
     fn parse_function_declaration(&mut self) -> Stmt {
         let start = self.position();
+        let decl_line = self.current_token().line_number;
+        let decl_column = self.current_token().line_column;
 
         let saved_might_need_arguments = self.function_might_need_arguments_object;
         self.function_might_need_arguments_object = false;
@@ -292,6 +333,20 @@ impl<'a> Parser<'a> {
         };
         self.last_function_kind = kind;
 
+        // Register function declaration in parent scope (before opening function scope).
+        let name_id_ptr = name.as_ref().map_or(std::ptr::null(), |id| &**id as *const Identifier);
+        // declaration_index will be set later when added to parent's children.
+        // For now, pass 0 — it will be corrected when the parent ScopeData is built.
+        self.scope_collector.add_function_declaration(
+            &fn_name, name_id_ptr, 0,
+            kind, self.strict_mode, decl_line, decl_column,
+        );
+
+        // Open function scope.
+        let fn_name_for_scope = if fn_name.is_empty() { None } else { Some(fn_name.as_slice()) };
+        self.scope_collector.open_function_scope(fn_name_for_scope);
+        self.scope_collector.set_is_function_declaration();
+
         let in_generator_before = self.in_generator_function_context;
         let await_before = self.await_expression_is_valid;
         self.in_generator_function_context = is_generator;
@@ -299,10 +354,16 @@ impl<'a> Parser<'a> {
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
+        // Register function parameters with scope collector.
+        self.register_function_params_with_scope(&params, &param_info);
+
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
+
+        // Close function scope.
+        self.scope_collector.close_scope();
 
         if has_use_strict || kind != FunctionKind::Normal {
             let force_strict = has_use_strict;
@@ -374,6 +435,10 @@ impl<'a> Parser<'a> {
             None
         };
 
+        // Open function scope (function expression name is bound within its own scope).
+        let fn_name_for_scope = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
+        self.scope_collector.open_function_scope(fn_name_for_scope);
+
         let in_generator_before = self.in_generator_function_context;
         let await_before = self.await_expression_is_valid;
         self.in_generator_function_context = is_generator;
@@ -381,10 +446,16 @@ impl<'a> Parser<'a> {
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
+        // Register function parameters with scope collector.
+        self.register_function_params_with_scope(&params, &param_info);
+
         self.in_generator_function_context = in_generator_before;
         self.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
+
+        // Close function scope.
+        self.scope_collector.close_scope();
 
         if has_use_strict || kind != FunctionKind::Normal {
             let force_strict = has_use_strict;
@@ -447,6 +518,10 @@ impl<'a> Parser<'a> {
 
         let saved_class_name = self.last_class_name.clone();
 
+        // Open class declaration scope.
+        let class_name_for_scope = if name_value.is_empty() { None } else { Some(name_value.as_slice()) };
+        self.scope_collector.open_class_declaration_scope(class_name_for_scope);
+
         // Optional extends.
         let super_class = if self.match_token(TokenType::Extends) {
             self.consume();
@@ -484,6 +559,9 @@ impl<'a> Parser<'a> {
         self.class_has_super_class = saved_class_has_super;
         self.strict_mode = strict_before;
 
+        // Close class declaration scope.
+        self.scope_collector.close_scope();
+
         // Synthesize default constructor if none was declared.
         if constructor.is_none() {
             constructor = Some(self.synthesize_default_constructor(
@@ -520,6 +598,9 @@ impl<'a> Parser<'a> {
             None
         };
 
+        // Note: No scope collector calls here. The synthesized constructor is
+        // compiled lazily via C++ re-parsing, so Rust scope analysis is irrelevant.
+
         if has_super {
             // Derived class: constructor(...args) { return super(...args); }
             let args_name: Vec<u16> = "args".encode_utf16().collect();
@@ -534,7 +615,7 @@ impl<'a> Parser<'a> {
             }));
             let return_stmt = self.stmt(start, Statement::Return(Some(Box::new(super_call))));
             let body = self.stmt(start, Statement::FunctionBody {
-                scope: ScopeData::with_children(vec![return_stmt]),
+                scope: Box::new(ScopeData::with_children(vec![return_stmt])),
                 in_strict_mode: true,
             });
 
@@ -565,7 +646,7 @@ impl<'a> Parser<'a> {
         } else {
             // Base class: empty constructor() {}
             let body = self.stmt(start, Statement::FunctionBody {
-                scope: ScopeData::with_children(Vec::new()),
+                scope: Box::new(ScopeData::with_children(Vec::new())),
                 in_strict_mode: true,
             });
 
@@ -612,6 +693,7 @@ impl<'a> Parser<'a> {
                 self.in_class_field_initializer = true;
                 self.in_class_static_init_block = true;
                 self.allow_super_property_lookup = true;
+                self.scope_collector.open_static_init_scope(std::ptr::null_mut());
                 let children = self.parse_statement_list(false);
                 self.in_break_context = saved_break;
                 self.in_continue_context = saved_continue;
@@ -622,8 +704,11 @@ impl<'a> Parser<'a> {
                 self.in_class_static_init_block = saved_static_init;
                 self.allow_super_property_lookup = saved_super;
                 self.consume_token(TokenType::CurlyClose);
+                let mut scope = Box::new(ScopeData::with_children(children));
+                self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+                self.scope_collector.close_scope();
                 let body = self.stmt(start, Statement::FunctionBody {
-                    scope: ScopeData::with_children(children),
+                    scope,
                     in_strict_mode: self.strict_mode,
                 });
                 return (Some(Node::new(self.range_from(start), ClassElement::StaticInitializer {
@@ -716,7 +801,10 @@ impl<'a> Parser<'a> {
         // Field.
         let init = if self.match_token(TokenType::Equals) {
             self.consume();
-            Some(Box::new(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none())))
+            self.scope_collector.open_class_field_scope(std::ptr::null_mut());
+            let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+            self.scope_collector.close_scope();
+            Some(Box::new(expr))
         } else {
             None
         };
@@ -766,8 +854,11 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
 
+        let mut scope = Box::new(ScopeData::with_children(children));
+        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+
         let body = self.stmt(start, Statement::FunctionBody {
-            scope: ScopeData::with_children(children),
+            scope,
             in_strict_mode: body_is_strict,
         });
 

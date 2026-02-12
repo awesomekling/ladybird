@@ -73,6 +73,10 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_block_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
+
+        // Open block scope (scope_data pointer set after children are collected).
+        self.scope_collector.open_block_scope(std::ptr::null_mut());
+
         let mut children = Vec::new();
 
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
@@ -84,7 +88,10 @@ impl<'a> Parser<'a> {
         }
 
         self.consume_token(TokenType::CurlyClose);
-        self.stmt(start, Statement::Block(ScopeData::with_children(children)))
+        let mut scope = Box::new(ScopeData::with_children(children));
+        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        self.scope_collector.close_scope();
+        self.stmt(start, Statement::Block(scope))
     }
 
     // === Expression statement ===
@@ -305,6 +312,10 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::For);
 
+        // Open for-loop scope (for let/const/using declarations).
+        // scope_data set after the for-loop body is parsed.
+        self.scope_collector.open_for_loop_scope(std::ptr::null_mut());
+
         let is_await = if self.match_token(TokenType::Await) {
             if !self.await_expression_is_valid {
                 self.syntax_error("for-await-of not allowed outside of async context");
@@ -320,7 +331,8 @@ impl<'a> Parser<'a> {
         // for (;;)
         if self.match_token(TokenType::Semicolon) && !is_await {
             self.consume();
-            return self.parse_standard_for_loop(start, None);
+            let result = self.parse_standard_for_loop(start, None);
+            return self.close_for_loop_scope(start, result);
         }
 
         let init_start = self.position();
@@ -382,11 +394,12 @@ impl<'a> Parser<'a> {
                     }
                 }
             };
-            return self.stmt(start, Statement::ForIn {
+            let result = self.stmt(start, Statement::ForIn {
                 lhs,
                 rhs: Box::new(rhs),
                 body: Box::new(body),
             });
+            return self.close_for_loop_scope(start, result);
         }
 
         // Check for of
@@ -434,17 +447,19 @@ impl<'a> Parser<'a> {
                     }
                 };
                 if is_await {
-                    return self.stmt(start, Statement::ForAwaitOf {
+                    let result = self.stmt(start, Statement::ForAwaitOf {
                         lhs,
                         rhs: Box::new(rhs),
                         body: Box::new(body),
                     });
+                    return self.close_for_loop_scope(start, result);
                 }
-                return self.stmt(start, Statement::ForOf {
+                let result = self.stmt(start, Statement::ForOf {
                     lhs,
                     rhs: Box::new(rhs),
                     body: Box::new(body),
                 });
+                return self.close_for_loop_scope(start, result);
             }
         }
 
@@ -457,7 +472,17 @@ impl<'a> Parser<'a> {
                 Some(Box::new(Stmt::new(range, Statement::Expression(Box::new(expr)))))
             }
         };
-        self.parse_standard_for_loop(start, init_stmt)
+        let result = self.parse_standard_for_loop(start, init_stmt);
+        self.close_for_loop_scope(start, result)
+    }
+
+    /// Close the for-loop scope and wrap the for-loop statement in a Block
+    /// with scope data, matching C++ parser behavior.
+    fn close_for_loop_scope(&mut self, start: Position, inner: Stmt) -> Stmt {
+        let mut scope = Box::new(ScopeData::with_children(vec![inner]));
+        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        self.scope_collector.close_scope();
+        self.stmt(start, Statement::Block(scope))
     }
 
     fn parse_standard_for_loop(&mut self, start: Position, init: Option<Box<Stmt>>) -> Stmt {
@@ -501,7 +526,9 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenOpen);
         let object = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
+        self.scope_collector.open_with_scope(std::ptr::null_mut());
         let body = self.parse_statement(false);
+        self.scope_collector.close_scope();
         self.stmt(start, Statement::With {
             object: Box::new(object),
             body: Box::new(body),
@@ -519,6 +546,9 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyOpen);
 
+        // Open block scope for the switch body (all cases share one scope).
+        self.scope_collector.open_block_scope(std::ptr::null_mut());
+
         let break_before = self.in_break_context;
         self.in_break_context = true;
 
@@ -531,8 +561,12 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
 
+        let mut scope = Box::new(ScopeData::new());
+        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        self.scope_collector.close_scope();
+
         self.stmt(start, Statement::Switch(SwitchStatementData {
-            scope: ScopeData::new(),
+            scope,
             discriminant: Box::new(discriminant),
             cases,
         }))
@@ -568,7 +602,7 @@ impl<'a> Parser<'a> {
 
         SwitchCase {
             range: self.range_from(start),
-            scope: ScopeData::with_children(children),
+            scope: Box::new(ScopeData::with_children(children)),
             test,
         }
     }
@@ -609,16 +643,23 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Catch);
 
+        // Open catch scope (wraps parameter + body).
+        self.scope_collector.open_catch_scope();
+
         let parameter = if self.match_token(TokenType::ParenOpen) {
             self.consume();
             let param = if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pattern = self.parse_binding_pattern();
+                let bound_names: Vec<&[u16]> = self.pattern_bound_names.iter().map(|n| n.as_slice()).collect();
+                self.scope_collector.add_catch_parameter_pattern(&bound_names);
                 CatchParameter::BindingPattern(pattern)
             } else if self.match_identifier() {
                 let param_start = self.position();
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                CatchParameter::Identifier(self.make_identifier(param_start, value))
+                let id = self.make_identifier(param_start, value.clone());
+                self.scope_collector.add_catch_parameter_identifier(&value, &*id as *const Identifier);
+                CatchParameter::Identifier(id)
             } else {
                 self.expected("catch parameter");
                 CatchParameter::None
@@ -630,6 +671,8 @@ impl<'a> Parser<'a> {
         };
 
         let body = self.parse_block_statement();
+
+        self.scope_collector.close_scope();
 
         CatchClause {
             range: self.range_from(start),
