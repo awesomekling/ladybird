@@ -1605,6 +1605,10 @@ fn generate_call_expression(
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
 
+    // Detect direct eval calls: bare identifier "eval" as callee.
+    let is_direct_eval = !is_new
+        && matches!(&data.callee.inner, Expression::Identifier(ident) if ident.name == utf16!("eval"));
+
     // For method calls (obj.method()), we need to use the object as `this`.
     let (callee, this_value) = if !is_new {
         match &data.callee.inner {
@@ -1629,6 +1633,20 @@ fn generate_call_expression(
                     emit_get_by_id(gen, &method, &obj, &ident.name, None);
                 }
                 (method, Some(obj))
+            }
+            Expression::Identifier(ident) if !ident.is_local() && !ident.is_global.get() => {
+                // Non-local, non-global identifier: use GetCalleeAndThisFromEnvironment
+                // to properly handle with-statement bindings and eval.
+                let callee_reg = gen.allocate_register();
+                let this_reg = gen.allocate_register();
+                let id = gen.intern_identifier(ident.name.clone());
+                gen.emit(Instruction::GetCalleeAndThisFromEnvironment {
+                    callee: callee_reg.operand(),
+                    this_value: this_reg.operand(),
+                    identifier: id,
+                    cache: EnvironmentCoordinate::empty(),
+                });
+                (callee_reg, Some(this_reg))
             }
             _ => {
                 let callee = generate_expr(&data.callee, gen, None)
@@ -1682,6 +1700,15 @@ fn generate_call_expression(
                 arguments: args_array.operand(),
                 expression_string: None,
             });
+        } else if is_direct_eval {
+            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::CallDirectEvalWithArgumentArray {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: this_op.operand(),
+                arguments: args_array.operand(),
+                expression_string: None,
+            });
         } else {
             let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::CallWithArgumentArray {
@@ -1706,6 +1733,16 @@ fn generate_call_expression(
             gen.emit(Instruction::CallConstruct {
                 dst: dst.operand(),
                 callee: callee.operand(),
+                argument_count: args.len() as u32,
+                expression_string: None,
+                arguments: args,
+            });
+        } else if is_direct_eval {
+            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::CallDirectEval {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: this_op.operand(),
                 argument_count: args.len() as u32,
                 expression_string: None,
                 arguments: args,
