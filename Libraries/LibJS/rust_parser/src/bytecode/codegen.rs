@@ -175,10 +175,16 @@ pub fn generate_expr(
         // === Array ===
         Expression::Array(elements) => {
             let dst = choose_dst(gen, preferred_dst);
-            // Keep ScopedOperands alive until after NewArray is emitted,
-            // otherwise their registers get freed and reused.
+
+            // Find the first spread element.
+            let first_spread = elements.iter().position(|e| {
+                matches!(e, Some(elem) if matches!(elem.inner, Expression::Spread(_)))
+            });
+
+            // Collect elements before the first spread into a NewArray.
+            let pre_spread_count = first_spread.unwrap_or(elements.len());
             let mut scoped_args: Vec<ScopedOperand> = Vec::new();
-            for elem in elements {
+            for elem in &elements[..pre_spread_count] {
                 match elem {
                     Some(e) => {
                         let val = generate_expr(e, gen, None).unwrap_or_else(|| {
@@ -197,6 +203,35 @@ pub fn generate_expr(
                 element_count: args.len() as u32,
                 elements: args,
             });
+            drop(scoped_args);
+
+            // Append elements after the first spread using ArrayAppend.
+            if let Some(spread_idx) = first_spread {
+                for elem in &elements[spread_idx..] {
+                    match elem {
+                        None => {
+                            let empty = gen.add_constant_empty();
+                            gen.emit(Instruction::ArrayAppend {
+                                dst: dst.operand(),
+                                src: empty.operand(),
+                                is_spread: false,
+                            });
+                        }
+                        Some(e) => {
+                            let is_spread = matches!(e.inner, Expression::Spread(_));
+                            let val = generate_expr(e, gen, None).unwrap_or_else(|| {
+                                gen.add_constant_undefined()
+                            });
+                            gen.emit(Instruction::ArrayAppend {
+                                dst: dst.operand(),
+                                src: val.operand(),
+                                is_spread,
+                            });
+                        }
+                    }
+                }
+            }
+
             Some(dst)
         }
 
