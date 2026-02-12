@@ -7,9 +7,6 @@
 //! # LibJS Rust Parser
 //!
 //! A JavaScript parser written in Rust that produces a Rust AST.
-//! Currently, the Rust AST cannot yet be consumed by the C++ bytecode
-//! generator, so this entry point always signals errors to cause the
-//! C++ caller (Script.cpp) to fall back to the C++ parser.
 //!
 //! ## Architecture
 //!
@@ -27,6 +24,18 @@
 //! │  Parser (parser.rs + parser/*.rs)                   │
 //! │  Recursive descent with precedence climbing         │
 //! │  Builds Rust AST (ast.rs)                           │
+//! └──────────────────────┬──────────────────────────────┘
+//!                        │ Rust AST
+//!                        ▼
+//! ┌─────────────────────────────────────────────────────┐
+//! │  Codegen (bytecode/codegen.rs)                      │
+//! │  Walks AST, emits bytecode via Generator            │
+//! └──────────────────────┬──────────────────────────────┘
+//!                        │ assembled bytecode
+//!                        ▼
+//! ┌─────────────────────────────────────────────────────┐
+//! │  FFI (bytecode/ffi.rs → BytecodeFactory.cpp)        │
+//! │  Creates C++ Executable from assembled data         │
 //! └─────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -40,6 +49,7 @@
 //! - `parser/statements.rs` — Statement parsing (if, for, while, etc.)
 //! - `parser/declarations.rs` — Functions, classes, variables, modules
 //! - `ast.rs` — Rust AST type definitions
+//! - `bytecode/` — Bytecode generator, instruction types, and FFI
 //! - `ast_bridge.rs` — (Legacy) Safe Rust wrappers around C++ factory FFI
 //! - `scope_collector.rs` — (Legacy) Scope analysis
 
@@ -84,11 +94,9 @@ use std::ffi::c_void;
 
 /// Parse a JavaScript program from UTF-16 source code.
 ///
-/// The Rust parser now builds a Rust AST, which cannot yet be consumed
-/// by the C++ bytecode generator. This function always sets
-/// `out_has_errors = true` so that Script.cpp falls back to the C++
-/// parser. The Rust parser is still exercised (parsing runs to
-/// completion), which lets us verify it compiles and doesn't panic.
+/// The Rust parser builds a Rust AST. When `USE_RUST_CODEGEN` is set
+/// (checked by the C++ caller), the codegen path produces a C++ Executable.
+/// Otherwise, this signals errors so Script.cpp falls back to the C++ parser.
 ///
 /// # Safety
 /// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
@@ -121,13 +129,87 @@ pub unsafe extern "C" fn rust_parse_program(
         parser.in_class_field_initializer = in_class_field_initializer;
     }
 
-    // Run the parser to build the Rust AST (exercises the parser code).
+    // Run the parser to build the Rust AST.
     let _program = parser.parse_program(starts_in_strict_mode);
 
     // Always signal errors so the C++ caller falls back to the C++ parser.
-    // The Rust AST is not yet bridged to C++ bytecode generation.
+    // The Rust codegen path is not yet ready for production use.
     if !out_has_errors.is_null() {
         *out_has_errors = true;
     }
     std::ptr::null_mut()
+}
+
+/// Compile a JavaScript program using the Rust parser and bytecode generator.
+///
+/// This is the full Rust pipeline: parse → codegen → assemble → create Executable.
+/// Called from C++ when `USE_RUST_CODEGEN=1` is set.
+///
+/// Returns a `GC::Ptr<Bytecode::Executable>` cast to `void*`, or nullptr on failure.
+///
+/// # Safety
+/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_program(
+    source: *const u16,
+    source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    program_type: u8,
+    starts_in_strict_mode: bool,
+    initiated_by_eval: bool,
+    in_eval_function_context: bool,
+    allow_super_property_lookup: bool,
+    allow_super_constructor_call: bool,
+    in_class_field_initializer: bool,
+) -> *mut c_void {
+    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let pt = if program_type == 1 {
+        ProgramType::Module
+    } else {
+        ProgramType::Script
+    };
+    let mut parser = Parser::new(source_slice, pt);
+    if initiated_by_eval {
+        parser.initiated_by_eval = true;
+        parser.in_eval_function_context = in_eval_function_context;
+        parser.allow_super_property_lookup = allow_super_property_lookup;
+        parser.allow_super_constructor_call = allow_super_constructor_call;
+        parser.in_class_field_initializer = in_class_field_initializer;
+    }
+
+    // Parse
+    let program = parser.parse_program(starts_in_strict_mode);
+
+    // Check for parse errors
+    if parser.has_errors() {
+        return std::ptr::null_mut();
+    }
+
+    // Generate bytecode
+    let mut gen = bytecode::generator::Generator::new();
+    gen.strict = starts_in_strict_mode;
+
+    // Create initial basic block
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Generate bytecode for the program
+    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
+
+    // If the last block isn't terminated, emit End with the last result
+    if !gen.is_current_block_terminated() {
+        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(bytecode::instruction::Instruction::End {
+            value: value.operand(),
+        });
+    }
+
+    // Assemble
+    let assembled = gen.assemble();
+
+    // Create C++ Executable via FFI
+    bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
 }
