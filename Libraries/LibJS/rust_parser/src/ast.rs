@@ -415,6 +415,7 @@ pub struct ObjectProperty {
     pub key: Box<Expr>,
     pub value: Option<Box<Expr>>,
     pub is_method: bool,
+    pub is_computed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

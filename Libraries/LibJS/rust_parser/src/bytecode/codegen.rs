@@ -1825,7 +1825,7 @@ fn generate_object_expression(
 
         match prop.property_type {
             ObjectPropertyType::KeyValue => {
-                emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index);
+                emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, prop.is_computed);
             }
             ObjectPropertyType::Spread => {
                 gen.emit(Instruction::PutBySpread {
@@ -1834,10 +1834,10 @@ fn generate_object_expression(
                 });
             }
             ObjectPropertyType::Getter => {
-                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true);
+                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true, prop.is_computed);
             }
             ObjectPropertyType::Setter => {
-                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, false);
+                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, false, prop.is_computed);
             }
             ObjectPropertyType::ProtoSetter => {
                 let key = gen.intern_property_key(utf16!("__proto__").to_vec());
@@ -1864,7 +1864,19 @@ fn emit_object_property_set_by_key(
     value: &ScopedOperand,
     slot: u32,
     cache_index: u32,
+    is_computed: bool,
 ) {
+    if is_computed {
+        let key_val = generate_expr(key, gen, None)
+            .unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(Instruction::PutOwnByValue {
+            base: object.operand(),
+            property: key_val.operand(),
+            src: value.operand(),
+            base_identifier: None,
+        });
+        return;
+    }
     match &key.inner {
         Expression::Identifier(ident) => {
             let prop_key = gen.intern_property_key(ident.name.clone());
@@ -1916,6 +1928,7 @@ fn emit_object_accessor_by_key(
     key: &Expr,
     value: &ScopedOperand,
     is_getter: bool,
+    is_computed: bool,
 ) {
     let emit_by_id = |gen: &mut Generator, name: &[u16]| {
         let prop_key = gen.intern_property_key(name.to_vec());
@@ -1939,28 +1952,35 @@ fn emit_object_accessor_by_key(
         }
     };
 
+    let emit_by_value = |gen: &mut Generator, key: &Expr| {
+        let key_val = generate_expr(key, gen, None)
+            .unwrap_or_else(|| gen.add_constant_undefined());
+        if is_getter {
+            gen.emit(Instruction::PutGetterByValue {
+                base: object.operand(),
+                property: key_val.operand(),
+                src: value.operand(),
+                base_identifier: None,
+            });
+        } else {
+            gen.emit(Instruction::PutSetterByValue {
+                base: object.operand(),
+                property: key_val.operand(),
+                src: value.operand(),
+                base_identifier: None,
+            });
+        }
+    };
+
+    if is_computed {
+        emit_by_value(gen, key);
+        return;
+    }
+
     match &key.inner {
         Expression::Identifier(ident) => emit_by_id(gen, &ident.name),
         Expression::StringLiteral(s) => emit_by_id(gen, s),
-        _ => {
-            let key_val = generate_expr(key, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
-            if is_getter {
-                gen.emit(Instruction::PutGetterByValue {
-                    base: object.operand(),
-                    property: key_val.operand(),
-                    src: value.operand(),
-                    base_identifier: None,
-                });
-            } else {
-                gen.emit(Instruction::PutSetterByValue {
-                    base: object.operand(),
-                    property: key_val.operand(),
-                    src: value.operand(),
-                    base_identifier: None,
-                });
-            }
-        }
+        _ => emit_by_value(gen, key),
     }
 }
 

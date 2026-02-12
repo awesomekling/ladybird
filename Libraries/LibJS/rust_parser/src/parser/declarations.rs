@@ -747,7 +747,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse key.
-        let (key, key_value, _is_proto) = self.parse_property_key();
+        let (key, key_value, _is_proto, _is_computed) = self.parse_property_key();
 
         if is_static && key_value.as_deref() == Some(utf16!("prototype")) {
             self.syntax_error("Classes may not have a static property named 'prototype'");

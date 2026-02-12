@@ -968,6 +968,7 @@ impl<'a> Parser<'a> {
                     range: self.range_from(spread_start),
                     property_type: ObjectPropertyType::Spread,
                     key: Box::new(expr),
+                    is_computed: false,
                     value: None,
                     is_method: false,
                 });
@@ -1016,7 +1017,7 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let (key, key_value, is_proto) = self.parse_property_key();
+        let (key, key_value, is_proto, is_computed) = self.parse_property_key();
 
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
@@ -1028,6 +1029,7 @@ impl<'a> Parser<'a> {
                 key: Box::new(key),
                 value: Some(Box::new(func)),
                 is_method: true,
+                is_computed,
             };
         }
 
@@ -1041,6 +1043,7 @@ impl<'a> Parser<'a> {
                 key: Box::new(key),
                 value: Some(Box::new(func)),
                 is_method: true,
+                is_computed,
             };
         }
 
@@ -1055,6 +1058,7 @@ impl<'a> Parser<'a> {
                 key: Box::new(key),
                 value: Some(Box::new(value)),
                 is_method: false,
+                is_computed,
             };
         }
 
@@ -1069,6 +1073,7 @@ impl<'a> Parser<'a> {
                 key: Box::new(key),
                 value: Some(Box::new(value)),
                 is_method: false,
+                is_computed: false,
             };
         }
 
@@ -1079,6 +1084,7 @@ impl<'a> Parser<'a> {
             key: Box::new(key),
             value: None,
             is_method: false,
+            is_computed,
         }
     }
 
@@ -1094,7 +1100,7 @@ impl<'a> Parser<'a> {
         ) || next.token_type.is_identifier_name()
     }
 
-    pub(crate) fn parse_property_key(&mut self) -> (Expr, Option<Vec<u16>>, bool) {
+    pub(crate) fn parse_property_key(&mut self) -> (Expr, Option<Vec<u16>>, bool, bool) {
         let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {
@@ -1102,7 +1108,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::BracketClose);
-                (expr, None, false)
+                (expr, None, false, true)
             }
             TokenType::StringLiteral => {
                 let tok = self.consume();
@@ -1115,13 +1121,13 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expr(start, Expression::StringLiteral(value.clone())), Some(value), is_proto)
+                (self.expr(start, Expression::StringLiteral(value.clone())), Some(value), is_proto, false)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
                 let value_str = self.token_value(&tok);
                 let value = parse_numeric_value(value_str);
-                (self.expr(start, Expression::NumericLiteral(value)), None, false)
+                (self.expr(start, Expression::NumericLiteral(value)), None, false, false)
             }
             TokenType::PrivateIdentifier => {
                 let tok = self.consume();
@@ -1132,7 +1138,7 @@ impl<'a> Parser<'a> {
                 (self.expr(start, Expression::PrivateIdentifier(PrivateIdentifier {
                     range: self.range_from(start),
                     name: value.clone(),
-                })), Some(value), false)
+                })), Some(value), false, false)
             }
             _ => {
                 if self.match_identifier_name() {
@@ -1140,11 +1146,11 @@ impl<'a> Parser<'a> {
                     let value = self.token_value(&tok).to_vec();
                     let is_proto = value == proto_name;
                     let key = self.expr(start, Expression::StringLiteral(value.clone()));
-                    (key, Some(value), is_proto)
+                    (key, Some(value), is_proto, false)
                 } else {
                     self.expected("property key");
                     self.consume();
-                    (self.expr(start, Expression::StringLiteral(Vec::new())), None, false)
+                    (self.expr(start, Expression::StringLiteral(Vec::new())), None, false, false)
                 }
             }
         }
