@@ -1690,6 +1690,11 @@ NonnullRefPtr<Program> rust_parse(
             allow_super_constructor_call, in_class_field_initializer, &out_has_errors);
     }
 
+    if (out_has_errors || !program) {
+        out_has_errors = true;
+        return adopt_ref(*new Program({ source_code, {}, {} }, program_type));
+    }
+
     // The Rust side added an extra ref before dropping the arena.
     // Adopt it without incrementing the refcount again.
     return adopt_ref(static_cast<Program&>(*static_cast<ASTNode*>(program)));

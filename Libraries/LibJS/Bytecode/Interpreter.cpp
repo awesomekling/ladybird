@@ -8,6 +8,7 @@
 #include <AK/Debug.h>
 #include <AK/HashTable.h>
 #include <AK/TemporaryChange.h>
+#include <LibGC/DeferGC.h>
 #include <LibGC/RootHashMap.h>
 #include <LibJS/AST.h>
 #include <LibJS/BytecodeFactory.h>
@@ -131,6 +132,7 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
     if (!executable && result.type() == Completion::Type::Normal) {
         static bool use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
         if (use_rust_codegen) {
+            GC::DeferGC defer_gc(vm.heap());
             auto& source_code = script_record.parse_node()->source_code();
             auto const& code_view = source_code.code_view();
             auto length = code_view.length_in_code_units();

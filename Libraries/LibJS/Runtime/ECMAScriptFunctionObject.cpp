@@ -9,6 +9,7 @@
 
 #include <AK/Debug.h>
 #include <AK/Function.h>
+#include <LibGC/DeferGC.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/BasicBlock.h>
 #include <LibJS/Bytecode/Generator.h>
@@ -221,6 +222,7 @@ void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals
     if (!executable) {
         if (m_shared_data->m_use_rust_compilation) {
             VERIFY(m_shared_data->m_rust_function_ast);
+            GC::DeferGC defer_gc(heap());
             auto const& code_view = m_shared_data->m_source_code->code_view();
             auto const* source_ptr = code_view.is_ascii()
                 ? reinterpret_cast<uint16_t const*>(code_view.ascii_span().data())
