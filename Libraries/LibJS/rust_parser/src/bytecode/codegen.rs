@@ -395,7 +395,7 @@ pub fn generate_stmt(
         Statement::Expression(expr) => generate_expr(expr, gen, preferred_dst),
 
         // === Block ===
-        Statement::Block(scope) => generate_scope_children(gen, scope, preferred_dst),
+        Statement::Block(scope) => generate_block_statement(gen, scope, preferred_dst),
 
         // === FunctionBody ===
         Statement::FunctionBody { scope, .. } => generate_scope_children(gen, scope, preferred_dst),
@@ -1024,6 +1024,91 @@ fn generate_scope_children(
         }
     }
     last_result
+}
+
+/// Generate bytecode for a block statement, creating a lexical environment
+/// if the block has non-local lexical declarations (let/const/class).
+fn generate_block_statement(
+    gen: &mut Generator,
+    scope: &ScopeData,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let did_create_env = emit_block_declaration_instantiation(gen, scope);
+    let result = generate_scope_children(gen, scope, preferred_dst);
+
+    if did_create_env {
+        gen.lexical_environment_register_stack.pop();
+        if !gen.is_current_block_terminated() {
+            let parent = gen.lexical_environment_register_stack.last().cloned()
+                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        }
+    }
+    result
+}
+
+/// Create a lexical environment for a block with non-local lexical declarations.
+/// Returns true if an environment was created.
+fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) -> bool {
+    if !has_non_local_lexical_decls(scope) {
+        return false;
+    }
+
+    let parent = gen.lexical_environment_register_stack.last().cloned()
+        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let new_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: new_env.operand(),
+        parent: parent.operand(),
+        capacity: 0,
+    });
+    gen.lexical_environment_register_stack.push(new_env);
+
+    // Create bindings for non-local lexical declarations.
+    for child in &scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations } => {
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    let is_constant = *kind == DeclarationKind::Const;
+                    for decl in declarations {
+                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                            if !ident.is_local() {
+                                let id = gen.intern_identifier(ident.name.clone());
+                                gen.emit(Instruction::CreateVariable {
+                                    identifier: id,
+                                    mode: ENV_MODE_LEXICAL,
+                                    is_immutable: is_constant,
+                                    is_global: false,
+                                    is_strict: is_constant,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name_ident) = class_data.name {
+                    if !name_ident.is_local() {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                    }
+                }
+            }
+            Statement::FunctionDeclaration(_) => {
+                // Function declarations in blocks need block-scoped bindings too.
+                // (Handled by FDI for the function body scope.)
+            }
+            _ => {}
+        }
+    }
+
+    true
 }
 
 // =============================================================================
@@ -2169,6 +2254,62 @@ fn check_private_key(key: &Expr) -> (bool, Option<Vec<u16>>) {
     }
 }
 
+/// Check if a for-in/for-of LHS is a `let`/`const` declaration with non-local identifiers,
+/// meaning we need a per-iteration lexical environment.
+fn for_in_of_needs_lexical_env(lhs: &ForInOfLhs) -> bool {
+    if let ForInOfLhs::Declaration(stmt) = lhs {
+        if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
+            if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                for decl in declarations {
+                    if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                        if !ident.is_local() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Create a per-iteration lexical environment for for-in/for-of `let`/`const` declarations.
+/// Returns the parent environment register so we can restore it later.
+fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> ScopedOperand {
+    let parent = gen.lexical_environment_register_stack.last().cloned()
+        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let new_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: new_env.operand(),
+        parent: parent.operand(),
+        capacity: 1,
+    });
+    gen.lexical_environment_register_stack.push(new_env);
+
+    // Create the variable binding in the new environment.
+    if let ForInOfLhs::Declaration(stmt) = lhs {
+        if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
+            let is_constant = *kind == DeclarationKind::Const;
+            for decl in declarations {
+                if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                    if !ident.is_local() {
+                        let id = gen.intern_identifier(ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: is_constant,
+                            is_global: false,
+                            is_strict: is_constant,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    parent
+}
+
 /// Check if a key is a "static" key (identifier or string literal — not computed).
 // =============================================================================
 // For-in statement
@@ -2183,6 +2324,7 @@ fn generate_for_in_statement(
 ) -> Option<ScopedOperand> {
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
     let end_block = gen.make_block();
+    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
 
     // Check for null/undefined
     let nullish_block = gen.make_block();
@@ -2237,6 +2379,13 @@ fn generate_for_in_statement(
     });
     gen.switch_to_basic_block(loop_continue_block);
 
+    // Create per-iteration lexical environment for let/const declarations.
+    let parent_env = if needs_lexical_env {
+        Some(create_for_in_of_lexical_env(gen, lhs))
+    } else {
+        None
+    };
+
     // Assign to LHS
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
@@ -2245,17 +2394,40 @@ fn generate_for_in_statement(
         target: Label(loop_block as u32),
     });
 
-    // Body
+    // Body — use cleanup blocks for break/continue if we have a lexical env.
     gen.switch_to_basic_block(loop_block);
-    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let (break_target, continue_target) = if needs_lexical_env {
+        (gen.make_block(), gen.make_block())
+    } else {
+        (end_block, update_block)
+    };
+    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
+    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
     generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(update_block as u32),
-        });
+
+    if needs_lexical_env {
+        let parent = parent_env.as_ref().unwrap();
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
+        gen.lexical_environment_register_stack.pop();
+
+        // Break cleanup: restore environment then jump to end.
+        gen.switch_to_basic_block(break_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+
+        // Continue cleanup: restore environment then jump to update.
+        gen.switch_to_basic_block(continue_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+    } else {
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
     }
 
     gen.switch_to_basic_block(end_block);
@@ -2275,6 +2447,7 @@ fn generate_for_of_statement(
 ) -> Option<ScopedOperand> {
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
     let end_block = gen.make_block();
+    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
 
     // Get iterator
     let iterator_object = gen.allocate_register();
@@ -2314,6 +2487,13 @@ fn generate_for_of_statement(
     });
     gen.switch_to_basic_block(loop_continue_block);
 
+    // Create per-iteration lexical environment for let/const declarations.
+    let parent_env = if needs_lexical_env {
+        Some(create_for_in_of_lexical_env(gen, lhs))
+    } else {
+        None
+    };
+
     // Assign to LHS
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
@@ -2321,17 +2501,40 @@ fn generate_for_of_statement(
         target: Label(loop_block as u32),
     });
 
-    // Body
+    // Body — use cleanup blocks for break/continue if we have a lexical env.
     gen.switch_to_basic_block(loop_block);
-    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let (break_target, continue_target) = if needs_lexical_env {
+        (gen.make_block(), gen.make_block())
+    } else {
+        (end_block, update_block)
+    };
+    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
+    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
     generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(update_block as u32),
-        });
+
+    if needs_lexical_env {
+        let parent = parent_env.as_ref().unwrap();
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
+        gen.lexical_environment_register_stack.pop();
+
+        // Break cleanup: restore environment then jump to end.
+        gen.switch_to_basic_block(break_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+
+        // Continue cleanup: restore environment then jump to update.
+        gen.switch_to_basic_block(continue_target);
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+    } else {
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        }
     }
 
     gen.switch_to_basic_block(end_block);
