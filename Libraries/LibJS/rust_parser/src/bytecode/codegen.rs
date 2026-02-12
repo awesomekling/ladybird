@@ -1690,31 +1690,29 @@ fn generate_template_literal(
     data: &TemplateLiteralData,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    if data.expressions.is_empty() && data.raw_strings.len() == 1 {
-        return Some(gen.add_constant_string(data.raw_strings[0].clone()));
+    // The parser stores ALL parts (string segments AND interpolated expressions)
+    // in data.expressions. raw_strings is only populated for tagged templates.
+    if data.expressions.is_empty() {
+        return Some(gen.add_constant_string(Vec::new()));
     }
 
-    if data.raw_strings.is_empty() {
-        // Tagged templates may have no raw strings when processed as standalone.
-        return Some(gen.add_constant_undefined());
+    if data.expressions.len() == 1 {
+        if let Expression::StringLiteral(s) = &data.expressions[0].inner {
+            return Some(gen.add_constant_string(s.clone()));
+        }
     }
 
     let dst = choose_dst(gen, preferred_dst);
-    // Build the template by concatenating raw strings and expressions
-    let first_raw = gen.add_constant_string(data.raw_strings[0].clone());
-    gen.emit_mov(&dst, &first_raw);
-
-    for (i, expr) in data.expressions.iter().enumerate() {
+    let mut first = true;
+    for expr in &data.expressions {
         let val = generate_expr(expr, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(Instruction::ConcatString {
-            dst: dst.operand(),
-            src: val.operand(),
-        });
-        if i + 1 < data.raw_strings.len() {
-            let raw = gen.add_constant_string(data.raw_strings[i + 1].clone());
+        if first {
+            gen.emit_mov(&dst, &val);
+            first = false;
+        } else {
             gen.emit(Instruction::ConcatString {
                 dst: dst.operand(),
-                src: raw.operand(),
+                src: val.operand(),
             });
         }
     }
