@@ -251,6 +251,9 @@ fn generate_instruction_impl(out: &mut String, ops: &[OpDef]) {
     // encode()
     generate_encode_method(out, ops);
 
+    // encoded_size()
+    generate_encoded_size_method(out, ops);
+
     // visit_operands()
     generate_visit_operands_method(out, ops);
 
@@ -290,6 +293,76 @@ fn generate_is_terminator_method(out: &mut String, ops: &[OpDef]) {
         }
     }
     writeln!(out, "        )").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+}
+
+fn generate_encoded_size_method(out: &mut String, ops: &[OpDef]) {
+    writeln!(out, "    /// Returns the encoded size of this instruction in bytes.").unwrap();
+    writeln!(out, "    pub fn encoded_size(&self) -> usize {{").unwrap();
+    writeln!(out, "        match self {{").unwrap();
+
+    for op in ops {
+        let fields = user_fields(op);
+        let has_array = op.fields.iter().any(|f| f.is_array);
+
+        if !has_array {
+            // Fixed-length: compute size statically
+            let mut offset: usize = 2; // header
+            for f in &op.fields {
+                if f.is_array || f.name == "m_type" || f.name == "m_strict" {
+                    continue;
+                }
+                let (_, align, size, _) = field_type_info(&f.ty);
+                offset = round_up(offset, align);
+                offset += size;
+            }
+            let final_size = round_up(offset, 8);
+            let pat = if fields.is_empty() {
+                format!("Instruction::{}", op.name)
+            } else {
+                format!("Instruction::{} {{ .. }}", op.name)
+            };
+            writeln!(out, "            {} => {},", pat, final_size).unwrap();
+        } else {
+            // Variable-length: depends on array size
+            // Compute fixed part size
+            let mut fixed_offset: usize = 2;
+            for f in &op.fields {
+                if f.is_array || f.name == "m_type" || f.name == "m_strict" {
+                    continue;
+                }
+                let (_, align, size, _) = field_type_info(&f.ty);
+                fixed_offset = round_up(fixed_offset, align);
+                fixed_offset += size;
+            }
+
+            // Find the array field and its element size
+            let array_field = op.fields.iter().find(|f| f.is_array).unwrap();
+            let (_, elem_align, elem_size, _) = field_type_info(&array_field.ty);
+            let arr_name = rust_field_name(&array_field.name);
+            let aligned_fixed = round_up(fixed_offset, elem_align);
+
+            // Bind only the array field
+            let bindings: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    let rname = rust_field_name(&f.name);
+                    if rname == arr_name {
+                        rname
+                    } else {
+                        format!("{}: _", rname)
+                    }
+                })
+                .collect();
+            writeln!(out, "            Instruction::{} {{ {} }} => {{", op.name, bindings.join(", ")).unwrap();
+            writeln!(out, "                let base = {} + {}.len() * {};", aligned_fixed, arr_name, elem_size).unwrap();
+            writeln!(out, "                (base + 7) & !7 // round up to 8").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
+    }
+
+    writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
 }
