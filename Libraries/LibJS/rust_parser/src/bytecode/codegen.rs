@@ -1674,6 +1674,27 @@ fn generate_call_expression(
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
 
+    // Compute expression_string for error messages (e.g. "true is not a function (evaluated from 'a')").
+    let expression_string: Option<StringTableIndex> = match &data.callee.inner {
+        Expression::Identifier(ident) => {
+            Some(gen.intern_string(ident.name.clone()))
+        }
+        Expression::Member { object, property, computed } => {
+            // Approximate the member expression as a string (e.g. "o.a", "o[key]").
+            let mut s = expression_to_string_approximation(object);
+            if *computed {
+                s.extend_from_slice(utf16!("["));
+                s.extend(expression_to_string_approximation(property));
+                s.extend_from_slice(utf16!("]"));
+            } else {
+                s.extend_from_slice(utf16!("."));
+                s.extend(expression_to_string_approximation(property));
+            }
+            Some(gen.intern_string(s))
+        }
+        _ => None,
+    };
+
     // Detect direct eval calls: bare identifier "eval" as callee.
     let is_direct_eval = !is_new
         && matches!(&data.callee.inner, Expression::Identifier(ident) if ident.name == utf16!("eval"));
@@ -1767,7 +1788,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 this_value: this_op.operand(),
                 arguments: args_array.operand(),
-                expression_string: None,
+                expression_string,
             });
         } else if is_direct_eval {
             let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
@@ -1776,7 +1797,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 this_value: this_op.operand(),
                 arguments: args_array.operand(),
-                expression_string: None,
+                expression_string,
             });
         } else {
             let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
@@ -1785,7 +1806,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 this_value: this_op.operand(),
                 arguments: args_array.operand(),
-                expression_string: None,
+                expression_string,
             });
         }
     } else {
@@ -1803,7 +1824,7 @@ fn generate_call_expression(
                 dst: dst.operand(),
                 callee: callee.operand(),
                 argument_count: args.len() as u32,
-                expression_string: None,
+                expression_string,
                 arguments: args,
             });
         } else if is_direct_eval {
@@ -1813,7 +1834,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 this_value: this_op.operand(),
                 argument_count: args.len() as u32,
-                expression_string: None,
+                expression_string,
                 arguments: args,
             });
         } else {
@@ -1823,7 +1844,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 this_value: this_op.operand(),
                 argument_count: args.len() as u32,
-                expression_string: None,
+                expression_string,
                 arguments: args,
             });
         }
@@ -2858,7 +2879,6 @@ fn generate_class_expression(
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
     let has_super = data.super_class.is_some();
-    let has_name = data.name.is_some();
 
     // Step 2: Save parent environment, create class lexical environment.
     let parent_env = gen.allocate_register();
@@ -5030,5 +5050,31 @@ fn collect_binding_pattern_names(
             }
             BindingEntryAlias::MemberExpression(_) => {}
         }
+    }
+}
+
+/// Approximate a source expression as a string for error messages.
+fn expression_to_string_approximation(expr: &Expr) -> Vec<u16> {
+    match &expr.inner {
+        Expression::Identifier(ident) => ident.name.clone(),
+        Expression::Member { object, property, computed } => {
+            let mut s = expression_to_string_approximation(object);
+            if *computed {
+                s.extend_from_slice(utf16!("["));
+                s.extend(expression_to_string_approximation(property));
+                s.extend_from_slice(utf16!("]"));
+            } else {
+                s.extend_from_slice(utf16!("."));
+                s.extend(expression_to_string_approximation(property));
+            }
+            s
+        }
+        Expression::StringLiteral(s) => s.clone(),
+        Expression::NumericLiteral(n) => {
+            let s = format!("{}", n);
+            s.encode_utf16().collect()
+        }
+        Expression::This => utf16!("this").to_vec(),
+        _ => utf16!("<expression>").to_vec(),
     }
 }
