@@ -606,6 +606,7 @@ pub struct ScopeData {
     pub children: Vec<Stmt>,
     pub local_variables: Vec<LocalVariable>,
     pub function_scope_data: Option<Box<FunctionScopeData>>,
+    pub hoisted_functions: Vec<usize>,
 }
 
 impl ScopeData {
@@ -614,6 +615,7 @@ impl ScopeData {
             children: Vec::new(),
             local_variables: Vec::new(),
             function_scope_data: None,
+            hoisted_functions: Vec::new(),
         }
     }
 
@@ -622,6 +624,7 @@ impl ScopeData {
             children,
             local_variables: Vec::new(),
             function_scope_data: None,
+            hoisted_functions: Vec::new(),
         }
     }
 }
