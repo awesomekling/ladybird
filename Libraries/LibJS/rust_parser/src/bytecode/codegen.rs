@@ -325,14 +325,58 @@ pub fn generate_expr(
             Some(dst)
         }
 
-        // Placeholder for nodes not yet fully implemented
-        Expression::Object(_)
-        | Expression::Class(_)
-        | Expression::OptionalChain { .. }
-        | Expression::SuperCall(_)
-        | Expression::Super
-        | Expression::PrivateIdentifier(_)
-        | Expression::Error => None,
+        // === Object ===
+        Expression::Object(data) => {
+            generate_object_expression(gen, data, preferred_dst)
+        }
+
+        // === OptionalChain ===
+        Expression::OptionalChain { base, references } => {
+            generate_optional_chain(gen, base, references, preferred_dst)
+        }
+
+        // === SuperCall ===
+        Expression::SuperCall(data) => {
+            let dst = choose_dst(gen, preferred_dst);
+            // Build arguments array
+            let args_array_dst = gen.allocate_register();
+            let mut arg_ops = Vec::new();
+            for arg in &data.arguments {
+                let val = generate_expr(&arg.value, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                arg_ops.push(val.operand());
+            }
+            gen.emit(Instruction::NewArray {
+                dst: args_array_dst.operand(),
+                element_count: arg_ops.len() as u32,
+                elements: arg_ops,
+            });
+            gen.emit(Instruction::SuperCallWithArgumentArray {
+                dst: dst.operand(),
+                arguments: args_array_dst.operand(),
+                is_synthetic: data.is_synthetic,
+            });
+            Some(dst)
+        }
+
+        Expression::Super => {
+            // super keyword as an expression (for super.foo, super[foo])
+            // Returns the home object's prototype
+            let dst = choose_dst(gen, preferred_dst);
+            gen.emit(Instruction::ResolveSuperBase { dst: dst.operand() });
+            Some(dst)
+        }
+
+        Expression::Class(data) => {
+            generate_class_expression(gen, data, preferred_dst)
+        }
+
+        Expression::PrivateIdentifier(_) => {
+            // Private identifiers are handled by member access codegen
+            None
+        }
+
+        Expression::Error => None,
     }
 }
 
@@ -458,15 +502,40 @@ pub fn generate_stmt(
             result
         }
 
-        // Placeholder for nodes not yet fully implemented
-        Statement::ForIn { .. }
-        | Statement::ForOf { .. }
-        | Statement::ForAwaitOf { .. }
-        | Statement::UsingDeclaration { .. }
-        | Statement::ClassDeclaration(_)
-        | Statement::Import(_)
-        | Statement::Export(_)
-        | Statement::ClassFieldInitializer { .. } => None,
+        // === ForIn ===
+        Statement::ForIn { lhs, rhs, body } => {
+            generate_for_in_statement(gen, lhs, rhs, body, preferred_dst)
+        }
+
+        // === ForOf ===
+        Statement::ForOf { lhs, rhs, body } => {
+            generate_for_of_statement(gen, lhs, rhs, body, preferred_dst)
+        }
+
+        // === ForAwaitOf ===
+        Statement::ForAwaitOf { lhs, rhs, body } => {
+            // Treat as for-of for now (async iteration needs more work)
+            generate_for_of_statement(gen, lhs, rhs, body, preferred_dst)
+        }
+
+        // === UsingDeclaration ===
+        Statement::UsingDeclaration { declarations, .. } => {
+            generate_variable_declaration(gen, DeclarationKind::Let, declarations);
+            None
+        }
+
+        // === ClassDeclaration ===
+        Statement::ClassDeclaration(data) => {
+            generate_class_expression(gen, data, None);
+            None
+        }
+
+        // === Import/Export ===
+        Statement::Import(_) => None, // Handled by module loading
+        Statement::Export(_) => None, // Handled by module loading
+
+        // === ClassFieldInitializer ===
+        Statement::ClassFieldInitializer { .. } => None,
     }
 }
 
@@ -1014,9 +1083,9 @@ fn generate_assignment_expression(
 ) -> Option<ScopedOperand> {
     match lhs {
         AssignmentLhs::Expression(lhs_expr) => {
-            let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
             // Simple assignment to identifier
             if let Expression::Identifier(ident) = &lhs_expr.inner {
+                let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
                 if op == AssignmentOp::Assignment {
                     emit_set_variable(gen, ident, &rhs_val);
                     return Some(rhs_val);
@@ -1028,7 +1097,62 @@ fn generate_assignment_expression(
                 emit_set_variable(gen, ident, &dst);
                 return Some(dst);
             }
-            // Other LHS (member expressions, etc.)
+            // Member expression LHS (e.g., obj.foo = x, obj[key] = x)
+            if let Expression::Member { object, property, computed } = &lhs_expr.inner {
+                let base = generate_expr(object, gen, None)?;
+                if op == AssignmentOp::Assignment {
+                    let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+                    emit_put_to_member(gen, &base, property, *computed, &rhs_val);
+                    return Some(rhs_val);
+                }
+                // Compound member assignment
+                let old_val = gen.allocate_register();
+                if *computed {
+                    let prop = generate_expr(property, gen, None)?;
+                    gen.emit(Instruction::GetByValue {
+                        dst: old_val.operand(),
+                        base: base.operand(),
+                        property: prop.operand(),
+                        base_identifier: None,
+                    });
+                    let rhs_val = generate_expr(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                    gen.emit(Instruction::PutNormalByValue {
+                        base: base.operand(),
+                        property: prop.operand(),
+                        src: dst.operand(),
+                        base_identifier: None,
+                    });
+                    return Some(dst);
+                } else {
+                    if let Expression::Identifier(ident) = &property.inner {
+                        let key = gen.intern_property_key(ident.name.clone());
+                        let cache = gen.next_property_lookup_cache();
+                        gen.emit(Instruction::GetById {
+                            dst: old_val.operand(),
+                            base: base.operand(),
+                            property: key,
+                            base_identifier: None,
+                            cache_index: cache,
+                        });
+                        let rhs_val = generate_expr(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
+                        emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                        let cache2 = gen.next_property_lookup_cache();
+                        gen.emit(Instruction::PutNormalById {
+                            base: base.operand(),
+                            property: key,
+                            src: dst.operand(),
+                            cache_index: cache2,
+                            base_identifier: None,
+                        });
+                        return Some(dst);
+                    }
+                }
+            }
+            // Fallback: just evaluate RHS
+            let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
             Some(rhs_val)
         }
         AssignmentLhs::Pattern(_pattern) => {
@@ -1055,6 +1179,60 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             src: value.operand(),
             cache: EnvironmentCoordinate::empty(),
         });
+    }
+}
+
+fn emit_put_to_member(
+    gen: &mut Generator,
+    base: &ScopedOperand,
+    property: &Expr,
+    computed: bool,
+    value: &ScopedOperand,
+) {
+    if computed {
+        let prop = generate_expr(property, gen, None)
+            .unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(Instruction::PutNormalByValue {
+            base: base.operand(),
+            property: prop.operand(),
+            src: value.operand(),
+            base_identifier: None,
+        });
+    } else if let Expression::Identifier(ident) = &property.inner {
+        let key = gen.intern_property_key(ident.name.clone());
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::PutNormalById {
+            base: base.operand(),
+            property: key,
+            src: value.operand(),
+            cache_index: cache,
+            base_identifier: None,
+        });
+    } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
+        let id = gen.intern_identifier(priv_ident.name.clone());
+        gen.emit(Instruction::PutPrivateById {
+            base: base.operand(),
+            property: id,
+            src: value.operand(),
+        });
+    }
+}
+
+fn emit_store_to_reference(
+    gen: &mut Generator,
+    target: &Expr,
+    value: &ScopedOperand,
+) {
+    match &target.inner {
+        Expression::Identifier(ident) => {
+            emit_set_variable(gen, ident, value);
+        }
+        Expression::Member { object, property, computed } => {
+            let base = generate_expr(object, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            emit_put_to_member(gen, &base, property, *computed, value);
+        }
+        _ => {}
     }
 }
 
@@ -1204,6 +1382,525 @@ fn generate_switch_statement(
 // =============================================================================
 // Try statement
 // =============================================================================
+
+// =============================================================================
+// Object expression
+// =============================================================================
+
+fn generate_object_expression(
+    gen: &mut Generator,
+    properties: &[ObjectProperty],
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let dst = choose_dst(gen, preferred_dst);
+    let cache_index = gen.next_object_shape_cache();
+    gen.emit(Instruction::NewObject {
+        dst: dst.operand(),
+        cache_index,
+    });
+
+    if properties.is_empty() {
+        return Some(dst);
+    }
+
+    for (slot, prop) in properties.iter().enumerate() {
+        let value = prop.value.as_ref().and_then(|v| generate_expr(v, gen, None))
+            .unwrap_or_else(|| gen.add_constant_undefined());
+
+        match prop.property_type {
+            ObjectPropertyType::KeyValue => {
+                emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index);
+            }
+            ObjectPropertyType::Spread => {
+                gen.emit(Instruction::PutBySpread {
+                    base: dst.operand(),
+                    src: value.operand(),
+                });
+            }
+            ObjectPropertyType::Getter => {
+                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true);
+            }
+            ObjectPropertyType::Setter => {
+                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, false);
+            }
+            ObjectPropertyType::ProtoSetter => {
+                let key = gen.intern_property_key(utf16!("__proto__").to_vec());
+                let cache = gen.next_property_lookup_cache();
+                gen.emit(Instruction::PutPrototypeById {
+                    base: dst.operand(),
+                    property: key,
+                    src: value.operand(),
+                    cache_index: cache,
+                    base_identifier: None,
+                });
+            }
+        }
+    }
+
+    Some(dst)
+}
+
+/// Emit a property set for an object literal key (static or computed).
+fn emit_object_property_set_by_key(
+    gen: &mut Generator,
+    object: &ScopedOperand,
+    key: &Expr,
+    value: &ScopedOperand,
+    slot: u32,
+    cache_index: u32,
+) {
+    match &key.inner {
+        Expression::Identifier(ident) => {
+            let prop_key = gen.intern_property_key(ident.name.clone());
+            gen.emit(Instruction::InitObjectLiteralProperty {
+                object: object.operand(),
+                property: prop_key,
+                src: value.operand(),
+                shape_cache_index: cache_index,
+                property_slot: slot,
+            });
+        }
+        Expression::StringLiteral(s) => {
+            let prop_key = gen.intern_property_key(s.clone());
+            gen.emit(Instruction::InitObjectLiteralProperty {
+                object: object.operand(),
+                property: prop_key,
+                src: value.operand(),
+                shape_cache_index: cache_index,
+                property_slot: slot,
+            });
+        }
+        Expression::NumericLiteral(n) => {
+            let key_val = gen.add_constant_number(*n);
+            gen.emit(Instruction::PutOwnByValue {
+                base: object.operand(),
+                property: key_val.operand(),
+                src: value.operand(),
+                base_identifier: None,
+            });
+        }
+        _ => {
+            // Computed key
+            let key_val = generate_expr(key, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::PutOwnByValue {
+                base: object.operand(),
+                property: key_val.operand(),
+                src: value.operand(),
+                base_identifier: None,
+            });
+        }
+    }
+}
+
+/// Emit a getter/setter for an object literal key.
+fn emit_object_accessor_by_key(
+    gen: &mut Generator,
+    object: &ScopedOperand,
+    key: &Expr,
+    value: &ScopedOperand,
+    is_getter: bool,
+) {
+    let emit_by_id = |gen: &mut Generator, name: &[u16]| {
+        let prop_key = gen.intern_property_key(name.to_vec());
+        let cache = gen.next_property_lookup_cache();
+        if is_getter {
+            gen.emit(Instruction::PutGetterById {
+                base: object.operand(),
+                property: prop_key,
+                src: value.operand(),
+                cache_index: cache,
+                base_identifier: None,
+            });
+        } else {
+            gen.emit(Instruction::PutSetterById {
+                base: object.operand(),
+                property: prop_key,
+                src: value.operand(),
+                cache_index: cache,
+                base_identifier: None,
+            });
+        }
+    };
+
+    match &key.inner {
+        Expression::Identifier(ident) => emit_by_id(gen, &ident.name),
+        Expression::StringLiteral(s) => emit_by_id(gen, s),
+        _ => {
+            let key_val = generate_expr(key, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            if is_getter {
+                gen.emit(Instruction::PutGetterByValue {
+                    base: object.operand(),
+                    property: key_val.operand(),
+                    src: value.operand(),
+                    base_identifier: None,
+                });
+            } else {
+                gen.emit(Instruction::PutSetterByValue {
+                    base: object.operand(),
+                    property: key_val.operand(),
+                    src: value.operand(),
+                    base_identifier: None,
+                });
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Optional chain
+// =============================================================================
+
+fn generate_optional_chain(
+    gen: &mut Generator,
+    base: &Expr,
+    references: &[OptionalChainReference],
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let end_block = gen.make_block();
+    let dst = choose_dst(gen, preferred_dst);
+    let undef = gen.add_constant_undefined();
+
+    let mut current = generate_expr(base, gen, None)?;
+
+    for reference in references {
+        let is_optional = match reference {
+            OptionalChainReference::Call { mode, .. }
+            | OptionalChainReference::ComputedReference { mode, .. }
+            | OptionalChainReference::MemberReference { mode, .. }
+            | OptionalChainReference::PrivateMemberReference { mode, .. } => {
+                *mode == OptionalChainMode::Optional
+            }
+        };
+
+        if is_optional {
+            let continue_block = gen.make_block();
+            let short_circuit_block = gen.make_block();
+            gen.emit(Instruction::JumpNullish {
+                condition: current.operand(),
+                true_target: Label(short_circuit_block as u32),
+                false_target: Label(continue_block as u32),
+            });
+            gen.switch_to_basic_block(short_circuit_block);
+            gen.emit_mov(&dst, &undef);
+            gen.emit(Instruction::Jump {
+                target: Label(end_block as u32),
+            });
+            gen.switch_to_basic_block(continue_block);
+        }
+
+        match reference {
+            OptionalChainReference::MemberReference { identifier, .. } => {
+                let next = gen.allocate_register();
+                let key = gen.intern_property_key(identifier.name.clone());
+                let cache = gen.next_property_lookup_cache();
+                gen.emit(Instruction::GetById {
+                    dst: next.operand(),
+                    base: current.operand(),
+                    property: key,
+                    base_identifier: None,
+                    cache_index: cache,
+                });
+                current = next;
+            }
+            OptionalChainReference::ComputedReference { expression, .. } => {
+                let next = gen.allocate_register();
+                let prop = generate_expr(expression, gen, None)?;
+                gen.emit(Instruction::GetByValue {
+                    dst: next.operand(),
+                    base: current.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+                current = next;
+            }
+            OptionalChainReference::Call { arguments, .. } => {
+                let next = gen.allocate_register();
+                let mut arg_ops = Vec::new();
+                for arg in arguments {
+                    let val = generate_expr(&arg.value, gen, None)
+                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    arg_ops.push(val.operand());
+                }
+                let this_value = gen.add_constant_undefined();
+                gen.emit(Instruction::Call {
+                    dst: next.operand(),
+                    callee: current.operand(),
+                    this_value: this_value.operand(),
+                    argument_count: arg_ops.len() as u32,
+                    expression_string: None,
+                    arguments: arg_ops,
+                });
+                current = next;
+            }
+            OptionalChainReference::PrivateMemberReference { private_identifier, .. } => {
+                let next = gen.allocate_register();
+                let id = gen.intern_identifier(private_identifier.name.clone());
+                gen.emit(Instruction::GetPrivateById {
+                    dst: next.operand(),
+                    base: current.operand(),
+                    property: id,
+                });
+                current = next;
+            }
+        }
+    }
+
+    gen.emit_mov(&dst, &current);
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(end_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    Some(dst)
+}
+
+// =============================================================================
+// Class expression
+// =============================================================================
+
+fn generate_class_expression(
+    gen: &mut Generator,
+    _data: &ClassData,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    // For now, create a minimal class via NewFunction for the constructor.
+    // Full class support (methods, fields, static init, private) needs more work.
+    let dst = choose_dst(gen, preferred_dst);
+    let shared_function_index = gen.shared_function_data_count;
+    gen.shared_function_data_count += 1;
+    gen.emit(Instruction::NewFunction {
+        dst: dst.operand(),
+        shared_function_data_index: shared_function_index,
+        lhs_name: None,
+        home_object: None,
+    });
+    Some(dst)
+}
+
+// =============================================================================
+// For-in statement
+// =============================================================================
+
+fn generate_for_in_statement(
+    gen: &mut Generator,
+    lhs: &ForInOfLhs,
+    rhs: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let end_block = gen.make_block();
+
+    // Check for null/undefined
+    let nullish_block = gen.make_block();
+    let continue_block = gen.make_block();
+    gen.emit(Instruction::JumpNullish {
+        condition: object.operand(),
+        true_target: Label(nullish_block as u32),
+        false_target: Label(continue_block as u32),
+    });
+
+    gen.switch_to_basic_block(nullish_block);
+    gen.emit(Instruction::Jump {
+        target: Label(end_block as u32),
+    });
+
+    gen.switch_to_basic_block(continue_block);
+
+    // Get property iterator
+    let iterator_object = gen.allocate_register();
+    let iterator_next_method = gen.allocate_register();
+    let iterator_done = gen.allocate_register();
+    gen.emit(Instruction::GetObjectPropertyIterator {
+        dst_iterator_object: iterator_object.operand(),
+        dst_iterator_next: iterator_next_method.operand(),
+        dst_iterator_done: iterator_done.operand(),
+        object: object.operand(),
+    });
+
+    let loop_block = gen.make_block();
+    let update_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(update_block as u32),
+    });
+
+    // Update: get next value
+    gen.switch_to_basic_block(update_block);
+    let next_value = gen.allocate_register();
+    let done = gen.allocate_register();
+    gen.emit(Instruction::IteratorNextUnpack {
+        dst_value: next_value.operand(),
+        dst_done: done.operand(),
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next_method.operand(),
+        iterator_done: iterator_done.operand(),
+    });
+
+    let loop_continue_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(end_block as u32),
+        false_target: Label(loop_continue_block as u32),
+    });
+    gen.switch_to_basic_block(loop_continue_block);
+
+    // Assign to LHS
+    assign_to_for_in_of_lhs(gen, lhs, &next_value);
+
+    // Jump to body
+    gen.emit(Instruction::Jump {
+        target: Label(loop_block as u32),
+    });
+
+    // Body
+    gen.switch_to_basic_block(loop_block);
+    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(update_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+// =============================================================================
+// For-of statement
+// =============================================================================
+
+fn generate_for_of_statement(
+    gen: &mut Generator,
+    lhs: &ForInOfLhs,
+    rhs: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let end_block = gen.make_block();
+
+    // Get iterator
+    let iterator_object = gen.allocate_register();
+    let iterator_next_method = gen.allocate_register();
+    let iterator_done = gen.allocate_register();
+    gen.emit(Instruction::GetIterator {
+        dst_iterator_object: iterator_object.operand(),
+        dst_iterator_next: iterator_next_method.operand(),
+        dst_iterator_done: iterator_done.operand(),
+        iterable: object.operand(),
+        hint: 0, // Sync
+    });
+
+    let update_block = gen.make_block();
+    let loop_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(update_block as u32),
+    });
+
+    // Update: get next value
+    gen.switch_to_basic_block(update_block);
+    let next_value = gen.allocate_register();
+    let done = gen.allocate_register();
+    gen.emit(Instruction::IteratorNextUnpack {
+        dst_value: next_value.operand(),
+        dst_done: done.operand(),
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next_method.operand(),
+        iterator_done: iterator_done.operand(),
+    });
+
+    let loop_continue_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(end_block as u32),
+        false_target: Label(loop_continue_block as u32),
+    });
+    gen.switch_to_basic_block(loop_continue_block);
+
+    // Assign to LHS
+    assign_to_for_in_of_lhs(gen, lhs, &next_value);
+
+    gen.emit(Instruction::Jump {
+        target: Label(loop_block as u32),
+    });
+
+    // Body
+    gen.switch_to_basic_block(loop_block);
+    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    generate_stmt(body, gen, preferred_dst);
+    gen.end_breakable_scope();
+    gen.end_continuable_scope();
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump {
+            target: Label(update_block as u32),
+        });
+    }
+
+    gen.switch_to_basic_block(end_block);
+    None
+}
+
+fn assign_to_for_in_of_lhs(
+    gen: &mut Generator,
+    lhs: &ForInOfLhs,
+    value: &ScopedOperand,
+) {
+    match lhs {
+        ForInOfLhs::Declaration(stmt) => {
+            // The declaration is a VariableDeclaration with a single declarator
+            if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
+                if let Some(decl) = declarations.first() {
+                    if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                        if ident.is_local() {
+                            let local_index = ident.local_index.get();
+                            let local = match ident.local_type.get() {
+                                LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
+                                LocalType::Variable => gen.local(local_index),
+                                LocalType::None => unreachable!(),
+                            };
+                            gen.emit_mov(&local, value);
+                            gen.mark_local_initialized(local_index);
+                        } else {
+                            let id = gen.intern_identifier(ident.name.clone());
+                            match kind {
+                                DeclarationKind::Var => {
+                                    gen.emit(Instruction::InitializeVariableBinding {
+                                        identifier: id,
+                                        src: value.operand(),
+                                        cache: EnvironmentCoordinate::empty(),
+                                    });
+                                }
+                                DeclarationKind::Let | DeclarationKind::Const => {
+                                    gen.emit(Instruction::InitializeLexicalBinding {
+                                        identifier: id,
+                                        src: value.operand(),
+                                        cache: EnvironmentCoordinate::empty(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ForInOfLhs::Expression(expr) => {
+            emit_store_to_reference(gen, expr, value);
+        }
+        ForInOfLhs::Pattern(_pattern) => {
+            // Destructuring pattern in for-in/of
+            // TODO: implement destructuring
+        }
+    }
+}
 
 fn generate_try_statement(
     gen: &mut Generator,

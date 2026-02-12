@@ -192,14 +192,11 @@ pub unsafe extern "C" fn rust_compile_program(
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = starts_in_strict_mode;
 
-    // Create initial basic block
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
-    // Generate bytecode for the program
     let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
 
-    // If the last block isn't terminated, emit End with the last result
     if !gen.is_current_block_terminated() {
         let value = result.unwrap_or_else(|| gen.add_constant_undefined());
         gen.emit(bytecode::instruction::Instruction::End {
