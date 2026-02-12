@@ -210,7 +210,9 @@ pub struct Parser<'a> {
 
     /// Bound names collected during parse_binding_pattern.
     /// Caller drains this after calling parse_binding_pattern.
-    pub(crate) pattern_bound_names: Vec<Vec<u16>>,
+    /// Each entry is (name, identifier_pointer) — the pointer allows scope analysis
+    /// to annotate binding pattern identifiers with local variable info.
+    pub(crate) pattern_bound_names: Vec<(Vec<u16>, *const Identifier)>,
 
     /// Set by parse_primary_expression when the result is a bare Identifier("eval").
     /// Read and cleared by parse_secondary_expression for the ParenOpen (call) case.
@@ -307,7 +309,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn register_function_params_with_scope(
         &mut self,
         params: &[crate::ast::FunctionParameter],
-        param_info: &[(Vec<u16>, bool, bool)],
+        param_info: &[(Vec<u16>, bool, bool, *const Identifier)],
     ) {
         use crate::ast::FunctionParameterBinding;
         let mut entries: Vec<(Vec<u16>, *const Identifier, bool, bool)> = Vec::new();
@@ -328,8 +330,7 @@ impl<'a> Parser<'a> {
                     // Pattern parameters have multiple bound names in param_info.
                     while info_idx < param_info.len() && param_info[info_idx].2 {
                         let pi = &param_info[info_idx];
-                        // For pattern bound names, we don't have individual Identifier pointers.
-                        entries.push((pi.0.clone(), std::ptr::null(), pi.1, true));
+                        entries.push((pi.0.clone(), pi.3, pi.1, true));
                         info_idx += 1;
                     }
                 }
@@ -660,12 +661,12 @@ impl<'a> Parser<'a> {
     /// body or the function is a generator/async.
     pub(crate) fn check_parameters_post_body(
         &mut self,
-        param_info: &[(Vec<u16>, bool, bool)],
+        param_info: &[(Vec<u16>, bool, bool, *const Identifier)],
         force_strict: bool,
         _kind: FunctionKind,
     ) {
         let mut seen_names: Vec<&[u16]> = Vec::new();
-        for (name, _, _) in param_info {
+        for (name, _, _, _) in param_info {
             if name.is_empty() {
                 continue;
             }

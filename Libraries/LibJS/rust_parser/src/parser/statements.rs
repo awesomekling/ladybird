@@ -385,6 +385,7 @@ impl<'a> Parser<'a> {
                 ForInit::Expression(expr) => {
                     if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                         if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
+                            self.pattern_bound_names.clear();
                             ForInOfLhs::Pattern(pattern)
                         } else {
                             ForInOfLhs::Expression(Box::new(expr))
@@ -437,6 +438,7 @@ impl<'a> Parser<'a> {
                     ForInit::Expression(expr) => {
                         if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                             if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
+                                self.pattern_bound_names.clear();
                                 ForInOfLhs::Pattern(pattern)
                             } else {
                                 ForInOfLhs::Expression(Box::new(expr))
@@ -650,7 +652,7 @@ impl<'a> Parser<'a> {
             self.consume();
             let param = if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pattern = self.parse_binding_pattern();
-                let bound_names: Vec<&[u16]> = self.pattern_bound_names.iter().map(|n| n.as_slice()).collect();
+                let bound_names: Vec<&[u16]> = self.pattern_bound_names.iter().map(|(n, _)| n.as_slice()).collect();
                 self.scope_collector.add_catch_parameter_pattern(&bound_names);
                 CatchParameter::BindingPattern(pattern)
             } else if self.match_identifier() {

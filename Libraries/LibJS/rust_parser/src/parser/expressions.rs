@@ -513,6 +513,8 @@ impl<'a> Parser<'a> {
                 let op = token_to_assignment_op(tt);
                 if op == AssignmentOp::Assignment && (Self::is_object_expression(&lhs) || Self::is_array_expression(&lhs)) {
                     if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs_start) {
+                        // Clear pattern_bound_names — assignment patterns don't need scope registration.
+                        self.pattern_bound_names.clear();
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                         return (self.expr(lhs_start, Expression::Assignment {
@@ -1523,13 +1525,14 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 let binding = Box::new(Identifier::new(self.range_from(param_start), value.clone()));
+                let id_ptr = &*binding as *const Identifier;
                 params = vec![FunctionParameter {
                     binding: FunctionParameterBinding::Identifier(binding),
                     default_value: None,
                     is_rest: false,
                 }];
                 function_length = 1;
-                param_info = vec![(value, false, false)];
+                param_info = vec![(value, false, false, id_ptr)];
                 is_simple = true;
             } else {
                 self.load_state();
