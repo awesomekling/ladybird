@@ -562,6 +562,7 @@ pub fn generate_stmt(
                         LocalType::None => unreachable!(),
                     };
                     gen.emit_mov(&local, &val);
+                    gen.mark_local_initialized(local_index);
                 } else {
                     let id = gen.intern_identifier(name_ident.name.clone());
                     gen.emit(Instruction::InitializeLexicalBinding {

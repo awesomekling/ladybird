@@ -586,7 +586,24 @@ impl<'a> Parser<'a> {
         let class_expr = self.parse_class_expression(true);
         // Convert the class expression into a class declaration by extracting ClassData.
         match class_expr.inner {
-            Expression::Class(data) => self.stmt(start, Statement::ClassDeclaration(data)),
+            Expression::Class(data) => {
+                // Register class name as lexical declaration in the outer scope.
+                // The inner class scope (opened/closed inside parse_class_expression)
+                // only has the name as IsBound. The outer scope needs IsLexical so
+                // FDI creates the binding.
+                if let Some(ref name_ident) = data.name {
+                    self.scope_collector.add_lexical_declaration(
+                        &[&name_ident.name as &[u16]],
+                        start.line, start.column,
+                    );
+                    self.scope_collector.register_identifier(
+                        &**name_ident as *const Identifier,
+                        &name_ident.name,
+                        Some(DeclarationKind::Let),
+                    );
+                }
+                self.stmt(start, Statement::ClassDeclaration(data))
+            }
             _ => unreachable!("parse_class_expression must return Expression::Class"),
         }
     }
