@@ -74,6 +74,7 @@ extern "C" {
         object_shape_cache_count: u32,
         number_of_registers: u32,
         is_strict: bool,
+        length_identifier: i32, // -1 for none, otherwise PropertyKeyTableIndex
         shared_function_data: *const *const c_void,
         shared_function_data_count: usize,
         class_blueprints: *const *mut c_void,
@@ -287,6 +288,7 @@ pub unsafe fn create_executable(
         gen.next_object_shape_cache,
         assembled.number_of_registers,
         gen.strict,
+        gen.length_identifier.map_or(-1i32, |idx| idx.0 as i32),
         sfd_ptrs.as_ptr(),
         sfd_ptrs.len(),
         bp_ptrs.as_ptr(),

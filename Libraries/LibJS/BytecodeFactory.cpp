@@ -125,6 +125,7 @@ extern "C" void* rust_create_executable(
     uint32_t object_shape_cache_count,
     uint32_t number_of_registers,
     bool is_strict,
+    int32_t length_identifier, // -1 for none
     void const* const* shared_function_data,
     size_t shared_function_data_count,
     void* const* class_blueprints,
@@ -232,6 +233,10 @@ extern "C" void* rust_create_executable(
     executable->argument_index_base = number_of_registers + local_var_count + constants_count;
     executable->registers_and_locals_count = number_of_registers + local_var_count;
     executable->registers_and_locals_and_constants_count = number_of_registers + local_var_count + constants_count;
+
+    // Set length identifier (for GetLength optimization)
+    if (length_identifier >= 0)
+        executable->length_identifier = JS::Bytecode::PropertyKeyTableIndex(static_cast<u32>(length_identifier));
 
     // Set shared function data (inner function definitions)
     for (size_t i = 0; i < shared_function_data_count; ++i) {

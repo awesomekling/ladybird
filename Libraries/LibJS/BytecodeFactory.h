@@ -121,6 +121,8 @@ void* rust_create_executable(
     // Register and mode
     uint32_t number_of_registers,
     bool is_strict,
+    // Length identifier: PropertyKeyTableIndex for "length", or -1
+    int32_t length_identifier,
     // Shared function data (inner functions)
     // Array of SharedFunctionInstanceData* cast to void*.
     void const* const* shared_function_data,

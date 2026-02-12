@@ -219,15 +219,7 @@ pub fn generate_expr(
             } else {
                 // Non-computed: property must be an Identifier
                 if let Expression::Identifier(ident) = &property.inner {
-                    let key = gen.intern_property_key(ident.name.clone());
-                    let cache = gen.next_property_lookup_cache();
-                    gen.emit(Instruction::GetById {
-                        dst: dst.operand(),
-                        base: obj.operand(),
-                        property: key,
-                        base_identifier: None,
-                        cache_index: cache,
-                    });
+                    emit_get_by_id(gen, &dst, &obj, &ident.name, None);
                 } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
                     let id = gen.intern_identifier(priv_ident.name.clone());
                     gen.emit(Instruction::GetPrivateById {
@@ -1218,15 +1210,7 @@ fn generate_call_expression(
                         base_identifier: None,
                     });
                 } else if let Expression::Identifier(ident) = &property.inner {
-                    let key = gen.intern_property_key(ident.name.clone());
-                    let cache = gen.next_property_lookup_cache();
-                    gen.emit(Instruction::GetById {
-                        dst: method.operand(),
-                        base: obj.operand(),
-                        property: key,
-                        base_identifier: None,
-                        cache_index: cache,
-                    });
+                    emit_get_by_id(gen, &method, &obj, &ident.name, None);
                 }
                 (method, Some(obj))
             }
@@ -1358,15 +1342,8 @@ fn generate_update_expression(
                     Some(dst)
                 }
             } else if let Expression::Identifier(prop_ident) = &property.inner {
+                emit_get_by_id(gen, &value, &base, &prop_ident.name, None);
                 let key = gen.intern_property_key(prop_ident.name.clone());
-                let cache = gen.next_property_lookup_cache();
-                gen.emit(Instruction::GetById {
-                    dst: value.operand(),
-                    base: base.operand(),
-                    property: key,
-                    base_identifier: None,
-                    cache_index: cache,
-                });
                 if prefixed {
                     match op {
                         UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
@@ -1492,18 +1469,11 @@ fn generate_assignment_expression(
                     return Some(dst);
                 } else {
                     if let Expression::Identifier(ident) = &property.inner {
-                        let key = gen.intern_property_key(ident.name.clone());
-                        let cache = gen.next_property_lookup_cache();
-                        gen.emit(Instruction::GetById {
-                            dst: old_val.operand(),
-                            base: base.operand(),
-                            property: key,
-                            base_identifier: None,
-                            cache_index: cache,
-                        });
+                        emit_get_by_id(gen, &old_val, &base, &ident.name, None);
                         let rhs_val = generate_expr(rhs, gen, None)?;
                         let dst = choose_dst(gen, preferred_dst);
                         emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                        let key = gen.intern_property_key(ident.name.clone());
                         let cache2 = gen.next_property_lookup_cache();
                         gen.emit(Instruction::PutNormalById {
                             base: base.operand(),
@@ -1525,6 +1495,36 @@ fn generate_assignment_expression(
             let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
             Some(rhs_val)
         }
+    }
+}
+
+/// Emit a property access by name, using GetLength for the "length" property.
+fn emit_get_by_id(
+    gen: &mut Generator,
+    dst: &ScopedOperand,
+    base: &ScopedOperand,
+    property_name: &[u16],
+    base_identifier: Option<IdentifierTableIndex>,
+) {
+    let key = gen.intern_property_key(property_name.to_vec());
+    if property_name == utf16!("length") {
+        gen.length_identifier = Some(key);
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::GetLength {
+            dst: dst.operand(),
+            base: base.operand(),
+            base_identifier,
+            cache_index: cache,
+        });
+    } else {
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::GetById {
+            dst: dst.operand(),
+            base: base.operand(),
+            property: key,
+            base_identifier,
+            cache_index: cache,
+        });
     }
 }
 
@@ -2009,15 +2009,7 @@ fn generate_optional_chain(
         match reference {
             OptionalChainReference::MemberReference { identifier, .. } => {
                 let next = gen.allocate_register();
-                let key = gen.intern_property_key(identifier.name.clone());
-                let cache = gen.next_property_lookup_cache();
-                gen.emit(Instruction::GetById {
-                    dst: next.operand(),
-                    base: current.operand(),
-                    property: key,
-                    base_identifier: None,
-                    cache_index: cache,
-                });
+                emit_get_by_id(gen, &next, &current, &identifier.name, None);
                 current = next;
             }
             OptionalChainReference::ComputedReference { expression, .. } => {
