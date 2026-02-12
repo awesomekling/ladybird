@@ -892,8 +892,10 @@ impl<'a> Lexer<'a> {
                 let mut has_escape = false;
                 let mut ident_len = len;
                 loop {
-                    has_escape |= ident_len > 1 && !self.is_surrogate_pair(ident_len);
-                    for _ in 0..ident_len {
+                    let is_pair = self.is_surrogate_pair(ident_len);
+                    has_escape |= ident_len > 1 && !is_pair;
+                    let consume_count = if is_pair { 1 } else { ident_len };
+                    for _ in 0..consume_count {
                         self.consume();
                     }
                     if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
@@ -915,8 +917,12 @@ impl<'a> Lexer<'a> {
             let mut has_escape = false;
             let mut ident_len = len;
             loop {
-                has_escape |= ident_len > 1 && !self.is_surrogate_pair(ident_len);
-                for _ in 0..ident_len {
+                let is_pair = self.is_surrogate_pair(ident_len);
+                has_escape |= ident_len > 1 && !is_pair;
+                // consume() already advances past both code units of a
+                // surrogate pair, so only call it once in that case.
+                let consume_count = if is_pair { 1 } else { ident_len };
+                for _ in 0..consume_count {
                     self.consume();
                 }
                 if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
