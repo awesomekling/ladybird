@@ -10,7 +10,9 @@
 #include <AK/TemporaryChange.h>
 #include <LibGC/RootHashMap.h>
 #include <LibJS/AST.h>
+#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Bytecode/BasicBlock.h>
+#include <LibJS/SourceCode.h>
 #include <LibJS/Bytecode/FormatOperand.h>
 #include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Instruction.h>
@@ -127,11 +129,37 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
     // 11. Let script be scriptRecord.[[ECMAScriptCode]].
     GC::Ptr<Executable> executable = script_record.cached_executable();
     if (!executable && result.type() == Completion::Type::Normal) {
-        executable = JS::Bytecode::Generator::generate_from_ast_node(vm, *script_record.parse_node(), {});
-        script_record.cache_executable(*executable);
-        script_record.drop_ast();
-        if (g_dump_bytecode)
-            executable->dump();
+        static bool use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+        if (use_rust_codegen) {
+            auto& source_code = script_record.parse_node()->source_code();
+            auto const& code_view = source_code.code_view();
+            auto length = code_view.length_in_code_units();
+            bool is_strict = script_record.parse_node()->is_strict_mode();
+
+            void* exec_ptr;
+            if (code_view.has_ascii_storage()) {
+                auto ascii = code_view.ascii_span();
+                Vector<u16> utf16_buf;
+                utf16_buf.ensure_capacity(length);
+                for (size_t i = 0; i < length; ++i)
+                    utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+                exec_ptr = rust_compile_program(utf16_buf.data(), length, &vm, &source_code, 0, is_strict, false, false, false, false, false);
+            } else {
+                auto utf16 = code_view.utf16_span();
+                exec_ptr = rust_compile_program(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, &source_code, 0, is_strict, false, false, false, false, false);
+            }
+
+            if (exec_ptr)
+                executable = static_cast<Executable*>(exec_ptr);
+        } else {
+            executable = JS::Bytecode::Generator::generate_from_ast_node(vm, *script_record.parse_node(), {});
+        }
+        if (executable) {
+            script_record.cache_executable(*executable);
+            script_record.drop_ast();
+            if (g_dump_bytecode)
+                executable->dump();
+        }
     }
 
     u32 registers_and_locals_count = 0;

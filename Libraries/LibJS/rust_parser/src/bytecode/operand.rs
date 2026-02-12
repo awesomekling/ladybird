@@ -96,10 +96,12 @@ impl Operand {
     }
 
     /// Offset the index by the given amount (used during operand rewriting).
-    /// Preserves the type tag.
+    /// Strips the type tag, leaving a flat index into the combined
+    /// [registers | locals | constants | arguments] array.
+    /// This matches C++ `Operand::offset_index_by`.
     pub fn offset_index_by(&mut self, offset: u32) {
-        let index = self.0 & Self::INDEX_MASK;
-        self.0 = (self.0 & !Self::INDEX_MASK) | (index + offset);
+        self.0 &= Self::INDEX_MASK;
+        self.0 += offset;
     }
 }
 

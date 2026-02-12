@@ -47,6 +47,22 @@ struct FFIUtf16Slice {
 extern "C" {
 #endif
 
+// Parse and compile a JavaScript program using the Rust parser and
+// bytecode generator. Returns a Bytecode::Executable* cast to void*,
+// or nullptr on failure.
+void* rust_compile_program(
+    uint16_t const* source,
+    size_t source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    uint8_t program_type,
+    bool starts_in_strict_mode,
+    bool initiated_by_eval,
+    bool in_eval_function_context,
+    bool allow_super_property_lookup,
+    bool allow_super_constructor_call,
+    bool in_class_field_initializer);
+
 // Create a C++ Bytecode::Executable from assembled Rust bytecode data.
 //
 // The source_code parameter is a SourceCode const* cast to void*.
