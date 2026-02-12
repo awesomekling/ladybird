@@ -557,7 +557,9 @@ impl ScopeCollector {
                 self.records[idx].parameter_names.push((name.clone(), *is_rest));
                 prev_was_pattern = false;
             }
-            self.register_identifier(*identifier, name, None);
+            if !identifier.is_null() {
+                self.register_identifier(*identifier, name, None);
+            }
             let var = self.records[idx].variables.entry(name.clone()).or_default();
             var.flags |= FLAG_IS_PARAMETER_CANDIDATE | FLAG_IS_FORBIDDEN_LEXICAL;
         }
@@ -704,9 +706,10 @@ impl ScopeCollector {
             self.analyze_recursive(child_idx, initiated_by_eval);
         }
 
-        if self.records[idx].scope_data.is_null() {
-            return;
-        }
+        // Steps 1-3 must run even for scopes without scope_data (e.g. catch
+        // scopes), so that identifier groups propagate through the scope chain.
+        // Without this, captured variables inside catch blocks are invisible
+        // to enclosing scopes and get incorrectly optimized as locals.
 
         // 1. Propagate eval() flags from children to parent.
         Self::propagate_eval_poisoning(&mut self.records, idx);
@@ -717,7 +720,10 @@ impl ScopeCollector {
 
         // 4. For function scopes, build the var declaration list that the
         //    bytecode generator uses to initialize function-scoped variables.
-        if self.records[idx].scope_type == ScopeType::Function && self.records[idx].has_function_parameters {
+        if !self.records[idx].scope_data.is_null()
+            && self.records[idx].scope_type == ScopeType::Function
+            && self.records[idx].has_function_parameters
+        {
             Self::build_function_scope_data(&self.records, idx);
         }
     }
@@ -797,7 +803,10 @@ impl ScopeCollector {
             if records[idx].scope_type == ScopeType::Catch
                 && (var_flags & FLAG_IS_CATCH_PARAMETER) != 0
             {
-                local_var_kind = Some(LocalVarKind::CatchClauseParameter);
+                // Catch parameters are handled by the catch codegen, not as
+                // local variables. Skip this group entirely so it doesn't
+                // get optimized to a local or propagated further.
+                continue;
             }
 
             let hoistable = records[idx].has_hoistable_function_named(&name);
@@ -970,10 +979,29 @@ impl ScopeCollector {
         // Collect IS_VAR variables for FunctionScopeData.
         let mut vars_to_initialize = Vec::new();
         let mut var_names = Vec::new();
-        let functions_to_initialize = Vec::new();
         let mut has_function_named_arguments = false;
         let mut has_lexically_declared_arguments = false;
         let mut non_local_var_count: usize = 0;
+
+        // Build functions_to_initialize by scanning children for FunctionDeclarations.
+        // Walk in reverse order, deduplicating by name (like C++ ensure_function_scope_data).
+        let mut functions_to_initialize: Vec<crate::ast::FunctionToInit> = Vec::new();
+        let mut seen_function_names: Vec<Vec<u16>> = Vec::new();
+        unsafe {
+            let children = &(*scope_data).children;
+            for i in (0..children.len()).rev() {
+                if let crate::ast::Statement::FunctionDeclaration(ref func_data) = children[i].inner {
+                    if let Some(ref name_ident) = func_data.name {
+                        if !seen_function_names.contains(&name_ident.name) {
+                            seen_function_names.push(name_ident.name.clone());
+                            functions_to_initialize.push(crate::ast::FunctionToInit {
+                                child_index: i,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         for (name, var) in &record.variables {
             if var.flags & FLAG_IS_VAR == 0 {
@@ -1002,9 +1030,11 @@ impl ScopeCollector {
                 is_function_name,
             });
 
-            if name == utf16!("arguments") as &[u16] {
-                has_function_named_arguments = true;
-            }
+        }
+
+        // Check if any function declaration is named "arguments".
+        if seen_function_names.iter().any(|n| n == utf16!("arguments")) {
+            has_function_named_arguments = true;
         }
 
         // Check for lexically declared arguments
@@ -1013,12 +1043,6 @@ impl ScopeCollector {
         {
             has_lexically_declared_arguments = true;
         }
-
-        // Build functions_to_initialize from the scope's hoisted function list
-        // (these are function declarations at the top level of this function scope).
-        // NB: For the Rust pipeline, we need to find function declarations that are
-        // direct children of this function scope's body.
-        // This will be populated during Phase 2 when the parser instruments scope calls.
 
         let fsd = FunctionScopeData {
             functions_to_initialize,
@@ -1033,6 +1057,15 @@ impl ScopeCollector {
 
         unsafe {
             (*scope_data).function_scope_data = Some(Box::new(fsd));
+
+            // Write scope analysis insights to ScopeData so they can be read
+            // during lazy compilation (write_sfd_metadata, FDI emission).
+            (*scope_data).uses_this = record.uses_this;
+            (*scope_data).uses_this_from_environment = record.uses_this_from_environment;
+            (*scope_data).contains_direct_call_to_eval = record.contains_direct_call_to_eval
+                || record.screwed_by_eval_in_scope_chain;
+            (*scope_data).contains_access_to_arguments_object =
+                record.contains_access_to_arguments_object_in_non_strict_mode;
         }
     }
 
