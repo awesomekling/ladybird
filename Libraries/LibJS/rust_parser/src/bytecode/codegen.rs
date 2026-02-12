@@ -65,6 +65,26 @@ pub fn generate_expr(
 
         // === Unary ===
         Expression::Unary { op, operand } => {
+            // typeof and delete on identifiers need special handling BEFORE
+            // evaluating the operand to avoid throwing on unresolvable references.
+            if *op == UnaryOp::Typeof {
+                if let Expression::Identifier(ident) = &operand.inner {
+                    if !ident.is_local() {
+                        let dst = choose_dst(gen, preferred_dst);
+                        let id = gen.intern_identifier(ident.name.clone());
+                        gen.emit(Instruction::TypeofBinding {
+                            dst: dst.operand(),
+                            identifier: id,
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                        return Some(dst);
+                    }
+                }
+            }
+            if *op == UnaryOp::Delete {
+                return Some(emit_delete_reference(gen, operand, preferred_dst));
+            }
+
             let value = generate_expr(operand, gen, None)?;
             let dst = choose_dst(gen, preferred_dst);
             match op {
@@ -101,10 +121,7 @@ pub fn generate_expr(
                 UnaryOp::Void => {
                     return Some(gen.add_constant_undefined());
                 }
-                UnaryOp::Delete => {
-                    // delete on non-reference is always true
-                    return Some(gen.add_constant_boolean(true));
-                }
+                UnaryOp::Delete => unreachable!(),
             }
             Some(dst)
         }
@@ -1559,6 +1576,57 @@ fn emit_put_to_member(
             property: id,
             src: value.operand(),
         });
+    }
+}
+
+/// Emit bytecode for `delete <expression>`.
+fn emit_delete_reference(
+    gen: &mut Generator,
+    operand: &Expr,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    match &operand.inner {
+        Expression::Identifier(ident) => {
+            if ident.is_local() {
+                return gen.add_constant_boolean(false);
+            }
+            let dst = choose_dst(gen, preferred_dst);
+            let id = gen.intern_identifier(ident.name.clone());
+            gen.emit(Instruction::DeleteVariable {
+                dst: dst.operand(),
+                identifier: id,
+            });
+            dst
+        }
+        Expression::Member { object, property, computed } => {
+            let base = generate_expr(object, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            let dst = choose_dst(gen, preferred_dst);
+            if *computed {
+                let key = generate_expr(property, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                gen.emit(Instruction::DeleteByValue {
+                    dst: dst.operand(),
+                    base: base.operand(),
+                    property: key.operand(),
+                });
+            } else if let Expression::Identifier(prop_ident) = &property.inner {
+                let key = gen.intern_property_key(prop_ident.name.clone());
+                gen.emit(Instruction::DeleteById {
+                    dst: dst.operand(),
+                    base: base.operand(),
+                    property: key,
+                });
+            } else {
+                return gen.add_constant_boolean(true);
+            }
+            dst
+        }
+        _ => {
+            // delete on non-reference: evaluate for side effects, return true
+            generate_expr(operand, gen, None);
+            gen.add_constant_boolean(true)
+        }
     }
 }
 
