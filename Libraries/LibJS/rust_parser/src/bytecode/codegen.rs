@@ -175,20 +175,23 @@ pub fn generate_expr(
         // === Array ===
         Expression::Array(elements) => {
             let dst = choose_dst(gen, preferred_dst);
-            let mut args = Vec::new();
+            // Keep ScopedOperands alive until after NewArray is emitted,
+            // otherwise their registers get freed and reused.
+            let mut scoped_args: Vec<ScopedOperand> = Vec::new();
             for elem in elements {
                 match elem {
                     Some(e) => {
                         let val = generate_expr(e, gen, None).unwrap_or_else(|| {
                             gen.add_constant_undefined()
                         });
-                        args.push(val.operand());
+                        scoped_args.push(val);
                     }
                     None => {
-                        args.push(gen.add_constant_empty().operand());
+                        scoped_args.push(gen.add_constant_empty());
                     }
                 }
             }
+            let args: Vec<Operand> = scoped_args.iter().map(|s| s.operand()).collect();
             gen.emit(Instruction::NewArray {
                 dst: dst.operand(),
                 element_count: args.len() as u32,
@@ -353,14 +356,15 @@ pub fn generate_expr(
         // === SuperCall ===
         Expression::SuperCall(data) => {
             let dst = choose_dst(gen, preferred_dst);
-            // Build arguments array
+            // Build arguments array — keep ScopedOperands alive.
             let args_array_dst = gen.allocate_register();
-            let mut arg_ops = Vec::new();
+            let mut arg_holders = Vec::new();
             for arg in &data.arguments {
                 let val = generate_expr(&arg.value, gen, None)
                     .unwrap_or_else(|| gen.add_constant_undefined());
-                arg_ops.push(val.operand());
+                arg_holders.push(val);
             }
+            let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
             gen.emit(Instruction::NewArray {
                 dst: args_array_dst.operand(),
                 element_count: arg_ops.len() as u32,
@@ -2034,12 +2038,13 @@ fn generate_optional_chain(
             }
             OptionalChainReference::Call { arguments, .. } => {
                 let next = gen.allocate_register();
-                let mut arg_ops = Vec::new();
+                let mut arg_holders = Vec::new();
                 for arg in arguments {
                     let val = generate_expr(&arg.value, gen, None)
                         .unwrap_or_else(|| gen.add_constant_undefined());
-                    arg_ops.push(val.operand());
+                    arg_holders.push(val);
                 }
+                let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
                 let this_value = gen.add_constant_undefined();
                 gen.emit(Instruction::Call {
                     dst: next.operand(),
