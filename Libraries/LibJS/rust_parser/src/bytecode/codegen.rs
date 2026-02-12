@@ -2326,19 +2326,54 @@ fn generate_object_expression(
             _ => {}
         }
 
+        // For computed keys, evaluate key before value (spec evaluation order).
+        let computed_key = if prop.is_computed {
+            Some(generate_expr(&prop.key, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined()))
+        } else {
+            None
+        };
+
         let value = prop.value.as_ref().and_then(|v| generate_expr(v, gen, None))
             .unwrap_or_else(|| gen.add_constant_undefined());
 
         match prop.property_type {
             ObjectPropertyType::Spread => unreachable!(),
             ObjectPropertyType::KeyValue => {
-                emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, prop.is_computed);
+                if let Some(key_val) = &computed_key {
+                    gen.emit(Instruction::PutOwnByValue {
+                        base: dst.operand(),
+                        property: key_val.operand(),
+                        src: value.operand(),
+                        base_identifier: None,
+                    });
+                } else {
+                    emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, false);
+                }
             }
             ObjectPropertyType::Getter => {
-                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true, prop.is_computed);
+                if let Some(key_val) = &computed_key {
+                    gen.emit(Instruction::PutGetterByValue {
+                        base: dst.operand(),
+                        property: key_val.operand(),
+                        src: value.operand(),
+                        base_identifier: None,
+                    });
+                } else {
+                    emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true, false);
+                }
             }
             ObjectPropertyType::Setter => {
-                emit_object_accessor_by_key(gen, &dst, &prop.key, &value, false, prop.is_computed);
+                if let Some(key_val) = &computed_key {
+                    gen.emit(Instruction::PutSetterByValue {
+                        base: dst.operand(),
+                        property: key_val.operand(),
+                        src: value.operand(),
+                        base_identifier: None,
+                    });
+                } else {
+                    emit_object_accessor_by_key(gen, &dst, &prop.key, &value, false, false);
+                }
             }
             ObjectPropertyType::ProtoSetter => {
                 let key = gen.intern_property_key(utf16!("__proto__").to_vec());
