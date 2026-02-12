@@ -1657,33 +1657,85 @@ fn generate_call_expression(
         (callee, None)
     };
 
-    // Keep ScopedOperands alive until the Call instruction is emitted,
-    // so argument registers don't get freed and reused between evaluations.
-    let mut arg_holders = Vec::new();
-    for arg in &data.arguments {
-        let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
-        arg_holders.push(val);
-    }
-    let args: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
+    let has_spread = data.arguments.iter().any(|a| a.is_spread);
 
-    if is_new {
-        gen.emit(Instruction::CallConstruct {
-            dst: dst.operand(),
-            callee: callee.operand(),
-            argument_count: args.len() as u32,
-            expression_string: None,
-            arguments: args,
+    if has_spread {
+        // Build an arguments array using NewArray + ArrayAppend for spread elements.
+        let args_array = gen.allocate_register();
+        let first_spread = data.arguments.iter().position(|a| a.is_spread).unwrap_or(0);
+
+        let mut pre_holders = Vec::new();
+        for arg in &data.arguments[..first_spread] {
+            let val = generate_expr(&arg.value, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            pre_holders.push(val);
+        }
+        let pre_args: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
+        gen.emit(Instruction::NewArray {
+            dst: args_array.operand(),
+            element_count: pre_args.len() as u32,
+            elements: pre_args,
         });
+        drop(pre_holders);
+
+        for arg in &data.arguments[first_spread..] {
+            let val = generate_expr(&arg.value, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::ArrayAppend {
+                dst: args_array.operand(),
+                src: val.operand(),
+                is_spread: arg.is_spread,
+            });
+        }
+
+        if is_new {
+            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::CallConstructWithArgumentArray {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: this_op.operand(),
+                arguments: args_array.operand(),
+                expression_string: None,
+            });
+        } else {
+            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::CallWithArgumentArray {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: this_op.operand(),
+                arguments: args_array.operand(),
+                expression_string: None,
+            });
+        }
     } else {
-        let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(Instruction::Call {
-            dst: dst.operand(),
-            callee: callee.operand(),
-            this_value: this_op.operand(),
-            argument_count: args.len() as u32,
-            expression_string: None,
-            arguments: args,
-        });
+        // Keep ScopedOperands alive until the Call instruction is emitted,
+        // so argument registers don't get freed and reused between evaluations.
+        let mut arg_holders = Vec::new();
+        for arg in &data.arguments {
+            let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+            arg_holders.push(val);
+        }
+        let args: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
+
+        if is_new {
+            gen.emit(Instruction::CallConstruct {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                argument_count: args.len() as u32,
+                expression_string: None,
+                arguments: args,
+            });
+        } else {
+            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::Call {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: this_op.operand(),
+                argument_count: args.len() as u32,
+                expression_string: None,
+                arguments: args,
+            });
+        }
     }
 
     Some(dst)
@@ -2260,18 +2312,27 @@ fn generate_object_expression(
     }
 
     for (slot, prop) in properties.iter().enumerate() {
+        match prop.property_type {
+            ObjectPropertyType::Spread => {
+                // For spread, the source expression is in `key`, not `value`.
+                let src = generate_expr(&prop.key, gen, None)
+                    .unwrap_or_else(|| gen.add_constant_undefined());
+                gen.emit(Instruction::PutBySpread {
+                    base: dst.operand(),
+                    src: src.operand(),
+                });
+                continue;
+            }
+            _ => {}
+        }
+
         let value = prop.value.as_ref().and_then(|v| generate_expr(v, gen, None))
             .unwrap_or_else(|| gen.add_constant_undefined());
 
         match prop.property_type {
+            ObjectPropertyType::Spread => unreachable!(),
             ObjectPropertyType::KeyValue => {
                 emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, prop.is_computed);
-            }
-            ObjectPropertyType::Spread => {
-                gen.emit(Instruction::PutBySpread {
-                    base: dst.operand(),
-                    src: value.operand(),
-                });
             }
             ObjectPropertyType::Getter => {
                 emit_object_accessor_by_key(gen, &dst, &prop.key, &value, true, prop.is_computed);
