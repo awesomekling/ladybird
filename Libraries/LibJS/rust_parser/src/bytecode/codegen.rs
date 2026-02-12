@@ -2563,9 +2563,17 @@ fn generate_object_expression(
         }
 
         // For computed keys, evaluate key before value (spec evaluation order).
+        // ComputedPropertyName calls ToPropertyKey, which includes ToPrimitive(hint: string).
+        // The ToPrimitive is the only user-observable step; after this, the ToPrimitive
+        // inside PutOwnByValue's to_property_key is a no-op.
         let computed_key = if prop.is_computed {
-            Some(generate_expr(&prop.key, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined()))
+            let key = generate_expr(&prop.key, gen, None)
+                .unwrap_or_else(|| gen.add_constant_undefined());
+            gen.emit(Instruction::ToPrimitiveWithStringHint {
+                dst: key.operand(),
+                value: key.operand(),
+            });
+            Some(key)
         } else {
             None
         };
