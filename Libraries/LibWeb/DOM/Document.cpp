@@ -42,6 +42,7 @@
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
 #include <LibWeb/CSS/AnimationEvent.h>
 #include <LibWeb/CSS/CSSAnimation.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/CSSImportRule.h>
 #include <LibWeb/CSS/CSSPropertyRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
@@ -630,6 +631,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_svg_roots_needing_relayout);
 
     visitor.visit(m_shared_resource_requests);
+    visitor.visit(m_css_image_resources);
 
     visitor.visit(m_associated_animation_timelines);
     visitor.visit(m_list_of_available_images);
@@ -5628,6 +5630,17 @@ void Document::update_for_history_step_application(GC::Ref<HTML::SessionHistoryE
 HashMap<URL::URL, GC::Ptr<HTML::SharedResourceRequest>>& Document::shared_resource_requests()
 {
     return m_shared_resource_requests;
+}
+
+GC::Ref<CSS::CSSImageResource> Document::ensure_css_image_resource(CSS::URL const& url)
+{
+    auto it = m_css_image_resources.find(url.url());
+    if (it != m_css_image_resources.end())
+        return it->value;
+
+    auto resource = CSS::CSSImageResource::create(heap(), url, *this);
+    m_css_image_resources.set(url.url(), resource);
+    return resource;
 }
 
 // https://www.w3.org/TR/web-animations-1/#dom-document-timeline

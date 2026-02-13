@@ -753,6 +753,8 @@ public:
 
     HashMap<URL::URL, GC::Ptr<HTML::SharedResourceRequest>>& shared_resource_requests();
 
+    GC::Ref<CSS::CSSImageResource> ensure_css_image_resource(CSS::URL const&);
+
     void restore_the_history_object_state(GC::Ref<HTML::SessionHistoryEntry> entry);
 
     GC::Ref<Animations::DocumentTimeline> timeline();
@@ -1271,6 +1273,8 @@ private:
     GC::Ptr<HTML::SessionHistoryEntry> m_latest_entry;
 
     HashMap<URL::URL, GC::Ptr<HTML::SharedResourceRequest>> m_shared_resource_requests;
+
+    HashMap<String, GC::Ref<CSS::CSSImageResource>> m_css_image_resources;
 
     // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
     HashTable<GC::Ref<Animations::AnimationTimeline>> m_associated_animation_timelines;
