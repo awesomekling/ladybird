@@ -785,9 +785,13 @@ pub fn generate_stmt(
         Statement::Export(_) => None, // Handled by module loading
 
         // === ClassFieldInitializer ===
-        Statement::ClassFieldInitializer { expression, .. } => {
+        Statement::ClassFieldInitializer { expression, field_name } => {
+            if !field_name.is_empty() {
+                gen.pending_lhs_name = Some(gen.intern_identifier(field_name.clone()));
+            }
             let value = generate_expr(expression, gen, None)
                 .unwrap_or_else(|| gen.add_constant_undefined());
+            gen.pending_lhs_name = None;
             gen.emit(Instruction::Return {
                 value: value.operand(),
             });
@@ -3723,12 +3727,33 @@ fn generate_object_expression(
         };
 
         // Set pending LHS name for function name inference on non-computed properties.
-        if !prop.is_computed && prop.property_type == ObjectPropertyType::KeyValue {
-            if let Expression::StringLiteral(s) = &prop.key.inner {
-                gen.pending_lhs_name = Some(gen.intern_identifier(s.clone()));
-            } else if let Expression::Identifier(ident) = &prop.key.inner {
-                gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
+        if !prop.is_computed {
+            let base_name = match &prop.key.inner {
+                Expression::StringLiteral(s) => Some(s.clone()),
+                Expression::Identifier(ident) => Some(ident.name.clone()),
+                Expression::NumericLiteral(n) => Some(number_to_utf16(*n)),
+                _ => None,
+            };
+            if let Some(name) = base_name {
+                let full_name = match prop.property_type {
+                    ObjectPropertyType::Getter => {
+                        let mut prefixed: Vec<u16> = utf16!("get ").to_vec();
+                        prefixed.extend_from_slice(&name);
+                        prefixed
+                    }
+                    ObjectPropertyType::Setter => {
+                        let mut prefixed: Vec<u16> = utf16!("set ").to_vec();
+                        prefixed.extend_from_slice(&name);
+                        prefixed
+                    }
+                    _ => name,
+                };
+                gen.pending_lhs_name = Some(gen.intern_identifier(full_name));
+            } else {
+                gen.pending_lhs_name = None;
             }
+        } else {
+            gen.pending_lhs_name = None;
         }
         // Methods, getters, and setters need the object as their [[HomeObject]]
         // so that super property lookups work.
@@ -4143,34 +4168,15 @@ fn generate_class_expression(
                     ClassMethodKind::Setter => 2u8,
                 };
 
-                // Extract key name for the SFD (methods need their name set from the key).
-                // Getters and setters have "get "/"set " prefixed to the name.
-                let method_name = match &key.inner {
-                    Expression::Identifier(ident) => Some(ident.name.clone()),
-                    Expression::StringLiteral(s) => Some(s.clone()),
-                    _ => None,
-                }.map(|name| {
-                    match kind {
-                        ClassMethodKind::Getter => {
-                            let mut prefixed: Vec<u16> = utf16!("get ").to_vec();
-                            prefixed.extend_from_slice(&name);
-                            prefixed
-                        }
-                        ClassMethodKind::Setter => {
-                            let mut prefixed: Vec<u16> = utf16!("set ").to_vec();
-                            prefixed.extend_from_slice(&name);
-                            prefixed
-                        }
-                        ClassMethodKind::Method => name,
-                    }
-                });
-
-                // Create SFD for the method function
+                // Create SFD for the method function.
+                // Don't set the method name here — the runtime's update_function_name
+                // in construct_class sets it from the evaluated property key, which
+                // correctly handles computed keys (Symbols, etc).
                 let sfd_index = if let Expression::Function(func_data) = &function.inner {
                     emit_new_function(
                         gen,
                         func_data,
-                        method_name.as_deref(),
+                        None,
                     ) as i32
                 } else {
                     -1i32
@@ -4214,6 +4220,7 @@ fn generate_class_expression(
                     let field_name = match &key.inner {
                         Expression::Identifier(ident) => ident.name.clone(),
                         Expression::StringLiteral(s) => s.clone(),
+                        Expression::PrivateIdentifier(p) => p.name.clone(),
                         _ => Vec::new(),
                     };
 
