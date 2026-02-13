@@ -223,12 +223,6 @@ pub struct Parser<'a> {
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
 
-    /// Expressions replaced by synthesized binding patterns must stay alive
-    /// because the scope collector holds raw `*mut ScopeData` pointers to
-    /// scope nodes within the original expression's AST.
-    scope_anchor: Vec<Expr>,
-
-
     /// True while parsing a class body that has an `extends` clause.
     pub(crate) class_has_super_class: bool,
     pub(crate) has_default_export_name: bool,
@@ -282,7 +276,6 @@ impl<'a> Parser<'a> {
             last_class_name: Vec::new(),
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
-            scope_anchor: Vec::new(),
             class_has_super_class: false,
             has_default_export_name: false,
             for_loop_declaration_count: 0,
@@ -789,10 +782,10 @@ impl<'a> Parser<'a> {
 
         if self.program_type == ProgramType::Script {
             let (children, is_strict) = self.parse_script(starts_in_strict_mode);
-            let mut scope = Box::new(ScopeData::with_children(children));
+            let scope = ScopeData::shared_with_children(children);
             // Scope was opened in parse_script via open_program_scope.
             // Now close it after children are set.
-            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+            self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
             self.stmt(start, Statement::Program(ProgramData {
                 scope,
@@ -802,8 +795,8 @@ impl<'a> Parser<'a> {
             }))
         } else {
             let (children, has_top_level_await) = self.parse_module();
-            let mut scope = Box::new(ScopeData::with_children(children));
-            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+            let scope = ScopeData::shared_with_children(children);
+            self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
             self.stmt(start, Statement::Program(ProgramData {
                 scope,
@@ -816,7 +809,7 @@ impl<'a> Parser<'a> {
 
     fn parse_script(&mut self, starts_in_strict_mode: bool) -> (Vec<Stmt>, bool) {
         // Open program scope — will be closed in parse_program after ScopeData is created.
-        self.scope_collector.open_program_scope(std::ptr::null_mut(), ProgramType::Script);
+        self.scope_collector.open_program_scope(ProgramType::Script);
 
         let strict_before = self.strict_mode;
         if starts_in_strict_mode {
@@ -842,7 +835,7 @@ impl<'a> Parser<'a> {
 
     fn parse_module(&mut self) -> (Vec<Stmt>, bool) {
         // Open program scope — will be closed in parse_program after ScopeData is created.
-        self.scope_collector.open_program_scope(std::ptr::null_mut(), ProgramType::Module);
+        self.scope_collector.open_program_scope(ProgramType::Module);
 
         let strict_before = self.strict_mode;
         let await_before = self.await_expression_is_valid;

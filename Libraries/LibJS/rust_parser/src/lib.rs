@@ -153,7 +153,8 @@ pub unsafe extern "C" fn rust_compile_program(
 
     // Copy program's local variables from scope analysis into the generator.
     if let Statement::Program(ref data) = program.inner {
-        gen.local_variables = data.scope.local_variables.iter().map(|lv| {
+        let scope = data.scope.borrow();
+        gen.local_variables = scope.local_variables.iter().map(|lv| {
             bytecode::generator::LocalVariable {
                 name: lv.name.clone(),
                 is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
@@ -247,7 +248,8 @@ pub unsafe extern "C" fn rust_compile_function(
     };
 
     if let Some(scope) = body_scope {
-        gen.local_variables = scope.local_variables.iter().map(|lv| {
+        let sd = scope.borrow();
+        gen.local_variables = sd.local_variables.iter().map(|lv| {
             bytecode::generator::LocalVariable {
                 name: lv.name.clone(),
                 is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
@@ -284,7 +286,7 @@ pub unsafe extern "C" fn rust_compile_function(
     // Emit FDI (FunctionDeclarationInstantiation) bytecode.
     if let Some(scope) = body_scope {
         bytecode::codegen::emit_function_declaration_instantiation(
-            &mut gen, &func_data, scope,
+            &mut gen, &func_data, &scope.borrow(),
         );
     }
 
@@ -353,17 +355,18 @@ pub unsafe extern "C" fn rust_compile_function(
 /// ScopeData (populated by the scope collector after analyze()).
 unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData) {
     let body_scope = match &func_data.body.inner {
-        ast::Statement::FunctionBody { ref scope, .. } => Some(scope.as_ref()),
+        ast::Statement::FunctionBody { ref scope, .. } => Some(scope),
         _ => None,
     };
 
     let (uses_this, contains_eval, might_need_arguments) = if let Some(scope) = body_scope {
+        let sd = scope.borrow();
         (
             // Respect both scope analysis AND explicit parsing insights
             // (e.g. for class field initializers / static initializers).
-            scope.uses_this || func_data.parsing_insights.uses_this,
-            scope.contains_direct_call_to_eval,
-            scope.contains_access_to_arguments_object,
+            sd.uses_this || func_data.parsing_insights.uses_this,
+            sd.contains_direct_call_to_eval,
+            sd.contains_access_to_arguments_object,
         )
     } else {
         // Conservative defaults if no scope data.

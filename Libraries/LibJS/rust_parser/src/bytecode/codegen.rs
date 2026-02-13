@@ -579,22 +579,23 @@ pub fn generate_stmt(
         Statement::Expression(expr) => generate_expr(expr, gen, preferred_dst),
 
         // === Block ===
-        Statement::Block(scope) => generate_block_statement(gen, scope, preferred_dst),
+        Statement::Block(ref scope) => generate_block_statement(gen, &scope.borrow(), preferred_dst),
 
         // === FunctionBody ===
-        Statement::FunctionBody { scope, .. } => generate_scope_children(gen, scope, preferred_dst),
+        Statement::FunctionBody { ref scope, .. } => generate_scope_children(gen, &scope.borrow(), preferred_dst),
 
         // === Program ===
         // Note: GlobalDeclarationInstantiation (GDI) runs before this bytecode.
         // GDI already hoists top-level function declarations and handles Annex B
         // at the global scope. We only need to generate the program body here.
-        Statement::Program(data) => {
+        Statement::Program(ref data) => {
             // Populate annexb_function_names so switch codegen can emit
             // GetBinding + SetVariableBinding for AnnexB-hoisted functions.
-            for name in &data.scope.annexb_function_names {
+            let scope = data.scope.borrow();
+            for name in &scope.annexb_function_names {
                 gen.annexb_function_names.insert(name.clone());
             }
-            generate_scope_children(gen, &data.scope, preferred_dst)
+            generate_scope_children(gen, &scope, preferred_dst)
         }
 
         // === If ===
@@ -3489,7 +3490,8 @@ fn generate_switch_statement(
     // Emit case bodies (fall-through by default)
     for (i, case) in data.cases.iter().enumerate() {
         gen.switch_to_basic_block(case_blocks[i]);
-        for child in &case.scope.children {
+        let case_scope = case.scope.borrow();
+        for child in &case_scope.children {
             // For function declarations in switch cases: emit AnnexB hoisting
             // only if the scope collector approved it (name is in annexb_function_names).
             if did_create_env {
@@ -3551,8 +3553,9 @@ fn emit_switch_block_declaration_instantiation(
     data: &SwitchStatementData,
 ) -> bool {
     // Collect all statements across all cases.
-    let all_children: Vec<&Stmt> = data.cases.iter()
-        .flat_map(|case| case.scope.children.iter())
+    let case_scopes: Vec<_> = data.cases.iter().map(|c| c.scope.borrow()).collect();
+    let all_children: Vec<&Stmt> = case_scopes.iter()
+        .flat_map(|scope| scope.children.iter())
         .collect();
 
     // Check if we need a lexical environment.
@@ -4276,7 +4279,7 @@ fn generate_class_expression(
                     );
                     let wrapper_body = Stmt::new(
                         init_expr.range,
-                        Statement::Block(Box::new(ScopeData::with_children(vec![body_stmt]))),
+                        Statement::Block(ScopeData::shared_with_children(vec![body_stmt])),
                     );
 
                     // Class bodies are always strict mode.
@@ -4800,9 +4803,11 @@ fn generate_labelled_statement(
     // begin_breakable_scope/begin_continuable_scope pick them up.
     // NB: The Rust parser wraps for/for-in/for-of loops in a Block for scope
     // management, so we look through single-child Block wrappers.
-    let effective_inner = if let Statement::Block(scope) = &inner.inner {
-        if scope.children.len() == 1 {
-            &scope.children[0]
+    let block_scope_borrow;
+    let effective_inner = if let Statement::Block(ref scope) = inner.inner {
+        block_scope_borrow = scope.borrow();
+        if block_scope_borrow.children.len() == 1 {
+            &block_scope_borrow.children[0]
         } else {
             inner
         }

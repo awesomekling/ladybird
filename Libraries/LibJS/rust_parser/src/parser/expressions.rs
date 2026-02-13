@@ -520,9 +520,6 @@ impl<'a> Parser<'a> {
                         for (name, id) in self.pattern_bound_names.drain(..) {
                             self.scope_collector.register_identifier(id, &name, None);
                         }
-                        // Keep the original expression alive: scope collector holds raw
-                        // *mut ScopeData pointers to scopes within it.
-                        self.scope_anchor.push(lhs);
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                         return (self.expr(lhs_start, Expression::Assignment {
@@ -1622,8 +1619,8 @@ impl<'a> Parser<'a> {
             let body_start = self.position();
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             let return_stmt = Stmt::new(self.range_from(body_start), Statement::Return(Some(Box::new(expr))));
-            let mut scope = Box::new(ScopeData::with_children(vec![return_stmt]));
-            self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+            let scope = ScopeData::shared_with_children(vec![return_stmt]);
+            self.scope_collector.set_scope_node(scope.clone());
             let body = Stmt::new(self.range_from(body_start), Statement::FunctionBody {
                 scope,
                 in_strict_mode: self.strict_mode,

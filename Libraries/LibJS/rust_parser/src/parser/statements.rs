@@ -76,8 +76,8 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
 
-        // Open block scope (scope_data pointer set after children are collected).
-        self.scope_collector.open_block_scope(std::ptr::null_mut());
+        // Open block scope (scope_data set after children are collected).
+        self.scope_collector.open_block_scope(None);
 
         let mut children = Vec::new();
 
@@ -90,8 +90,8 @@ impl<'a> Parser<'a> {
         }
 
         self.consume_token(TokenType::CurlyClose);
-        let mut scope = Box::new(ScopeData::with_children(children));
-        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        let scope = ScopeData::shared_with_children(children);
+        self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
         self.stmt(start, Statement::Block(scope))
     }
@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
 
         // Open for-loop scope (for let/const/using declarations).
         // scope_data set after the for-loop body is parsed.
-        self.scope_collector.open_for_loop_scope(std::ptr::null_mut());
+        self.scope_collector.open_for_loop_scope(None);
 
         let is_await = if self.match_token(TokenType::Await) {
             if !self.await_expression_is_valid {
@@ -390,7 +390,6 @@ impl<'a> Parser<'a> {
                             for (name, id) in self.pattern_bound_names.drain(..) {
                                 self.scope_collector.register_identifier(id, &name, None);
                             }
-                            self.scope_anchor.push(expr);
                             ForInOfLhs::Pattern(pattern)
                         } else {
                             ForInOfLhs::Expression(Box::new(expr))
@@ -446,7 +445,6 @@ impl<'a> Parser<'a> {
                                 for (name, id) in self.pattern_bound_names.drain(..) {
                                     self.scope_collector.register_identifier(id, &name, None);
                                 }
-                                self.scope_anchor.push(expr);
                                 ForInOfLhs::Pattern(pattern)
                             } else {
                                 ForInOfLhs::Expression(Box::new(expr))
@@ -489,8 +487,8 @@ impl<'a> Parser<'a> {
     /// Close the for-loop scope and wrap the for-loop statement in a Block
     /// with scope data, matching C++ parser behavior.
     fn close_for_loop_scope(&mut self, start: Position, inner: Stmt) -> Stmt {
-        let mut scope = Box::new(ScopeData::with_children(vec![inner]));
-        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        let scope = ScopeData::shared_with_children(vec![inner]);
+        self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
         self.stmt(start, Statement::Block(scope))
     }
@@ -536,7 +534,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenOpen);
         let object = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
-        self.scope_collector.open_with_scope(std::ptr::null_mut());
+        self.scope_collector.open_with_scope(None);
         let body = self.parse_statement(false);
         self.scope_collector.close_scope();
         self.stmt(start, Statement::With {
@@ -557,7 +555,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
 
         // Open block scope for the switch body (all cases share one scope).
-        self.scope_collector.open_block_scope(std::ptr::null_mut());
+        self.scope_collector.open_block_scope(None);
 
         let break_before = self.in_break_context;
         self.in_break_context = true;
@@ -571,8 +569,8 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
 
-        let mut scope = Box::new(ScopeData::new());
-        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        let scope = ScopeData::new_shared();
+        self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
 
         self.stmt(start, Statement::Switch(SwitchStatementData {
@@ -612,7 +610,7 @@ impl<'a> Parser<'a> {
 
         SwitchCase {
             range: self.range_from(start),
-            scope: Box::new(ScopeData::with_children(children)),
+            scope: ScopeData::shared_with_children(children),
             test,
         }
     }

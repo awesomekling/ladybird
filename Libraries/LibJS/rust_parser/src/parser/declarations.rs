@@ -636,7 +636,7 @@ impl<'a> Parser<'a> {
             }));
             let return_stmt = self.stmt(start, Statement::Return(Some(Box::new(super_call))));
             let body = self.stmt(start, Statement::FunctionBody {
-                scope: Box::new(ScopeData::with_children(vec![return_stmt])),
+                scope: ScopeData::shared_with_children(vec![return_stmt]),
                 in_strict_mode: true,
             });
 
@@ -667,7 +667,7 @@ impl<'a> Parser<'a> {
         } else {
             // Base class: empty constructor() {}
             let body = self.stmt(start, Statement::FunctionBody {
-                scope: Box::new(ScopeData::with_children(Vec::new())),
+                scope: ScopeData::shared_with_children(Vec::new()),
                 in_strict_mode: true,
             });
 
@@ -714,7 +714,7 @@ impl<'a> Parser<'a> {
                 self.in_class_field_initializer = true;
                 self.in_class_static_init_block = true;
                 self.allow_super_property_lookup = true;
-                self.scope_collector.open_static_init_scope(std::ptr::null_mut());
+                self.scope_collector.open_static_init_scope(None);
                 let children = self.parse_statement_list(false);
                 self.in_break_context = saved_break;
                 self.in_continue_context = saved_continue;
@@ -725,8 +725,8 @@ impl<'a> Parser<'a> {
                 self.in_class_static_init_block = saved_static_init;
                 self.allow_super_property_lookup = saved_super;
                 self.consume_token(TokenType::CurlyClose);
-                let mut scope = Box::new(ScopeData::with_children(children));
-                self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+                let scope = ScopeData::shared_with_children(children);
+                self.scope_collector.set_scope_node(scope.clone());
                 self.scope_collector.close_scope();
                 let body = self.stmt(start, Statement::FunctionBody {
                     scope,
@@ -824,7 +824,7 @@ impl<'a> Parser<'a> {
             self.consume();
             let saved_field_init = self.in_class_field_initializer;
             self.in_class_field_initializer = true;
-            self.scope_collector.open_class_field_scope(std::ptr::null_mut());
+            self.scope_collector.open_class_field_scope(None);
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
             self.in_class_field_initializer = saved_field_init;
@@ -878,8 +878,8 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
 
-        let mut scope = Box::new(ScopeData::with_children(children));
-        self.scope_collector.set_scope_node(&mut *scope as *mut ScopeData);
+        let scope = ScopeData::shared_with_children(children);
+        self.scope_collector.set_scope_node(scope.clone());
 
         let body = self.stmt(start, Statement::FunctionBody {
             scope,
@@ -1088,7 +1088,6 @@ impl<'a> Parser<'a> {
                             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                                 if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
-                                    self.scope_anchor.push(expression);
                                     entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                                 }
                             } else if Self::is_member_expression(&expression) {
@@ -1131,7 +1130,6 @@ impl<'a> Parser<'a> {
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                         if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
-                            self.scope_anchor.push(expression);
                             entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                         }
                     } else if Self::is_member_expression(&expression) {

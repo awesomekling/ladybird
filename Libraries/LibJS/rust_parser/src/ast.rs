@@ -22,7 +22,7 @@
 //! - `ScopeData` replaces the C++ `ScopeNode` base class, carried by
 //!   block-like constructs (Program, BlockStatement, FunctionBody, etc.).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 // =============================================================================
@@ -534,7 +534,7 @@ pub enum CatchParameter {
 
 #[derive(Clone)]
 pub struct SwitchStatementData {
-    pub scope: Box<ScopeData>,
+    pub scope: Rc<RefCell<ScopeData>>,
     pub discriminant: Box<Expr>,
     pub cases: Vec<SwitchCase>,
 }
@@ -542,7 +542,7 @@ pub struct SwitchStatementData {
 #[derive(Clone)]
 pub struct SwitchCase {
     pub range: SourceRange,
-    pub scope: Box<ScopeData>,
+    pub scope: Rc<RefCell<ScopeData>>,
     pub test: Option<Expr>,
 }
 
@@ -665,8 +665,8 @@ pub struct ScopeData {
 }
 
 impl ScopeData {
-    pub fn new() -> Self {
-        Self {
+    pub fn new_shared() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
             children: Vec::new(),
             local_variables: Vec::new(),
             function_scope_data: None,
@@ -676,11 +676,11 @@ impl ScopeData {
             uses_this_from_environment: false,
             contains_direct_call_to_eval: false,
             contains_access_to_arguments_object: false,
-        }
+        }))
     }
 
-    pub fn with_children(children: Vec<Stmt>) -> Self {
-        Self {
+    pub fn shared_with_children(children: Vec<Stmt>) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
             children,
             local_variables: Vec::new(),
             function_scope_data: None,
@@ -690,7 +690,7 @@ impl ScopeData {
             uses_this_from_environment: false,
             contains_direct_call_to_eval: false,
             contains_access_to_arguments_object: false,
-        }
+        }))
     }
 }
 
@@ -845,9 +845,9 @@ pub enum Statement {
     Debugger,
 
     // Blocks (carry ScopeData like C++ ScopeNode)
-    Block(Box<ScopeData>),
+    Block(Rc<RefCell<ScopeData>>),
     FunctionBody {
-        scope: Box<ScopeData>,
+        scope: Rc<RefCell<ScopeData>>,
         in_strict_mode: bool,
     },
     Program(ProgramData),
@@ -937,7 +937,7 @@ pub enum Statement {
 
 #[derive(Clone)]
 pub struct ProgramData {
-    pub scope: Box<ScopeData>,
+    pub scope: Rc<RefCell<ScopeData>>,
     pub program_type: ProgramType,
     pub is_strict_mode: bool,
     pub has_top_level_await: bool,
