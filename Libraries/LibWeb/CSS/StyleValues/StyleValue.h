@@ -20,7 +20,6 @@
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
 #include <LibGfx/Color.h>
-#include <LibJS/Heap/Cell.h>
 #include <LibURL/URL.h>
 #include <LibWeb/CSS/CalculationResolutionContext.h>
 #include <LibWeb/CSS/Keyword.h>
@@ -172,7 +171,6 @@ public:
     virtual StyleValueVector subdivide_into_iterations(PropertyNameAndID const&) const;
 
     virtual void set_style_sheet(GC::Ptr<CSSStyleSheet>) { }
-    virtual void visit_edges(JS::Cell::Visitor&) const { }
 
     virtual bool equals(StyleValue const& other) const = 0;
 

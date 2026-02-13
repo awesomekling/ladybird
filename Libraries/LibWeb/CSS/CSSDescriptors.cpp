@@ -259,9 +259,6 @@ WebIDL::ExceptionOr<void> CSSDescriptors::set_css_text(StringView value)
 void CSSDescriptors::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    for (auto& descriptor : m_descriptors) {
-        descriptor.value->visit_edges(visitor);
-    }
 }
 
 RefPtr<StyleValue const> CSSDescriptors::descriptor(DescriptorID descriptor_id) const

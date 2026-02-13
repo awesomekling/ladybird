@@ -119,9 +119,6 @@ void CSSStyleProperties::initialize(JS::Realm& realm)
 void CSSStyleProperties::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    for (auto& property : m_properties) {
-        property.value->visit_edges(visitor);
-    }
 }
 
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-length

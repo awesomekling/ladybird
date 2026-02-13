@@ -443,15 +443,6 @@ struct ContentData {
 
     Vector<Variant<String, NonnullRefPtr<ImageStyleValue>>> data;
     Optional<String> alt_text {};
-
-    void visit_edges(GC::Cell::Visitor& visitor) const
-    {
-        for (auto const& item : data) {
-            if (auto* ptr = item.get_pointer<NonnullRefPtr<ImageStyleValue>>()) {
-                (*ptr)->visit_edges(visitor);
-            }
-        }
-    }
 };
 
 struct CounterData {
@@ -898,22 +889,9 @@ protected:
 
         void visit_edges(GC::Cell::Visitor& visitor)
         {
-            for (auto& layer : background_layers) {
-                layer.background_image->visit_edges(visitor);
+            for (auto& layer : background_layers)
                 visitor.visit(layer.image_resource);
-            }
-            if (mask_image)
-                mask_image->visit_edges(visitor);
             visitor.visit(mask_image_resource);
-            for (auto const& transform : transformations)
-                transform->visit_edges(visitor);
-            if (rotate)
-                rotate->visit_edges(visitor);
-            if (translate)
-                translate->visit_edges(visitor);
-            if (scale)
-                scale->visit_edges(visitor);
-            content.visit_edges(visitor);
         }
     };
 
