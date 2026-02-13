@@ -2377,6 +2377,7 @@ fn generate_call_expression(
             } => {
                 let obj = generate_expr(object, gen, None)
                     .unwrap_or_else(|| gen.add_constant_undefined());
+                let base_id = intern_base_identifier(gen, object);
                 let method = gen.allocate_register();
                 if *computed {
                     let prop = generate_expr(property, gen, None)
@@ -2385,10 +2386,10 @@ fn generate_call_expression(
                         dst: method.operand(),
                         base: obj.operand(),
                         property: prop.operand(),
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                 } else if let Expression::Identifier(ident) = &property.inner {
-                    emit_get_by_id(gen, &method, &obj, &ident.name, None);
+                    emit_get_by_id(gen, &method, &obj, &ident.name, base_id);
                 } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
                     let id = gen.intern_identifier(priv_ident.name.clone());
                     gen.emit(Instruction::GetPrivateById {
@@ -2430,6 +2431,10 @@ fn generate_call_expression(
     let this_value = this_value.map(|tv| gen.copy_if_needed_to_preserve_evaluation_order(&tv));
     let callee = gen.copy_if_needed_to_preserve_evaluation_order(&callee);
 
+    // Unwrap this_value at function scope so its register lifetime matches C++
+    // (where original_this_value is a function-scope local that outlives argument temporaries).
+    let this_value = this_value.unwrap_or_else(|| gen.add_constant_undefined());
+
     let has_spread = data.arguments.iter().any(|a| a.is_spread);
 
     if has_spread {
@@ -2462,29 +2467,26 @@ fn generate_call_expression(
         }
 
         if is_new {
-            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::CallConstructWithArgumentArray {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                this_value: this_op.operand(),
+                this_value: this_value.operand(),
                 arguments: args_array.operand(),
                 expression_string,
             });
         } else if is_direct_eval {
-            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::CallDirectEvalWithArgumentArray {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                this_value: this_op.operand(),
+                this_value: this_value.operand(),
                 arguments: args_array.operand(),
                 expression_string,
             });
         } else {
-            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::CallWithArgumentArray {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                this_value: this_op.operand(),
+                this_value: this_value.operand(),
                 arguments: args_array.operand(),
                 expression_string,
             });
@@ -2509,21 +2511,19 @@ fn generate_call_expression(
                 arguments: args,
             });
         } else if is_direct_eval {
-            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::CallDirectEval {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                this_value: this_op.operand(),
+                this_value: this_value.operand(),
                 argument_count: args.len() as u32,
                 expression_string,
                 arguments: args,
             });
         } else {
-            let this_op = this_value.unwrap_or_else(|| gen.add_constant_undefined());
             gen.emit(Instruction::Call {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                this_value: this_op.operand(),
+                this_value: this_value.operand(),
                 argument_count: args.len() as u32,
                 expression_string,
                 arguments: args,
