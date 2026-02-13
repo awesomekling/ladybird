@@ -266,7 +266,7 @@ bool HTMLIFrameElement::is_presentational_hint(FlyString const& name) const
     return name == HTML::AttributeNames::frameborder;
 }
 
-void HTMLIFrameElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLIFrameElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
 
@@ -278,10 +278,10 @@ void HTMLIFrameElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperti
         auto frameborder = parse_integer(*frameborder_attribute);
         if (!frameborder.has_value() || frameborder == 0) {
             auto zero = CSS::LengthStyleValue::create(CSS::Length::make_px(0));
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BorderTopWidth, zero);
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BorderRightWidth, zero);
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BorderBottomWidth, zero);
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BorderLeftWidth, zero);
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BorderTopWidth, zero);
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BorderRightWidth, zero);
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BorderBottomWidth, zero);
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BorderLeftWidth, zero);
         }
     }
 }

@@ -128,7 +128,7 @@ bool SVGElement::is_presentational_hint(FlyString const& name) const
     return any_of(attribute_style_properties(), [&](auto& property) { return name.equals_ignoring_ascii_case(property.name); });
 }
 
-void SVGElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void SVGElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
     CSS::Parser::ParsingParams parsing_context { document(), CSS::Parser::ParsingMode::SVGPresentationAttribute };
@@ -140,10 +140,10 @@ void SVGElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cas
                 continue;
             if (property.id == CSS::PropertyID::Mask) {
                 if (auto style_value = parse_css_value(parsing_context, value, CSS::PropertyID::Mask))
-                    cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::Mask, style_value.release_nonnull());
+                    cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::Mask, style_value.release_nonnull());
             } else {
                 if (auto style_value = parse_css_value(parsing_context, value, property.id))
-                    cascaded_properties->set_property_from_presentational_hint(property.id, style_value.release_nonnull());
+                    cascaded_properties.set_property_from_presentational_hint(property.id, style_value.release_nonnull());
             }
             break;
         }

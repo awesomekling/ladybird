@@ -60,7 +60,7 @@ bool HTMLBodyElement::is_presentational_hint(FlyString const& name) const
         HTML::AttributeNames::leftmargin);
 }
 
-void HTMLBodyElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLBodyElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
     for_each_attribute([&](auto& name, auto& value) {
@@ -68,15 +68,15 @@ void HTMLBodyElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties
             // https://html.spec.whatwg.org/multipage/rendering.html#the-page:rules-for-parsing-a-legacy-colour-value
             auto color = parse_legacy_color_value(value);
             if (color.has_value())
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BackgroundColor, CSS::ColorStyleValue::create_from_color(color.value(), CSS::ColorSyntax::Legacy));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BackgroundColor, CSS::ColorStyleValue::create_from_color(color.value(), CSS::ColorSyntax::Legacy));
         } else if (name == HTML::AttributeNames::text) {
             // https://html.spec.whatwg.org/multipage/rendering.html#the-page:rules-for-parsing-a-legacy-colour-value-2
             auto color = parse_legacy_color_value(value);
             if (color.has_value())
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::Color, CSS::ColorStyleValue::create_from_color(color.value(), CSS::ColorSyntax::Legacy));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::Color, CSS::ColorStyleValue::create_from_color(color.value(), CSS::ColorSyntax::Legacy));
         } else if (name == HTML::AttributeNames::background) {
             VERIFY(m_background_style_value);
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::BackgroundImage, CSS::StyleValueList::create({ *m_background_style_value }, CSS::StyleValueList::Separator::Comma));
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::BackgroundImage, CSS::StyleValueList::create({ *m_background_style_value }, CSS::StyleValueList::Separator::Comma));
         }
     });
 
@@ -104,7 +104,7 @@ void HTMLBodyElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties
         if (!value.has_value())
             return;
         if (auto parsed_value = parse_non_negative_integer(value.value()); parsed_value.has_value())
-            cascaded_properties->set_property_from_presentational_hint(property_id, CSS::LengthStyleValue::create(CSS::Length::make_px(*parsed_value)));
+            cascaded_properties.set_property_from_presentational_hint(property_id, CSS::LengthStyleValue::create(CSS::Length::make_px(*parsed_value)));
     };
 
     apply_margin_value(CSS::PropertyID::MarginTop, margin_top_value);

@@ -66,7 +66,7 @@ bool HTMLLIElement::is_presentational_hint(FlyString const& name) const
     return name == HTML::AttributeNames::type;
 }
 
-void HTMLLIElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLLIElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
 
@@ -74,23 +74,23 @@ void HTMLLIElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> 
     for_each_attribute([&](auto& name, auto& value) {
         if (name == HTML::AttributeNames::type) {
             if (value == "1"sv) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("decimal"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("decimal"_fly_string));
             } else if (value == "a"sv) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("lower-alpha"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("lower-alpha"_fly_string));
             } else if (value == "A"sv) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("upper-alpha"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("upper-alpha"_fly_string));
             } else if (value == "i"sv) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("lower-roman"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("lower-roman"_fly_string));
             } else if (value == "I"sv) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("upper-roman"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("upper-roman"_fly_string));
             } else if (value.equals_ignoring_ascii_case("none"sv)) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::KeywordStyleValue::create(CSS::Keyword::None));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::KeywordStyleValue::create(CSS::Keyword::None));
             } else if (value.equals_ignoring_ascii_case("disc"sv)) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("disc"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("disc"_fly_string));
             } else if (value.equals_ignoring_ascii_case("circle"sv)) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("circle"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("circle"_fly_string));
             } else if (value.equals_ignoring_ascii_case("square"sv)) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("square"_fly_string));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::ListStyleType, CSS::CounterStyleStyleValue::create("square"_fly_string));
             }
         }
     });

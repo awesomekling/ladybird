@@ -75,7 +75,7 @@ bool HTMLCanvasElement::is_presentational_hint(FlyString const& name) const
         HTML::AttributeNames::height);
 }
 
-void HTMLCanvasElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLCanvasElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
     // https://html.spec.whatwg.org/multipage/rendering.html#attributes-for-embedded-content-and-images
@@ -90,7 +90,7 @@ void HTMLCanvasElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperti
 
     if (w.has_value() && h.has_value())
         // then the user agent is expected to use the parsed integers as a presentational hint for the 'aspect-ratio' property of the form auto w / h.
-        cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::AspectRatio,
+        cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::AspectRatio,
             CSS::StyleValueList::create(CSS::StyleValueVector {
                                             CSS::KeywordStyleValue::create(CSS::Keyword::Auto),
                                             CSS::RatioStyleValue::create(CSS::Ratio { static_cast<double>(w.value()), static_cast<double>(h.value()) }) },

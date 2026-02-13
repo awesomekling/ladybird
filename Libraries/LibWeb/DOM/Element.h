@@ -217,7 +217,7 @@ public:
     virtual bool supports_dimension_attributes() const { return false; }
 
     virtual bool is_presentational_hint(FlyString const&) const { return false; }
-    virtual void apply_presentational_hints(GC::Ref<CSS::CascadedProperties>) const { }
+    virtual void apply_presentational_hints(CSS::CascadedProperties&) const { }
 
     void run_attribute_change_steps(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_);
 
@@ -234,8 +234,8 @@ public:
     RefPtr<CSS::ComputedProperties const> computed_properties(Optional<CSS::PseudoElement> = {}) const;
     void set_computed_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::ComputedProperties>);
 
-    [[nodiscard]] GC::Ptr<CSS::CascadedProperties> cascaded_properties(Optional<CSS::PseudoElement>) const;
-    void set_cascaded_properties(Optional<CSS::PseudoElement>, GC::Ptr<CSS::CascadedProperties>);
+    [[nodiscard]] RefPtr<CSS::CascadedProperties> cascaded_properties(Optional<CSS::PseudoElement>) const;
+    void set_cascaded_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::CascadedProperties>);
 
     Optional<PseudoElement&> get_pseudo_element(CSS::PseudoElement) const;
 
@@ -598,7 +598,7 @@ private:
     GC::Ptr<ShadowRoot> m_shadow_root;
     GC::Ptr<DOMTokenList> m_part_list;
 
-    GC::Ptr<CSS::CascadedProperties> m_cascaded_properties;
+    RefPtr<CSS::CascadedProperties> m_cascaded_properties;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
 

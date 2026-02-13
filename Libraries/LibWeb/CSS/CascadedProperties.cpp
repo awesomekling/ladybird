@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -14,21 +13,9 @@
 
 namespace Web::CSS {
 
-GC_DEFINE_ALLOCATOR(CascadedProperties);
-
 CascadedProperties::CascadedProperties() = default;
 
 CascadedProperties::~CascadedProperties() = default;
-
-void CascadedProperties::visit_edges(Visitor& visitor)
-{
-    Base::visit_edges(visitor);
-    for (auto const& [property_id, entries] : m_properties) {
-        for (auto const& entry : entries) {
-            visitor.visit(entry.source);
-        }
-    }
-}
 
 void CascadedProperties::revert_property(PropertyID property_id, Important important, CascadeOrigin cascade_origin)
 {
@@ -75,7 +62,7 @@ void CascadedProperties::resolve_unresolved_properties(DOM::AbstractElement abst
     }
 }
 
-void CascadedProperties::set_property(PropertyID property_id, NonnullRefPtr<StyleValue const> value, Important important, CascadeOrigin origin, Optional<FlyString> layer_name, GC::Ptr<CSS::CSSStyleDeclaration const> source)
+void CascadedProperties::set_property(PropertyID property_id, NonnullRefPtr<StyleValue const> value, Important important, CascadeOrigin origin, Optional<FlyString> layer_name)
 {
     m_contained_properties_cache.set(to_underlying(property_id), true);
 
@@ -102,7 +89,6 @@ void CascadedProperties::set_property(PropertyID property_id, NonnullRefPtr<Styl
         },
         .origin = origin,
         .layer_name = move(layer_name),
-        .source = source,
     });
 }
 
@@ -121,7 +107,6 @@ void CascadedProperties::set_property_from_presentational_hint(PropertyID proper
             },
             .origin = CascadeOrigin::Author,
             .layer_name = {},
-            .source = nullptr,
         });
     });
 }
@@ -132,14 +117,6 @@ RefPtr<StyleValue const> CascadedProperties::property(PropertyID property_id) co
         return nullptr;
 
     return m_properties.get(property_id)->last().property.value;
-}
-
-GC::Ptr<CSSStyleDeclaration const> CascadedProperties::property_source(PropertyID property_id) const
-{
-    if (!m_contained_properties_cache.get(to_underlying(property_id)))
-        return nullptr;
-
-    return m_properties.get(property_id)->last().source;
 }
 
 Optional<StyleProperty> CascadedProperties::style_property(PropertyID property_id) const

@@ -59,14 +59,14 @@ bool HTMLTableColElement::is_presentational_hint(FlyString const& name) const
     return name == HTML::AttributeNames::width;
 }
 
-void HTMLTableColElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLTableColElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     Base::apply_presentational_hints(cascaded_properties);
     for_each_attribute([&](auto& name, auto& value) {
         // https://html.spec.whatwg.org/multipage/rendering.html#tables-2:maps-to-the-dimension-property-2
         if (name == HTML::AttributeNames::width) {
             if (auto parsed_value = parse_dimension_value(value)) {
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::Width, *parsed_value);
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::Width, *parsed_value);
             }
         }
     });

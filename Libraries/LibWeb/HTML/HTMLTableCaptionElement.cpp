@@ -36,13 +36,13 @@ bool HTMLTableCaptionElement::is_presentational_hint(FlyString const& name) cons
 }
 
 // https://html.spec.whatwg.org/multipage/rendering.html#tables-2
-void HTMLTableCaptionElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLTableCaptionElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     HTMLElement::apply_presentational_hints(cascaded_properties);
     for_each_attribute([&](auto& name, auto& value) {
         if (name == HTML::AttributeNames::align) {
             if (value == "bottom"sv)
-                cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::CaptionSide, CSS::KeywordStyleValue::create(CSS::Keyword::Bottom));
+                cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::CaptionSide, CSS::KeywordStyleValue::create(CSS::Keyword::Bottom));
         }
     });
 }

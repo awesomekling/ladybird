@@ -36,13 +36,13 @@ bool HTMLPreElement::is_presentational_hint(FlyString const& name) const
     return name == HTML::AttributeNames::wrap;
 }
 
-void HTMLPreElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
+void HTMLPreElement::apply_presentational_hints(CSS::CascadedProperties& cascaded_properties) const
 {
     HTMLElement::apply_presentational_hints(cascaded_properties);
 
     for_each_attribute([&](auto const& name, auto const&) {
         if (name == HTML::AttributeNames::wrap) {
-            cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::TextWrapMode, CSS::KeywordStyleValue::create(CSS::Keyword::Wrap));
+            cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::TextWrapMode, CSS::KeywordStyleValue::create(CSS::Keyword::Wrap));
         }
     });
 }

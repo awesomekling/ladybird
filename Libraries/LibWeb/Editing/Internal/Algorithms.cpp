@@ -3898,8 +3898,8 @@ Optional<Utf16String> specified_command_value(GC::Ref<DOM::Element> element, Fly
     //     "xxx-large".)
     if (is<HTML::HTMLFontElement>(*element)) {
         auto const& font_element = static_cast<HTML::HTMLFontElement&>(*element);
-        auto cascaded_properties = font_element.document().heap().allocate<CSS::CascadedProperties>();
-        font_element.apply_presentational_hints(cascaded_properties);
+        auto cascaded_properties = adopt_ref(*new CSS::CascadedProperties());
+        font_element.apply_presentational_hints(*cascaded_properties);
         auto property_value = cascaded_properties->property(property.value());
         if (property_value)
             return Utf16String::from_utf8_without_validation(property_value->to_string(CSS::SerializationMode::Normal));
