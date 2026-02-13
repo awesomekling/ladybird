@@ -54,7 +54,7 @@ COLD Completion throw_null_or_undefined_property_get(VM& vm, Value base_value, G
 
     auto base_identifier = get_base_identifier();
     if (base_identifier.has_value())
-        return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithPropertyAndName, get_property_name(), base_value, base_identifier);
+        return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithPropertyAndName, get_property_name(), base_value, *base_identifier);
     return vm.throw_completion<TypeError>(ErrorType::ToObjectNullOrUndefinedWithProperty, get_property_name(), base_value);
 }
 

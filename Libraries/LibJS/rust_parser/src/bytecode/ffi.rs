@@ -114,6 +114,13 @@ extern "C" {
         uses_this_from_environment: bool,
     ) -> *mut c_void;
 
+    pub fn rust_sfd_set_class_field_initializer_name(
+        sfd_ptr: *mut c_void,
+        name: *const u16,
+        name_len: usize,
+        is_private: bool,
+    );
+
     pub fn rust_create_class_blueprint(
         name: *const u16,
         name_len: usize,

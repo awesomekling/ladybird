@@ -398,6 +398,9 @@ impl<'a> Parser<'a> {
                 if end <= self.source.len() { &self.source[start..end] } else { &[] }
             };
             if value == utf16!("arguments") {
+                if self.in_class_field_initializer {
+                    self.syntax_error("'arguments' is not allowed in class field initializer");
+                }
                 self.function_might_need_arguments_object = true;
                 if !self.strict_mode {
                     self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();

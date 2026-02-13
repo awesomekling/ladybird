@@ -611,8 +611,7 @@ impl Generator {
 
     // --- Break/continue scope management ---
 
-    pub fn begin_breakable_scope(&mut self, target: Label, mut label_set: Vec<Vec<u16>>) {
-        label_set.extend(self.pending_labels.iter().cloned());
+    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
         self.breakable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
@@ -626,8 +625,7 @@ impl Generator {
         self.breakable_scopes.pop();
     }
 
-    pub fn begin_continuable_scope(&mut self, target: Label, mut label_set: Vec<Vec<u16>>) {
-        label_set.extend(self.pending_labels.iter().cloned());
+    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
         self.continuable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,

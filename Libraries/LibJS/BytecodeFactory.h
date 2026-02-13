@@ -181,6 +181,14 @@ void* rust_create_sfd(
     bool uses_this,
     bool uses_this_from_environment);
 
+// Set class_field_initializer_name on a SharedFunctionInstanceData.
+// Called after rust_create_sfd for class field initializer functions.
+void rust_sfd_set_class_field_initializer_name(
+    void* sfd_ptr,
+    uint16_t const* name,
+    size_t name_len,
+    bool is_private);
+
 // Compile a function body using the Rust pipeline.
 // Takes ownership of the Rust AST (frees it after compilation).
 //

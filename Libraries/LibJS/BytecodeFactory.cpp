@@ -469,6 +469,21 @@ extern "C" void rust_sfd_set_metadata(
     shared.m_contains_direct_call_to_eval = contains_direct_call_to_eval;
 }
 
+extern "C" void rust_sfd_set_class_field_initializer_name(
+    void* sfd_ptr,
+    uint16_t const* name,
+    size_t name_len,
+    bool is_private)
+{
+    auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    auto utf16_name = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len));
+    if (is_private) {
+        shared.m_class_field_initializer_name = JS::PrivateName(0, utf16_name);
+    } else {
+        shared.m_class_field_initializer_name = JS::PropertyKey(utf16_name.to_utf16_string());
+    }
+}
+
 extern "C" void* rust_create_class_blueprint(
     uint16_t const* name,
     size_t name_len,

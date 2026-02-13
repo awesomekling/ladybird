@@ -1308,8 +1308,9 @@ fn generate_while_statement(
     });
 
     gen.switch_to_basic_block(body_block);
-    gen.begin_continuable_scope(Label(test_block as u32), Vec::new());
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_continuable_scope(Label(test_block as u32), labels.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels);
     let _body_result = generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -1342,8 +1343,9 @@ fn generate_do_while_statement(
     });
 
     gen.switch_to_basic_block(body_block);
-    gen.begin_continuable_scope(Label(test_block as u32), Vec::new());
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_continuable_scope(Label(test_block as u32), labels.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels);
     let _body_result = generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -1457,8 +1459,9 @@ fn generate_for_statement(
 
     // Body
     gen.switch_to_basic_block(body_block);
-    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_continuable_scope(Label(update_block as u32), labels.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels);
     let _body_result = generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -1852,6 +1855,13 @@ fn generate_call_expression(
                     });
                 } else if let Expression::Identifier(ident) = &property.inner {
                     emit_get_by_id(gen, &method, &obj, &ident.name, None);
+                } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
+                    let id = gen.intern_identifier(priv_ident.name.clone());
+                    gen.emit(Instruction::GetPrivateById {
+                        dst: method.operand(),
+                        base: obj.operand(),
+                        property: id,
+                    });
                 }
                 (method, Some(obj))
             }
@@ -2031,6 +2041,7 @@ fn generate_update_expression(
         }
         Expression::Member { object, property, computed } => {
             let base = generate_expr(object, gen, None)?;
+            let base_id = intern_base_identifier(gen, object);
             let value = gen.allocate_register();
             // Load the member value
             if *computed {
@@ -2039,7 +2050,7 @@ fn generate_update_expression(
                     dst: value.operand(),
                     base: base.operand(),
                     property: prop.operand(),
-                    base_identifier: None,
+                    base_identifier: base_id,
                 });
                 if prefixed {
                     match op {
@@ -2050,7 +2061,7 @@ fn generate_update_expression(
                         base: base.operand(),
                         property: prop.operand(),
                         src: value.operand(),
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                     Some(value)
                 } else {
@@ -2069,7 +2080,7 @@ fn generate_update_expression(
                         base: base.operand(),
                         property: prop.operand(),
                         src: value.operand(),
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                     Some(dst)
                 }
@@ -2099,7 +2110,7 @@ fn generate_update_expression(
                         property: key,
                         src: value.operand(),
                         cache_index: cache2,
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                     return Some(dst);
                 }
@@ -2109,7 +2120,7 @@ fn generate_update_expression(
                     property: key,
                     src: value.operand(),
                     cache_index: cache2,
-                    base_identifier: None,
+                    base_identifier: base_id,
                 });
                 Some(value)
             } else {
@@ -2237,19 +2248,21 @@ fn generate_assignment_expression(
                     };
                     let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
                     if let Some(key) = precomputed_key {
+                        let base_id = intern_base_identifier(gen, object);
                         gen.emit(Instruction::PutNormalByValue {
                             base: base.operand(),
                             property: key.operand(),
                             src: rhs_val.operand(),
-                            base_identifier: None,
+                            base_identifier: base_id,
                         });
                     } else {
-                        emit_put_to_member(gen, &base, property, false, &rhs_val);
+                        emit_put_to_member(gen, &base, property, false, &rhs_val, Some(object));
                     }
                     return Some(rhs_val);
                 }
                 // Compound member assignment: load old value, then apply op.
                 let old_val = gen.allocate_register();
+                let base_id = intern_base_identifier(gen, object);
                 let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
                 if *computed {
                     let prop_raw = generate_expr(property, gen, None)?;
@@ -2260,7 +2273,7 @@ fn generate_assignment_expression(
                         dst: old_val.operand(),
                         base: base.operand(),
                         property: prop.operand(),
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                     if is_logical {
                         let rhs_block = gen.make_block();
@@ -2275,7 +2288,7 @@ fn generate_assignment_expression(
                             base: base.operand(),
                             property: prop.operand(),
                             src: dst.operand(),
-                            base_identifier: None,
+                            base_identifier: base_id,
                         });
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                         gen.switch_to_basic_block(lhs_block);
@@ -2291,7 +2304,7 @@ fn generate_assignment_expression(
                         base: base.operand(),
                         property: prop.operand(),
                         src: dst.operand(),
-                        base_identifier: None,
+                        base_identifier: base_id,
                     });
                     return Some(dst);
                 } else {
@@ -2313,7 +2326,7 @@ fn generate_assignment_expression(
                                 property: key,
                                 src: dst.operand(),
                                 cache_index: cache2,
-                                base_identifier: None,
+                                base_identifier: base_id,
                             });
                             gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                             gen.switch_to_basic_block(lhs_block);
@@ -2332,7 +2345,7 @@ fn generate_assignment_expression(
                             property: key,
                             src: dst.operand(),
                             cache_index: cache2,
-                            base_identifier: None,
+                            base_identifier: base_id,
                         });
                         return Some(dst);
                     }
@@ -2431,7 +2444,9 @@ fn emit_put_to_member(
     property: &Expr,
     computed: bool,
     value: &ScopedOperand,
+    base_object: Option<&Expr>,
 ) {
+    let base_id = base_object.and_then(|obj| intern_base_identifier(gen, obj));
     if computed {
         let prop = generate_expr(property, gen, None)
             .unwrap_or_else(|| gen.add_constant_undefined());
@@ -2439,7 +2454,7 @@ fn emit_put_to_member(
             base: base.operand(),
             property: prop.operand(),
             src: value.operand(),
-            base_identifier: None,
+            base_identifier: base_id,
         });
     } else if let Expression::Identifier(ident) = &property.inner {
         let key = gen.intern_property_key(ident.name.clone());
@@ -2449,7 +2464,7 @@ fn emit_put_to_member(
             property: key,
             src: value.operand(),
             cache_index: cache,
-            base_identifier: None,
+            base_identifier: base_id,
         });
     } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
         let id = gen.intern_identifier(priv_ident.name.clone());
@@ -2524,7 +2539,7 @@ fn emit_store_to_reference(
         Expression::Member { object, property, computed } => {
             let base = generate_expr(object, gen, None)
                 .unwrap_or_else(|| gen.add_constant_undefined());
-            emit_put_to_member(gen, &base, property, *computed, value);
+            emit_put_to_member(gen, &base, property, *computed, value, Some(object));
         }
         _ => {}
     }
@@ -2752,7 +2767,8 @@ fn generate_switch_statement(
 ) -> Option<ScopedOperand> {
     let discriminant = generate_expr(&data.discriminant, gen, None)?;
     let end_block = gen.make_block();
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_breakable_scope(Label(end_block as u32), labels);
 
     // Create blocks for each case
     let case_blocks: Vec<usize> = data.cases.iter().map(|_| gen.make_block()).collect();
@@ -3380,7 +3396,35 @@ fn generate_class_expression(
                         },
                         is_hoisted: false,
                     };
-                    emit_new_function(gen, &func_data, Some(utf16!("field"))) as i32
+                    let idx = emit_new_function(gen, &func_data, Some(utf16!("field")));
+
+                    // Set class_field_initializer_name on the SFD so that
+                    // eval("arguments") inside field initializers correctly
+                    // throws a SyntaxError.
+                    let sfd_ptr = gen.shared_function_data[idx as usize];
+                    let (key_is_private, _) = check_private_key(key);
+                    let key_name: Vec<u16> = match &key.inner {
+                        Expression::PrivateIdentifier(ident) => ident.name.clone(),
+                        Expression::Identifier(ident) => ident.name.clone(),
+                        Expression::StringLiteral(s) => s.clone(),
+                        Expression::NumericLiteral(n) => {
+                            let s = format!("{}", n);
+                            s.encode_utf16().collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    if !key_name.is_empty() {
+                        unsafe {
+                            super::ffi::rust_sfd_set_class_field_initializer_name(
+                                sfd_ptr,
+                                key_name.as_ptr(),
+                                key_name.len(),
+                                key_is_private,
+                            );
+                        }
+                    }
+
+                    idx as i32
                 } else {
                     -1i32
                 };
@@ -3733,8 +3777,9 @@ fn generate_for_in_statement(
     } else {
         (end_block, update_block)
     };
-    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
-    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone());
+    gen.begin_breakable_scope(Label(break_target as u32), labels);
     generate_stmt(body, gen, preferred_dst);
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -3786,8 +3831,19 @@ fn generate_labelled_statement(
 
     // For iteration/switch statements, set pending_labels so that
     // begin_breakable_scope/begin_continuable_scope pick them up.
+    // NB: The Rust parser wraps for/for-in/for-of loops in a Block for scope
+    // management, so we look through single-child Block wrappers.
+    let effective_inner = if let Statement::Block(scope) = &inner.inner {
+        if scope.children.len() == 1 {
+            &scope.children[0]
+        } else {
+            inner
+        }
+    } else {
+        inner
+    };
     let is_iteration_or_switch = matches!(
-        &inner.inner,
+        &effective_inner.inner,
         Statement::For { .. }
             | Statement::ForOf { .. }
             | Statement::ForIn { .. }
@@ -3878,7 +3934,8 @@ fn generate_for_of_statement_inner(
     });
 
     // Break scope wraps the ReturnToFinally so break hits ReturnToFinally first.
-    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    let labels = std::mem::take(&mut gen.pending_labels);
+    gen.begin_breakable_scope(Label(end_block as u32), labels.clone());
     gen.start_boundary(BlockBoundaryType::ReturnToFinally);
 
     let update_block = gen.make_block();
@@ -3959,7 +4016,7 @@ fn generate_for_of_statement_inner(
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
     // Body
-    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
+    gen.begin_continuable_scope(Label(update_block as u32), labels);
     generate_stmt(body, gen, preferred_dst);
 
     // Restore lexical env before continuing

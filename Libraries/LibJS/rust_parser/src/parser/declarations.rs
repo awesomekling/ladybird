@@ -823,9 +823,12 @@ impl<'a> Parser<'a> {
         // Field.
         let init = if self.match_token(TokenType::Equals) {
             self.consume();
+            let saved_field_init = self.in_class_field_initializer;
+            self.in_class_field_initializer = true;
             self.scope_collector.open_class_field_scope(std::ptr::null_mut());
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
+            self.in_class_field_initializer = saved_field_init;
             Some(Box::new(expr))
         } else {
             None
