@@ -1067,6 +1067,31 @@ impl<'a> Parser<'a> {
             };
         }
 
+        // CoverInitializedName: { x = defaultValue }
+        // Not a valid object literal, but a valid destructuring assignment target.
+        // Parse the initializer to advance the lexer, but roll back scope records
+        // since this expression is discarded. synthesize_binding_pattern will
+        // re-parse from source and create the real scope records.
+        if self.match_token(TokenType::Equals) {
+            if let Some(kv) = &key_value {
+                let id = self.make_identifier(start, kv.clone());
+                self.scope_collector.register_identifier(&*id as *const Identifier, &id.name, None);
+                let value = self.expr(start, Expression::Identifier(id));
+                self.consume(); // consume '='
+                let saved_scope_state = self.scope_collector.save_state();
+                let _initializer = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                self.scope_collector.load_state(saved_scope_state);
+                return ObjectProperty {
+                    range: self.range_from(start),
+                    property_type: ObjectPropertyType::KeyValue,
+                    key: Box::new(key),
+                    value: Some(Box::new(value)),
+                    is_method: false,
+                    is_computed: false,
+                };
+            }
+        }
+
         // Shorthand property: { x }
         if let Some(kv) = key_value {
             let id = self.make_identifier(start, kv);
