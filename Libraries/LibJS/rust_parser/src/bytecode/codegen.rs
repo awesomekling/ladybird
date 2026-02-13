@@ -2338,7 +2338,7 @@ fn generate_variable_declaration(
                                     cache_index: cache,
                                 });
                             } else {
-                                gen.emit(Instruction::SetVariableBinding {
+                                gen.emit(Instruction::SetLexicalBinding {
                                     identifier: id,
                                     src: value.operand(),
                                     cache: EnvironmentCoordinate::empty(),
