@@ -16,7 +16,7 @@ class TextInputBox : public BlockContainer {
     GC_DECLARE_ALLOCATOR(TextInputBox);
 
 public:
-    TextInputBox(DOM::Document&, GC::Ptr<DOM::Element>, GC::Ref<CSS::ComputedProperties>);
+    TextInputBox(DOM::Document&, GC::Ptr<DOM::Element>, NonnullRefPtr<CSS::ComputedProperties>);
 
     HTML::HTMLInputElement const& dom_node() const { return static_cast<HTML::HTMLInputElement const&>(*Box::dom_node()); }
 

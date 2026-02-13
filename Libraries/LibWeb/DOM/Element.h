@@ -230,9 +230,9 @@ public:
     GC::Ptr<Layout::NodeWithStyle> layout_node();
     GC::Ptr<Layout::NodeWithStyle const> layout_node() const;
 
-    GC::Ptr<CSS::ComputedProperties> computed_properties(Optional<CSS::PseudoElement> = {});
-    GC::Ptr<CSS::ComputedProperties const> computed_properties(Optional<CSS::PseudoElement> = {}) const;
-    void set_computed_properties(Optional<CSS::PseudoElement>, GC::Ptr<CSS::ComputedProperties>);
+    RefPtr<CSS::ComputedProperties> computed_properties(Optional<CSS::PseudoElement> = {});
+    RefPtr<CSS::ComputedProperties const> computed_properties(Optional<CSS::PseudoElement> = {}) const;
+    void set_computed_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::ComputedProperties>);
 
     [[nodiscard]] GC::Ptr<CSS::CascadedProperties> cascaded_properties(Optional<CSS::PseudoElement>) const;
     void set_cascaded_properties(Optional<CSS::PseudoElement>, GC::Ptr<CSS::CascadedProperties>);
@@ -308,7 +308,7 @@ public:
     [[nodiscard]] Vector<CSSPixelRect> get_client_rects() const;
     [[nodiscard]] GC::Ref<Geometry::DOMRectList> get_client_rects_for_bindings() const;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(GC::Ref<CSS::ComputedProperties>);
+    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>);
     virtual void adjust_computed_style(CSS::ComputedProperties&) { }
 
     virtual void did_receive_focus() { }
@@ -316,7 +316,7 @@ public:
     bool should_indicate_focus() const;
     virtual bool is_focusable() const override;
 
-    static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, GC::Ref<CSS::ComputedProperties>, Element*);
+    static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::ComputedProperties>, Element*);
 
     [[nodiscard]] bool affected_by_pseudo_class(CSS::PseudoClass) const;
     bool includes_properties_from_invalidation_set(CSS::InvalidationSet const&) const;
@@ -599,7 +599,7 @@ private:
     GC::Ptr<DOMTokenList> m_part_list;
 
     GC::Ptr<CSS::CascadedProperties> m_cascaded_properties;
-    GC::Ptr<CSS::ComputedProperties> m_computed_properties;
+    RefPtr<CSS::ComputedProperties> m_computed_properties;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
 
     using PseudoElementData = HashMap<CSS::PseudoElement, GC::Ref<PseudoElement>>;

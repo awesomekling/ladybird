@@ -39,7 +39,7 @@ void HTMLIFrameElement::initialize(JS::Realm& realm)
     Base::initialize(realm);
 }
 
-GC::Ptr<Layout::Node> HTMLIFrameElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLIFrameElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     return heap().allocate<Layout::NavigableContainerViewport>(document(), *this, move(style));
 }

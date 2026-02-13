@@ -14,12 +14,14 @@ namespace Web::DOM {
 GC_DEFINE_ALLOCATOR(PseudoElement);
 GC_DEFINE_ALLOCATOR(PseudoElementTreeNode);
 
+RefPtr<CSS::ComputedProperties> PseudoElement::computed_properties() const { return m_computed_properties; }
+void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> value) { m_computed_properties = move(value); }
+
 void PseudoElement::visit_edges(JS::Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
 
     visitor.visit(m_cascaded_properties);
-    visitor.visit(m_computed_properties);
     visitor.visit(m_layout_node);
     if (m_counters_set)
         m_counters_set->visit_edges(visitor);

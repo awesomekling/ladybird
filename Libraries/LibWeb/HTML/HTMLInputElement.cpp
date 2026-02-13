@@ -119,7 +119,7 @@ void HTMLInputElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_resource_request);
 }
 
-GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     if (type_state() == TypeAttributeState::Hidden)
         return nullptr;

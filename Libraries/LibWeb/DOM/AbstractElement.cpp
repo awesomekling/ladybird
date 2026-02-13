@@ -125,7 +125,7 @@ bool AbstractElement::is_before(AbstractElement const& other) const
     return this_node && other_node && this_node->is_before(*other_node);
 }
 
-GC::Ptr<CSS::ComputedProperties const> AbstractElement::computed_properties() const
+RefPtr<CSS::ComputedProperties const> AbstractElement::computed_properties() const
 {
     return m_element->computed_properties(m_pseudo_element);
 }

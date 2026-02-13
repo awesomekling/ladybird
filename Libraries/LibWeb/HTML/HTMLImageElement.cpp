@@ -186,7 +186,7 @@ void HTMLImageElement::form_associated_element_attribute_changed(FlyString const
     }
 }
 
-GC::Ptr<Layout::Node> HTMLImageElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLImageElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     return heap().allocate<Layout::ImageBox>(document(), *this, move(style), *this);
 }

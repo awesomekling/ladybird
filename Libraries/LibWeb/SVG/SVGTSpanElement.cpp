@@ -24,7 +24,7 @@ void SVGTSpanElement::initialize(JS::Realm& realm)
     Base::initialize(realm);
 }
 
-GC::Ptr<Layout::Node> SVGTSpanElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGTSpanElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     // Text must be within an SVG <text> element.
     if (first_flat_tree_ancestor_of_type<SVGTextElement>())

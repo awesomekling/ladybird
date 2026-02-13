@@ -24,7 +24,7 @@ public:
 
 private:
     virtual CSS::SizeWithAspectRatio natural_size() const override;
-    AudioBox(DOM::Document&, DOM::Element&, GC::Ref<CSS::ComputedProperties>);
+    AudioBox(DOM::Document&, DOM::Element&, NonnullRefPtr<CSS::ComputedProperties>);
 };
 
 }

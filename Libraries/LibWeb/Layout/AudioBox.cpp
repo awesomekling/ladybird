@@ -12,7 +12,7 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(AudioBox);
 
-AudioBox::AudioBox(DOM::Document& document, DOM::Element& element, GC::Ref<CSS::ComputedProperties> style)
+AudioBox::AudioBox(DOM::Document& document, DOM::Element& element, NonnullRefPtr<CSS::ComputedProperties> style)
     : ReplacedBox(document, element, move(style))
 {
 }

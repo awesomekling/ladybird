@@ -142,7 +142,6 @@ void Element::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_custom_element_definition);
     visitor.visit(m_custom_state_set);
     visitor.visit(m_cascaded_properties);
-    visitor.visit(m_computed_properties);
     visitor.visit(m_computed_style_map_cache);
     visitor.visit(m_attribute_style_map);
     if (m_pseudo_element_data) {
@@ -754,7 +753,7 @@ Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_assoc
     return elements;
 }
 
-GC::Ptr<Layout::Node> Element::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     if (local_name() == "noscript" && document().is_scripting_enabled())
         return nullptr;
@@ -763,7 +762,7 @@ GC::Ptr<Layout::Node> Element::create_layout_node(GC::Ref<CSS::ComputedPropertie
     return create_layout_node_for_display_type(document(), display, style, this);
 }
 
-GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, GC::Ref<CSS::ComputedProperties> style, Element* element)
+GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::ComputedProperties> style, Element* element)
 {
     if (display.is_none())
         return {};
@@ -3236,7 +3235,7 @@ void Element::set_cascaded_properties(Optional<CSS::PseudoElement> pseudo_elemen
     }
 }
 
-GC::Ptr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type)
+RefPtr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type)
 {
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
@@ -3246,7 +3245,7 @@ GC::Ptr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::Pseu
     return m_computed_properties;
 }
 
-GC::Ptr<CSS::ComputedProperties const> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type) const
+RefPtr<CSS::ComputedProperties const> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
@@ -3256,7 +3255,7 @@ GC::Ptr<CSS::ComputedProperties const> Element::computed_properties(Optional<CSS
     return m_computed_properties;
 }
 
-void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_element_type, GC::Ptr<CSS::ComputedProperties> style)
+void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_element_type, RefPtr<CSS::ComputedProperties> style)
 {
     if (pseudo_element_type.has_value()) {
         if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(*pseudo_element_type))

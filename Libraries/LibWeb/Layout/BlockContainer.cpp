@@ -11,7 +11,7 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(BlockContainer);
 
-BlockContainer::BlockContainer(DOM::Document& document, DOM::Node* node, GC::Ref<CSS::ComputedProperties> style)
+BlockContainer::BlockContainer(DOM::Document& document, DOM::Node* node, NonnullRefPtr<CSS::ComputedProperties> style)
     : Box(document, node, move(style))
 {
 }

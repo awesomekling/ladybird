@@ -45,7 +45,7 @@ void SVGSVGElement::visit_edges(Visitor& visitor)
     visitor.visit(m_active_view_element);
 }
 
-GC::Ptr<Layout::Node> SVGSVGElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGSVGElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     return heap().allocate<Layout::SVGSVGBox>(document(), *this, move(style));
 }

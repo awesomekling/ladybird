@@ -17,7 +17,7 @@ class ListItemMarkerBox final : public Box {
     GC_DECLARE_ALLOCATOR(ListItemMarkerBox);
 
 public:
-    explicit ListItemMarkerBox(DOM::Document&, CSS::ListStyleType, CSS::ListStylePosition, GC::Ref<DOM::Element>, GC::Ref<CSS::ComputedProperties>);
+    explicit ListItemMarkerBox(DOM::Document&, CSS::ListStyleType, CSS::ListStylePosition, GC::Ref<DOM::Element>, NonnullRefPtr<CSS::ComputedProperties>);
     virtual ~ListItemMarkerBox() override;
 
     Optional<String> text() const;

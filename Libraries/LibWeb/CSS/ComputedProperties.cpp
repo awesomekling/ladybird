@@ -8,7 +8,6 @@
 #include <AK/NonnullRawPtr.h>
 #include <AK/TypeCasts.h>
 #include <LibCore/DirIterator.h>
-#include <LibGC/CellAllocator.h>
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Animations/ScrollTimeline.h>
@@ -54,16 +53,9 @@
 
 namespace Web::CSS {
 
-GC_DEFINE_ALLOCATOR(ComputedProperties);
-
 ComputedProperties::ComputedProperties() = default;
 
 ComputedProperties::~ComputedProperties() = default;
-
-void ComputedProperties::visit_edges(Visitor& visitor)
-{
-    Base::visit_edges(visitor);
-}
 
 bool ComputedProperties::is_property_important(PropertyID property_id) const
 {

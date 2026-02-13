@@ -100,10 +100,10 @@ public:
     void push_ancestor(DOM::Element const&);
     void pop_ancestor(DOM::Element const&);
 
-    [[nodiscard]] GC::Ref<ComputedProperties> create_document_style() const;
+    [[nodiscard]] NonnullRefPtr<ComputedProperties> create_document_style() const;
 
-    [[nodiscard]] GC::Ref<ComputedProperties> compute_style(DOM::AbstractElement, Optional<bool&> did_change_custom_properties = {}) const;
-    [[nodiscard]] GC::Ptr<ComputedProperties> compute_pseudo_element_style_if_needed(DOM::AbstractElement, Optional<bool&> did_change_custom_properties) const;
+    [[nodiscard]] NonnullRefPtr<ComputedProperties> compute_style(DOM::AbstractElement, Optional<bool&> did_change_custom_properties = {}) const;
+    [[nodiscard]] RefPtr<ComputedProperties> compute_pseudo_element_style_if_needed(DOM::AbstractElement, Optional<bool&> did_change_custom_properties) const;
 
     [[nodiscard]] Vector<MatchingRule const*> collect_matching_rules(DOM::AbstractElement, CascadeOrigin, PseudoClassBitmap& attempted_pseudo_class_matches, Optional<FlyString const> qualified_layer_name = {}) const;
 
@@ -119,7 +119,7 @@ public:
 
     void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect> animation, ComputedProperties&) const;
 
-    [[nodiscard]] GC::Ref<ComputedProperties> compute_properties(DOM::AbstractElement, CascadedProperties&) const;
+    [[nodiscard]] NonnullRefPtr<ComputedProperties> compute_properties(DOM::AbstractElement, CascadedProperties&) const;
 
     void compute_property_values(ComputedProperties&, Optional<DOM::AbstractElement>) const;
     void process_animation_definitions(ComputedProperties const& computed_properties, DOM::AbstractElement& abstract_element) const;
@@ -165,7 +165,7 @@ private:
     [[nodiscard]] MatchingRuleSet build_matching_rule_set(DOM::AbstractElement, PseudoClassBitmap& attempted_pseudo_class_matches, bool& did_match_any_pseudo_element_rules, ComputeStyleMode, StyleScope const&) const;
 
     LogicalAliasMappingContext compute_logical_alias_mapping_context(DOM::AbstractElement, ComputeStyleMode, MatchingRuleSet const&) const;
-    [[nodiscard]] GC::Ptr<ComputedProperties> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&) const;
+    [[nodiscard]] RefPtr<ComputedProperties> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&) const;
     [[nodiscard]] GC::Ref<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, bool did_match_any_pseudo_element_rules, ComputeStyleMode, MatchingRuleSet const&, Optional<LogicalAliasMappingContext>, ReadonlySpan<PropertyID> properties_to_cascade) const;
     void compute_custom_properties(ComputedProperties&, DOM::AbstractElement) const;
     void start_needed_transitions(ComputedProperties const& old_style, ComputedProperties& new_style, DOM::AbstractElement) const;

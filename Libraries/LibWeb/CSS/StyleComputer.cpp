@@ -1696,9 +1696,9 @@ void StyleComputer::transform_box_type_if_needed(ComputedProperties& style, DOM:
         style.set_property(PropertyID::Display, DisplayStyleValue::create(new_display));
 }
 
-GC::Ref<ComputedProperties> StyleComputer::create_document_style() const
+NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
 {
-    auto style = document().heap().allocate<CSS::ComputedProperties>();
+    auto style = adopt_ref(*new CSS::ComputedProperties());
     for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
         auto property_id = static_cast<PropertyID>(i);
         style->set_property(property_id, property_initial_value(property_id));
@@ -1712,19 +1712,19 @@ GC::Ref<ComputedProperties> StyleComputer::create_document_style() const
     return style;
 }
 
-GC::Ref<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
+NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
 {
     auto& style_scope = abstract_element.style_scope();
     return *compute_style_impl(abstract_element, ComputeStyleMode::Normal, did_change_custom_properties, style_scope);
 }
 
-GC::Ptr<ComputedProperties> StyleComputer::compute_pseudo_element_style_if_needed(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
+RefPtr<ComputedProperties> StyleComputer::compute_pseudo_element_style_if_needed(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
 {
     auto& style_scope = abstract_element.style_scope();
     return compute_style_impl(abstract_element, ComputeStyleMode::CreatePseudoElementStyleIfNeeded, did_change_custom_properties, style_scope);
 }
 
-GC::Ptr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElement abstract_element, ComputeStyleMode mode, Optional<bool&> did_change_custom_properties, StyleScope const& style_scope) const
+RefPtr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElement abstract_element, ComputeStyleMode mode, Optional<bool&> did_change_custom_properties, StyleScope const& style_scope) const
 {
     style_scope.build_rule_cache_if_needed();
 
@@ -1946,9 +1946,9 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
     return CSS::LengthStyleValue::create(CSS::Length::make_px(current_size_in_px));
 }
 
-GC::Ref<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties) const
+NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties) const
 {
-    auto computed_style = document().heap().allocate<CSS::ComputedProperties>();
+    auto computed_style = adopt_ref(*new CSS::ComputedProperties());
 
     auto new_font_size = recascade_font_size_if_needed(abstract_element, cascaded_properties);
     if (new_font_size)

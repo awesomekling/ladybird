@@ -82,7 +82,7 @@ GC::Ref<DOM::DOMTokenList> SVGAElement::rel_list()
     return *m_rel_list;
 }
 
-GC::Ptr<Layout::Node> SVGAElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGAElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     return heap().allocate<Layout::SVGGraphicsBox>(document(), *this, move(style));
 }

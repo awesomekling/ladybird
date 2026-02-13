@@ -10,6 +10,7 @@
 #include <AK/NonnullRefPtr.h>
 #include <AK/Vector.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -283,7 +284,7 @@ public:
     void set_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
 
 protected:
-    NodeWithStyle(DOM::Document&, DOM::Node*, GC::Ref<CSS::ComputedProperties>);
+    NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
 
 private:
@@ -315,7 +316,7 @@ public:
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
 protected:
-    NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Node* node, GC::Ref<CSS::ComputedProperties> style)
+    NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Node* node, NonnullRefPtr<CSS::ComputedProperties> style)
         : NodeWithStyle(document, node, style)
     {
     }

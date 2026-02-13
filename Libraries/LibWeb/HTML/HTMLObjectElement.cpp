@@ -188,7 +188,7 @@ void HTMLObjectElement::set_data(String const& data)
     set_attribute_value(HTML::AttributeNames::data, data);
 }
 
-GC::Ptr<Layout::Node> HTMLObjectElement::create_layout_node(GC::Ref<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLObjectElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     switch (m_representation) {
     case Representation::Children:
