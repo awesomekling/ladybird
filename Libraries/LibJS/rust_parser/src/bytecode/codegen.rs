@@ -6211,6 +6211,16 @@ pub fn emit_function_declaration_instantiation(
                 gen.emit(Instruction::CreateVariableEnvironment {
                     capacity: fsd.non_local_var_count_for_parameter_expressions as u32,
                 });
+                // After CreateVariableEnvironment, re-read the lexical environment
+                // (which was also updated) and push it onto the register stack.
+                // This ensures subsequent CreateLexicalEnvironment instructions
+                // (e.g. Step 7) use the var environment as their parent, not the
+                // parameter scope.
+                let var_env = gen.allocate_register();
+                gen.emit(Instruction::GetLexicalEnvironment {
+                    dst: var_env.operand(),
+                });
+                gen.lexical_environment_register_stack.push(var_env);
             }
 
             for var in &fsd.vars_to_initialize {
