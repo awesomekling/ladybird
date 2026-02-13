@@ -2013,28 +2013,20 @@ fn generate_update_expression(
             }
         }
         _ => {
-            // Fallback for other expressions (shouldn't normally happen)
-            let value = generate_expr(argument, gen, None)?;
-            if prefixed {
-                match op {
-                    UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                    UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                }
-                Some(value)
-            } else {
-                let dst = choose_dst(gen, preferred_dst);
-                match op {
-                    UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    }),
-                    UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    }),
-                }
-                Some(dst)
-            }
+            // Invalid update target (e.g. foo()++). Per spec, evaluate the
+            // expression first, then throw ReferenceError.
+            generate_expr(argument, gen, None);
+            let exception = gen.allocate_register();
+            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
+            let error_string = gen.intern_string(error_msg);
+            gen.emit(Instruction::NewReferenceError {
+                dst: exception.operand(),
+                error_string,
+            });
+            gen.emit(Instruction::Throw { src: exception.operand() });
+            let dead_block = gen.make_block();
+            gen.switch_to_basic_block(dead_block);
+            Some(gen.add_constant_undefined())
         }
     }
 }
@@ -2241,9 +2233,21 @@ fn generate_assignment_expression(
                     }
                 }
             }
-            // Fallback: just evaluate RHS
-            let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
-            Some(rhs_val)
+            // LHS is not an identifier or member expression (e.g. a function call).
+            // Per spec 13.15.2 step 1b, evaluate the LHS, then throw ReferenceError
+            // before evaluating the RHS.
+            generate_expr(lhs_expr, gen, None);
+            let exception = gen.allocate_register();
+            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
+            let error_string = gen.intern_string(error_msg);
+            gen.emit(Instruction::NewReferenceError {
+                dst: exception.operand(),
+                error_string,
+            });
+            gen.emit(Instruction::Throw { src: exception.operand() });
+            let dead_block = gen.make_block();
+            gen.switch_to_basic_block(dead_block);
+            Some(gen.add_constant_undefined())
         }
         AssignmentLhs::Pattern(pattern) => {
             let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
@@ -3071,6 +3075,7 @@ fn generate_class_expression(
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
     let has_super = data.super_class.is_some();
+    let lhs_name = if data.name.is_none() { gen.pending_lhs_name.take() } else { None };
 
     // Step 2: Save parent environment, create class lexical environment.
     let parent_env = gen.allocate_register();
@@ -3087,8 +3092,6 @@ fn generate_class_expression(
     // Step 3.a: Create binding for the class name in the class environment.
     // For named classes, this is the class name (e.g. "A" in "class A {}").
     // For anonymous classes without lhs_name, create binding for empty name.
-    // FIXME: When lhs_name support is added, only create for named classes
-    //        or classes without lhs_name (matching C++ logic).
     {
         let name = if let Some(name_ident) = &data.name {
             name_ident.name.clone()
@@ -3376,7 +3379,7 @@ fn generate_class_expression(
         super_class: super_class.as_ref().map(|s| s.operand()),
         class_environment: class_env.operand(),
         class_blueprint_index: blueprint_index,
-        lhs_name: None,
+        lhs_name,
         element_keys_count: element_key_ops.len() as u32,
         element_keys: element_key_ops,
     });
@@ -5350,7 +5353,12 @@ fn expression_to_string_approximation(expr: &Expr) -> Vec<u16> {
             }
             s
         }
-        Expression::StringLiteral(s) => s.clone(),
+        Expression::StringLiteral(s) => {
+            let mut result = utf16!("'").to_vec();
+            result.extend_from_slice(s);
+            result.extend_from_slice(utf16!("'"));
+            result
+        }
         Expression::NumericLiteral(n) => {
             let s = format!("{}", n);
             s.encode_utf16().collect()
