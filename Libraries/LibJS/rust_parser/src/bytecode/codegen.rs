@@ -298,6 +298,7 @@ pub fn generate_expr(
             computed,
         } => {
             let obj = generate_expr(object, gen, None)?;
+            let base_id = intern_base_identifier(gen, object);
             let dst = choose_dst(gen, preferred_dst);
             if *computed {
                 let prop = generate_expr(property, gen, None)?;
@@ -305,12 +306,12 @@ pub fn generate_expr(
                     dst: dst.operand(),
                     base: obj.operand(),
                     property: prop.operand(),
-                    base_identifier: None,
+                    base_identifier: base_id,
                 });
             } else {
                 // Non-computed: property must be an Identifier
                 if let Expression::Identifier(ident) = &property.inner {
-                    emit_get_by_id(gen, &dst, &obj, &ident.name, None);
+                    emit_get_by_id(gen, &dst, &obj, &ident.name, base_id);
                 } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
                     let id = gen.intern_identifier(priv_ident.name.clone());
                     gen.emit(Instruction::GetPrivateById {
@@ -5131,6 +5132,20 @@ fn collect_binding_pattern_names(
 }
 
 /// Approximate a source expression as a string for error messages.
+/// Intern the base expression as an identifier for error messages like
+/// "Cannot access property X on null object Y".
+fn intern_base_identifier(gen: &mut Generator, base: &Expr) -> Option<IdentifierTableIndex> {
+    match &base.inner {
+        Expression::Identifier(_)
+        | Expression::Member { .. }
+        | Expression::This => {
+            let s = expression_to_string_approximation(base);
+            Some(gen.intern_identifier(s))
+        }
+        _ => None,
+    }
+}
+
 fn expression_to_string_approximation(expr: &Expr) -> Vec<u16> {
     match &expr.inner {
         Expression::Identifier(ident) => ident.name.clone(),
