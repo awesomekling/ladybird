@@ -3038,6 +3038,14 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             LocalType::Variable => gen.local(local_index),
             LocalType::None => unreachable!(),
         };
+        // TDZ check: throw ReferenceError if assigning to an uninitialized let binding.
+        if !gen.is_local_initialized(local_index)
+            && ident.declaration_kind.get() != IdentDeclarationKind::Var
+        {
+            gen.emit(Instruction::ThrowIfTDZ {
+                src: local.operand(),
+            });
+        }
         gen.emit_mov(&local, value);
     } else if ident.is_global.get() {
         let id = gen.intern_identifier(ident.name.clone());
