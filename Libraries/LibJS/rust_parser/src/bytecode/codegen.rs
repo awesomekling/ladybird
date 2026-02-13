@@ -15,7 +15,7 @@
 
 use crate::ast::*;
 
-use super::generator::{choose_dst, BlockBoundaryType, FinallyContext, Generator, ScopedOperand};
+use super::generator::{choose_dst, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
 use super::operand::*;
 
@@ -132,6 +132,10 @@ pub fn generate_expr(
         Expression::Binary { op, lhs, rhs } => {
             let lhs_val = generate_expr(lhs, gen, None)?;
             let rhs_val = generate_expr(rhs, gen, None)?;
+            // OPTIMIZATION: constant folding for binary operations on constants.
+            if let Some(folded) = try_constant_fold_binary(gen, *op, &lhs_val, &rhs_val) {
+                return Some(folded);
+            }
             let dst = choose_dst(gen, preferred_dst);
             emit_binary_op(gen, *op, &dst, &lhs_val, &rhs_val);
             Some(dst)
@@ -3169,22 +3173,44 @@ fn generate_template_literal(
 ) -> Option<ScopedOperand> {
     // The parser stores ALL parts (string segments AND interpolated expressions)
     // in data.expressions. raw_strings is only populated for tagged templates.
-    if data.expressions.is_empty() {
+
+    // OPTIMIZATION: Filter out empty string segments (matching C++ behavior).
+    let segments: Vec<&Expr> = data.expressions.iter().filter(|e| {
+        !matches!(&e.inner, Expression::StringLiteral(s) if s.is_empty())
+    }).collect();
+
+    if segments.is_empty() {
         return Some(gen.add_constant_string(Vec::new()));
     }
 
-    if data.expressions.len() == 1 {
-        if let Expression::StringLiteral(s) = &data.expressions[0].inner {
-            return Some(gen.add_constant_string(s.clone()));
+    if segments.len() == 1 {
+        let val = generate_expr(segments[0], gen, None)?;
+        // If it's a constant, return directly.
+        if val.operand().is_constant() {
+            return Some(val);
         }
+        // Otherwise, emit ToString.
+        let dst = choose_dst(gen, preferred_dst);
+        gen.emit(Instruction::ToString {
+            dst: dst.operand(),
+            value: val.operand(),
+        });
+        return Some(dst);
     }
 
     let dst = choose_dst(gen, preferred_dst);
     let mut first = true;
-    for expr in &data.expressions {
+    for expr in &segments {
         let val = generate_expr(expr, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
         if first {
-            gen.emit_mov(&dst, &val);
+            if matches!(&expr.inner, Expression::StringLiteral(_)) {
+                gen.emit_mov(&dst, &val);
+            } else {
+                gen.emit(Instruction::ToString {
+                    dst: dst.operand(),
+                    value: val.operand(),
+                });
+            }
             first = false;
         } else {
             gen.emit(Instruction::ConcatString {
@@ -6056,6 +6082,107 @@ fn collect_binding_pattern_names(
             BindingEntryAlias::MemberExpression(_) => {}
         }
     }
+}
+
+/// Try to constant-fold a binary operation when both operands are constants.
+fn try_constant_fold_binary(
+    gen: &mut Generator,
+    op: BinaryOp,
+    lhs: &ScopedOperand,
+    rhs: &ScopedOperand,
+) -> Option<ScopedOperand> {
+    let lhs_const = gen.get_constant(lhs)?;
+    let rhs_const = gen.get_constant(rhs)?;
+    match op {
+        BinaryOp::Addition => {
+            match (lhs_const, rhs_const) {
+                (ConstantValue::String(a), ConstantValue::String(b)) => {
+                    let mut result = a.clone();
+                    result.extend_from_slice(b);
+                    Some(gen.add_constant_string(result))
+                }
+                (ConstantValue::Number(a), ConstantValue::Number(b)) => {
+                    Some(gen.add_constant_number(a + b))
+                }
+                // String + Number or Number + String coercion
+                (ConstantValue::String(a), ConstantValue::Number(b)) => {
+                    let mut result = a.clone();
+                    result.extend(number_to_utf16(*b));
+                    Some(gen.add_constant_string(result))
+                }
+                (ConstantValue::Number(a), ConstantValue::String(b)) => {
+                    let mut result = number_to_utf16(*a);
+                    result.extend_from_slice(b);
+                    Some(gen.add_constant_string(result))
+                }
+                _ => None,
+            }
+        }
+        BinaryOp::Subtraction => {
+            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_number(a - b));
+            }
+            None
+        }
+        BinaryOp::Multiplication => {
+            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_number(a * b));
+            }
+            None
+        }
+        BinaryOp::Division => {
+            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_number(a / b));
+            }
+            None
+        }
+        BinaryOp::Modulo => {
+            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_number(a % b));
+            }
+            None
+        }
+        BinaryOp::Exponentiation => {
+            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_number(a.powf(*b)));
+            }
+            None
+        }
+        BinaryOp::StrictlyEquals => {
+            match (lhs_const, rhs_const) {
+                (ConstantValue::Number(a), ConstantValue::Number(b)) => Some(gen.add_constant_boolean(a == b)),
+                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a == b)),
+                (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a == b)),
+                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
+                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
+                _ => None,
+            }
+        }
+        BinaryOp::StrictlyInequals => {
+            match (lhs_const, rhs_const) {
+                (ConstantValue::Number(a), ConstantValue::Number(b)) => Some(gen.add_constant_boolean(a != b)),
+                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a != b)),
+                (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a != b)),
+                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
+                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn number_to_utf16(n: f64) -> Vec<u16> {
+    // Simple number-to-string for constant folding purposes.
+    if n == 0.0 && n.is_sign_positive() {
+        return vec![b'0' as u16];
+    }
+    let s = if n == (n as i64 as f64) && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    };
+    s.encode_utf16().collect()
 }
 
 // NanBoxed Value encoding helpers matching C++ GC::NanBoxedValue.

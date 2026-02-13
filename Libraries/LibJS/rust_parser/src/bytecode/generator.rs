@@ -457,6 +457,15 @@ impl Generator {
         self.append_constant(ConstantValue::BigInt(value))
     }
 
+    /// Get the constant value for a constant operand.
+    pub fn get_constant(&self, operand: &ScopedOperand) -> Option<&ConstantValue> {
+        if operand.operand().is_constant() {
+            self.constants.get(operand.operand().index() as usize)
+        } else {
+            None
+        }
+    }
+
     // --- Table interning ---
 
     pub fn intern_string(&mut self, s: Vec<u16>) -> StringTableIndex {
