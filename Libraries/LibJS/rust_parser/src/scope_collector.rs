@@ -1116,6 +1116,18 @@ impl ScopeCollector {
             }
 
             if records[idx].is_top_level() {
+                // AnnexB.3.3.1: Skip hoisting if the function name is a parameter name.
+                if records[idx].has_flag(&func.name, FLAG_IS_FORBIDDEN_LEXICAL) {
+                    continue;
+                }
+                // AnnexB.3.3.1: Skip hoisting if the function name is "arguments"
+                // and the function needs an arguments object.
+                if func.name == utf16!("arguments")
+                    && records[idx].contains_access_to_arguments_object_in_non_strict_mode
+                    && !records[idx].has_flag(utf16!("arguments"), FLAG_IS_FORBIDDEN_LEXICAL)
+                {
+                    continue;
+                }
                 // Reached function/program scope — register the hoisted function name.
                 let scope_data = records[idx].scope_data;
                 if !scope_data.is_null() {
