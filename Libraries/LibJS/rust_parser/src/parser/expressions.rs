@@ -516,8 +516,13 @@ impl<'a> Parser<'a> {
                         // Keep the original expression alive so that the scope collector's
                         // raw pointers to its identifiers don't dangle.
                         self.scope_anchor.push(lhs);
-                        // Clear pattern_bound_names — assignment patterns don't need scope registration.
-                        self.pattern_bound_names.clear();
+                        // Register synthesized identifiers with the scope collector so
+                        // they get resolved as locals during analyze().
+                        for (name, id_ptr) in self.pattern_bound_names.drain(..) {
+                            if !id_ptr.is_null() {
+                                self.scope_collector.register_identifier(id_ptr, &name, None);
+                            }
+                        }
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                         return (self.expr(lhs_start, Expression::Assignment {
