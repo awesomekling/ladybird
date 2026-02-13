@@ -481,7 +481,7 @@ pub fn generate_expr(
 
         // === OptionalChain ===
         Expression::OptionalChain { base, references } => {
-            generate_optional_chain(gen, base, references, preferred_dst)
+            generate_optional_chain(gen, base, references, preferred_dst).map(|(v, _)| v)
         }
 
         // === SuperCall ===
@@ -2466,6 +2466,10 @@ fn generate_call_expression(
                 });
                 (callee_reg, Some(this_reg))
             }
+            Expression::OptionalChain { base, references } => {
+                let (callee, this_val) = generate_optional_chain(gen, base, references, None)?;
+                (callee, Some(this_val))
+            }
             _ => {
                 let callee = generate_expr(&data.callee, gen, None)
                     .unwrap_or_else(|| gen.add_constant_undefined());
@@ -3962,14 +3966,14 @@ fn generate_optional_chain(
     base: &Expr,
     references: &[OptionalChainReference],
     preferred_dst: Option<&ScopedOperand>,
-) -> Option<ScopedOperand> {
+) -> Option<(ScopedOperand, ScopedOperand)> {
     let end_block = gen.make_block();
     let dst = choose_dst(gen, preferred_dst);
     let undef = gen.add_constant_undefined();
+    let this_value = gen.allocate_register();
+    gen.emit_mov(&this_value, &undef);
 
     let mut current = generate_expr(base, gen, None)?;
-    // Track the base object for method calls (e.g., obj?.a() needs obj as this).
-    let mut this_value_for_call: Option<ScopedOperand> = None;
 
     for reference in references {
         let is_optional = match reference {
@@ -3999,13 +4003,13 @@ fn generate_optional_chain(
 
         match reference {
             OptionalChainReference::MemberReference { identifier, .. } => {
-                this_value_for_call = Some(current.clone());
+                gen.emit_mov(&this_value, &current);
                 let next = gen.allocate_register();
                 emit_get_by_id(gen, &next, &current, &identifier.name, None);
                 current = next;
             }
             OptionalChainReference::ComputedReference { expression, .. } => {
-                this_value_for_call = Some(current.clone());
+                gen.emit_mov(&this_value, &current);
                 let next = gen.allocate_register();
                 let prop = generate_expr(expression, gen, None)?;
                 gen.emit(Instruction::GetByValue {
@@ -4018,27 +4022,61 @@ fn generate_optional_chain(
             }
             OptionalChainReference::Call { arguments, .. } => {
                 let next = gen.allocate_register();
-                let mut arg_holders = Vec::new();
-                for arg in arguments {
-                    let val = generate_expr(&arg.value, gen, None)
-                        .unwrap_or_else(|| gen.add_constant_undefined());
-                    arg_holders.push(val);
+                let has_spread = arguments.iter().any(|a| a.is_spread);
+                if has_spread {
+                    let args_array = gen.allocate_register();
+                    let first_spread = arguments.iter().position(|a| a.is_spread).unwrap_or(0);
+                    let mut pre_holders = Vec::new();
+                    for arg in &arguments[..first_spread] {
+                        let val = generate_expr(&arg.value, gen, None)
+                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        pre_holders.push(val);
+                    }
+                    let pre_args: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
+                    gen.emit(Instruction::NewArray {
+                        dst: args_array.operand(),
+                        element_count: pre_args.len() as u32,
+                        elements: pre_args,
+                    });
+                    drop(pre_holders);
+                    for arg in &arguments[first_spread..] {
+                        let val = generate_expr(&arg.value, gen, None)
+                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        gen.emit(Instruction::ArrayAppend {
+                            dst: args_array.operand(),
+                            src: val.operand(),
+                            is_spread: arg.is_spread,
+                        });
+                    }
+                    gen.emit(Instruction::CallWithArgumentArray {
+                        dst: next.operand(),
+                        callee: current.operand(),
+                        this_value: this_value.operand(),
+                        arguments: args_array.operand(),
+                        expression_string: None,
+                    });
+                } else {
+                    let mut arg_holders = Vec::new();
+                    for arg in arguments {
+                        let val = generate_expr(&arg.value, gen, None)
+                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        arg_holders.push(val);
+                    }
+                    let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
+                    gen.emit(Instruction::Call {
+                        dst: next.operand(),
+                        callee: current.operand(),
+                        this_value: this_value.operand(),
+                        argument_count: arg_ops.len() as u32,
+                        expression_string: None,
+                        arguments: arg_ops,
+                    });
                 }
-                let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
-                let this_val = this_value_for_call.take()
-                    .unwrap_or_else(|| gen.add_constant_undefined());
-                gen.emit(Instruction::Call {
-                    dst: next.operand(),
-                    callee: current.operand(),
-                    this_value: this_val.operand(),
-                    argument_count: arg_ops.len() as u32,
-                    expression_string: None,
-                    arguments: arg_ops,
-                });
+                gen.emit_mov(&this_value, &undef);
                 current = next;
             }
             OptionalChainReference::PrivateMemberReference { private_identifier, .. } => {
-                this_value_for_call = Some(current.clone());
+                gen.emit_mov(&this_value, &current);
                 let next = gen.allocate_register();
                 let id = gen.intern_identifier(private_identifier.name.clone());
                 gen.emit(Instruction::GetPrivateById {
@@ -4059,7 +4097,7 @@ fn generate_optional_chain(
     }
 
     gen.switch_to_basic_block(end_block);
-    Some(dst)
+    Some((dst, this_value))
 }
 
 // =============================================================================
