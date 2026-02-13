@@ -153,7 +153,7 @@ NonnullRefPtr<ConnectionFromClient::Job> ConnectionFromClient::make_decode_image
             return TRY(decode_image_to_details(encoded_buffer, ideal_size, mime_type));
         },
         [strong_this = NonnullRefPtr(*this), image_id](DecodeResult result) -> ErrorOr<void> {
-            strong_this->async_did_decode_image(image_id, result.is_animated, result.loop_count, move(result.bitmaps), move(result.durations), result.scale, move(result.color_profile));
+            strong_this->async_did_decode_image(image_id, result.is_animated, result.loop_count, move(result.bitmaps), move(result.durations), result.scale, move(result.color_profile), 0);
             strong_this->m_pending_jobs.remove(image_id);
             return {};
         },
@@ -184,6 +184,16 @@ void ConnectionFromClient::cancel_decoding(i64 image_id)
     if (auto job = m_pending_jobs.take(image_id); job.has_value()) {
         job.value()->cancel();
     }
+}
+
+void ConnectionFromClient::request_animation_frames(i64, u32, u32)
+{
+    // Stub: will be implemented when animation sessions are added.
+}
+
+void ConnectionFromClient::stop_animation_decode(i64)
+{
+    // Stub: will be implemented when animation sessions are added.
 }
 
 }

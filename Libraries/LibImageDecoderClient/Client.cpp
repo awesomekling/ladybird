@@ -57,8 +57,9 @@ NonnullRefPtr<Core::Promise<DecodedImage>> Client::decode_image(ReadonlyBytes en
     return promise;
 }
 
-void Client::did_decode_image(i64 image_id, bool is_animated, u32 loop_count, Gfx::BitmapSequence bitmap_sequence, Vector<u32> durations, Gfx::FloatPoint scale, Gfx::ColorSpace color_space)
+void Client::did_decode_image(i64 image_id, bool is_animated, u32 loop_count, Gfx::BitmapSequence bitmap_sequence, Vector<u32> durations, Gfx::FloatPoint scale, Gfx::ColorSpace color_space, i64 session_id)
 {
+    (void)session_id;
     auto bitmaps = move(bitmap_sequence.bitmaps);
     VERIFY(!bitmaps.is_empty());
 
@@ -100,6 +101,16 @@ void Client::did_fail_to_decode_image(i64 image_id, String error_message)
     dbgln("ImageDecoderClient: Failed to decode image with ID {}: {}", image_id, error_message);
     // FIXME: Include the error message in the Error object when Errors are allowed to hold Strings
     promise->reject(Error::from_string_literal("Image decoding failed or aborted"));
+}
+
+void Client::did_decode_animation_frames(i64, Vector<u32>, Gfx::BitmapSequence)
+{
+    // Stub: will be implemented when animation session client is added.
+}
+
+void Client::did_fail_animation_decode(i64, String)
+{
+    // Stub: will be implemented when animation session client is added.
 }
 
 }
