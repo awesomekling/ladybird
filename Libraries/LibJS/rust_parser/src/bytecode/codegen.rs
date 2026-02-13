@@ -3463,13 +3463,12 @@ fn generate_switch_statement(
     for (i, case) in data.cases.iter().enumerate() {
         gen.switch_to_basic_block(case_blocks[i]);
         for child in &case.scope.children {
-            // For function declarations in switch cases: the scope collector
-            // cannot set is_hoisted because block_scope_data doesn't contain
-            // case children. Emit the AnnexB hoisting step here.
+            // For function declarations in switch cases: emit AnnexB hoisting
+            // only if the scope collector approved it (name is in annexb_function_names).
             if did_create_env {
                 if let Statement::FunctionDeclaration(func_data) = &child.inner {
-                    if !func_data.is_hoisted {
-                        if let Some(ref name_ident) = func_data.name {
+                    if let Some(ref name_ident) = func_data.name {
+                        if gen.annexb_function_names.contains(&name_ident.name) {
                             let id = gen.intern_identifier(name_ident.name.clone());
                             let value = gen.allocate_register();
                             gen.emit(Instruction::GetBinding {
@@ -6248,6 +6247,7 @@ pub fn emit_function_declaration_instantiation(
     // --- Step 6: AnnexB function name bindings (non-strict only) ---
     if !strict {
         for name in &body_scope.annexb_function_names {
+            gen.annexb_function_names.insert(name.clone());
             let id = gen.intern_identifier(name.clone());
             gen.emit(Instruction::CreateVariable {
                 identifier: id,

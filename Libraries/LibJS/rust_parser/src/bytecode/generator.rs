@@ -10,7 +10,7 @@
 //! needed for bytecode generation from the Rust AST. It mirrors the
 //! C++ `Bytecode::Generator` class.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::basic_block::{BasicBlock, SourceMapEntry};
 use super::instruction::Instruction;
@@ -222,6 +222,11 @@ pub struct Generator {
     // --- Generator finished flag ---
     pub finished: bool,
 
+    // --- AnnexB function names ---
+    // Names approved for AnnexB.3.3 hoisting by the scope collector.
+    // Populated during FDI, checked in switch case codegen.
+    pub annexb_function_names: HashSet<Vec<u16>>,
+
     // --- FFI context ---
     // These are set by the top-level compiler and passed through for
     // creating SharedFunctionInstanceData via FFI callbacks.
@@ -292,6 +297,7 @@ impl Generator {
             length_identifier: None,
             current_unwind_handler: None,
             finished: false,
+            annexb_function_names: HashSet::new(),
             vm_ptr: std::ptr::null_mut(),
             source_code_ptr: std::ptr::null(),
             source: std::ptr::null(),
