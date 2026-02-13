@@ -13,6 +13,8 @@
 //! - `Some(op)` if the node produces a value (expressions)
 //! - `None` for statements that don't produce values
 
+use std::collections::HashSet;
+
 use crate::ast::*;
 
 use super::generator::{choose_dst, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
@@ -296,9 +298,7 @@ pub fn generate_expr(
             for elem in &elements[..pre_spread_count] {
                 match elem {
                     Some(e) => {
-                        let val = generate_expr(e, gen, None).unwrap_or_else(|| {
-                            gen.add_constant_undefined()
-                        });
+                        let val = generate_expr_or_undefined(e, gen, None);
                         scoped_args.push(val);
                     }
                     None => {
@@ -328,9 +328,7 @@ pub fn generate_expr(
                         }
                         Some(e) => {
                             let is_spread = matches!(e.inner, Expression::Spread(_));
-                            let val = generate_expr(e, gen, None).unwrap_or_else(|| {
-                                gen.add_constant_undefined()
-                            });
+                            let val = generate_expr_or_undefined(e, gen, None);
                             gen.emit(Instruction::ArrayAppend {
                                 dst: dst.operand(),
                                 src: val.operand(),
@@ -390,7 +388,7 @@ pub fn generate_expr(
         // === Spread ===
         Expression::Spread(inner) => {
             // Spread is handled by the caller (Call, Array, Object)
-            generate_expr(inner, gen, preferred_dst)
+            Some(generate_expr_or_undefined(inner, gen, preferred_dst))
         }
 
         // === Yield ===
@@ -399,8 +397,7 @@ pub fn generate_expr(
             is_yield_from,
         } => {
             let value = if let Some(arg) = argument {
-                generate_expr(arg, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined())
+                generate_expr_or_undefined(arg, gen, None)
             } else {
                 gen.add_constant_undefined()
             };
@@ -418,8 +415,7 @@ pub fn generate_expr(
 
         // === Await ===
         Expression::Await(inner) => {
-            let value = generate_expr(inner, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let value = generate_expr_or_undefined(inner, gen, None);
             Some(generate_await(gen, value))
         }
 
@@ -493,8 +489,7 @@ pub fn generate_expr(
                 // Synthetic constructor: super(...args) — single spread arg,
                 // don't call @@iterator on %Array.prototype%.
                 assert!(data.arguments.len() == 1 && data.arguments[0].is_spread);
-                let val = generate_expr(&data.arguments[0].value, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let val = generate_expr_or_undefined(&data.arguments[0].value, gen, None);
                 gen.emit_mov(&args_array_dst, &val);
             } else {
                 // Build arguments array with proper spread handling.
@@ -504,8 +499,7 @@ pub fn generate_expr(
 
                 let mut pre_holders = Vec::new();
                 for arg in &data.arguments[..first_spread] {
-                    let val = generate_expr(&arg.value, gen, None)
-                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    let val = generate_expr_or_undefined(&arg.value, gen, None);
                     pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
                 }
                 let pre_ops: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
@@ -517,8 +511,7 @@ pub fn generate_expr(
                 drop(pre_holders);
 
                 for arg in &data.arguments[first_spread..] {
-                    let val = generate_expr(&arg.value, gen, None)
-                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    let val = generate_expr_or_undefined(&arg.value, gen, None);
                     gen.emit(Instruction::ArrayAppend {
                         dst: args_array_dst.operand(),
                         src: val.operand(),
@@ -558,6 +551,15 @@ pub fn generate_expr(
     gen.current_source_start = saved_source_start;
     gen.current_source_end = saved_source_end;
     result
+}
+
+fn generate_expr_or_undefined(
+    expr: &Expr,
+    gen: &mut Generator,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    generate_expr(expr, gen, preferred_dst)
+        .unwrap_or_else(|| gen.add_constant_undefined())
 }
 
 /// Generate bytecode for a statement.
@@ -626,8 +628,7 @@ pub fn generate_stmt(
         // === Return ===
         Statement::Return(value) => {
             let mut val = match value {
-                Some(expr) => generate_expr(expr, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined()),
+                Some(expr) => generate_expr_or_undefined(expr, gen, None),
                 None => gen.add_constant_undefined(),
             };
             // Async functions implicitly await the return value.
@@ -790,8 +791,7 @@ pub fn generate_stmt(
             if !field_name.is_empty() {
                 gen.pending_lhs_name = Some(gen.intern_identifier(field_name.clone()));
             }
-            let value = generate_expr(expression, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let value = generate_expr_or_undefined(expression, gen, None);
             gen.pending_lhs_name = None;
             gen.emit(Instruction::Return {
                 value: value.operand(),
@@ -1833,7 +1833,7 @@ fn generate_if_statement(
     alternate: Option<&Stmt>,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let pred = generate_expr(predicate, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let pred = generate_expr_or_undefined(predicate, gen, None);
 
     let true_block = gen.make_block();
     let false_block = gen.make_block();
@@ -1887,7 +1887,7 @@ fn generate_while_statement(
     });
 
     gen.switch_to_basic_block(test_block);
-    let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let test_val = generate_expr_or_undefined(test, gen, None);
     gen.emit(Instruction::JumpIf {
         condition: test_val.operand(),
         true_target: Label(body_block as u32),
@@ -1943,7 +1943,7 @@ fn generate_do_while_statement(
     }
 
     gen.switch_to_basic_block(test_block);
-    let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let test_val = generate_expr_or_undefined(test, gen, None);
     gen.emit(Instruction::JumpIf {
         condition: test_val.operand(),
         true_target: Label(body_block as u32),
@@ -1984,8 +1984,7 @@ fn generate_for_statement(
                     let is_const = *kind == DeclarationKind::Const;
 
                     // begin_variable_scope: CreateLexicalEnvironment
-                    let parent = gen.lexical_environment_register_stack.last().cloned()
-                        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                    let parent = gen.current_lexical_environment();
                     let new_env = gen.allocate_register();
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
@@ -2032,7 +2031,7 @@ fn generate_for_statement(
     // Test
     gen.switch_to_basic_block(test_block);
     if let Some(test) = test {
-        let test_val = generate_expr(test, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+        let test_val = generate_expr_or_undefined(test, gen, None);
         gen.emit(Instruction::JumpIf {
             condition: test_val.operand(),
             true_target: Label(body_block as u32),
@@ -2077,8 +2076,7 @@ fn generate_for_statement(
     if has_lexical_environment {
         gen.lexical_environment_register_stack.pop();
         if !gen.is_current_block_terminated() {
-            let parent = gen.lexical_environment_register_stack.last().cloned()
-                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            let parent = gen.current_lexical_environment();
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
     }
@@ -2109,8 +2107,7 @@ fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Vec<u16>]) {
 
     // Pop current environment (end_variable_scope).
     gen.lexical_environment_register_stack.pop();
-    let parent = gen.lexical_environment_register_stack.last().cloned()
-        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let parent = gen.current_lexical_environment();
     gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
 
     // Push new environment (begin_variable_scope).
@@ -2178,8 +2175,7 @@ fn generate_block_statement(
         gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
         gen.lexical_environment_register_stack.pop();
         if !gen.is_current_block_terminated() {
-            let parent = gen.lexical_environment_register_stack.last().cloned()
-                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            let parent = gen.current_lexical_environment();
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
     }
@@ -2188,25 +2184,9 @@ fn generate_block_statement(
 
 /// Create a lexical environment for a block with non-local lexical declarations.
 /// Returns true if an environment was created.
-fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) -> bool {
-    if !needs_block_declaration_instantiation(scope) {
-        return false;
-    }
-
-    let parent = gen.lexical_environment_register_stack.last().cloned()
-        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
-    let new_env = gen.allocate_register();
-    gen.emit(Instruction::CreateLexicalEnvironment {
-        dst: new_env.operand(),
-        parent: parent.operand(),
-        capacity: 0,
-    });
-    gen.lexical_environment_register_stack.push(new_env);
-
-    // Pass 1: Create bindings for non-local lexical declarations.
-    // For function declarations with duplicate names, only create the binding once.
-    let mut func_binding_created: Vec<Vec<u16>> = Vec::new();
-    for child in &scope.children {
+fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Iterator<Item = &'a Stmt>) {
+    let mut func_binding_created: HashSet<Vec<u16>> = HashSet::new();
+    for child in children {
         match &child.inner {
             Statement::VariableDeclaration { kind, declarations } => {
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
@@ -2243,7 +2223,7 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
             }
             Statement::FunctionDeclaration(func_data) => {
                 if let Some(ref name_ident) = func_data.name {
-                    if !name_ident.is_local() && !func_binding_created.contains(&name_ident.name) {
+                    if !name_ident.is_local() && func_binding_created.insert(name_ident.name.clone()) {
                         let id = gen.intern_identifier(name_ident.name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
@@ -2252,13 +2232,29 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
                             is_global: false,
                             is_strict: false,
                         });
-                        func_binding_created.push(name_ident.name.clone());
                     }
                 }
             }
             _ => {}
         }
     }
+}
+
+fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) -> bool {
+    if !needs_block_declaration_instantiation(scope) {
+        return false;
+    }
+
+    let parent = gen.current_lexical_environment();
+    let new_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: new_env.operand(),
+        parent: parent.operand(),
+        capacity: 0,
+    });
+    gen.lexical_environment_register_stack.push(new_env);
+
+    create_lexical_bindings_for_block(gen, scope.children.iter());
 
     // Pass 2: Instantiate function declarations.
     // For duplicate names, only instantiate the last declaration (it wins).
@@ -2432,13 +2428,11 @@ fn generate_call_expression(
                 property,
                 computed,
             } => {
-                let obj = generate_expr(object, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let obj = generate_expr_or_undefined(object, gen, None);
                 let base_id = intern_base_identifier(gen, object);
                 let method = gen.allocate_register();
                 if *computed {
-                    let prop = generate_expr(property, gen, None)
-                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    let prop = generate_expr_or_undefined(property, gen, None);
                     gen.emit(Instruction::GetByValue {
                         dst: method.operand(),
                         base: obj.operand(),
@@ -2476,14 +2470,12 @@ fn generate_call_expression(
                 (callee, Some(this_val))
             }
             _ => {
-                let callee = generate_expr(&data.callee, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let callee = generate_expr_or_undefined(&data.callee, gen, None);
                 (callee, None)
             }
         }
     } else {
-        let callee = generate_expr(&data.callee, gen, None)
-            .unwrap_or_else(|| gen.add_constant_undefined());
+        let callee = generate_expr_or_undefined(&data.callee, gen, None);
         (callee, None)
     };
 
@@ -2505,8 +2497,7 @@ fn generate_call_expression(
 
         let mut pre_holders = Vec::new();
         for arg in &data.arguments[..first_spread] {
-            let val = generate_expr(&arg.value, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let val = generate_expr_or_undefined(&arg.value, gen, None);
             pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
         }
         let pre_args: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
@@ -2518,8 +2509,7 @@ fn generate_call_expression(
         drop(pre_holders);
 
         for arg in &data.arguments[first_spread..] {
-            let val = generate_expr(&arg.value, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let val = generate_expr_or_undefined(&arg.value, gen, None);
             gen.emit(Instruction::ArrayAppend {
                 dst: args_array.operand(),
                 src: val.operand(),
@@ -2558,7 +2548,7 @@ fn generate_call_expression(
         // `bar(i, i++)` — the first arg must be the pre-increment value).
         let mut arg_holders = Vec::new();
         for arg in &data.arguments {
-            let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+            let val = generate_expr_or_undefined(&arg.value, gen, None);
             arg_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
         }
         let args: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
@@ -2832,8 +2822,7 @@ fn generate_assignment_expression(
                     // For computed properties, evaluate the key BEFORE the RHS
                     // (spec: LHS is fully evaluated before RHS).
                     let precomputed_key = if *computed {
-                        let key_val = generate_expr(property, gen, None)
-                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        let key_val = generate_expr_or_undefined(property, gen, None);
                         // Copy into a fresh register so the RHS can't mutate it.
                         let saved = gen.allocate_register();
                         gen.emit_mov(&saved, &key_val);
@@ -3090,8 +3079,7 @@ fn emit_put_to_member(
 ) {
     let base_id = base_object.and_then(|obj| intern_base_identifier(gen, obj));
     if computed {
-        let prop = generate_expr(property, gen, None)
-            .unwrap_or_else(|| gen.add_constant_undefined());
+        let prop = generate_expr_or_undefined(property, gen, None);
         gen.emit(Instruction::PutNormalByValue {
             base: base.operand(),
             property: prop.operand(),
@@ -3138,12 +3126,10 @@ fn emit_delete_reference(
             dst
         }
         Expression::Member { object, property, computed } => {
-            let base = generate_expr(object, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let base = generate_expr_or_undefined(object, gen, None);
             let dst = choose_dst(gen, preferred_dst);
             if *computed {
-                let key = generate_expr(property, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let key = generate_expr_or_undefined(property, gen, None);
                 gen.emit(Instruction::DeleteByValue {
                     dst: dst.operand(),
                     base: base.operand(),
@@ -3179,8 +3165,7 @@ fn emit_store_to_reference(
             emit_set_variable(gen, ident, value);
         }
         Expression::Member { object, property, computed } => {
-            let base = generate_expr(object, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let base = generate_expr_or_undefined(object, gen, None);
             emit_put_to_member(gen, &base, property, *computed, value, Some(object));
         }
         _ => {
@@ -3296,7 +3281,7 @@ fn generate_template_literal(
     let dst = choose_dst(gen, preferred_dst);
     let mut first = true;
     for expr in &segments {
-        let val = generate_expr(expr, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+        let val = generate_expr_or_undefined(expr, gen, None);
         if first {
             if matches!(&expr.inner, Expression::StringLiteral(_)) {
                 gen.emit_mov(&dst, &val);
@@ -3331,12 +3316,10 @@ fn generate_tagged_template_literal(
     // Resolve tag and this_value based on the tag expression type.
     let (tag_reg, this_value) = match &tag.inner {
         Expression::Member { object, property, computed } => {
-            let obj = generate_expr(object, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let obj = generate_expr_or_undefined(object, gen, None);
             let method = gen.allocate_register();
             if *computed {
-                let prop = generate_expr(property, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let prop = generate_expr_or_undefined(property, gen, None);
                 gen.emit(Instruction::GetByValue {
                     dst: method.operand(),
                     base: obj.operand(),
@@ -3349,8 +3332,7 @@ fn generate_tagged_template_literal(
             (method, Some(obj))
         }
         Expression::Identifier(ident) if ident.is_local() || ident.is_global.get() => {
-            let tag_val = generate_expr(tag, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let tag_val = generate_expr_or_undefined(tag, gen, None);
             (tag_val, None)
         }
         Expression::Identifier(ident) => {
@@ -3368,8 +3350,7 @@ fn generate_tagged_template_literal(
             (callee_reg, Some(this_reg))
         }
         _ => {
-            let tag_val = generate_expr(tag, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let tag_val = generate_expr_or_undefined(tag, gen, None);
             (tag_val, None)
         }
     };
@@ -3387,8 +3368,7 @@ fn generate_tagged_template_literal(
         if matches!(&data.expressions[i].inner, Expression::NullLiteral) {
             string_regs.push(gen.add_constant_undefined());
         } else {
-            let val = generate_expr(&data.expressions[i], gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let val = generate_expr_or_undefined(&data.expressions[i], gen, None);
             string_regs.push(val);
         }
     }
@@ -3413,8 +3393,7 @@ fn generate_tagged_template_literal(
     // Build arguments: [template_object, ...interpolated_expressions]
     let mut arg_regs = vec![strings_array];
     for i in (1..data.expressions.len()).step_by(2) {
-        let val = generate_expr(&data.expressions[i], gen, None)
-            .unwrap_or_else(|| gen.add_constant_undefined());
+        let val = generate_expr_or_undefined(&data.expressions[i], gen, None);
         arg_regs.push(val);
     }
 
@@ -3537,8 +3516,7 @@ fn generate_switch_statement(
     if did_create_env {
         gen.lexical_environment_register_stack.pop();
         if !gen.is_current_block_terminated() {
-            let parent = gen.lexical_environment_register_stack.last().cloned()
-                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            let parent = gen.current_lexical_environment();
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
     }
@@ -3574,8 +3552,7 @@ fn emit_switch_block_declaration_instantiation(
         return false;
     }
 
-    let parent = gen.lexical_environment_register_stack.last().cloned()
-        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let parent = gen.current_lexical_environment();
     let new_env = gen.allocate_register();
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: new_env.operand(),
@@ -3584,61 +3561,7 @@ fn emit_switch_block_declaration_instantiation(
     });
     gen.lexical_environment_register_stack.push(new_env);
 
-    // Pass 1: Create bindings for non-local lexical declarations.
-    let mut func_binding_created: Vec<Vec<u16>> = Vec::new();
-    for child in &all_children {
-        match &child.inner {
-            Statement::VariableDeclaration { kind, declarations } => {
-                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
-                    let is_constant = *kind == DeclarationKind::Const;
-                    for decl in declarations {
-                        let mut names = Vec::new();
-                        collect_target_names(&decl.target, &mut names);
-                        for (name, _) in &names {
-                            let id = gen.intern_identifier(name.clone());
-                            gen.emit(Instruction::CreateVariable {
-                                identifier: id,
-                                mode: ENV_MODE_LEXICAL,
-                                is_immutable: is_constant,
-                                is_global: false,
-                                is_strict: is_constant,
-                            });
-                        }
-                    }
-                }
-            }
-            Statement::ClassDeclaration(class_data) => {
-                if let Some(ref name_ident) = class_data.name {
-                    if !name_ident.is_local() {
-                        let id = gen.intern_identifier(name_ident.name.clone());
-                        gen.emit(Instruction::CreateVariable {
-                            identifier: id,
-                            mode: ENV_MODE_LEXICAL,
-                            is_immutable: false,
-                            is_global: false,
-                            is_strict: false,
-                        });
-                    }
-                }
-            }
-            Statement::FunctionDeclaration(func_data) => {
-                if let Some(ref name_ident) = func_data.name {
-                    if !name_ident.is_local() && !func_binding_created.contains(&name_ident.name) {
-                        let id = gen.intern_identifier(name_ident.name.clone());
-                        gen.emit(Instruction::CreateVariable {
-                            identifier: id,
-                            mode: ENV_MODE_LEXICAL,
-                            is_immutable: false,
-                            is_global: false,
-                            is_strict: false,
-                        });
-                        func_binding_created.push(name_ident.name.clone());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    create_lexical_bindings_for_block(gen, all_children.iter().copied());
 
     // Pass 2: Instantiate function declarations (last one wins for duplicates).
     let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
@@ -3707,18 +3630,14 @@ fn generate_object_expression(
     }
 
     for (slot, prop) in properties.iter().enumerate() {
-        match prop.property_type {
-            ObjectPropertyType::Spread => {
-                // For spread, the source expression is in `key`, not `value`.
-                let src = generate_expr(&prop.key, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
-                gen.emit(Instruction::PutBySpread {
-                    base: dst.operand(),
-                    src: src.operand(),
-                });
-                continue;
-            }
-            _ => {}
+        if prop.property_type == ObjectPropertyType::Spread {
+            // For spread, the source expression is in `key`, not `value`.
+            let src = generate_expr_or_undefined(&prop.key, gen, None);
+            gen.emit(Instruction::PutBySpread {
+                base: dst.operand(),
+                src: src.operand(),
+            });
+            continue;
         }
 
         // For computed keys, evaluate key before value (spec evaluation order).
@@ -3726,8 +3645,7 @@ fn generate_object_expression(
         // The ToPrimitive is the only user-observable step; after this, the ToPrimitive
         // inside PutOwnByValue's to_property_key is a no-op.
         let computed_key = if prop.is_computed {
-            let key = generate_expr(&prop.key, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let key = generate_expr_or_undefined(&prop.key, gen, None);
             gen.emit(Instruction::ToPrimitiveWithStringHint {
                 dst: key.operand(),
                 value: key.operand(),
@@ -3847,8 +3765,7 @@ fn emit_object_property_set_by_key(
     is_computed: bool,
 ) {
     if is_computed {
-        let key_val = generate_expr(key, gen, None)
-            .unwrap_or_else(|| gen.add_constant_undefined());
+        let key_val = generate_expr_or_undefined(key, gen, None);
         gen.emit(Instruction::PutOwnByValue {
             base: object.operand(),
             property: key_val.operand(),
@@ -3889,8 +3806,7 @@ fn emit_object_property_set_by_key(
         }
         _ => {
             // Computed key
-            let key_val = generate_expr(key, gen, None)
-                .unwrap_or_else(|| gen.add_constant_undefined());
+            let key_val = generate_expr_or_undefined(key, gen, None);
             gen.emit(Instruction::PutOwnByValue {
                 base: object.operand(),
                 property: key_val.operand(),
@@ -3933,8 +3849,7 @@ fn emit_object_accessor_by_key(
     };
 
     let emit_by_value = |gen: &mut Generator, key: &Expr| {
-        let key_val = generate_expr(key, gen, None)
-            .unwrap_or_else(|| gen.add_constant_undefined());
+        let key_val = generate_expr_or_undefined(key, gen, None);
         if is_getter {
             gen.emit(Instruction::PutGetterByValue {
                 base: object.operand(),
@@ -4035,8 +3950,7 @@ fn generate_optional_chain(
                     let first_spread = arguments.iter().position(|a| a.is_spread).unwrap_or(0);
                     let mut pre_holders = Vec::new();
                     for arg in &arguments[..first_spread] {
-                        let val = generate_expr(&arg.value, gen, None)
-                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        let val = generate_expr_or_undefined(&arg.value, gen, None);
                         pre_holders.push(val);
                     }
                     let pre_args: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
@@ -4047,8 +3961,7 @@ fn generate_optional_chain(
                     });
                     drop(pre_holders);
                     for arg in &arguments[first_spread..] {
-                        let val = generate_expr(&arg.value, gen, None)
-                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        let val = generate_expr_or_undefined(&arg.value, gen, None);
                         gen.emit(Instruction::ArrayAppend {
                             dst: args_array.operand(),
                             src: val.operand(),
@@ -4065,8 +3978,7 @@ fn generate_optional_chain(
                 } else {
                     let mut arg_holders = Vec::new();
                     for arg in arguments {
-                        let val = generate_expr(&arg.value, gen, None)
-                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        let val = generate_expr_or_undefined(&arg.value, gen, None);
                         arg_holders.push(val);
                     }
                     let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
@@ -4228,7 +4140,7 @@ fn generate_class_expression(
                 };
 
                 // Handle computed vs static keys
-                let (is_private, _priv_name) = check_private_key(key);
+                let is_private = is_private_key(key);
 
                 // Evaluate the key for non-private elements
                 if !is_private {
@@ -4306,7 +4218,7 @@ fn generate_class_expression(
                     // eval("arguments") inside field initializers correctly
                     // throws a SyntaxError.
                     let sfd_ptr = gen.shared_function_data[idx as usize];
-                    let (key_is_private, _) = check_private_key(key);
+                    let key_is_private = is_private_key(key);
                     let key_name: Vec<u16> = match &key.inner {
                         Expression::PrivateIdentifier(ident) => ident.name.clone(),
                         Expression::Identifier(ident) => ident.name.clone(),
@@ -4333,7 +4245,7 @@ fn generate_class_expression(
                     -1i32
                 };
 
-                let (is_private, _priv_name) = check_private_key(key);
+                let is_private = is_private_key(key);
 
                 if !is_private {
                     let key_val = generate_expr(key, gen, None);
@@ -4476,12 +4388,8 @@ fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
 }
 
 /// Check if a key expression is a private identifier, return (is_private, private_name).
-fn check_private_key(key: &Expr) -> (bool, Option<Vec<u16>>) {
-    if let Expression::PrivateIdentifier(ident) = &key.inner {
-        (true, Some(ident.name.clone()))
-    } else {
-        (false, None)
-    }
+fn is_private_key(key: &Expr) -> bool {
+    matches!(&key.inner, Expression::PrivateIdentifier(_))
 }
 
 /// Get a pointer directly into the AST's PrivateIdentifier name.
@@ -4552,8 +4460,7 @@ fn collect_pattern_binding_names(pattern: &BindingPattern, names: &mut Vec<(Vec<
 /// Create a per-iteration lexical environment for for-in/for-of `let`/`const` declarations.
 /// Returns the parent environment register so we can restore it later.
 fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> ScopedOperand {
-    let parent = gen.lexical_environment_register_stack.last().cloned()
-        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let parent = gen.current_lexical_environment();
 
     // Collect all binding names to determine capacity.
     let mut binding_names: Vec<(Vec<u16>, bool)> = Vec::new();
@@ -4606,8 +4513,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
                     collect_target_names(&decl.target, &mut names);
                 }
                 if !names.is_empty() {
-                    let parent = gen.lexical_environment_register_stack.last().cloned()
-                        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                    let parent = gen.current_lexical_environment();
                     let new_env = gen.allocate_register();
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
@@ -4637,8 +4543,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
 fn leave_for_in_of_head_tdz(gen: &mut Generator) {
     gen.lexical_environment_register_stack.pop();
     if !gen.is_current_block_terminated() {
-        let parent = gen.lexical_environment_register_stack.last().cloned()
-            .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+        let parent = gen.current_lexical_environment();
         gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
     }
 }
@@ -4656,7 +4561,7 @@ fn generate_for_in_statement(
         if let Statement::VariableDeclaration { kind: DeclarationKind::Var, declarations } = &stmt.inner {
             if let Some(decl) = declarations.first() {
                 if let (VariableDeclaratorTarget::Identifier(ident), Some(init)) = (&decl.target, &decl.init) {
-                    let value = generate_expr(init, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+                    let value = generate_expr_or_undefined(init, gen, None);
                     emit_set_variable(gen, ident, &value);
                 }
             }
@@ -4665,7 +4570,7 @@ fn generate_for_in_statement(
 
     // Create TDZ for lexical declarations before evaluating the RHS expression.
     let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
-    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let object = generate_expr_or_undefined(rhs, gen, None);
     if entered_tdz {
         leave_for_in_of_head_tdz(gen);
     }
@@ -4871,7 +4776,7 @@ fn generate_for_of_statement_inner(
 ) -> Option<ScopedOperand> {
     // Create TDZ for lexical declarations before evaluating the RHS expression.
     let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
-    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    let object = generate_expr_or_undefined(rhs, gen, None);
     if entered_tdz {
         leave_for_in_of_head_tdz(gen);
     }
@@ -5482,7 +5387,7 @@ fn generate_object_binding_pattern(
     let has_rest = pattern
         .entries
         .last()
-        .map_or(false, |e| e.is_rest);
+        .is_some_and(|e| e.is_rest);
 
     for entry in &pattern.entries {
         if entry.is_rest {
@@ -5509,8 +5414,7 @@ fn generate_object_binding_pattern(
                 }
             }
             BindingEntryName::Expression(expr) => {
-                let property_name = generate_expr(expr, gen, None)
-                    .unwrap_or_else(|| gen.add_constant_undefined());
+                let property_name = generate_expr_or_undefined(expr, gen, None);
                 if has_rest {
                     let excluded_name = gen.allocate_register();
                     gen.emit_mov(&excluded_name, &property_name);
@@ -5562,8 +5466,7 @@ fn generate_try_statement(
     let saved_block = gen.current_block_index();
 
     // Save lexical environment for restoration in catch/exception handler.
-    let saved_env = gen.lexical_environment_register_stack.last().cloned()
-        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let saved_env = gen.current_lexical_environment();
 
     let mut next_block: Option<usize> = None;
 
@@ -5641,10 +5544,7 @@ fn generate_try_statement(
                     gen.emit_mov(&local, &caught_value);
                     gen.mark_local_initialized(ident.local_index.get());
                 } else {
-                    let parent = gen.lexical_environment_register_stack.last().cloned();
-                    let parent = parent.unwrap_or_else(|| {
-                        gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
-                    });
+                    let parent = gen.current_lexical_environment();
                     let new_env = gen.allocate_register();
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
@@ -5674,10 +5574,7 @@ fn generate_try_statement(
                 collect_pattern_binding_names(pattern, &mut names);
 
                 if !names.is_empty() {
-                    let parent = gen.lexical_environment_register_stack.last().cloned()
-                        .unwrap_or_else(|| {
-                            gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
-                        });
+                    let parent = gen.current_lexical_environment();
                     let new_env = gen.allocate_register();
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
@@ -5709,8 +5606,7 @@ fn generate_try_statement(
         if created_catch_scope {
             gen.lexical_environment_register_stack.pop();
             if !gen.is_current_block_terminated() {
-                let parent = gen.lexical_environment_register_stack.last().cloned()
-                    .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                let parent = gen.current_lexical_environment();
                 gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
             }
         }
@@ -6085,10 +5981,7 @@ pub fn emit_function_declaration_instantiation(
     if has_parameter_expressions {
         let has_non_local_params = parameter_names.iter().any(|(_, is_local)| !is_local);
         if has_non_local_params {
-            let parent = gen.lexical_environment_register_stack.last().cloned();
-            let parent = parent.unwrap_or_else(|| {
-                gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
-            });
+            let parent = gen.current_lexical_environment();
             let new_env = gen.allocate_register();
             gen.emit(Instruction::CreateLexicalEnvironment {
                 dst: new_env.operand(),
@@ -6347,10 +6240,7 @@ pub fn emit_function_declaration_instantiation(
     let has_non_local_lexical_declarations = needs_block_declaration_instantiation(body_scope);
 
     if !strict && has_non_local_lexical_declarations {
-        let parent = gen.lexical_environment_register_stack.last().cloned();
-        let parent = parent.unwrap_or_else(|| {
-            gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
-        });
+        let parent = gen.current_lexical_environment();
         let new_env = gen.allocate_register();
         gen.emit(Instruction::CreateLexicalEnvironment {
             dst: new_env.operand(),

@@ -124,9 +124,9 @@ pub unsafe extern "C" fn rust_compile_program(
     if initiated_by_eval {
         parser.initiated_by_eval = true;
         parser.in_eval_function_context = in_eval_function_context;
-        parser.allow_super_property_lookup = allow_super_property_lookup;
-        parser.allow_super_constructor_call = allow_super_constructor_call;
-        parser.in_class_field_initializer = in_class_field_initializer;
+        parser.flags.allow_super_property_lookup = allow_super_property_lookup;
+        parser.flags.allow_super_constructor_call = allow_super_constructor_call;
+        parser.flags.in_class_field_initializer = in_class_field_initializer;
     }
 
     // Parse

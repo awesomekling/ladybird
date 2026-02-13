@@ -228,6 +228,16 @@ pub struct Generator {
     pub source_len: usize,
 }
 
+macro_rules! next_cache_method {
+    ($method:ident, $field:ident) => {
+        pub fn $method(&mut self) -> u32 {
+            let idx = self.$field;
+            self.$field += 1;
+            idx
+        }
+    };
+}
+
 impl Generator {
     /// Create a new bytecode generator.
     pub fn new() -> Self {
@@ -570,28 +580,16 @@ impl Generator {
 
     // --- Cache index allocation ---
 
-    pub fn next_property_lookup_cache(&mut self) -> u32 {
-        let idx = self.next_property_lookup_cache;
-        self.next_property_lookup_cache += 1;
-        idx
-    }
+    next_cache_method!(next_property_lookup_cache, next_property_lookup_cache);
+    next_cache_method!(next_global_variable_cache, next_global_variable_cache);
+    next_cache_method!(next_template_object_cache, next_template_object_cache);
+    next_cache_method!(next_object_shape_cache, next_object_shape_cache);
 
-    pub fn next_global_variable_cache(&mut self) -> u32 {
-        let idx = self.next_global_variable_cache;
-        self.next_global_variable_cache += 1;
-        idx
-    }
+    // --- Lexical environment helpers ---
 
-    pub fn next_template_object_cache(&mut self) -> u32 {
-        let idx = self.next_template_object_cache;
-        self.next_template_object_cache += 1;
-        idx
-    }
-
-    pub fn next_object_shape_cache(&mut self) -> u32 {
-        let idx = self.next_object_shape_cache;
-        self.next_object_shape_cache += 1;
-        idx
+    pub fn current_lexical_environment(&mut self) -> ScopedOperand {
+        self.lexical_environment_register_stack.last().cloned()
+            .unwrap_or_else(|| self.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)))
     }
 
     // --- Boundary management ---

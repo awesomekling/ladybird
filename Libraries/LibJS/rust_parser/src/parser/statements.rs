@@ -38,7 +38,7 @@ impl<'a> Parser<'a> {
             TokenType::Do => self.parse_do_while_statement(),
             TokenType::While => self.parse_while_statement(),
             TokenType::With => {
-                if self.strict_mode {
+                if self.flags.strict_mode {
                     self.syntax_error("'with' statement not allowed in strict mode");
                 }
                 self.parse_with_statement()
@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
 
     fn parse_return_statement(&mut self) -> Stmt {
         let start = self.position();
-        if !self.in_function_context {
+        if !self.flags.in_function_context {
             self.syntax_error("'return' not allowed outside of a function");
         }
         self.consume_token(TokenType::Return);
@@ -177,7 +177,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        if label.is_none() && !self.in_break_context {
+        if label.is_none() && !self.flags.in_break_context {
             self.syntax_error("Unlabeled 'break' not allowed outside of a loop or switch statement");
         }
 
@@ -188,7 +188,7 @@ impl<'a> Parser<'a> {
 
     fn parse_continue_statement(&mut self) -> Stmt {
         let start = self.position();
-        if !self.in_continue_context {
+        if !self.flags.in_continue_context {
             self.syntax_error("'continue' not allow outside of a loop");
         }
         self.consume_token(TokenType::Continue);
@@ -264,15 +264,15 @@ impl<'a> Parser<'a> {
         let test = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
 
-        let break_before = self.in_break_context;
-        let continue_before = self.in_continue_context;
-        self.in_break_context = true;
-        self.in_continue_context = true;
+        let break_before = self.flags.in_break_context;
+        let continue_before = self.flags.in_continue_context;
+        self.flags.in_break_context = true;
+        self.flags.in_continue_context = true;
 
         let body = self.parse_statement(false);
 
-        self.in_break_context = break_before;
-        self.in_continue_context = continue_before;
+        self.flags.in_break_context = break_before;
+        self.flags.in_continue_context = continue_before;
 
         self.stmt(start, Statement::While {
             test: Box::new(test),
@@ -286,15 +286,15 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Do);
 
-        let break_before = self.in_break_context;
-        let continue_before = self.in_continue_context;
-        self.in_break_context = true;
-        self.in_continue_context = true;
+        let break_before = self.flags.in_break_context;
+        let continue_before = self.flags.in_continue_context;
+        self.flags.in_break_context = true;
+        self.flags.in_continue_context = true;
 
         let body = self.parse_statement(false);
 
-        self.in_break_context = break_before;
-        self.in_continue_context = continue_before;
+        self.flags.in_break_context = break_before;
+        self.flags.in_continue_context = continue_before;
 
         self.consume_token(TokenType::While);
         self.consume_token(TokenType::ParenOpen);
@@ -319,7 +319,7 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_for_loop_scope(None);
 
         let is_await = if self.match_token(TokenType::Await) {
-            if !self.await_expression_is_valid {
+            if !self.flags.await_expression_is_valid {
                 self.syntax_error("for-await-of not allowed outside of async context");
             }
             self.consume();
@@ -359,7 +359,7 @@ impl<'a> Parser<'a> {
                     self.syntax_error("Multiple declarations not allowed in for..in/of");
                 }
                 if self.for_loop_declaration_has_init {
-                    if !(self.for_loop_declaration_is_var && self.for_loop_declaration_count == 1 && !self.strict_mode) {
+                    if !(self.for_loop_declaration_is_var && self.for_loop_declaration_count == 1 && !self.flags.strict_mode) {
                         self.syntax_error("Variable initializer not allowed in for..in/of");
                     }
                 }
@@ -374,13 +374,13 @@ impl<'a> Parser<'a> {
             let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
             self.consume_token(TokenType::ParenClose);
 
-            let break_before = self.in_break_context;
-            let continue_before = self.in_continue_context;
-            self.in_break_context = true;
-            self.in_continue_context = true;
+            let break_before = self.flags.in_break_context;
+            let continue_before = self.flags.in_continue_context;
+            self.flags.in_break_context = true;
+            self.flags.in_continue_context = true;
             let body = self.parse_statement(false);
-            self.in_break_context = break_before;
-            self.in_continue_context = continue_before;
+            self.flags.in_break_context = break_before;
+            self.flags.in_continue_context = continue_before;
 
             let lhs = match init {
                 ForInit::Declaration(decl) => ForInOfLhs::Declaration(Box::new(decl)),
@@ -429,13 +429,13 @@ impl<'a> Parser<'a> {
                 let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::ParenClose);
 
-                let break_before = self.in_break_context;
-                let continue_before = self.in_continue_context;
-                self.in_break_context = true;
-                self.in_continue_context = true;
+                let break_before = self.flags.in_break_context;
+                let continue_before = self.flags.in_continue_context;
+                self.flags.in_break_context = true;
+                self.flags.in_continue_context = true;
                 let body = self.parse_statement(false);
-                self.in_break_context = break_before;
-                self.in_continue_context = continue_before;
+                self.flags.in_break_context = break_before;
+                self.flags.in_continue_context = continue_before;
 
                 let lhs = match init {
                     ForInit::Declaration(decl) => ForInOfLhs::Declaration(Box::new(decl)),
@@ -508,15 +508,15 @@ impl<'a> Parser<'a> {
         };
         self.consume_token(TokenType::ParenClose);
 
-        let break_before = self.in_break_context;
-        let continue_before = self.in_continue_context;
-        self.in_break_context = true;
-        self.in_continue_context = true;
+        let break_before = self.flags.in_break_context;
+        let continue_before = self.flags.in_continue_context;
+        self.flags.in_break_context = true;
+        self.flags.in_continue_context = true;
 
         let body = self.parse_statement(false);
 
-        self.in_break_context = break_before;
-        self.in_continue_context = continue_before;
+        self.flags.in_break_context = break_before;
+        self.flags.in_continue_context = continue_before;
 
         self.stmt(start, Statement::For {
             init,
@@ -557,15 +557,15 @@ impl<'a> Parser<'a> {
         // Open block scope for the switch body (all cases share one scope).
         self.scope_collector.open_block_scope(None);
 
-        let break_before = self.in_break_context;
-        self.in_break_context = true;
+        let break_before = self.flags.in_break_context;
+        self.flags.in_break_context = true;
 
         let mut cases = Vec::new();
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             cases.push(self.parse_switch_case());
         }
 
-        self.in_break_context = break_before;
+        self.flags.in_break_context = break_before;
 
         self.consume_token(TokenType::CurlyClose);
 
@@ -709,7 +709,7 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
         self.consume(); // consume :
 
-        if self.strict_mode && label == utf16!("let") {
+        if self.flags.strict_mode && label == utf16!("let") {
             self.syntax_error("Strict mode reserved word 'let' is not allowed in label");
         }
 
@@ -718,7 +718,7 @@ impl<'a> Parser<'a> {
         }
 
         if self.match_token(TokenType::Function) {
-            if !allow_labelled_function || self.strict_mode {
+            if !allow_labelled_function || self.flags.strict_mode {
                 self.syntax_error("Not allowed to declare a function here");
             }
             let next = self.next_token();
@@ -735,8 +735,8 @@ impl<'a> Parser<'a> {
 
         self.labels_in_scope.insert(label.clone(), None);
 
-        let break_before = self.in_break_context;
-        self.in_break_context = true;
+        let break_before = self.flags.in_break_context;
+        self.flags.in_break_context = true;
 
         let body_starts_iteration = self.match_iteration_start();
         self.last_inner_label_is_iteration = false;
@@ -752,7 +752,7 @@ impl<'a> Parser<'a> {
         }
 
         self.labels_in_scope.remove(&label);
-        self.in_break_context = break_before;
+        self.flags.in_break_context = break_before;
         self.last_inner_label_is_iteration = is_iteration;
 
         Some(self.stmt(start, Statement::Labelled {

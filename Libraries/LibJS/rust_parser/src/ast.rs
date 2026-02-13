@@ -176,6 +176,17 @@ pub enum FunctionKind {
     AsyncGenerator = 3,
 }
 
+impl FunctionKind {
+    pub fn from_async_generator(is_async: bool, is_generator: bool) -> Self {
+        match (is_async, is_generator) {
+            (true, true) => Self::AsyncGenerator,
+            (true, false) => Self::Async,
+            (false, true) => Self::Generator,
+            (false, false) => Self::Normal,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProgramType {
     Script,
@@ -647,7 +658,7 @@ pub struct LocalVariable {
 
 /// Data shared by all scope-bearing nodes (Program, BlockStatement,
 /// FunctionBody, SwitchStatement, SwitchCase).
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ScopeData {
     pub children: Vec<Stmt>,
     pub local_variables: Vec<LocalVariable>,
@@ -666,30 +677,13 @@ pub struct ScopeData {
 
 impl ScopeData {
     pub fn new_shared() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
-            children: Vec::new(),
-            local_variables: Vec::new(),
-            function_scope_data: None,
-            hoisted_functions: Vec::new(),
-            annexb_function_names: Vec::new(),
-            uses_this: false,
-            uses_this_from_environment: false,
-            contains_direct_call_to_eval: false,
-            contains_access_to_arguments_object: false,
-        }))
+        Rc::new(RefCell::new(Self::default()))
     }
 
     pub fn shared_with_children(children: Vec<Stmt>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             children,
-            local_variables: Vec::new(),
-            function_scope_data: None,
-            hoisted_functions: Vec::new(),
-            annexb_function_names: Vec::new(),
-            uses_this: false,
-            uses_this_from_environment: false,
-            contains_direct_call_to_eval: false,
-            contains_access_to_arguments_object: false,
+            ..Default::default()
         }))
     }
 }

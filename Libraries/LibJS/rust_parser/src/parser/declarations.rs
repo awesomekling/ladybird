@@ -298,31 +298,14 @@ impl<'a> Parser<'a> {
         let decl_line = self.current_token().line_number;
         let decl_column = self.current_token().line_column;
 
-        let saved_might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = false;
+        let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = false;
 
-        let is_async = if self.match_token(TokenType::Async) {
-            self.consume();
-            true
-        } else {
-            false
-        };
-
+        let is_async = self.eat(TokenType::Async);
         self.consume_token(TokenType::Function);
+        let is_generator = self.eat(TokenType::Asterisk);
 
-        let is_generator = if self.match_token(TokenType::Asterisk) {
-            self.consume();
-            true
-        } else {
-            false
-        };
-
-        let kind = match (is_async, is_generator) {
-            (true, true) => FunctionKind::AsyncGenerator,
-            (true, false) => FunctionKind::Async,
-            (false, true) => FunctionKind::Generator,
-            (false, false) => FunctionKind::Normal,
-        };
+        let kind = FunctionKind::from_async_generator(is_async, is_generator);
 
         // Parse function name.
         let (name, fn_name) = if self.has_default_export_name && !self.match_identifier() {
@@ -343,7 +326,7 @@ impl<'a> Parser<'a> {
         // Register function declaration in parent scope (before opening function scope).
         self.scope_collector.add_function_declaration(
             &fn_name, name.clone(),
-            kind, self.strict_mode, decl_line, decl_column,
+            kind, self.flags.strict_mode, decl_line, decl_column,
         );
 
         // Open function scope.
@@ -351,18 +334,18 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(fn_name_for_scope);
         self.scope_collector.set_is_function_declaration();
 
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
+        let in_generator_before = self.flags.in_generator_function_context;
+        let await_before = self.flags.await_expression_is_valid;
+        self.flags.in_generator_function_context = is_generator;
+        self.flags.await_expression_is_valid = is_async;
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
         self.register_function_params_with_scope(&params, &param_info);
 
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
+        self.flags.in_generator_function_context = in_generator_before;
+        self.flags.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
 
@@ -377,8 +360,8 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&param_info, force_strict, kind);
         }
 
-        let might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = saved_might_need_arguments;
+        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         self.stmt(start, Statement::FunctionDeclaration(Box::new(FunctionData {
             name,
@@ -388,7 +371,7 @@ impl<'a> Parser<'a> {
             parameters: params,
             function_length,
             kind,
-            is_strict_mode: self.strict_mode || has_use_strict,
+            is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: FunctionParsingInsights {
                 might_need_arguments_object: might_need_arguments,
@@ -403,31 +386,14 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_function_expression(&mut self) -> Expr {
         let start = self.position();
 
-        let saved_might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = false;
+        let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = false;
 
-        let is_async = if self.match_token(TokenType::Async) {
-            self.consume();
-            true
-        } else {
-            false
-        };
-
+        let is_async = self.eat(TokenType::Async);
         self.consume_token(TokenType::Function);
+        let is_generator = self.eat(TokenType::Asterisk);
 
-        let is_generator = if self.match_token(TokenType::Asterisk) {
-            self.consume();
-            true
-        } else {
-            false
-        };
-
-        let kind = match (is_async, is_generator) {
-            (true, true) => FunctionKind::AsyncGenerator,
-            (true, false) => FunctionKind::Async,
-            (false, true) => FunctionKind::Generator,
-            (false, false) => FunctionKind::Normal,
-        };
+        let kind = FunctionKind::from_async_generator(is_async, is_generator);
 
         // Optional name.
         let mut fn_name_value: Vec<u16> = Vec::new();
@@ -443,18 +409,18 @@ impl<'a> Parser<'a> {
         let fn_name_for_scope = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
         self.scope_collector.open_function_scope(fn_name_for_scope);
 
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
+        let in_generator_before = self.flags.in_generator_function_context;
+        let await_before = self.flags.await_expression_is_valid;
+        self.flags.in_generator_function_context = is_generator;
+        self.flags.await_expression_is_valid = is_async;
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
         self.register_function_params_with_scope(&params, &param_info);
 
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
+        self.flags.in_generator_function_context = in_generator_before;
+        self.flags.await_expression_is_valid = await_before;
 
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
 
@@ -469,8 +435,8 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&param_info, force_strict, kind);
         }
 
-        let might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = saved_might_need_arguments;
+        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         self.expr(start, Expression::Function(Box::new(FunctionData {
             name,
@@ -480,7 +446,7 @@ impl<'a> Parser<'a> {
             parameters: params,
             function_length,
             kind,
-            is_strict_mode: self.strict_mode || has_use_strict,
+            is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: FunctionParsingInsights {
                 might_need_arguments_object: might_need_arguments,
@@ -495,8 +461,8 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_class_expression(&mut self, expect_name: bool) -> Expr {
         let start = self.position();
 
-        let strict_before = self.strict_mode;
-        self.strict_mode = true;
+        let strict_before = self.flags.strict_mode;
+        self.flags.strict_mode = true;
 
         self.consume_token(TokenType::Class);
 
@@ -561,7 +527,7 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyClose);
         self.class_has_super_class = saved_class_has_super;
-        self.strict_mode = strict_before;
+        self.flags.strict_mode = strict_before;
 
         // Close class declaration scope.
         self.scope_collector.close_scope();
@@ -698,39 +664,39 @@ impl<'a> Parser<'a> {
             // static { } block
             if self.match_token(TokenType::CurlyOpen) {
                 self.consume(); // consume '{'
-                let saved_break = self.in_break_context;
-                let saved_continue = self.in_continue_context;
-                let saved_function = self.in_function_context;
-                let saved_generator = self.in_generator_function_context;
-                let saved_await = self.await_expression_is_valid;
-                let saved_field_init = self.in_class_field_initializer;
-                let saved_static_init = self.in_class_static_init_block;
-                let saved_super = self.allow_super_property_lookup;
-                self.in_break_context = false;
-                self.in_continue_context = false;
-                self.in_function_context = false;
-                self.in_generator_function_context = false;
-                self.await_expression_is_valid = false;
-                self.in_class_field_initializer = true;
-                self.in_class_static_init_block = true;
-                self.allow_super_property_lookup = true;
+                let saved_break = self.flags.in_break_context;
+                let saved_continue = self.flags.in_continue_context;
+                let saved_function = self.flags.in_function_context;
+                let saved_generator = self.flags.in_generator_function_context;
+                let saved_await = self.flags.await_expression_is_valid;
+                let saved_field_init = self.flags.in_class_field_initializer;
+                let saved_static_init = self.flags.in_class_static_init_block;
+                let saved_super = self.flags.allow_super_property_lookup;
+                self.flags.in_break_context = false;
+                self.flags.in_continue_context = false;
+                self.flags.in_function_context = false;
+                self.flags.in_generator_function_context = false;
+                self.flags.await_expression_is_valid = false;
+                self.flags.in_class_field_initializer = true;
+                self.flags.in_class_static_init_block = true;
+                self.flags.allow_super_property_lookup = true;
                 self.scope_collector.open_static_init_scope(None);
                 let children = self.parse_statement_list(false);
-                self.in_break_context = saved_break;
-                self.in_continue_context = saved_continue;
-                self.in_function_context = saved_function;
-                self.in_generator_function_context = saved_generator;
-                self.await_expression_is_valid = saved_await;
-                self.in_class_field_initializer = saved_field_init;
-                self.in_class_static_init_block = saved_static_init;
-                self.allow_super_property_lookup = saved_super;
+                self.flags.in_break_context = saved_break;
+                self.flags.in_continue_context = saved_continue;
+                self.flags.in_function_context = saved_function;
+                self.flags.in_generator_function_context = saved_generator;
+                self.flags.await_expression_is_valid = saved_await;
+                self.flags.in_class_field_initializer = saved_field_init;
+                self.flags.in_class_static_init_block = saved_static_init;
+                self.flags.allow_super_property_lookup = saved_super;
                 self.consume_token(TokenType::CurlyClose);
                 let scope = ScopeData::shared_with_children(children);
                 self.scope_collector.set_scope_node(scope.clone());
                 self.scope_collector.close_scope();
                 let body = self.stmt(start, Statement::FunctionBody {
                     scope,
-                    in_strict_mode: self.strict_mode,
+                    in_strict_mode: self.flags.strict_mode,
                 });
                 return (Some(Node::new(self.range_from(start), ClassElement::StaticInitializer {
                     body: Box::new(body),
@@ -822,12 +788,12 @@ impl<'a> Parser<'a> {
         // Field.
         let init = if self.match_token(TokenType::Equals) {
             self.consume();
-            let saved_field_init = self.in_class_field_initializer;
-            self.in_class_field_initializer = true;
+            let saved_field_init = self.flags.in_class_field_initializer;
+            self.flags.in_class_field_initializer = true;
             self.scope_collector.open_class_field_scope(None);
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
-            self.in_class_field_initializer = saved_field_init;
+            self.flags.in_class_field_initializer = saved_field_init;
             Some(Box::new(expr))
         } else {
             None
@@ -847,20 +813,20 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
 
-        let in_function_before = self.in_function_context;
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
+        let in_function_before = self.flags.in_function_context;
+        let in_generator_before = self.flags.in_generator_function_context;
+        let await_before = self.flags.await_expression_is_valid;
         let old_labels = std::mem::take(&mut self.labels_in_scope);
-        self.in_function_context = true;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
+        self.flags.in_function_context = true;
+        self.flags.in_generator_function_context = is_generator;
+        self.flags.await_expression_is_valid = is_async;
 
         let (has_use_strict, mut children) = self.parse_directive();
-        let body_is_strict = has_use_strict || self.strict_mode;
+        let body_is_strict = has_use_strict || self.flags.strict_mode;
 
-        let strict_before = self.strict_mode;
+        let strict_before = self.flags.strict_mode;
         if has_use_strict {
-            self.strict_mode = true;
+            self.flags.strict_mode = true;
             if !is_simple {
                 self.syntax_error("Illegal 'use strict' directive in function with non-simple parameter list");
             }
@@ -868,10 +834,10 @@ impl<'a> Parser<'a> {
 
         children.extend(self.parse_statement_list(false));
 
-        self.strict_mode = strict_before;
-        self.in_function_context = in_function_before;
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
+        self.flags.strict_mode = strict_before;
+        self.flags.in_function_context = in_function_before;
+        self.flags.in_generator_function_context = in_generator_before;
+        self.flags.await_expression_is_valid = await_before;
         self.labels_in_scope = old_labels;
 
         let insights = FunctionParsingInsights::default();
@@ -911,12 +877,7 @@ impl<'a> Parser<'a> {
 
         loop {
             let param_start = self.position();
-            let rest = if self.match_token(TokenType::TripleDot) {
-                self.consume();
-                true
-            } else {
-                false
-            };
+            let rest = self.eat(TokenType::TripleDot);
 
             let (binding, _is_pat) = if self.match_identifier() {
                 let tok = self.consume();
@@ -925,7 +886,7 @@ impl<'a> Parser<'a> {
                 // Check for duplicate parameter names.
                 for (prev_name, _, _, _) in &param_info {
                     if *prev_name == value {
-                        if self.strict_mode {
+                        if self.flags.strict_mode {
                             let name_str = String::from_utf16_lossy(&value);
                             self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
                         } else if has_seen_default {
@@ -1017,12 +978,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let is_rest = if self.match_token(TokenType::TripleDot) {
-                self.consume();
-                true
-            } else {
-                false
-            };
+            let is_rest = self.eat(TokenType::TripleDot);
 
             let mut entry_name = BindingEntryName::Empty;
             let mut entry_alias = BindingEntryAlias::Empty;

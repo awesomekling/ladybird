@@ -107,21 +107,13 @@ const FLAG_IS_PARAMETER_CANDIDATE: u16 = 1 << 7; // formal parameter name (candi
 
 /// A declared name within a scope. Multiple declaration forms can share
 /// the same name (e.g., `var x` and `function x`), so flags are ORed together.
+#[derive(Default)]
 struct ScopeVariable {
     /// Bit flags describing how this name was declared (FLAG_IS_* constants).
     flags: u16,
     /// The Identifier AST node for the `var` declaration (used to build
     /// FunctionScopeData). None if not a var.
     var_identifier: Option<Rc<Identifier>>,
-}
-
-impl Default for ScopeVariable {
-    fn default() -> Self {
-        Self {
-            flags: 0,
-            var_identifier: None,
-        }
-    }
 }
 
 /// Groups all Identifier AST nodes that share the same name within a scope.
@@ -211,10 +203,7 @@ impl ScopeRecord {
 
     /// Get or create a variable entry, only allocating the key when inserting.
     fn variable(&mut self, name: &[u16]) -> &mut ScopeVariable {
-        if !self.variables.contains_key(name) {
-            self.variables.insert(name.to_vec(), ScopeVariable::default());
-        }
-        self.variables.get_mut(name).unwrap()
+        self.variables.entry(name.to_vec()).or_default()
     }
 
     fn has_flag(&self, name: &[u16], flags: u16) -> bool {
@@ -531,16 +520,15 @@ impl ScopeCollector {
 
     pub fn register_identifier(&mut self, id: Rc<Identifier>, name: &[u16], declaration_kind: Option<DeclarationKind>) {
         let idx = self.current.unwrap();
-        if let Some(group) = self.records[idx].identifier_groups.get_mut(name) {
-            group.identifiers.push(id);
-        } else {
-            self.records[idx].identifier_groups.insert(name.to_vec(), IdentifierGroup {
+        self.records[idx].identifier_groups
+            .entry(name.to_vec())
+            .and_modify(|group| group.identifiers.push(id.clone()))
+            .or_insert_with(|| IdentifierGroup {
                 captured_by_nested_function: false,
                 used_inside_with_statement: false,
                 identifiers: vec![id],
                 declaration_kind,
             });
-        }
     }
 
     // === Function parameters ===
@@ -1132,7 +1120,7 @@ impl ScopeCollector {
                         if let crate::ast::Statement::FunctionDeclaration(ref mut fd)
                             = child.inner
                         {
-                            if fd.name.as_ref().map_or(false, |n| n.name == func.name) {
+                            if fd.name.as_ref().is_some_and(|n| n.name == func.name) {
                                 fd.is_hoisted = true;
                             }
                         }

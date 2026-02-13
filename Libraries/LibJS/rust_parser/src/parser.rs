@@ -136,25 +136,32 @@ pub struct ParserError {
     pub column: u32,
 }
 
+/// Boolean flags that are saved/restored during speculative parsing.
+#[derive(Clone, Copy, Default)]
+#[allow(dead_code)]
+pub(crate) struct ParserFlags {
+    pub strict_mode: bool,
+    pub allow_super_property_lookup: bool,
+    pub allow_super_constructor_call: bool,
+    pub in_function_context: bool,
+    pub in_formal_parameter_context: bool,
+    pub in_generator_function_context: bool,
+    pub await_expression_is_valid: bool,
+    pub in_arrow_function_context: bool,
+    pub in_break_context: bool,
+    pub in_continue_context: bool,
+    pub string_legacy_octal_escape_sequence_in_scope: bool,
+    pub in_class_field_initializer: bool,
+    pub in_class_static_init_block: bool,
+    pub function_might_need_arguments_object: bool,
+    pub previous_token_was_period: bool,
+}
+
 /// Snapshot of parser state for speculative parsing (backtracking).
 struct SavedState {
     token: Token,
     errors_len: usize,
-    strict_mode: bool,
-    allow_super_property_lookup: bool,
-    allow_super_constructor_call: bool,
-    in_function_context: bool,
-    in_formal_parameter_context: bool,
-    in_generator_function_context: bool,
-    await_expression_is_valid: bool,
-    in_arrow_function_context: bool,
-    in_break_context: bool,
-    in_continue_context: bool,
-    string_legacy_octal_escape_sequence_in_scope: bool,
-    in_class_field_initializer: bool,
-    in_class_static_init_block: bool,
-    function_might_need_arguments_object: bool,
-    previous_token_was_period: bool,
+    flags: ParserFlags,
     scope_collector_state: (usize, Option<usize>, usize),
 }
 
@@ -177,25 +184,13 @@ pub struct Parser<'a> {
     /// The original UTF-16 source text.
     source: &'a [u16],
 
-    // --- Parser state flags ---
-    pub(crate) strict_mode: bool,
-    pub(crate) allow_super_property_lookup: bool,
-    pub(crate) allow_super_constructor_call: bool,
-    pub(crate) in_function_context: bool,
+    // --- Parser state flags (saved/restored during speculative parsing) ---
+    pub(crate) flags: ParserFlags,
+
+    // --- Flags NOT saved/restored during speculative parsing ---
     pub(crate) initiated_by_eval: bool,
     #[allow(dead_code)]
     pub(crate) in_eval_function_context: bool,
-    pub(crate) in_formal_parameter_context: bool,
-    pub(crate) in_generator_function_context: bool,
-    pub(crate) await_expression_is_valid: bool,
-    pub(crate) in_arrow_function_context: bool,
-    pub(crate) in_break_context: bool,
-    pub(crate) in_continue_context: bool,
-    pub(crate) string_legacy_octal_escape_sequence_in_scope: bool,
-    pub(crate) in_class_field_initializer: bool,
-    pub(crate) in_class_static_init_block: bool,
-    pub(crate) function_might_need_arguments_object: bool,
-    pub(crate) previous_token_was_period: bool,
 
     /// Labels currently in scope. Value is Some(line, col) if a `continue`
     /// statement referenced this label, None otherwise.
@@ -251,23 +246,9 @@ impl<'a> Parser<'a> {
             saved_states: Vec::new(),
             program_type,
             source,
-            strict_mode: false,
-            allow_super_property_lookup: false,
-            allow_super_constructor_call: false,
-            in_function_context: false,
+            flags: ParserFlags::default(),
             initiated_by_eval: false,
             in_eval_function_context: false,
-            in_formal_parameter_context: false,
-            in_generator_function_context: false,
-            await_expression_is_valid: false,
-            in_arrow_function_context: false,
-            in_break_context: false,
-            in_continue_context: false,
-            string_legacy_octal_escape_sequence_in_scope: false,
-            in_class_field_initializer: false,
-            in_class_static_init_block: false,
-            function_might_need_arguments_object: false,
-            previous_token_was_period: false,
             labels_in_scope: HashMap::new(),
             last_inner_label_is_iteration: false,
             last_function_name: Vec::new(),
@@ -364,7 +345,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn consume(&mut self) -> Token {
         let old = std::mem::replace(&mut self.current_token, self.lexer.next());
         self.check_arguments_or_eval(&old);
-        self.previous_token_was_period = old.token_type == TokenType::Period;
+        self.flags.previous_token_was_period = old.token_type == TokenType::Period;
         old
     }
 
@@ -375,16 +356,25 @@ impl<'a> Parser<'a> {
         self.consume()
     }
 
+    pub(crate) fn eat(&mut self, tt: TokenType) -> bool {
+        if self.match_token(tt) {
+            self.consume();
+            true
+        } else {
+            false
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn consume_and_allow_division(&mut self) -> Token {
         let old = std::mem::replace(&mut self.current_token, self.lexer.next());
         self.check_arguments_or_eval(&old);
-        self.previous_token_was_period = old.token_type == TokenType::Period;
+        self.flags.previous_token_was_period = old.token_type == TokenType::Period;
         old
     }
 
     fn check_arguments_or_eval(&mut self, token: &Token) {
-        if token.token_type == TokenType::Identifier && !self.previous_token_was_period {
+        if token.token_type == TokenType::Identifier && !self.flags.previous_token_was_period {
             let value: &[u16] = if let Some(ref v) = token.identifier_value {
                 v
             } else {
@@ -393,15 +383,15 @@ impl<'a> Parser<'a> {
                 if end <= self.source.len() { &self.source[start..end] } else { &[] }
             };
             if value == utf16!("arguments") {
-                if self.in_class_field_initializer {
+                if self.flags.in_class_field_initializer {
                     self.syntax_error("'arguments' is not allowed in class field initializer");
                 }
-                self.function_might_need_arguments_object = true;
-                if !self.strict_mode {
+                self.flags.function_might_need_arguments_object = true;
+                if !self.flags.strict_mode {
                     self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();
                 }
             } else if value == utf16!("eval") {
-                self.function_might_need_arguments_object = true;
+                self.flags.function_might_need_arguments_object = true;
             }
         }
     }
@@ -420,11 +410,11 @@ impl<'a> Parser<'a> {
         if self.match_identifier() {
             return self.consume();
         }
-        if !self.strict_mode {
-            if self.match_token(TokenType::Yield) && !self.in_generator_function_context {
+        if !self.flags.strict_mode {
+            if self.match_token(TokenType::Yield) && !self.flags.in_generator_function_context {
                 return self.consume();
             }
-            if self.match_token(TokenType::Await) && !self.await_expression_is_valid {
+            if self.match_token(TokenType::Await) && !self.flags.await_expression_is_valid {
                 return self.consume();
             }
         }
@@ -434,7 +424,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn consume_and_validate_numeric_literal(&mut self) -> Token {
         let tok = self.consume();
-        if self.strict_mode {
+        if self.flags.strict_mode {
             let value = self.token_value(&tok);
             if value.len() > 1 && value[0] == b'0' as u16
                 && value[1] >= b'0' as u16 && value[1] <= b'9' as u16
@@ -534,21 +524,7 @@ impl<'a> Parser<'a> {
         self.saved_states.push(SavedState {
             token: self.current_token.clone(),
             errors_len: self.errors.len(),
-            strict_mode: self.strict_mode,
-            allow_super_property_lookup: self.allow_super_property_lookup,
-            allow_super_constructor_call: self.allow_super_constructor_call,
-            in_function_context: self.in_function_context,
-            in_formal_parameter_context: self.in_formal_parameter_context,
-            in_generator_function_context: self.in_generator_function_context,
-            await_expression_is_valid: self.await_expression_is_valid,
-            in_arrow_function_context: self.in_arrow_function_context,
-            in_break_context: self.in_break_context,
-            in_continue_context: self.in_continue_context,
-            string_legacy_octal_escape_sequence_in_scope: self.string_legacy_octal_escape_sequence_in_scope,
-            in_class_field_initializer: self.in_class_field_initializer,
-            in_class_static_init_block: self.in_class_static_init_block,
-            function_might_need_arguments_object: self.function_might_need_arguments_object,
-            previous_token_was_period: self.previous_token_was_period,
+            flags: self.flags,
             scope_collector_state: self.scope_collector.save_state(),
         });
     }
@@ -557,21 +533,7 @@ impl<'a> Parser<'a> {
         let state = self.saved_states.pop().expect("No saved state to restore");
         self.current_token = state.token;
         self.errors.truncate(state.errors_len);
-        self.strict_mode = state.strict_mode;
-        self.allow_super_property_lookup = state.allow_super_property_lookup;
-        self.allow_super_constructor_call = state.allow_super_constructor_call;
-        self.in_function_context = state.in_function_context;
-        self.in_formal_parameter_context = state.in_formal_parameter_context;
-        self.in_generator_function_context = state.in_generator_function_context;
-        self.await_expression_is_valid = state.await_expression_is_valid;
-        self.in_arrow_function_context = state.in_arrow_function_context;
-        self.in_break_context = state.in_break_context;
-        self.in_continue_context = state.in_continue_context;
-        self.string_legacy_octal_escape_sequence_in_scope = state.string_legacy_octal_escape_sequence_in_scope;
-        self.in_class_field_initializer = state.in_class_field_initializer;
-        self.in_class_static_init_block = state.in_class_static_init_block;
-        self.function_might_need_arguments_object = state.function_might_need_arguments_object;
-        self.previous_token_was_period = state.previous_token_was_period;
+        self.flags = state.flags;
         self.scope_collector.load_state(state.scope_collector_state);
         self.lexer.load_state();
     }
@@ -584,25 +546,13 @@ impl<'a> Parser<'a> {
     // === Token matching helpers ===
 
     pub(crate) fn match_identifier(&self) -> bool {
-        if self.current_token.token_type == TokenType::Identifier {
-            return true;
-        }
-        if self.current_token.token_type == TokenType::EscapedKeyword {
-            return !self.match_invalid_escaped_keyword();
-        }
-        if self.current_token.token_type == TokenType::Let && !self.strict_mode {
-            return true;
-        }
-        if self.current_token.token_type == TokenType::Yield && !self.strict_mode && !self.in_generator_function_context {
-            return true;
-        }
-        if self.current_token.token_type == TokenType::Await && !self.await_expression_is_valid && self.program_type != ProgramType::Module {
-            return true;
-        }
-        if self.current_token.token_type == TokenType::Async {
-            return true;
-        }
-        false
+        let tt = self.current_token.token_type;
+        tt == TokenType::Identifier
+            || (tt == TokenType::EscapedKeyword && !self.match_invalid_escaped_keyword())
+            || (tt == TokenType::Let && !self.flags.strict_mode)
+            || (tt == TokenType::Yield && !self.flags.strict_mode && !self.flags.in_generator_function_context)
+            || (tt == TokenType::Await && !self.flags.await_expression_is_valid && self.program_type != ProgramType::Module)
+            || tt == TokenType::Async
     }
 
     pub(crate) fn match_identifier_name(&self) -> bool {
@@ -616,27 +566,21 @@ impl<'a> Parser<'a> {
         }
         let value = self.token_value(&self.current_token);
         if value == utf16!("await") {
-            return self.program_type == ProgramType::Module || self.await_expression_is_valid;
+            return self.program_type == ProgramType::Module || self.flags.await_expression_is_valid;
         }
         if value == utf16!("async") {
             return false;
         }
         if value == utf16!("yield") {
-            return self.in_generator_function_context;
+            return self.flags.in_generator_function_context;
         }
-        if self.strict_mode {
+        if self.flags.strict_mode {
             return true;
         }
-        let non_strict_valid = [
+        ![
             utf16!("implements"), utf16!("interface"), utf16!("package"),
             utf16!("private"), utf16!("protected"), utf16!("public"),
-        ];
-        for kw in &non_strict_valid {
-            if value == *kw {
-                return false;
-            }
-        }
-        true
+        ].contains(&value)
     }
 
     #[allow(dead_code)]
@@ -652,7 +596,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn check_identifier_name_for_assignment_validity(&mut self, name: &[u16], force_strict: bool) {
-        if self.strict_mode || force_strict {
+        if self.flags.strict_mode || force_strict {
             if name == utf16!("arguments") || name == utf16!("eval") {
                 self.syntax_error("Binding pattern target may not be called 'arguments' or 'eval' in strict mode");
             } else if is_strict_reserved_word(name) {
@@ -811,15 +755,15 @@ impl<'a> Parser<'a> {
         // Open program scope — will be closed in parse_program after ScopeData is created.
         self.scope_collector.open_program_scope(ProgramType::Script);
 
-        let strict_before = self.strict_mode;
+        let strict_before = self.flags.strict_mode;
         if starts_in_strict_mode {
-            self.strict_mode = true;
+            self.flags.strict_mode = true;
         }
 
         let (has_use_strict, mut children) = self.parse_directive();
 
-        if self.strict_mode || has_use_strict {
-            self.strict_mode = true;
+        if self.flags.strict_mode || has_use_strict {
+            self.flags.strict_mode = true;
         }
 
         children.extend(self.parse_statement_list(true));
@@ -828,8 +772,8 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let is_strict = self.strict_mode;
-        self.strict_mode = strict_before;
+        let is_strict = self.flags.strict_mode;
+        self.flags.strict_mode = strict_before;
         (children, is_strict)
     }
 
@@ -837,10 +781,10 @@ impl<'a> Parser<'a> {
         // Open program scope — will be closed in parse_program after ScopeData is created.
         self.scope_collector.open_program_scope(ProgramType::Module);
 
-        let strict_before = self.strict_mode;
-        let await_before = self.await_expression_is_valid;
-        self.strict_mode = true;
-        self.await_expression_is_valid = true;
+        let strict_before = self.flags.strict_mode;
+        let await_before = self.flags.await_expression_is_valid;
+        self.flags.strict_mode = true;
+        self.flags.await_expression_is_valid = true;
 
         let mut children = Vec::new();
 
@@ -863,8 +807,8 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.strict_mode = strict_before;
-        self.await_expression_is_valid = await_before;
+        self.flags.strict_mode = strict_before;
+        self.flags.await_expression_is_valid = await_before;
         // has_top_level_await would need scope analysis to determine correctly.
         (children, false)
     }
@@ -879,13 +823,13 @@ impl<'a> Parser<'a> {
 
             if is_use_strict(raw_value) {
                 found_use_strict = true;
-                if self.string_legacy_octal_escape_sequence_in_scope {
+                if self.flags.string_legacy_octal_escape_sequence_in_scope {
                     self.syntax_error("Octal escape sequence in string literal not allowed in strict mode");
                 }
                 break;
             }
         }
-        self.string_legacy_octal_escape_sequence_in_scope = false;
+        self.flags.string_legacy_octal_escape_sequence_in_scope = false;
         (found_use_strict, stmts)
     }
 
@@ -931,7 +875,7 @@ impl<'a> Parser<'a> {
         match self.current_token_type() {
             TokenType::Function | TokenType::Class | TokenType::Const => true,
             TokenType::Let => {
-                if !self.strict_mode {
+                if !self.flags.strict_mode {
                     self.try_match_let_declaration()
                 } else {
                     true

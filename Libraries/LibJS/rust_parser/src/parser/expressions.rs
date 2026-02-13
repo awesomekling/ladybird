@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
                     self.scope_collector.set_uses_new_target();
                 }
                 if self.match_token(TokenType::ParenOpen) {
-                    if !self.allow_super_constructor_call {
+                    if !self.flags.allow_super_constructor_call {
                         self.syntax_error("'super' keyword unexpected here");
                     }
                     let arguments = self.parse_arguments();
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
                         is_synthetic: false,
                     })), true)
                 } else if self.match_token(TokenType::Period) || self.match_token(TokenType::BracketOpen) {
-                    if !self.allow_super_property_lookup {
+                    if !self.flags.allow_super_property_lookup {
                         self.syntax_error("'super' keyword unexpected here");
                     }
                     (self.expr(start, Expression::Super), true)
@@ -262,10 +262,10 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let (value, has_octal) = self.parse_string_value(&tok);
                 if has_octal {
-                    if self.strict_mode {
+                    if self.flags.strict_mode {
                         self.syntax_error("Octal escape sequence in string literal not allowed in strict mode");
                     } else {
-                        self.string_legacy_octal_escape_sequence_in_scope = true;
+                        self.flags.string_legacy_octal_escape_sequence_in_scope = true;
                     }
                 }
                 (self.expr(start, Expression::StringLiteral(value)), true)
@@ -359,12 +359,12 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            TokenType::Yield if self.in_generator_function_context => {
+            TokenType::Yield if self.flags.in_generator_function_context => {
                 let expr = self.parse_yield_expression();
                 (expr, false)
             }
 
-            TokenType::Await if self.await_expression_is_valid => {
+            TokenType::Await if self.flags.await_expression_is_valid => {
                 let expr = self.parse_await_expression();
                 (expr, false)
             }
@@ -705,7 +705,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 let rhs_start = self.position();
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
-                if self.strict_mode && Self::is_identifier(&expr) {
+                if self.flags.strict_mode && Self::is_identifier(&expr) {
                     self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.line, rhs_start.column);
                 }
                 self.expr(start, Expression::Unary {
@@ -730,7 +730,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Period) {
             self.consume();
             self.consume_token(TokenType::Identifier);
-            if !self.in_function_context && !self.in_eval_function_context && !self.in_class_static_init_block {
+            if !self.flags.in_function_context && !self.in_eval_function_context && !self.flags.in_class_static_init_block {
                 self.syntax_error("'new.target' not allowed outside of a function");
             }
             if self.scope_collector.has_current_scope() {
@@ -786,12 +786,7 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
 
         while !self.match_token(TokenType::ParenClose) && !self.done() {
-            let is_spread = if self.match_token(TokenType::TripleDot) {
-                self.consume();
-                true
-            } else {
-                false
-            };
+            let is_spread = self.eat(TokenType::TripleDot);
             let value = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             args.push(CallArgument { value, is_spread });
             if !self.match_token(TokenType::Comma) {
@@ -1147,10 +1142,10 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let (value, has_octal) = self.parse_string_value(&tok);
                 if has_octal {
-                    if self.strict_mode {
+                    if self.flags.strict_mode {
                         self.syntax_error("Octal escape sequence in string literal not allowed in strict mode");
                     } else {
-                        self.string_legacy_octal_escape_sequence_in_scope = true;
+                        self.flags.string_legacy_octal_escape_sequence_in_scope = true;
                     }
                 }
                 let is_proto = value == proto_name;
@@ -1610,7 +1605,7 @@ impl<'a> Parser<'a> {
                 parameters: params,
                 function_length,
                 kind: fn_kind,
-                is_strict_mode: self.strict_mode || has_use_strict,
+                is_strict_mode: self.flags.strict_mode || has_use_strict,
                 is_arrow_function: true,
                 parsing_insights: FunctionParsingInsights::default(),
                 is_hoisted: false,
@@ -1623,7 +1618,7 @@ impl<'a> Parser<'a> {
             self.scope_collector.set_scope_node(scope.clone());
             let body = Stmt::new(self.range_from(body_start), Statement::FunctionBody {
                 scope,
-                in_strict_mode: self.strict_mode,
+                in_strict_mode: self.flags.strict_mode,
             });
 
             // Close function scope.
@@ -1637,7 +1632,7 @@ impl<'a> Parser<'a> {
                 parameters: params,
                 function_length,
                 kind: fn_kind,
-                is_strict_mode: self.strict_mode,
+                is_strict_mode: self.flags.strict_mode,
                 is_arrow_function: true,
                 parsing_insights: FunctionParsingInsights::default(),
                 is_hoisted: false,
@@ -1649,23 +1644,18 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, source_text_start: Position) -> Expr {
         let start = self.position();
 
-        let saved_might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = false;
+        let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = false;
 
-        let fn_kind = match (is_async, is_generator) {
-            (true, true) => FunctionKind::AsyncGenerator,
-            (true, false) => FunctionKind::Async,
-            (false, true) => FunctionKind::Generator,
-            (false, false) => FunctionKind::Normal,
-        };
+        let fn_kind = FunctionKind::from_async_generator(is_async, is_generator);
 
         // Open function scope for method.
         self.scope_collector.open_function_scope(None);
 
-        let in_generator_before = self.in_generator_function_context;
-        let await_before = self.await_expression_is_valid;
-        self.in_generator_function_context = is_generator;
-        self.await_expression_is_valid = is_async;
+        let in_generator_before = self.flags.in_generator_function_context;
+        let await_before = self.flags.await_expression_is_valid;
+        self.flags.in_generator_function_context = is_generator;
+        self.flags.await_expression_is_valid = is_async;
 
         let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
 
@@ -1683,18 +1673,18 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.in_generator_function_context = in_generator_before;
-        self.await_expression_is_valid = await_before;
+        self.flags.in_generator_function_context = in_generator_before;
+        self.flags.await_expression_is_valid = await_before;
 
-        let saved_allow_super_call = self.allow_super_constructor_call;
+        let saved_allow_super_call = self.flags.allow_super_constructor_call;
         if is_constructor && self.class_has_super_class {
-            self.allow_super_constructor_call = true;
+            self.flags.allow_super_constructor_call = true;
         } else {
-            self.allow_super_constructor_call = false;
+            self.flags.allow_super_constructor_call = false;
         }
 
         let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
-        self.allow_super_constructor_call = saved_allow_super_call;
+        self.flags.allow_super_constructor_call = saved_allow_super_call;
 
         // Close function scope.
         self.scope_collector.close_scope();
@@ -1703,8 +1693,8 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
         }
 
-        let might_need_arguments = self.function_might_need_arguments_object;
-        self.function_might_need_arguments_object = saved_might_need_arguments;
+        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         self.expr(start, Expression::Function(Box::new(FunctionData {
             name: None,
@@ -1714,7 +1704,7 @@ impl<'a> Parser<'a> {
             parameters: params,
             function_length,
             kind: fn_kind,
-            is_strict_mode: self.strict_mode || has_use_strict,
+            is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: FunctionParsingInsights {
                 might_need_arguments_object: might_need_arguments,
