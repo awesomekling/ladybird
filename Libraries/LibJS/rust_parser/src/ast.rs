@@ -652,6 +652,10 @@ pub struct ScopeData {
     pub local_variables: Vec<LocalVariable>,
     pub function_scope_data: Option<Box<FunctionScopeData>>,
     pub hoisted_functions: Vec<usize>,
+    /// Function names hoisted from inner blocks via Annex B.3.3.
+    /// The FDI should create `var` bindings initialized to `undefined`
+    /// for each name.
+    pub annexb_function_names: Vec<Vec<u16>>,
     // Scope analysis insights, written by the scope collector after analyze().
     pub uses_this: bool,
     pub uses_this_from_environment: bool,
@@ -666,6 +670,7 @@ impl ScopeData {
             local_variables: Vec::new(),
             function_scope_data: None,
             hoisted_functions: Vec::new(),
+            annexb_function_names: Vec::new(),
             uses_this: false,
             uses_this_from_environment: false,
             contains_direct_call_to_eval: false,
@@ -679,6 +684,7 @@ impl ScopeData {
             local_variables: Vec::new(),
             function_scope_data: None,
             hoisted_functions: Vec::new(),
+            annexb_function_names: Vec::new(),
             uses_this: false,
             uses_this_from_environment: false,
             contains_direct_call_to_eval: false,

@@ -139,10 +139,12 @@ struct IdentifierGroup {
     declaration_kind: Option<DeclarationKind>,
 }
 
-/// A function to hoist, with its name and child index in the ScopeData.
+/// A function to hoist via Annex B.3.3.
 struct HoistableFunction {
     name: Vec<u16>,
-    declaration_index: usize,
+    /// Pointer to the block ScopeData that contains the function declaration.
+    /// Used to set `is_hoisted = true` on the FunctionData when it's hoisted.
+    block_scope_data: *mut ScopeData,
 }
 
 struct ScopeRecord {
@@ -453,7 +455,6 @@ impl ScopeCollector {
         &mut self,
         name: &[u16],
         name_identifier: *const Identifier,
-        declaration_index: usize,
         function_kind: FunctionKind,
         strict_mode: bool,
         decl_line: u32,
@@ -497,9 +498,10 @@ impl ScopeCollector {
             }
 
             if existing_flags & FLAG_IS_LEXICAL == 0 {
+                let block_scope = self.records[idx].scope_data;
                 self.records[idx].functions_to_hoist.push(HoistableFunction {
                     name: name.to_vec(),
-                    declaration_index,
+                    block_scope_data: block_scope,
                 });
             }
 
@@ -575,6 +577,13 @@ impl ScopeCollector {
     pub fn set_scope_node(&mut self, scope_data: *mut ScopeData) {
         let idx = self.current.unwrap();
         self.records[idx].scope_data = scope_data;
+        // Update block_scope_data for any pending functions_to_hoist that
+        // were registered before the ScopeData was created.
+        for func in &mut self.records[idx].functions_to_hoist {
+            if func.block_scope_data.is_null() {
+                func.block_scope_data = scope_data;
+            }
+        }
     }
 
     // === Flag setters ===
@@ -1104,11 +1113,29 @@ impl ScopeCollector {
             }
 
             if records[idx].is_top_level() {
-                // Reached function/program scope — register the hoisted function.
+                // Reached function/program scope — register the hoisted function name.
                 let scope_data = records[idx].scope_data;
                 if !scope_data.is_null() {
                     unsafe {
-                        (*scope_data).hoisted_functions.push(func.declaration_index);
+                        if !(*scope_data).annexb_function_names.contains(&func.name) {
+                            (*scope_data).annexb_function_names.push(func.name.clone());
+                        }
+                    }
+                }
+                // Mark all function declarations with this name in the block
+                // as hoisted, so they emit GetBinding + SetVariableBinding.
+                let block_scope = func.block_scope_data;
+                if !block_scope.is_null() {
+                    unsafe {
+                        for child in &mut (*block_scope).children {
+                            if let crate::ast::Statement::FunctionDeclaration(ref mut fd)
+                                = child.inner
+                            {
+                                if fd.name.as_ref().map_or(false, |n| n.name == func.name) {
+                                    fd.is_hoisted = true;
+                                }
+                            }
+                        }
                     }
                 }
             } else if let Some(parent_idx) = records[idx].parent {

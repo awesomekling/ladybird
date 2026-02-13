@@ -342,10 +342,8 @@ impl<'a> Parser<'a> {
 
         // Register function declaration in parent scope (before opening function scope).
         let name_id_ptr = name.as_ref().map_or(std::ptr::null(), |id| &**id as *const Identifier);
-        // declaration_index will be set later when added to parent's children.
-        // For now, pass 0 — it will be corrected when the parent ScopeData is built.
         self.scope_collector.add_function_declaration(
-            &fn_name, name_id_ptr, 0,
+            &fn_name, name_id_ptr,
             kind, self.strict_mode, decl_line, decl_column,
         );
 

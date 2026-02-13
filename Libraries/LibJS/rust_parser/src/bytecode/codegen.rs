@@ -534,6 +534,9 @@ pub fn generate_stmt(
         Statement::FunctionBody { scope, .. } => generate_scope_children(gen, scope, preferred_dst),
 
         // === Program ===
+        // Note: GlobalDeclarationInstantiation (GDI) runs before this bytecode.
+        // GDI already hoists top-level function declarations and handles Annex B
+        // at the global scope. We only need to generate the program body here.
         Statement::Program(data) => generate_scope_children(gen, &data.scope, preferred_dst),
 
         // === If ===
@@ -616,8 +619,28 @@ pub fn generate_stmt(
             generate_try_statement(gen, data, preferred_dst)
         }
 
-        // === FunctionDeclaration (hoisted, noop at declaration site) ===
-        Statement::FunctionDeclaration(_) => None,
+        // === FunctionDeclaration ===
+        Statement::FunctionDeclaration(func_data) => {
+            if func_data.is_hoisted {
+                // Annex B.3.3: Copy the function from the lexical (block) scope
+                // to the var scope.
+                if let Some(ref name_ident) = func_data.name {
+                    let id = gen.intern_identifier(name_ident.name.clone());
+                    let value = gen.allocate_register();
+                    gen.emit(Instruction::GetBinding {
+                        dst: value.operand(),
+                        identifier: id,
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                    gen.emit(Instruction::SetVariableBinding {
+                        identifier: id,
+                        src: value.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
+            }
+            None
+        }
 
         // === With ===
         Statement::With { object, body } => {
@@ -1572,7 +1595,7 @@ fn generate_block_statement(
 /// Create a lexical environment for a block with non-local lexical declarations.
 /// Returns true if an environment was created.
 fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) -> bool {
-    if !has_non_local_lexical_decls(scope) {
+    if !needs_block_declaration_instantiation(scope) {
         return false;
     }
 
@@ -1586,7 +1609,9 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
     });
     gen.lexical_environment_register_stack.push(new_env);
 
-    // Create bindings for non-local lexical declarations.
+    // Pass 1: Create bindings for non-local lexical declarations.
+    // For function declarations with duplicate names, only create the binding once.
+    let mut func_binding_created: Vec<Vec<u16>> = Vec::new();
     for child in &scope.children {
         match &child.inner {
             Statement::VariableDeclaration { kind, declarations } => {
@@ -1622,11 +1647,65 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
                     }
                 }
             }
-            Statement::FunctionDeclaration(_) => {
-                // Function declarations in blocks need block-scoped bindings too.
-                // (Handled by FDI for the function body scope.)
+            Statement::FunctionDeclaration(func_data) => {
+                if let Some(ref name_ident) = func_data.name {
+                    if !name_ident.is_local() && !func_binding_created.contains(&name_ident.name) {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                        func_binding_created.push(name_ident.name.clone());
+                    }
+                }
             }
             _ => {}
+        }
+    }
+
+    // Pass 2: Instantiate function declarations.
+    // For duplicate names, only instantiate the last declaration (it wins).
+    // Process in reverse to find which index is "last" per name.
+    let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
+    for (i, child) in scope.children.iter().enumerate().rev() {
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name_ident) = func_data.name {
+                if !last_func_indices.iter().any(|(n, _)| *n == name_ident.name) {
+                    last_func_indices.push((name_ident.name.clone(), i));
+                }
+            }
+        }
+    }
+    // Emit in forward order.
+    last_func_indices.reverse();
+    for (_, idx) in &last_func_indices {
+        if let Statement::FunctionDeclaration(func_data) = &scope.children[*idx].inner {
+            let sfd_index = emit_new_function(gen, func_data, None);
+            let fo = gen.allocate_register();
+            gen.emit(Instruction::NewFunction {
+                dst: fo.operand(),
+                shared_function_data_index: sfd_index,
+                home_object: None,
+                lhs_name: None,
+            });
+            if let Some(ref name_ident) = func_data.name {
+                if name_ident.is_local() {
+                    let local_idx = name_ident.local_index.get();
+                    let local = gen.local(local_idx);
+                    gen.emit_mov(&local, &fo);
+                    gen.mark_local_initialized(local_idx);
+                } else {
+                    let id = gen.intern_identifier(name_ident.name.clone());
+                    gen.emit(Instruction::InitializeLexicalBinding {
+                        identifier: id,
+                        src: fo.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
+                }
+            }
         }
     }
 
@@ -5167,11 +5246,28 @@ pub fn emit_function_declaration_instantiation(
     }
 
     // --- Step 6: AnnexB function name bindings (non-strict only) ---
-    // TODO: Implement AnnexB function hoisting once scope collector tracks it.
+    if !strict {
+        for name in &body_scope.annexb_function_names {
+            let id = gen.intern_identifier(name.clone());
+            gen.emit(Instruction::CreateVariable {
+                identifier: id,
+                mode: ENV_MODE_VAR,
+                is_immutable: false,
+                is_global: false,
+                is_strict: false,
+            });
+            let undef = gen.add_constant_undefined();
+            gen.emit(Instruction::InitializeVariableBinding {
+                identifier: id,
+                src: undef.operand(),
+                cache: EnvironmentCoordinate::empty(),
+            });
+        }
+    }
 
     // --- Step 7: Lexical environment for non-local declarations ---
 
-    let has_non_local_lexical_declarations = has_non_local_lexical_decls(body_scope);
+    let has_non_local_lexical_declarations = needs_block_declaration_instantiation(body_scope);
 
     if !strict && has_non_local_lexical_declarations {
         let parent = gen.lexical_environment_register_stack.last().cloned();
@@ -5270,10 +5366,14 @@ pub fn emit_function_declaration_instantiation(
     }
 }
 
-/// Check if a scope has any non-local lexical declarations.
-fn has_non_local_lexical_decls(scope: &ScopeData) -> bool {
+/// Check if a block needs block declaration instantiation.
+/// True when the block has function declarations or non-local let/const/class.
+fn needs_block_declaration_instantiation(scope: &ScopeData) -> bool {
     for child in &scope.children {
         match &child.inner {
+            Statement::FunctionDeclaration(_) => {
+                return true;
+            }
             Statement::VariableDeclaration { kind, declarations } => {
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                     for decl in declarations {
@@ -5296,14 +5396,6 @@ fn has_non_local_lexical_decls(scope: &ScopeData) -> bool {
         }
     }
     false
-}
-
-/// Find a local variable index by name.
-fn find_local_var(gen: &Generator, name: &[u16]) -> Option<u32> {
-    gen.local_variables
-        .iter()
-        .position(|lv| lv.name == name)
-        .map(|i| i as u32)
 }
 
 /// Create a ScopedOperand for a VarToInit's local variable (argument or variable).
