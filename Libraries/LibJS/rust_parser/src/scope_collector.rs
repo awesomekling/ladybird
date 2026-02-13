@@ -732,13 +732,16 @@ impl ScopeCollector {
         // 3. Annex B: hoist block-scoped functions to enclosing function scope.
         Self::hoist_functions(&mut self.records, idx);
 
-        // 4. For function scopes, build the var declaration list that the
-        //    bytecode generator uses to initialize function-scoped variables.
-        if !self.records[idx].scope_data.is_null()
-            && self.records[idx].scope_type == ScopeType::Function
-            && self.records[idx].has_function_parameters
-        {
-            Self::build_function_scope_data(&self.records, idx);
+        // 4. For function-like scopes, build the var declaration list that
+        //    the bytecode generator uses to initialize function-scoped variables.
+        if !self.records[idx].scope_data.is_null() {
+            let st = self.records[idx].scope_type;
+            let needs_fsd = (st == ScopeType::Function && self.records[idx].has_function_parameters)
+                || st == ScopeType::ClassStaticInit
+                || st == ScopeType::ClassField;
+            if needs_fsd {
+                Self::build_function_scope_data(&self.records, idx);
+            }
         }
     }
 
