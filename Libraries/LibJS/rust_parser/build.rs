@@ -144,6 +144,10 @@ fn round_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
 }
 
+/// The alignment of the C++ Instruction base class (`alignas(void*)`).
+/// On 64-bit: alignof(void*) = 8.
+const STRUCT_ALIGN: usize = 8;
+
 /// Compute the byte offset of the m_length field within the C++ struct.
 fn find_m_length_offset(fields: &[Field]) -> usize {
     let mut offset: usize = 2; // after m_type + m_strict
@@ -339,9 +343,12 @@ fn generate_encoded_size_method(out: &mut String, ops: &[OpDef]) {
 
             // Find the array field and its element size
             let array_field = op.fields.iter().find(|f| f.is_array).unwrap();
-            let (_, elem_align, elem_size, _) = field_type_info(&array_field.ty);
+            let (_, _elem_align, elem_size, _) = field_type_info(&array_field.ty);
             let arr_name = rust_field_name(&array_field.name);
-            let aligned_fixed = round_up(fixed_offset, elem_align);
+            // C++ computes m_length as:
+            //   round_up(alignof(void*), sizeof(*this) + sizeof(elem) * count)
+            // sizeof(*this) = round_up(fixed_offset, STRUCT_ALIGN) due to alignas(void*).
+            let sizeof_this = round_up(fixed_offset, STRUCT_ALIGN);
 
             // Bind only the array field
             let bindings: Vec<String> = fields
@@ -356,7 +363,7 @@ fn generate_encoded_size_method(out: &mut String, ops: &[OpDef]) {
                 })
                 .collect();
             writeln!(out, "            Instruction::{} {{ {} }} => {{", op.name, bindings.join(", ")).unwrap();
-            writeln!(out, "                let base = {} + {}.len() * {};", aligned_fixed, arr_name, elem_size).unwrap();
+            writeln!(out, "                let base = {} + {}.len() * {};", sizeof_this, arr_name, elem_size).unwrap();
             writeln!(out, "                (base + 7) & !7 // round up to 8").unwrap();
             writeln!(out, "            }}").unwrap();
         }
@@ -430,11 +437,14 @@ fn generate_encode_method(out: &mut String, ops: &[OpDef]) {
 
         // Write trailing array elements
         if has_array {
+            // sizeof(*this) in C++ = round_up(fixed_offset, STRUCT_ALIGN)
+            let sizeof_this = round_up(offset, STRUCT_ALIGN);
+
             for f in &op.fields {
                 if !f.is_array {
                     continue;
                 }
-                let (_, elem_align, _elem_size, elem_kind) = field_type_info(&f.ty);
+                let (_, elem_align, elem_size, elem_kind) = field_type_info(&f.ty);
                 let rname = rust_field_name(&f.name);
 
                 // Pad before first element if needed
@@ -448,15 +458,12 @@ fn generate_encode_method(out: &mut String, ops: &[OpDef]) {
                 emit_field_write(out, "item", elem_kind, true);
                 writeln!(out, "                }}").unwrap();
 
-                // After the loop, offset is dynamic; we'll pad at the end
-                offset = 0; // mark as dynamic
+                // Compute target size matching C++:
+                //   round_up(STRUCT_ALIGN, sizeof(*this) + count * elem_size)
+                writeln!(out, "                let target = ({} + {}.len() * {} + 7) & !7;",
+                    sizeof_this, rname, elem_size).unwrap();
+                writeln!(out, "                while (buf.len() - start) < target {{ buf.push(0); }}").unwrap();
             }
-        }
-
-        // Pad to multiple of 8
-        if has_array {
-            writeln!(out, "                // Pad to multiple of 8").unwrap();
-            writeln!(out, "                while (buf.len() - start) % 8 != 0 {{ buf.push(0); }}").unwrap();
 
             if has_m_length {
                 // Patch m_length: it's the first u32 field after the header
