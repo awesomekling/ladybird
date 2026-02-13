@@ -1630,13 +1630,20 @@ fn generate_variable_declaration(
                     let id = gen.intern_identifier(ident.name.clone());
                     match kind {
                         DeclarationKind::Var => {
-                            // Var declarations use Set mode (not Initialize) because
-                            // FDI already initialized the binding.
-                            gen.emit(Instruction::SetVariableBinding {
-                                identifier: id,
-                                src: value.operand(),
-                                cache: EnvironmentCoordinate::empty(),
-                            });
+                            if ident.is_global.get() {
+                                let cache = gen.next_global_variable_cache();
+                                gen.emit(Instruction::SetGlobal {
+                                    identifier: id,
+                                    src: value.operand(),
+                                    cache_index: cache,
+                                });
+                            } else {
+                                gen.emit(Instruction::SetVariableBinding {
+                                    identifier: id,
+                                    src: value.operand(),
+                                    cache: EnvironmentCoordinate::empty(),
+                                });
+                            }
                         }
                         DeclarationKind::Let | DeclarationKind::Const => {
                             gen.emit(Instruction::InitializeLexicalBinding {
@@ -2041,16 +2048,43 @@ fn generate_assignment_expression(
             }
             // Member expression LHS (e.g., obj.foo = x, obj[key] = x)
             if let Expression::Member { object, property, computed } = &lhs_expr.inner {
-                let base = generate_expr(object, gen, None)?;
+                let base_raw = generate_expr(object, gen, None)?;
+                // Copy base into a fresh register so the RHS can't mutate it.
+                let base = gen.allocate_register();
+                gen.emit_mov(&base, &base_raw);
                 if op == AssignmentOp::Assignment {
+                    // For computed properties, evaluate the key BEFORE the RHS
+                    // (spec: LHS is fully evaluated before RHS).
+                    let precomputed_key = if *computed {
+                        let key_val = generate_expr(property, gen, None)
+                            .unwrap_or_else(|| gen.add_constant_undefined());
+                        // Copy into a fresh register so the RHS can't mutate it.
+                        let saved = gen.allocate_register();
+                        gen.emit_mov(&saved, &key_val);
+                        Some(saved)
+                    } else {
+                        None
+                    };
                     let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
-                    emit_put_to_member(gen, &base, property, *computed, &rhs_val);
+                    if let Some(key) = precomputed_key {
+                        gen.emit(Instruction::PutNormalByValue {
+                            base: base.operand(),
+                            property: key.operand(),
+                            src: rhs_val.operand(),
+                            base_identifier: None,
+                        });
+                    } else {
+                        emit_put_to_member(gen, &base, property, false, &rhs_val);
+                    }
                     return Some(rhs_val);
                 }
                 // Compound member assignment
                 let old_val = gen.allocate_register();
                 if *computed {
-                    let prop = generate_expr(property, gen, None)?;
+                    let prop_raw = generate_expr(property, gen, None)?;
+                    // Copy key into a fresh register so the RHS can't mutate it.
+                    let prop = gen.allocate_register();
+                    gen.emit_mov(&prop, &prop_raw);
                     gen.emit(Instruction::GetByValue {
                         dst: old_val.operand(),
                         base: base.operand(),
