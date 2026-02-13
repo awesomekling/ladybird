@@ -876,12 +876,9 @@ fn generate_regular_yield(
         src: received_completion_value.operand(),
     });
 
-    // Return block: yield the value without continuation (done).
+    // Return block: route through finally context if active, else yield done.
     gen.switch_to_basic_block(return_block);
-    gen.emit(Instruction::Yield {
-        continuation_label: None,
-        value: received_completion_value.operand(),
-    });
+    gen.generate_return(&received_completion_value);
 
     // Normal block: the yield expression evaluates to the extracted value.
     gen.switch_to_basic_block(normal_block);
@@ -1027,12 +1024,9 @@ fn generate_async_generator_yield(
         src: received_completion_value.operand(),
     });
 
-    // Return: yield with no continuation (done).
+    // Return: route through finally context if active, else yield done.
     gen.switch_to_basic_block(return_value_block);
-    gen.emit(Instruction::Yield {
-        continuation_label: None,
-        value: received_completion_value.operand(),
-    });
+    gen.generate_return(&received_completion_value);
 
     // Normal: return the value.
     gen.switch_to_basic_block(normal_cont);
