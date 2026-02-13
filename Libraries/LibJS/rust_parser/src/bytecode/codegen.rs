@@ -25,10 +25,12 @@ pub fn generate_expr(
     gen: &mut Generator,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    let saved_source_start = gen.current_source_start;
+    let saved_source_end = gen.current_source_end;
     gen.current_source_start = expr.range.start.offset;
     gen.current_source_end = expr.range.end.offset;
 
-    match &expr.inner {
+    let result = match &expr.inner {
         // === Literals ===
         Expression::NumericLiteral(value) => Some(gen.add_constant_number(*value)),
 
@@ -510,7 +512,11 @@ pub fn generate_expr(
         }
 
         Expression::Error => None,
-    }
+    };
+
+    gen.current_source_start = saved_source_start;
+    gen.current_source_end = saved_source_end;
+    result
 }
 
 /// Generate bytecode for a statement.
@@ -519,10 +525,12 @@ pub fn generate_stmt(
     gen: &mut Generator,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    let saved_source_start = gen.current_source_start;
+    let saved_source_end = gen.current_source_end;
     gen.current_source_start = stmt.range.start.offset;
     gen.current_source_end = stmt.range.end.offset;
 
-    match &stmt.inner {
+    let result = match &stmt.inner {
         Statement::Empty | Statement::Error | Statement::ErrorDeclaration => None,
         Statement::Debugger => None,
 
@@ -729,7 +737,11 @@ pub fn generate_stmt(
             });
             None
         }
-    }
+    };
+
+    gen.current_source_start = saved_source_start;
+    gen.current_source_end = saved_source_end;
+    result
 }
 
 // =============================================================================
@@ -1566,6 +1578,13 @@ fn generate_identifier(
         if !gen.is_local_initialized(local_index)
             && ident.declaration_kind.get() != IdentDeclarationKind::Var
         {
+            if ident.local_type.get() == LocalType::Argument {
+                // Arguments are initialized to undefined by default, so we
+                // need to replace the value with the empty sentinel to
+                // trigger the TDZ check.
+                let empty = gen.add_constant_empty();
+                gen.emit_mov(&local, &empty);
+            }
             gen.emit(Instruction::ThrowIfTDZ {
                 src: local.operand(),
             });
