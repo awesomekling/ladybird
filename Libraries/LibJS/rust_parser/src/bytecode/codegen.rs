@@ -4796,6 +4796,23 @@ enum BindingMode {
     Set,
 }
 
+fn set_pending_lhs_name_for_entry(gen: &mut Generator, entry: &BindingEntry) {
+    let name = match &entry.alias {
+        BindingEntryAlias::Identifier(id) => Some(&id.name),
+        BindingEntryAlias::Empty => {
+            if let BindingEntryName::Identifier(id) = &entry.name {
+                Some(&id.name)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if let Some(name) = name {
+        gen.pending_lhs_name = Some(gen.intern_identifier(name.clone()));
+    }
+}
+
 fn generate_binding_pattern_bytecode(
     gen: &mut Generator,
     pattern: &BindingPattern,
@@ -5023,6 +5040,7 @@ fn generate_array_binding_pattern(
                 false_target: Label(if_not_undefined as u32),
             });
             gen.switch_to_basic_block(if_undefined);
+            set_pending_lhs_name_for_entry(gen, entry);
             if let Some(default_value) = generate_expr(initializer, gen, None) {
                 gen.emit_mov(&value, &default_value);
             }
@@ -5141,6 +5159,7 @@ fn generate_object_binding_pattern(
                 false_target: Label(if_not_undefined as u32),
             });
             gen.switch_to_basic_block(if_undefined);
+            set_pending_lhs_name_for_entry(gen, entry);
             if let Some(default_value) = generate_expr(initializer, gen, None) {
                 gen.emit_mov(&value, &default_value);
             }
