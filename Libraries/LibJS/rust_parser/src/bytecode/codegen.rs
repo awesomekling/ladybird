@@ -5289,8 +5289,37 @@ fn generate_try_statement(
                     });
                 }
             }
-            CatchParameter::BindingPattern(_) => {
-                // Destructuring catch: TODO
+            CatchParameter::BindingPattern(pattern) => {
+                let mut names: Vec<(Vec<u16>, bool)> = Vec::new();
+                collect_pattern_binding_names(pattern, &mut names);
+
+                if !names.is_empty() {
+                    let parent = gen.lexical_environment_register_stack.last().cloned()
+                        .unwrap_or_else(|| {
+                            gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT))
+                        });
+                    let new_env = gen.allocate_register();
+                    gen.emit(Instruction::CreateLexicalEnvironment {
+                        dst: new_env.operand(),
+                        parent: parent.operand(),
+                        capacity: names.len() as u32,
+                    });
+                    gen.lexical_environment_register_stack.push(new_env);
+                    created_catch_scope = true;
+
+                    for (name, _) in &names {
+                        let id = gen.intern_identifier(name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                    }
+                }
+
+                generate_binding_pattern_bytecode(gen, pattern, BindingMode::InitializeLexical, &caught_value);
             }
             CatchParameter::None => {}
         }
