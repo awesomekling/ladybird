@@ -4583,6 +4583,19 @@ fn generate_for_in_statement(
     body: &Stmt,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    // B.3.5 Initializers in ForIn Statement Heads
+    // Evaluate the initializer for `for (var x = init in obj)` before the RHS.
+    if let ForInOfLhs::Declaration(stmt) = lhs {
+        if let Statement::VariableDeclaration { kind: DeclarationKind::Var, declarations } = &stmt.inner {
+            if let Some(decl) = declarations.first() {
+                if let (VariableDeclaratorTarget::Identifier(ident), Some(init)) = (&decl.target, &decl.init) {
+                    let value = generate_expr(init, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+                    emit_set_variable(gen, ident, &value);
+                }
+            }
+        }
+    }
+
     // Create TDZ for lexical declarations before evaluating the RHS expression.
     let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
