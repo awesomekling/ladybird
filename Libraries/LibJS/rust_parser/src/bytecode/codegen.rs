@@ -228,11 +228,12 @@ pub fn generate_expr(
                 None
             };
             let shared_function_data_index = emit_new_function(gen, data, name_override);
+            let home_object = gen.home_objects.last().map(|ho| ho.operand());
             gen.emit(Instruction::NewFunction {
                 dst: dst.operand(),
                 shared_function_data_index,
                 lhs_name,
-                home_object: None,
+                home_object,
             });
 
             if has_name {
@@ -3715,8 +3716,19 @@ fn generate_object_expression(
                 gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
             }
         }
+        // Methods, getters, and setters need the object as their [[HomeObject]]
+        // so that super property lookups work.
+        let is_method_like = prop.is_method
+            || prop.property_type == ObjectPropertyType::Getter
+            || prop.property_type == ObjectPropertyType::Setter;
+        if is_method_like {
+            gen.home_objects.push(dst.clone());
+        }
         let value = prop.value.as_ref().and_then(|v| generate_expr(v, gen, None))
             .unwrap_or_else(|| gen.add_constant_undefined());
+        if is_method_like {
+            gen.home_objects.pop();
+        }
         gen.pending_lhs_name = None;
 
         match prop.property_type {
