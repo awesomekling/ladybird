@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/Sizing.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/Layout/Node.h>
@@ -160,6 +161,7 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
         }
 
         auto const& image = *layer.background_image;
+        auto const& image_resource = layer.image_resource;
         auto image_rect = layer.image_rect;
         auto background_positioning_area = layer.background_positioning_area;
 
@@ -258,7 +260,8 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
         CSSPixels initial_image_x = image_rect.x();
         CSSPixels image_y = image_rect.y();
 
-        image.resolve_for_size(paintable_box.layout_node_with_style_and_box_metrics(), image_rect.size());
+        if (!image_resource)
+            image.resolve_for_size(paintable_box.layout_node_with_style_and_box_metrics(), image_rect.size());
 
         auto for_each_image_device_rect = [&](auto callback) {
             while (image_y < css_clip_rect.bottom()) {
@@ -291,7 +294,11 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
             display_list_recorder.apply_effects(1.0f, compositing_and_blending_operator);
         }
 
-        if (auto color = image.color_if_single_pixel_bitmap(); color.has_value()) {
+        auto single_pixel_color = image_resource
+            ? image_resource->color_if_single_pixel_bitmap()
+            : image.color_if_single_pixel_bitmap();
+
+        if (single_pixel_color.has_value()) {
             // OPTIMIZATION: If the image is a single pixel, we can just fill the whole area with it.
             //               However, we must first figure out the real coverage area, taking repeat etc into account.
 
@@ -300,8 +307,8 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
             for_each_image_device_rect([&](auto const& image_device_rect) {
                 fill_rect.unite(image_device_rect);
             });
-            display_list_recorder.fill_rect(fill_rect.to_type<int>(), color.value());
-        } else if (is<CSS::ImageStyleValue>(image) && (repeat_x || repeat_y) && !repeat_x_has_gap && !repeat_y_has_gap) {
+            display_list_recorder.fill_rect(fill_rect.to_type<int>(), single_pixel_color.value());
+        } else if (image_resource && (repeat_x || repeat_y) && !repeat_x_has_gap && !repeat_y_has_gap) {
             // Use a dedicated painting command for repeated images instead of recording a separate command for each instance
             // of a repeated background, so the painter has the opportunity to optimize the painting of repeated images.
             auto dest_rect = context.rounded_device_rect(image_rect);
@@ -312,12 +319,15 @@ void paint_background(DisplayListRecordingContext& context, PaintableBox const& 
             if (dest_rect.height() == 0)
                 dest_rect.set_height(1);
 
-            auto const* bitmap = static_cast<CSS::ImageStyleValue const&>(image).current_frame_bitmap(dest_rect);
+            auto const* bitmap = image_resource->current_frame_bitmap(dest_rect);
             auto scaling_mode = to_gfx_scaling_mode(image_rendering, bitmap->size(), dest_rect.size().to_type<int>());
             context.display_list_recorder().draw_repeated_immutable_bitmap(dest_rect.to_type<int>(), clip_rect.to_type<int>(), *bitmap, scaling_mode, repeat_x, repeat_y);
         } else {
             for_each_image_device_rect([&](auto const& image_device_rect) {
-                image.paint(context, image_device_rect, image_rendering);
+                if (image_resource)
+                    image_resource->paint(context, image_device_rect, image_rendering);
+                else
+                    image.paint(context, image_device_rect, image_rendering);
             });
         }
 
@@ -345,8 +355,14 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
 
     Vector<ResolvedBackgroundLayerData> resolved_layers;
     for (auto const& layer : layers) {
-        if (!layer.background_image->is_paintable())
-            continue;
+        auto const& image_resource = layer.image_resource;
+        if (image_resource) {
+            if (!image_resource->is_paintable())
+                continue;
+        } else {
+            if (!layer.background_image->is_paintable())
+                continue;
+        }
 
         auto background_positioning_area = get_box(layer.origin, border_box, paintable_box).rect;
         auto const& image = *layer.background_image;
@@ -359,9 +375,14 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
             if (!layer.size_y.is_auto())
                 specified_height = layer.size_y.length_percentage().to_px(paintable_box.layout_node(), background_positioning_area.height());
         }
+
+        auto natural_width = image_resource ? image_resource->natural_width() : image.natural_width();
+        auto natural_height = image_resource ? image_resource->natural_height() : image.natural_height();
+        auto natural_aspect_ratio = image_resource ? image_resource->natural_aspect_ratio() : image.natural_aspect_ratio();
+
         auto concrete_image_size = CSS::run_default_sizing_algorithm(
             specified_width, specified_height,
-            { image.natural_width(), image.natural_height(), image.natural_aspect_ratio() },
+            { natural_width, natural_height, natural_aspect_ratio },
             background_positioning_area.size());
 
         // If any of these are zero, the NaNs will pop up in the painting code.
@@ -438,6 +459,7 @@ ResolvedBackground resolve_background_layers(Vector<CSS::BackgroundLayerData> co
         CSSPixels position_y = layer.position_y.to_px(paintable_box.layout_node(), space_y);
 
         resolved_layers.append({ .background_image = layer.background_image,
+            .image_resource = layer.image_resource,
             .attachment = layer.attachment,
             .clip = layer.clip,
             .position_x = position_x,

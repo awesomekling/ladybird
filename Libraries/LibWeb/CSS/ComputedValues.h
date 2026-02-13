@@ -12,6 +12,7 @@
 #include <AK/Optional.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibGfx/ScalingMode.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/CalculatedOr.h>
 #include <LibWeb/CSS/Clip.h>
 #include <LibWeb/CSS/ColumnCount.h>
@@ -366,6 +367,7 @@ private:
 
 struct BackgroundLayerData {
     NonnullRefPtr<AbstractImageStyleValue const> background_image;
+    GC::Ptr<CSSImageResource> image_resource;
     BackgroundAttachment attachment { BackgroundAttachment::Scroll };
     BackgroundBox origin { BackgroundBox::PaddingBox };
     BackgroundBox clip { BackgroundBox::BorderBox };
@@ -644,6 +646,7 @@ public:
     float stop_opacity() const { return m_noninherited.stop_opacity; }
     TextAnchor text_anchor() const { return m_inherited.text_anchor; }
     RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_image; }
+    GC::Ptr<CSSImageResource> mask_image_resource() const { return m_noninherited.mask_image_resource; }
     Optional<MaskReference> const& mask() const { return m_noninherited.mask; }
     MaskType mask_type() const { return m_noninherited.mask_type; }
     Optional<ClipPathReference> const& clip_path() const { return m_noninherited.clip_path; }
@@ -879,6 +882,7 @@ protected:
         Optional<MaskReference> mask;
         Optional<ClipPathReference> clip_path;
         RefPtr<AbstractImageStyleValue const> mask_image;
+        GC::Ptr<CSSImageResource> mask_image_resource;
         LengthPercentage cx { InitialValues::cx() };
         LengthPercentage cy { InitialValues::cy() };
         LengthPercentage r { InitialValues::r() };
@@ -894,10 +898,13 @@ protected:
 
         void visit_edges(GC::Cell::Visitor& visitor)
         {
-            for (auto& layer : background_layers)
+            for (auto& layer : background_layers) {
                 layer.background_image->visit_edges(visitor);
+                visitor.visit(layer.image_resource);
+            }
             if (mask_image)
                 mask_image->visit_edges(visitor);
+            visitor.visit(mask_image_resource);
             for (auto const& transform : transformations)
                 transform->visit_edges(visitor);
             if (rotate)
@@ -1102,6 +1109,7 @@ public:
     void set_mask(MaskReference value) { m_noninherited.mask = value; }
     void set_mask_type(MaskType value) { m_noninherited.mask_type = value; }
     void set_mask_image(AbstractImageStyleValue const& value) { m_noninherited.mask_image = value; }
+    void set_mask_image_resource(GC::Ref<CSSImageResource> resource) { m_noninherited.mask_image_resource = resource; }
     void set_clip_path(ClipPathReference value) { m_noninherited.clip_path = move(value); }
     void set_clip_rule(ClipRule value) { m_inherited.clip_rule = value; }
     void set_flood_color(Color value) { m_noninherited.flood_color = value; }

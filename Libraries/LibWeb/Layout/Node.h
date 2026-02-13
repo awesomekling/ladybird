@@ -269,6 +269,7 @@ public:
     Gfx::Font const& first_available_font() const;
     Vector<CSS::BackgroundLayerData> const& background_layers() const { return computed_values().background_layers(); }
     CSS::AbstractImageStyleValue const* list_style_image() const { return m_list_style_image; }
+    CSS::CSSImageResource* list_style_image_resource() const { return m_list_style_image_resource; }
 
     GC::Ref<NodeWithStyle> create_anonymous_wrapper() const;
 
@@ -294,6 +295,7 @@ private:
 
     NonnullOwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::AbstractImageStyleValue const> m_list_style_image;
+    GC::Ptr<CSS::CSSImageResource> m_list_style_image_resource;
 };
 
 template<>

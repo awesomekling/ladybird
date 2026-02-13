@@ -40,6 +40,7 @@ public:
 
     size_t current_frame_index() const { return m_current_frame_index; }
 
+    Function<void()> on_load;
     Function<void()> on_animate;
 
 private:

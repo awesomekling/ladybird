@@ -7,9 +7,11 @@
  */
 
 #include <AK/Demangle.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -568,12 +570,7 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, NonnullOw
 void NodeWithStyle::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    for (auto const& layer : computed_values().background_layers())
-        layer.background_image->visit_edges(visitor);
-
-    if (m_list_style_image && m_list_style_image->is_image())
-        m_list_style_image->as_image().visit_edges(visitor);
-
+    visitor.visit(m_list_style_image_resource);
     m_computed_values->visit_edges(visitor);
 }
 
@@ -606,8 +603,10 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     auto background_layers = computed_style.background_layers();
 
-    for (auto const& layer : background_layers)
-        const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(document());
+    for (auto& layer : background_layers) {
+        if (layer.background_image->is_image())
+            layer.image_resource = document().ensure_css_image_resource(layer.background_image->as_image().url());
+    }
 
     computed_values.set_background_layers(move(background_layers));
 
@@ -702,7 +701,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     auto const& list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
     if (list_style_image.is_abstract_image()) {
         m_list_style_image = list_style_image.as_abstract_image();
-        const_cast<CSS::AbstractImageStyleValue&>(*m_list_style_image).load_any_resources(document());
+        if (m_list_style_image->is_image())
+            m_list_style_image_resource = document().ensure_css_image_resource(m_list_style_image->as_image().url());
     }
 
     // FIXME: The default text decoration color value is `currentcolor`, but since we can't resolve that easily,
@@ -848,7 +848,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     } else if (mask_image.is_abstract_image()) {
         auto const& abstract_image = mask_image.as_abstract_image();
         computed_values.set_mask_image(abstract_image);
-        const_cast<CSS::AbstractImageStyleValue&>(abstract_image).load_any_resources(document());
+        if (abstract_image.is_image())
+            computed_values.set_mask_image_resource(document().ensure_css_image_resource(abstract_image.as_image().url()));
     }
 
     computed_values.set_mask_type(computed_style.mask_type());

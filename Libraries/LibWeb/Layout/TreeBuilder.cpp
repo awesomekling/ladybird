@@ -12,6 +12,7 @@
 #include <AK/Optional.h>
 #include <AK/TemporaryChange.h>
 #include <LibGfx/ImmutableBitmap.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Enums.h>
@@ -193,58 +194,54 @@ void TreeBuilder::insert_node_into_inline_or_block_ancestor(Layout::Node& node, 
 
 class GeneratedContentImageProvider final
     : public GC::Cell
-    , public ImageProvider
-    , public CSS::ImageStyleValue::Client {
+    , public ImageProvider {
     GC_CELL(GeneratedContentImageProvider, GC::Cell);
     GC_DECLARE_ALLOCATOR(GeneratedContentImageProvider);
 
 public:
-    static constexpr bool OVERRIDES_FINALIZE = true;
-
     virtual ~GeneratedContentImageProvider() override = default;
 
-    virtual void finalize() override
-    {
-        Base::finalize();
-        image_style_value_finalize();
-    }
+    virtual bool is_image_available() const override { return m_resource->is_paintable(); }
 
-    virtual bool is_image_available() const override { return m_image->is_paintable(); }
-
-    virtual Optional<CSSPixels> intrinsic_width() const override { return m_image->natural_width(); }
-    virtual Optional<CSSPixels> intrinsic_height() const override { return m_image->natural_height(); }
-    virtual Optional<CSSPixelFraction> intrinsic_aspect_ratio() const override { return m_image->natural_aspect_ratio(); }
+    virtual Optional<CSSPixels> intrinsic_width() const override { return m_resource->natural_width(); }
+    virtual Optional<CSSPixels> intrinsic_height() const override { return m_resource->natural_height(); }
+    virtual Optional<CSSPixelFraction> intrinsic_aspect_ratio() const override { return m_resource->natural_aspect_ratio(); }
 
     virtual RefPtr<Gfx::ImmutableBitmap> current_image_bitmap_sized(Gfx::IntSize size) const override
     {
         auto rect = DevicePixelRect { DevicePixelPoint {}, size.to_type<DevicePixels>() };
-        return const_cast<Gfx::ImmutableBitmap*>(m_image->current_frame_bitmap(rect));
+        return const_cast<Gfx::ImmutableBitmap*>(m_resource->current_frame_bitmap(rect));
     }
 
     virtual void set_visible_in_viewport(bool) override { }
 
     virtual GC::Ptr<DOM::Element const> to_html_element() const override { return nullptr; }
 
-    static GC::Ref<GeneratedContentImageProvider> create(GC::Heap& heap, NonnullRefPtr<CSS::ImageStyleValue> image)
+    static GC::Ref<GeneratedContentImageProvider> create(GC::Heap& heap, GC::Ref<CSS::CSSImageResource> resource)
     {
-        return heap.allocate<GeneratedContentImageProvider>(move(image));
+        return heap.allocate<GeneratedContentImageProvider>(resource);
     }
 
     void set_layout_node(GC::Ref<Layout::Node> layout_node)
     {
         m_layout_node = layout_node;
+        m_resource->on_load = [this] {
+            m_layout_node->set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+        };
+        m_resource->on_animate = [this] {
+            m_layout_node->set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+        };
     }
 
-    virtual size_t current_frame_index() const override { return 0; }
+    virtual size_t current_frame_index() const override { return m_resource->current_frame_index(); }
     virtual GC::Ptr<HTML::DecodedImageData> decoded_image_data() const override
     {
-        return m_image->image_data();
+        return m_resource->image_data();
     }
 
 private:
-    GeneratedContentImageProvider(NonnullRefPtr<CSS::ImageStyleValue> image)
-        : Client(image)
-        , m_image(move(image))
+    GeneratedContentImageProvider(GC::Ref<CSS::CSSImageResource> resource)
+        : m_resource(resource)
     {
     }
 
@@ -252,7 +249,7 @@ private:
     {
         Base::visit_edges(visitor);
         visitor.visit(m_layout_node);
-        m_image->visit_edges(visitor);
+        visitor.visit(m_resource);
     }
 
     virtual void image_provider_visit_edges(Visitor& visitor) const override
@@ -261,13 +258,8 @@ private:
         visitor.visit(*this);
     }
 
-    virtual void image_style_value_did_update(CSS::ImageStyleValue&) override
-    {
-        m_layout_node->set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
-    }
-
     GC::Ptr<Layout::Node> m_layout_node;
-    NonnullRefPtr<CSS::ImageStyleValue> m_image;
+    GC::Ref<CSS::CSSImageResource> m_resource;
 };
 
 GC_DEFINE_ALLOCATOR(GeneratedContentImageProvider);
@@ -373,8 +365,8 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
                     layout_node = document.heap().allocate<TextNode>(document, *text);
                 } else {
                     auto& image = *item.get<NonnullRefPtr<CSS::ImageStyleValue>>();
-                    image.load_any_resources(document);
-                    auto image_provider = GeneratedContentImageProvider::create(element.heap(), image);
+                    auto resource = document.ensure_css_image_resource(image.url());
+                    auto image_provider = GeneratedContentImageProvider::create(element.heap(), resource);
                     layout_node = document.heap().allocate<ImageBox>(document, nullptr, *pseudo_element_style, image_provider);
                     image_provider->set_layout_node(*layout_node);
                 }

@@ -10,6 +10,7 @@
 #include <AK/QuickSort.h>
 #include <AK/TemporaryChange.h>
 #include <LibGfx/Rect.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/Viewport.h>
@@ -292,6 +293,7 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
 
     auto const& computed_values = paintable_box().computed_values();
     auto mask_image = computed_values.mask_image();
+    auto mask_image_resource = computed_values.mask_image_resource();
 
     // Mask handling stays at paint time with its own save/restore.
     bool needs_to_save_state = mask_image || paintable_box().get_mask_area().has_value() || paintable_box().get_clip_area().has_value();
@@ -315,7 +317,10 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
         DisplayListRecorder display_list_recorder(*mask_display_list);
         auto mask_painting_context = context.clone(display_list_recorder);
         auto mask_rect_in_device_pixels = context.enclosing_device_rect(paintable_box().absolute_padding_box_rect());
-        mask_image->paint(mask_painting_context, { {}, mask_rect_in_device_pixels.size() }, CSS::ImageRendering::Auto);
+        if (mask_image_resource)
+            mask_image_resource->paint(mask_painting_context, { {}, mask_rect_in_device_pixels.size() }, CSS::ImageRendering::Auto);
+        else
+            mask_image->paint(mask_painting_context, { {}, mask_rect_in_device_pixels.size() }, CSS::ImageRendering::Auto);
         context.display_list_recorder().add_mask(mask_display_list, mask_rect_in_device_pixels.to_type<int>(), Gfx::MaskKind::Alpha);
     }
 

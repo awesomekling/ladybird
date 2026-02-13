@@ -5,6 +5,7 @@
  */
 
 #include <LibGC/Heap.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/Layout/ListItemMarkerBox.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/MarkerPaintable.h>
@@ -43,6 +44,10 @@ void MarkerPaintable::paint(DisplayListRecordingContext& context, PaintPhase pha
     auto marker_rect = absolute_rect().to_rounded<CSSPixels>();
     auto device_rect = context.enclosing_device_rect(marker_rect);
 
+    if (auto const* image_resource = layout_box().list_style_image_resource()) {
+        image_resource->paint(context, device_rect, computed_values().image_rendering());
+        return;
+    }
     if (auto const* list_style_image = layout_box().list_style_image()) {
         list_style_image->resolve_for_size(layout_box(), marker_rect.size());
         list_style_image->paint(context, device_rect, computed_values().image_rendering());

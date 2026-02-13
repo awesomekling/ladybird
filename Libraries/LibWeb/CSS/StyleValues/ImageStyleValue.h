@@ -63,6 +63,8 @@ public:
 
     GC::Ptr<HTML::DecodedImageData> image_data() const;
 
+    URL const& url() const { return m_url; }
+
 private:
     friend class Client;
 

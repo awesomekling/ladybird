@@ -39,6 +39,9 @@ CSSImageResource::CSSImageResource(URL const& url, DOM::Document& document)
     if (m_resource_request) {
         m_resource_request->add_callbacks(
             [this] {
+                if (on_load)
+                    on_load();
+
                 auto image_data = m_resource_request->image_data();
                 if (image_data->is_animated() && image_data->frame_count() > 1) {
                     m_timer = Platform::Timer::create(m_document->heap());

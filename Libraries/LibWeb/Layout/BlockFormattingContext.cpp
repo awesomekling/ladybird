@@ -6,6 +6,7 @@
  */
 
 #include <AK/TemporaryChange.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -1324,6 +1325,11 @@ void BlockFormattingContext::ensure_sizes_correct_for_left_offset_calculation(Li
     auto& marker_state = m_state.get_mutable(marker);
 
     // If an image is used, the marker's dimensions are the same as the image.
+    if (auto const* image_resource = marker.list_style_image_resource()) {
+        marker_state.set_content_width(image_resource->natural_width().value_or(0));
+        marker_state.set_content_height(image_resource->natural_height().value_or(0));
+        return;
+    }
     if (auto const* list_style_image = marker.list_style_image()) {
         marker_state.set_content_width(list_style_image->natural_width().value_or(0));
         marker_state.set_content_height(list_style_image->natural_height().value_or(0));

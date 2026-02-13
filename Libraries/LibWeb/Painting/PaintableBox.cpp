@@ -1238,7 +1238,7 @@ void PaintableBox::resolve_paint_properties()
         m_resolved_background.color_box.rect.unite(canvas_rect);
     }
 
-    if (auto mask_image = computed_values.mask_image()) {
+    if (auto mask_image = computed_values.mask_image(); mask_image && !computed_values.mask_image_resource()) {
         mask_image->resolve_for_size(layout_node_with_style_and_box_metrics(), absolute_padding_box_rect().size());
     }
 

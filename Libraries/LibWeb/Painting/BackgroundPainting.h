@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibGC/Ptr.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/BorderPainting.h>
@@ -14,6 +15,7 @@ namespace Web::Painting {
 
 struct ResolvedBackgroundLayerData {
     NonnullRefPtr<CSS::AbstractImageStyleValue const> background_image;
+    GC::Ptr<CSS::CSSImageResource> image_resource;
     CSS::BackgroundAttachment attachment;
     CSS::BackgroundBox clip;
     CSSPixels position_x;
