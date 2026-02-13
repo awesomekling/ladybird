@@ -33,7 +33,6 @@ public:
         return {};
     }
 
-    virtual void load_any_resources(DOM::Document&) { }
     virtual void resolve_for_size(Layout::NodeWithStyle const&, CSSPixelSize) const { }
 
     virtual bool is_paintable() const = 0;

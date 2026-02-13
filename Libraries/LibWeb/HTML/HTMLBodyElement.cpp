@@ -35,8 +35,6 @@ HTMLBodyElement::~HTMLBodyElement() = default;
 void HTMLBodyElement::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
-    if (m_background_style_value)
-        m_background_style_value->visit_edges(visitor);
 }
 
 void HTMLBodyElement::initialize(JS::Realm& realm)
@@ -136,13 +134,8 @@ void HTMLBodyElement::attribute_changed(FlyString const& name, Optional<String> 
             document().set_visited_link_color(color.value());
     } else if (name == HTML::AttributeNames::background) {
         // https://html.spec.whatwg.org/multipage/rendering.html#the-page:attr-background
-        if (auto maybe_background_url = document().encoding_parse_url(value.value_or(String {})); maybe_background_url.has_value()) {
+        if (auto maybe_background_url = document().encoding_parse_url(value.value_or(String {})); maybe_background_url.has_value())
             m_background_style_value = CSS::ImageStyleValue::create(maybe_background_url.value());
-            m_background_style_value->on_animate = [this] {
-                if (paintable())
-                    paintable()->set_needs_display();
-            };
-        }
     }
 
 #undef __ENUMERATE

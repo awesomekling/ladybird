@@ -7,9 +7,11 @@
 #include "CursorStyleValue.h"
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Painter.h>
+#include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/Sizing.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/Node.h>
@@ -48,12 +50,16 @@ ValueComparingNonnullRefPtr<StyleValue const> CursorStyleValue::absolutized(Comp
 Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithStyle const& layout_node) const
 {
     auto const& image = *m_properties.image;
-    if (!image.is_paintable()) {
-        const_cast<AbstractImageStyleValue&>(image).load_any_resources(const_cast<DOM::Document&>(layout_node.document()));
-        return {};
-    }
+    auto& document = const_cast<DOM::Document&>(layout_node.document());
 
-    auto const& document = layout_node.document();
+    // For URL-based images, use CSSImageResource for loading and painting.
+    GC::Ptr<CSSImageResource> image_resource;
+    if (image.is_image())
+        image_resource = document.ensure_css_image_resource(image.as_image().url());
+
+    bool paintable = image_resource ? image_resource->is_paintable() : image.is_paintable();
+    if (!paintable)
+        return {};
 
     CacheKey cache_key {
         .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node),
@@ -66,16 +72,21 @@ Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithS
     if (!m_cached_bitmap.has_value()) {
         // Determine the size of the cursor.
         // "The default object size for cursor images is a UA-defined size that should be based on the size of a
-        // typical cursor on the UA’s operating system.
+        // typical cursor on the UA's operating system.
         // The concrete object size is determined using the default sizing algorithm. If an operating system is
         // incapable of rendering a cursor above a given size, cursors larger than that size must be shrunk to
-        // within the OS-supported size bounds, while maintaining the cursor image’s natural aspect ratio, if any."
+        // within the OS-supported size bounds, while maintaining the cursor image's natural aspect ratio, if any."
         // https://drafts.csswg.org/css-ui-3/#cursor
 
         // 32x32 is selected arbitrarily.
         // FIXME: Ask the OS for the default size?
         CSSPixelSize const default_cursor_size { 32, 32 };
-        auto cursor_css_size = run_default_sizing_algorithm({}, {}, { image.natural_width(), image.natural_height(), image.natural_aspect_ratio() }, default_cursor_size);
+
+        auto natural_width = image_resource ? image_resource->natural_width() : image.natural_width();
+        auto natural_height = image_resource ? image_resource->natural_height() : image.natural_height();
+        auto natural_aspect_ratio = image_resource ? image_resource->natural_aspect_ratio() : image.natural_aspect_ratio();
+
+        auto cursor_css_size = run_default_sizing_algorithm({}, {}, { natural_width, natural_height, natural_aspect_ratio }, default_cursor_size);
         // FIXME: How do we determine what cursor sizes the OS allows?
         // We don't multiply by the pixel ratio, because we want to use the image's actual pixel size.
         DevicePixelSize cursor_device_size { cursor_css_size.to_type<double>().to_rounded<int>() };
@@ -103,8 +114,12 @@ Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithS
         Painting::DisplayListRecorder display_list_recorder(display_list);
         DisplayListRecordingContext paint_context { display_list_recorder, document.page().palette(), document.page().client().device_pixels_per_css_pixel(), document.page().chrome_metrics() };
 
-        image.resolve_for_size(layout_node, CSSPixelSize { bitmap.size() });
-        image.paint(paint_context, DevicePixelRect { bitmap.rect() }, ImageRendering::Auto);
+        if (image_resource) {
+            image_resource->paint(paint_context, DevicePixelRect { bitmap.rect() }, ImageRendering::Auto);
+        } else {
+            image.resolve_for_size(layout_node, CSSPixelSize { bitmap.size() });
+            image.paint(paint_context, DevicePixelRect { bitmap.rect() }, ImageRendering::Auto);
+        }
 
         switch (document.page().client().display_list_player_type()) {
         case DisplayListPlayerType::SkiaGPUIfAvailable:
