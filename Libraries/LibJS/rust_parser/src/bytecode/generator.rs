@@ -10,7 +10,9 @@
 //! needed for bytecode generation from the Rust AST. It mirrors the
 //! C++ `Bytecode::Generator` class.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use super::basic_block::{BasicBlock, SourceMapEntry};
 use super::instruction::Instruction;
@@ -29,7 +31,7 @@ pub struct ScopedOperand {
 
 struct ScopedOperandInner {
     operand: Operand,
-    generator: *mut Generator,
+    free_register_pool: Rc<RefCell<Vec<Register>>>,
 }
 
 impl std::fmt::Debug for ScopedOperandInner {
@@ -40,15 +42,8 @@ impl std::fmt::Debug for ScopedOperandInner {
 
 impl Drop for ScopedOperandInner {
     fn drop(&mut self) {
-        if self.generator.is_null() {
-            return;
-        }
-        let gen = unsafe { &mut *self.generator };
-        if gen.finished {
-            return;
-        }
         if self.operand.is_register() && self.operand.index() >= Register::RESERVED_COUNT {
-            gen.free_registers.push(Register(self.operand.index()));
+            self.free_register_pool.borrow_mut().push(Register(self.operand.index()));
         }
     }
 }
@@ -140,7 +135,7 @@ pub struct Generator {
 
     // --- Register allocation ---
     next_register: u32,
-    free_registers: Vec<Register>,
+    free_register_pool: Rc<RefCell<Vec<Register>>>,
 
     // --- Constant pool ---
     pub constants: Vec<ConstantValue>,
@@ -219,9 +214,6 @@ pub struct Generator {
     // When set, newly created basic blocks inherit this handler index.
     pub current_unwind_handler: Option<usize>,
 
-    // --- Generator finished flag ---
-    pub finished: bool,
-
     // --- AnnexB function names ---
     // Names approved for AnnexB.3.3 hoisting by the scope collector.
     // Populated during FDI, checked in switch case codegen.
@@ -239,14 +231,13 @@ pub struct Generator {
 impl Generator {
     /// Create a new bytecode generator.
     pub fn new() -> Self {
-        // We need a self-referential structure for ScopedOperand.
-        // Create the generator first, then fix up the operands.
-        let mut gen = Self {
+        let free_register_pool = Rc::new(RefCell::new(Vec::new()));
+
+        Self {
             basic_blocks: Vec::new(),
             current_block_index: 0,
             next_block_id: 1,
             next_register: Register::RESERVED_COUNT,
-            free_registers: Vec::new(),
             constants: Vec::new(),
             true_constant: None,
             false_constant: None,
@@ -279,39 +270,29 @@ impl Generator {
             current_source_start: 0,
             current_source_end: 0,
             current_completion_register: None,
-            // Placeholder — will be fixed up below
             accumulator: ScopedOperand {
-                inner: std::rc::Rc::new(ScopedOperandInner {
+                inner: Rc::new(ScopedOperandInner {
                     operand: Operand::register(Register::ACCUMULATOR),
-                    generator: std::ptr::null_mut(),
+                    free_register_pool: free_register_pool.clone(),
                 }),
             },
             this_value: ScopedOperand {
-                inner: std::rc::Rc::new(ScopedOperandInner {
+                inner: Rc::new(ScopedOperandInner {
                     operand: Operand::register(Register::THIS_VALUE),
-                    generator: std::ptr::null_mut(),
+                    free_register_pool: free_register_pool.clone(),
                 }),
             },
             shared_function_data: Vec::new(),
             class_blueprints: Vec::new(),
             length_identifier: None,
             current_unwind_handler: None,
-            finished: false,
             annexb_function_names: HashSet::new(),
             vm_ptr: std::ptr::null_mut(),
             source_code_ptr: std::ptr::null(),
             source: std::ptr::null(),
             source_len: 0,
-        };
-
-        // Fix up the self-referential pointers.
-        let self_ptr = &mut gen as *mut Generator;
-        let acc_inner = std::rc::Rc::get_mut(&mut gen.accumulator.inner).unwrap();
-        acc_inner.generator = self_ptr;
-        let this_inner = std::rc::Rc::get_mut(&mut gen.this_value.inner).unwrap();
-        this_inner.generator = self_ptr;
-
-        gen
+            free_register_pool,
+        }
     }
 
     // --- Function kind queries ---
@@ -336,7 +317,7 @@ impl Generator {
 
     /// Allocate a new register (or reuse a freed one).
     pub fn allocate_register(&mut self) -> ScopedOperand {
-        let reg = if let Some(r) = self.free_registers.pop() {
+        let reg = if let Some(r) = self.free_register_pool.borrow_mut().pop() {
             r
         } else {
             let r = Register(self.next_register);
@@ -376,9 +357,9 @@ impl Generator {
 
     pub fn scoped_operand(&mut self, operand: Operand) -> ScopedOperand {
         ScopedOperand {
-            inner: std::rc::Rc::new(ScopedOperandInner {
+            inner: Rc::new(ScopedOperandInner {
                 operand,
-                generator: self as *mut Generator,
+                free_register_pool: self.free_register_pool.clone(),
             }),
         }
     }
@@ -999,8 +980,6 @@ impl Generator {
 
             let _ = block_idx;
         }
-
-        self.finished = true;
 
         AssembledBytecode {
             bytecode,
