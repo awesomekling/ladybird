@@ -222,6 +222,13 @@ ErrorOr<ImageFrameDescriptor> WebPImageDecoderPlugin::frame(size_t index, Option
     return m_context->frame_descriptors[index];
 }
 
+int WebPImageDecoderPlugin::frame_duration(size_t index)
+{
+    if (index >= m_context->frame_descriptors.size())
+        return 0;
+    return m_context->frame_descriptors[index].duration;
+}
+
 ErrorOr<Optional<ReadonlyBytes>> WebPImageDecoderPlugin::icc_data()
 {
     if (m_context->state < WebPLoadingContext::State::HeaderDecoded)
