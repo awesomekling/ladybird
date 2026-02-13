@@ -588,7 +588,14 @@ pub fn generate_stmt(
         // Note: GlobalDeclarationInstantiation (GDI) runs before this bytecode.
         // GDI already hoists top-level function declarations and handles Annex B
         // at the global scope. We only need to generate the program body here.
-        Statement::Program(data) => generate_scope_children(gen, &data.scope, preferred_dst),
+        Statement::Program(data) => {
+            // Populate annexb_function_names so switch codegen can emit
+            // GetBinding + SetVariableBinding for AnnexB-hoisted functions.
+            for name in &data.scope.annexb_function_names {
+                gen.annexb_function_names.insert(name.clone());
+            }
+            generate_scope_children(gen, &data.scope, preferred_dst)
+        }
 
         // === If ===
         Statement::If {
