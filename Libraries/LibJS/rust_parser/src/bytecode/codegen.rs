@@ -3535,9 +3535,22 @@ fn generate_for_of_statement(
     body: &Stmt,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, false)
+}
+
+/// Shared implementation for for-of and for-await-of with iterator close.
+fn generate_for_of_statement_inner(
+    gen: &mut Generator,
+    lhs: &ForInOfLhs,
+    rhs: &Expr,
+    body: &Stmt,
+    preferred_dst: Option<&ScopedOperand>,
+    is_await: bool,
+) -> Option<ScopedOperand> {
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
     let end_block = gen.make_block();
     let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
+    let old_handler = gen.current_unwind_handler;
 
     // Get iterator
     let iterator_object = gen.allocate_register();
@@ -3548,11 +3561,33 @@ fn generate_for_of_statement(
         dst_iterator_next: iterator_next_method.operand(),
         dst_iterator_done: iterator_done.operand(),
         iterable: object.operand(),
-        hint: 0, // Sync
+        hint: if is_await { 1 } else { 0 },
     });
 
+    // Set up iterator close via synthetic FinallyContext.
+    let close_completion_type = gen.allocate_register();
+    let close_completion_value = gen.allocate_register();
+    let exception_preamble_block = gen.make_block();
+    let iterator_close_body_block = gen.make_block();
+    let lexical_env_at_entry = gen.lexical_environment_register_stack.last().cloned();
+
+    let parent_index = gen.current_finally_context;
+    gen.push_finally_context(FinallyContext {
+        completion_type: close_completion_type.clone(),
+        completion_value: close_completion_value.clone(),
+        finally_body: Label(iterator_close_body_block as u32),
+        exception_preamble: Label(exception_preamble_block as u32),
+        parent_index,
+        registered_jumps: Vec::new(),
+        next_jump_index: FinallyContext::FIRST_JUMP_INDEX,
+        lexical_environment_at_entry: lexical_env_at_entry.clone(),
+    });
+
+    // Break scope wraps the ReturnToFinally so break hits ReturnToFinally first.
+    gen.begin_breakable_scope(Label(end_block as u32), Vec::new());
+    gen.start_boundary(BlockBoundaryType::ReturnToFinally);
+
     let update_block = gen.make_block();
-    let loop_block = gen.make_block();
     gen.emit(Instruction::Jump {
         target: Label(update_block as u32),
     });
@@ -3561,21 +3596,63 @@ fn generate_for_of_statement(
     gen.switch_to_basic_block(update_block);
     let next_value = gen.allocate_register();
     let done = gen.allocate_register();
-    gen.emit(Instruction::IteratorNextUnpack {
-        dst_value: next_value.operand(),
-        dst_done: done.operand(),
-        iterator_object: iterator_object.operand(),
-        iterator_next: iterator_next_method.operand(),
-        iterator_done: iterator_done.operand(),
-    });
 
-    let loop_continue_block = gen.make_block();
-    gen.emit(Instruction::JumpIf {
-        condition: done.operand(),
-        true_target: Label(end_block as u32),
-        false_target: Label(loop_continue_block as u32),
+    if is_await {
+        // For-await-of: Call iterator.next(), await the result, then unpack.
+        let next_result = gen.allocate_register();
+        gen.emit(Instruction::IteratorNext {
+            dst: next_result.operand(),
+            iterator_object: iterator_object.operand(),
+            iterator_next: iterator_next_method.operand(),
+            iterator_done: iterator_done.operand(),
+        });
+        // Await the next result.
+        let awaited = generate_await(gen, next_result.clone());
+        gen.emit_mov(&next_result, &awaited);
+        // Type check
+        gen.emit(Instruction::ThrowIfNotObject {
+            src: next_result.operand(),
+        });
+        // IteratorComplete — get .done property
+        emit_get_by_id(gen, &done, &next_result, utf16!("done"), None);
+
+        let loop_continue_block = gen.make_block();
+        gen.emit(Instruction::JumpIf {
+            condition: done.operand(),
+            true_target: Label(end_block as u32),
+            false_target: Label(loop_continue_block as u32),
+        });
+        gen.switch_to_basic_block(loop_continue_block);
+
+        // IteratorValue — get .value property
+        emit_get_by_id(gen, &next_value, &next_result, utf16!("value"), None);
+    } else {
+        gen.emit(Instruction::IteratorNextUnpack {
+            dst_value: next_value.operand(),
+            dst_done: done.operand(),
+            iterator_object: iterator_object.operand(),
+            iterator_next: iterator_next_method.operand(),
+            iterator_done: iterator_done.operand(),
+        });
+
+        let loop_continue_block = gen.make_block();
+        gen.emit(Instruction::JumpIf {
+            condition: done.operand(),
+            true_target: Label(end_block as u32),
+            false_target: Label(loop_continue_block as u32),
+        });
+        gen.switch_to_basic_block(loop_continue_block);
+    }
+
+    // Set up exception handler AFTER iterator-next section.
+    // Per spec, exceptions from IteratorNext/Await/IteratorComplete/IteratorValue
+    // propagate directly; only LHS assignment and body exceptions trigger close.
+    gen.current_unwind_handler = Some(exception_preamble_block);
+    let loop_body_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(loop_body_block as u32),
     });
-    gen.switch_to_basic_block(loop_continue_block);
+    gen.switch_to_basic_block(loop_body_block);
 
     // Create per-iteration lexical environment for let/const declarations.
     let parent_env = if needs_lexical_env {
@@ -3587,44 +3664,138 @@ fn generate_for_of_statement(
     // Assign to LHS
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
-    gen.emit(Instruction::Jump {
-        target: Label(loop_block as u32),
-    });
-
-    // Body — use cleanup blocks for break/continue if we have a lexical env.
-    gen.switch_to_basic_block(loop_block);
-    let (break_target, continue_target) = if needs_lexical_env {
-        (gen.make_block(), gen.make_block())
-    } else {
-        (end_block, update_block)
-    };
-    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
-    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
+    // Body
+    gen.begin_continuable_scope(Label(update_block as u32), Vec::new());
     generate_stmt(body, gen, preferred_dst);
-    gen.end_breakable_scope();
+
+    // Restore lexical env before continuing
+    if needs_lexical_env {
+        gen.lexical_environment_register_stack.pop();
+    }
     gen.end_continuable_scope();
 
-    if needs_lexical_env {
-        let parent = parent_env.as_ref().unwrap();
-        if !gen.is_current_block_terminated() {
+    gen.end_boundary(BlockBoundaryType::ReturnToFinally);
+    gen.end_breakable_scope();
+
+    // Pop the FinallyContext.
+    let finally_ctx_index = gen.current_finally_context.unwrap();
+    gen.current_finally_context = gen.finally_contexts[finally_ctx_index].parent_index;
+
+    // Restore unwind handler
+    gen.current_unwind_handler = old_handler;
+
+    if !gen.is_current_block_terminated() {
+        if needs_lexical_env {
+            let parent = parent_env.as_ref().unwrap();
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
         }
-        gen.lexical_environment_register_stack.pop();
-
-        // Break cleanup: restore environment then jump to end.
-        gen.switch_to_basic_block(break_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-
-        // Continue cleanup: restore environment then jump to update.
-        gen.switch_to_basic_block(continue_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+    }
+
+    // --- Exception preamble: catch thrown exception, route to iterator close ---
+    gen.switch_to_basic_block(exception_preamble_block);
+    gen.emit(Instruction::Catch {
+        dst: close_completion_value.operand(),
+    });
+    if let Some(env) = &lexical_env_at_entry {
+        gen.emit(Instruction::SetLexicalEnvironment {
+            environment: env.operand(),
+        });
+    }
+    let throw_const = gen.add_constant_i32(FinallyContext::THROW);
+    gen.emit_mov(&close_completion_type, &throw_const);
+    gen.emit(Instruction::Jump {
+        target: Label(iterator_close_body_block as u32),
+    });
+
+    // --- Iterator close body: dispatch based on completion type ---
+    gen.switch_to_basic_block(iterator_close_body_block);
+
+    // THROW path
+    let throw_close_block = gen.make_block();
+    let non_throw_close_block = gen.make_block();
+    let throw_check_const = gen.add_constant_i32(FinallyContext::THROW);
+    gen.emit(Instruction::JumpStrictlyEquals {
+        lhs: close_completion_type.operand(),
+        rhs: throw_check_const.operand(),
+        true_target: Label(throw_close_block as u32),
+        false_target: Label(non_throw_close_block as u32),
+    });
+
+    // Non-throw close: IteratorClose with Normal completion, then dispatch.
+    gen.switch_to_basic_block(non_throw_close_block);
+    let undef = gen.add_constant_undefined();
+    gen.emit(Instruction::IteratorClose {
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next_method.operand(),
+        iterator_done: iterator_done.operand(),
+        completion_type: 1, // Completion::Type::Normal
+        completion_value: undef.operand(),
+    });
+
+    // Dispatch registered jumps (break/continue targets).
+    let registered_jumps = std::mem::take(&mut gen.finally_contexts[finally_ctx_index].registered_jumps);
+    for jump in &registered_jumps {
+        let after_check = gen.make_block();
+        let jump_const = gen.add_constant_i32(jump.index);
+        gen.emit(Instruction::JumpStrictlyEquals {
+            lhs: close_completion_type.operand(),
+            rhs: jump_const.operand(),
+            true_target: jump.target,
+            false_target: Label(after_check as u32),
+        });
+        gen.switch_to_basic_block(after_check);
+    }
+
+    // RETURN path
+    let return_block = gen.make_block();
+    let unreachable_block = gen.make_block();
+    let return_const = gen.add_constant_i32(FinallyContext::RETURN);
+    gen.emit(Instruction::JumpStrictlyEquals {
+        lhs: close_completion_type.operand(),
+        rhs: return_const.operand(),
+        true_target: Label(return_block as u32),
+        false_target: Label(unreachable_block as u32),
+    });
+
+    gen.switch_to_basic_block(return_block);
+    if let Some(outer_idx) = gen.current_finally_context {
+        let outer_ct = gen.finally_contexts[outer_idx].completion_type.clone();
+        let outer_cv = gen.finally_contexts[outer_idx].completion_value.clone();
+        let outer_fb = gen.finally_contexts[outer_idx].finally_body;
+        gen.emit_mov(&outer_ct, &close_completion_type);
+        gen.emit_mov(&outer_cv, &close_completion_value);
+        gen.emit(Instruction::Jump { target: outer_fb });
+    } else if gen.is_in_generator_or_async_function() {
+        gen.emit(Instruction::Yield {
+            continuation_label: None,
+            value: close_completion_value.operand(),
+        });
     } else {
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-        }
+        gen.emit(Instruction::Return {
+            value: close_completion_value.operand(),
+        });
+    }
+
+    // Unreachable default: throw the value.
+    gen.switch_to_basic_block(unreachable_block);
+    gen.emit(Instruction::Throw {
+        src: close_completion_value.operand(),
+    });
+
+    // Throw close: IteratorClose with Throw completion, then rethrow.
+    gen.switch_to_basic_block(throw_close_block);
+    gen.emit(Instruction::IteratorClose {
+        iterator_object: iterator_object.operand(),
+        iterator_next: iterator_next_method.operand(),
+        iterator_done: iterator_done.operand(),
+        completion_type: 5, // Completion::Type::Throw
+        completion_value: close_completion_value.operand(),
+    });
+    if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Throw {
+            src: close_completion_value.operand(),
+        });
     }
 
     gen.switch_to_basic_block(end_block);
@@ -3638,114 +3809,7 @@ fn generate_for_await_of_statement(
     body: &Stmt,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
-    let end_block = gen.make_block();
-    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
-
-    // GetIterator with Async hint
-    let iterator_object = gen.allocate_register();
-    let iterator_next_method = gen.allocate_register();
-    let iterator_done = gen.allocate_register();
-    gen.emit(Instruction::GetIterator {
-        dst_iterator_object: iterator_object.operand(),
-        dst_iterator_next: iterator_next_method.operand(),
-        dst_iterator_done: iterator_done.operand(),
-        iterable: object.operand(),
-        hint: 1, // Async
-    });
-
-    let update_block = gen.make_block();
-    let loop_block = gen.make_block();
-    gen.emit(Instruction::Jump {
-        target: Label(update_block as u32),
-    });
-
-    // Update: call .next(), await the result, extract done/value
-    gen.switch_to_basic_block(update_block);
-
-    // a. Let nextResult be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]]).
-    let next_result = gen.allocate_register();
-    gen.emit(Instruction::IteratorNext {
-        dst: next_result.operand(),
-        iterator_object: iterator_object.operand(),
-        iterator_next: iterator_next_method.operand(),
-        iterator_done: iterator_done.operand(),
-    });
-
-    // b. Set nextResult to ? Await(nextResult).
-    let awaited_result = generate_await(gen, next_result);
-
-    // c. If Type(nextResult) is not Object, throw a TypeError exception.
-    gen.emit(Instruction::ThrowIfNotObject {
-        src: awaited_result.operand(),
-    });
-
-    // d. Let done be ? IteratorComplete(nextResult).
-    let done = gen.allocate_register();
-    emit_get_by_id(gen, &done, &awaited_result, utf16!("done"), None);
-
-    let loop_continue_block = gen.make_block();
-    gen.emit(Instruction::JumpIf {
-        condition: done.operand(),
-        true_target: Label(end_block as u32),
-        false_target: Label(loop_continue_block as u32),
-    });
-    gen.switch_to_basic_block(loop_continue_block);
-
-    // f. Let nextValue be ? IteratorValue(nextResult).
-    let next_value = gen.allocate_register();
-    emit_get_by_id(gen, &next_value, &awaited_result, utf16!("value"), None);
-
-    // Create per-iteration lexical environment for let/const declarations.
-    let parent_env = if needs_lexical_env {
-        Some(create_for_in_of_lexical_env(gen, lhs))
-    } else {
-        None
-    };
-
-    // Assign to LHS
-    assign_to_for_in_of_lhs(gen, lhs, &next_value);
-
-    gen.emit(Instruction::Jump {
-        target: Label(loop_block as u32),
-    });
-
-    // Body
-    gen.switch_to_basic_block(loop_block);
-    let (break_target, continue_target) = if needs_lexical_env {
-        (gen.make_block(), gen.make_block())
-    } else {
-        (end_block, update_block)
-    };
-    gen.begin_continuable_scope(Label(continue_target as u32), Vec::new());
-    gen.begin_breakable_scope(Label(break_target as u32), Vec::new());
-    generate_stmt(body, gen, preferred_dst);
-    gen.end_breakable_scope();
-    gen.end_continuable_scope();
-
-    if needs_lexical_env {
-        let parent = parent_env.as_ref().unwrap();
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-        }
-        gen.lexical_environment_register_stack.pop();
-
-        gen.switch_to_basic_block(break_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-
-        gen.switch_to_basic_block(continue_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-    } else {
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-        }
-    }
-
-    gen.switch_to_basic_block(end_block);
-    None
+    generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, true)
 }
 
 fn assign_to_for_in_of_lhs(
@@ -4184,17 +4248,17 @@ fn generate_try_statement(
         finally_body_block = Some(fb_block);
 
         // Save the parent FinallyContext and install new one.
-        let parent = gen.current_finally_context.take();
-        gen.current_finally_context = Some(Box::new(FinallyContext {
+        let parent_index = gen.current_finally_context;
+        gen.push_finally_context(FinallyContext {
             completion_type,
             completion_value,
             finally_body: Label(fb_block as u32),
             exception_preamble: Label(exception_preamble_block as u32),
-            parent,
+            parent_index,
             registered_jumps: Vec::new(),
             next_jump_index: FinallyContext::FIRST_JUMP_INDEX,
             lexical_environment_at_entry: Some(saved_env.clone()),
-        }));
+        });
 
         // Generate exception preamble block:
         //   Catch → completion_value
@@ -4202,9 +4266,9 @@ fn generate_try_statement(
         //   completion_type = THROW
         //   Jump → finally_body
         gen.switch_to_basic_block(exception_preamble_block);
-        let ctx = gen.current_finally_context.as_ref().unwrap();
-        let cv = ctx.completion_value.clone();
-        let ct = ctx.completion_type.clone();
+        let ctx_idx = gen.current_finally_context.unwrap();
+        let cv = gen.finally_contexts[ctx_idx].completion_value.clone();
+        let ct = gen.finally_contexts[ctx_idx].completion_type.clone();
         gen.emit(Instruction::Catch { dst: cv.operand() });
         gen.emit(Instruction::SetLexicalEnvironment {
             environment: saved_env.operand(),
@@ -4288,9 +4352,9 @@ fn generate_try_statement(
         if !gen.is_current_block_terminated() {
             if has_finally {
                 // Normal exit from catch → completion_type = NORMAL, jump to finally.
-                let ctx = gen.current_finally_context.as_ref().unwrap();
-                let ct = ctx.completion_type.clone();
-                let fb = ctx.finally_body;
+                let ctx_idx = gen.current_finally_context.unwrap();
+                let ct = gen.finally_contexts[ctx_idx].completion_type.clone();
+                let fb = gen.finally_contexts[ctx_idx].finally_body;
                 let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
                 gen.emit_mov(&ct, &normal_const);
                 gen.emit(Instruction::Jump { target: fb });
@@ -4319,8 +4383,8 @@ fn generate_try_statement(
     if let Some(hb) = handler_block {
         gen.current_unwind_handler = Some(hb);
     } else if has_finally {
-        if let Some(ctx) = &gen.current_finally_context {
-            let ep = match ctx.exception_preamble {
+        if let Some(ctx_idx) = gen.current_finally_context {
+            let ep = match gen.finally_contexts[ctx_idx].exception_preamble {
                 Label(idx) => idx as usize,
             };
             gen.current_unwind_handler = Some(ep);
@@ -4344,9 +4408,9 @@ fn generate_try_statement(
     if !gen.is_current_block_terminated() {
         if has_finally {
             // Normal exit from try → completion_type = NORMAL, jump to finally.
-            let ctx = gen.current_finally_context.as_ref().unwrap();
-            let ct = ctx.completion_type.clone();
-            let fb = ctx.finally_body;
+            let ctx_idx = gen.current_finally_context.unwrap();
+            let ct = gen.finally_contexts[ctx_idx].completion_type.clone();
+            let fb = gen.finally_contexts[ctx_idx].finally_body;
             let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
             gen.emit_mov(&ct, &normal_const);
             gen.emit(Instruction::Jump { target: fb });
@@ -4370,9 +4434,13 @@ fn generate_try_statement(
 
     // --- Generate finally body and after-finally dispatch ---
     if let Some(fb_block) = finally_body_block {
-        // Pop FinallyContext and save its data for dispatch.
-        let ctx = gen.current_finally_context.take().unwrap();
-        gen.current_finally_context = ctx.parent;
+        // Pop FinallyContext.
+        let ctx_index = gen.current_finally_context.unwrap();
+        gen.current_finally_context = gen.finally_contexts[ctx_index].parent_index;
+
+        // Extract fields needed for dispatch (to avoid borrow conflicts).
+        let ctx_ct = gen.finally_contexts[ctx_index].completion_type.clone();
+        let ctx_cv = gen.finally_contexts[ctx_index].completion_value.clone();
 
         gen.switch_to_basic_block(fb_block);
         gen.start_boundary(BlockBoundaryType::LeaveFinally);
@@ -4395,7 +4463,7 @@ fn generate_try_statement(
             let after_normal_check = gen.make_block();
             let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
             gen.emit(Instruction::JumpStrictlyEquals {
-                lhs: ctx.completion_type.operand(),
+                lhs: ctx_ct.operand(),
                 rhs: normal_const.operand(),
                 true_target: Label(nb as u32),
                 false_target: Label(after_normal_check as u32),
@@ -4403,11 +4471,12 @@ fn generate_try_statement(
             gen.switch_to_basic_block(after_normal_check);
 
             // 2. Registered break/continue jumps
-            for jump in &ctx.registered_jumps {
+            let registered_jumps = std::mem::take(&mut gen.finally_contexts[ctx_index].registered_jumps);
+            for jump in &registered_jumps {
                 let after_jump_check = gen.make_block();
                 let jump_const = gen.add_constant_i32(jump.index);
                 gen.emit(Instruction::JumpStrictlyEquals {
-                    lhs: ctx.completion_type.operand(),
+                    lhs: ctx_ct.operand(),
                     rhs: jump_const.operand(),
                     true_target: jump.target,
                     false_target: Label(after_jump_check as u32),
@@ -4420,7 +4489,7 @@ fn generate_try_statement(
             let rethrow_block = gen.make_block();
             let return_const = gen.add_constant_i32(FinallyContext::RETURN);
             gen.emit(Instruction::JumpStrictlyEquals {
-                lhs: ctx.completion_type.operand(),
+                lhs: ctx_ct.operand(),
                 rhs: return_const.operand(),
                 true_target: Label(return_block as u32),
                 false_target: Label(rethrow_block as u32),
@@ -4428,23 +4497,23 @@ fn generate_try_statement(
 
             // Generate return block.
             gen.switch_to_basic_block(return_block);
-            if let Some(ref parent_ctx) = gen.current_finally_context {
+            if let Some(outer_idx) = gen.current_finally_context {
                 // Nested finally: copy completion record to outer and jump to outer finally.
-                let outer_ct = parent_ctx.completion_type.clone();
-                let outer_cv = parent_ctx.completion_value.clone();
-                let outer_fb = parent_ctx.finally_body;
-                gen.emit_mov(&outer_ct, &ctx.completion_type);
-                gen.emit_mov(&outer_cv, &ctx.completion_value);
+                let outer_ct = gen.finally_contexts[outer_idx].completion_type.clone();
+                let outer_cv = gen.finally_contexts[outer_idx].completion_value.clone();
+                let outer_fb = gen.finally_contexts[outer_idx].finally_body;
+                gen.emit_mov(&outer_ct, &ctx_ct);
+                gen.emit_mov(&outer_cv, &ctx_cv);
                 gen.emit(Instruction::Jump { target: outer_fb });
             } else {
                 if gen.is_in_generator_or_async_function() {
                     gen.emit(Instruction::Yield {
                         continuation_label: None,
-                        value: ctx.completion_value.operand(),
+                        value: ctx_cv.operand(),
                     });
                 } else {
                     gen.emit(Instruction::Return {
-                        value: ctx.completion_value.operand(),
+                        value: ctx_cv.operand(),
                     });
                 }
             }
@@ -4452,7 +4521,7 @@ fn generate_try_statement(
             // 4. Default → rethrow the exception.
             gen.switch_to_basic_block(rethrow_block);
             gen.emit(Instruction::Throw {
-                src: ctx.completion_value.operand(),
+                src: ctx_cv.operand(),
             });
         }
     }

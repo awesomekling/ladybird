@@ -92,13 +92,15 @@ pub struct LabelableScope {
 }
 
 /// Codegen-time state for a try/finally scope.
-#[derive(Clone)]
+///
+/// Stored in `Generator::finally_contexts` Vec, referenced by index.
+/// This avoids the deep-clone issues of an owned `Box` parent chain.
 pub struct FinallyContext {
     pub completion_type: ScopedOperand,
     pub completion_value: ScopedOperand,
     pub finally_body: Label,
     pub exception_preamble: Label,
-    pub parent: Option<Box<FinallyContext>>,
+    pub parent_index: Option<usize>,
     pub registered_jumps: Vec<FinallyJump>,
     pub next_jump_index: i32,
     pub lexical_environment_at_entry: Option<ScopedOperand>,
@@ -169,7 +171,10 @@ pub struct Generator {
     pub home_objects: Vec<ScopedOperand>,
 
     // --- Finally context ---
-    pub current_finally_context: Option<Box<FinallyContext>>,
+    // FinallyContext objects are stored in this Vec and referenced by index.
+    // This avoids the deep-clone issues of an owned Box parent chain.
+    pub finally_contexts: Vec<FinallyContext>,
+    pub current_finally_context: Option<usize>,
 
     // --- Various counters ---
     pub next_property_lookup_cache: u32,
@@ -255,6 +260,7 @@ impl Generator {
             pending_labels: Vec::new(),
             lexical_environment_register_stack: Vec::new(),
             home_objects: Vec::new(),
+            finally_contexts: Vec::new(),
             current_finally_context: None,
             next_property_lookup_cache: 0,
             next_global_variable_cache: 0,
@@ -646,6 +652,14 @@ impl Generator {
 
     // --- FinallyContext support ---
 
+    /// Push a new FinallyContext and set it as current. Returns its index.
+    pub fn push_finally_context(&mut self, ctx: FinallyContext) -> usize {
+        let index = self.finally_contexts.len();
+        self.finally_contexts.push(ctx);
+        self.current_finally_context = Some(index);
+        index
+    }
+
     /// Check if there is an outer ReturnToFinally boundary between `boundary_index`
     /// and the matching break/continue boundary.
     fn has_outer_finally_before_target(&self, is_break: bool, boundary_index: usize) -> bool {
@@ -666,7 +680,8 @@ impl Generator {
     /// Register a jump target with the current FinallyContext.
     /// Assigns a unique completion_type index and emits code to set it and jump to finally.
     pub fn register_jump_in_finally_context(&mut self, target: Label) {
-        let ctx = self.current_finally_context.as_mut().unwrap();
+        let idx = self.current_finally_context.unwrap();
+        let ctx = &mut self.finally_contexts[idx];
         let jump_index = ctx.next_jump_index;
         ctx.next_jump_index += 1;
         ctx.registered_jumps.push(FinallyJump {
@@ -688,13 +703,9 @@ impl Generator {
         self.register_jump_in_finally_context(Label(trampoline_block as u32));
         self.switch_to_basic_block(trampoline_block);
         // Pop to the parent FinallyContext (simulating the inner finally completing).
-        let parent = self
-            .current_finally_context
-            .as_ref()
-            .and_then(|c| c.parent.clone());
-        self.current_finally_context = parent;
-        // Continue the boundary walk from here (the caller will keep going).
-        let _ = is_break; // Used by caller to determine direction
+        let idx = self.current_finally_context.unwrap();
+        self.current_finally_context = self.finally_contexts[idx].parent_index;
+        let _ = is_break;
     }
 
     /// Generate a break, walking boundaries and handling FinallyContext.
@@ -717,7 +728,7 @@ impl Generator {
 
     /// Walk boundaries for unlabelled break/continue.
     fn generate_scoped_jump(&mut self, is_break: bool) {
-        let saved_finally_context = self.current_finally_context.clone();
+        let saved_ctx = self.current_finally_context;
         let env_stack_len = self.lexical_environment_register_stack.len();
         let mut env_offset = env_stack_len;
 
@@ -729,13 +740,13 @@ impl Generator {
                 BlockBoundaryType::Break if is_break => {
                     let target = self.breakable_scopes.last().unwrap().bytecode_target;
                     self.emit(Instruction::Jump { target });
-                    self.current_finally_context = saved_finally_context;
+                    self.current_finally_context = saved_ctx;
                     return;
                 }
                 BlockBoundaryType::Continue if !is_break => {
                     let target = self.continuable_scopes.last().unwrap().bytecode_target;
                     self.emit(Instruction::Jump { target });
-                    self.current_finally_context = saved_finally_context;
+                    self.current_finally_context = saved_ctx;
                     return;
                 }
                 BlockBoundaryType::LeaveLexicalEnvironment => {
@@ -753,7 +764,7 @@ impl Generator {
                             self.continuable_scopes.last().unwrap().bytecode_target
                         };
                         self.register_jump_in_finally_context(target);
-                        self.current_finally_context = saved_finally_context;
+                        self.current_finally_context = saved_ctx;
                         return;
                     }
                     self.emit_trampoline_through_finally(is_break);
@@ -761,12 +772,12 @@ impl Generator {
                 _ => {}
             }
         }
-        self.current_finally_context = saved_finally_context;
+        self.current_finally_context = saved_ctx;
     }
 
     /// Walk boundaries for labelled break/continue.
     fn generate_labelled_jump(&mut self, is_break: bool, label: &[u16]) {
-        let saved_finally_context = self.current_finally_context.clone();
+        let saved_ctx = self.current_finally_context;
         let env_stack_len = self.lexical_environment_register_stack.len();
         let mut env_offset = env_stack_len;
 
@@ -803,7 +814,7 @@ impl Generator {
                             && label_set.iter().any(|l| l == label)
                         {
                             self.register_jump_in_finally_context(*target);
-                            self.current_finally_context = saved_finally_context;
+                            self.current_finally_context = saved_ctx;
                             return;
                         }
                         self.emit_trampoline_through_finally(is_break);
@@ -821,16 +832,17 @@ impl Generator {
                 self.emit(Instruction::Jump {
                     target: *target,
                 });
-                self.current_finally_context = saved_finally_context;
+                self.current_finally_context = saved_ctx;
                 return;
             }
         }
-        self.current_finally_context = saved_finally_context;
+        self.current_finally_context = saved_ctx;
     }
 
     /// Generate a return, routing through FinallyContext if needed.
     pub fn generate_return(&mut self, value: &ScopedOperand) {
-        if let Some(ref ctx) = self.current_finally_context {
+        if let Some(idx) = self.current_finally_context {
+            let ctx = &self.finally_contexts[idx];
             let completion_value = ctx.completion_value.clone();
             let completion_type = ctx.completion_type.clone();
             let finally_body = ctx.finally_body;
