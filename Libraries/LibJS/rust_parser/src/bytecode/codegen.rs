@@ -2168,9 +2168,13 @@ fn generate_block_statement(
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
     let did_create_env = emit_block_declaration_instantiation(gen, scope);
+    if did_create_env {
+        gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+    }
     let result = generate_scope_children(gen, scope, preferred_dst);
 
     if did_create_env {
+        gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
         gen.lexical_environment_register_stack.pop();
         if !gen.is_current_block_terminated() {
             let parent = gen.lexical_environment_register_stack.last().cloned()
