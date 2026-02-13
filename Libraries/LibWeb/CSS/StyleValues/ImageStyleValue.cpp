@@ -48,7 +48,6 @@ void ImageStyleValue::visit_edges(JS::Cell::Visitor& visitor) const
     // FIXME: visit_edges in non-GC allocated classes is confusing pattern.
     //        Consider making StyleValue to be GC allocated instead.
     visitor.visit(m_resource_request);
-    visitor.visit(m_style_sheet);
     visitor.visit(m_timer);
 }
 
@@ -61,11 +60,11 @@ void ImageStyleValue::load_any_resources(DOM::Document& document)
     RuleOrDeclaration rule_or_declaration {
         .environment_settings_object = document.relevant_settings_object(),
         .value = RuleOrDeclaration::Rule {
-            .parent_style_sheet = m_style_sheet,
+            .parent_style_sheet = nullptr,
         }
     };
 
-    m_resource_request = fetch_an_external_image_for_a_stylesheet(m_url, rule_or_declaration, m_style_sheet ? *m_style_sheet->owning_document() : document);
+    m_resource_request = fetch_an_external_image_for_a_stylesheet(m_url, rule_or_declaration, document);
 
     if (m_resource_request) {
         m_resource_request->add_callbacks(
@@ -194,7 +193,11 @@ Optional<Gfx::Color> ImageStyleValue::color_if_single_pixel_bitmap() const
 void ImageStyleValue::set_style_sheet(GC::Ptr<CSSStyleSheet> style_sheet)
 {
     Base::set_style_sheet(style_sheet);
-    m_style_sheet = style_sheet;
+    if (style_sheet) {
+        m_base_url = style_sheet->base_url()
+                         .value_or_lazy_evaluated_optional([&]() { return style_sheet->location(); })
+                         .value_or_lazy_evaluated_optional([&]() { return HTML::relevant_settings_object(*style_sheet).api_base_url(); });
+    }
 }
 
 ValueComparingNonnullRefPtr<StyleValue const> ImageStyleValue::absolutized(ComputationContext const&) const
@@ -202,24 +205,8 @@ ValueComparingNonnullRefPtr<StyleValue const> ImageStyleValue::absolutized(Compu
     if (m_url.url().is_empty())
         return *this;
 
-    // FIXME: The spec has been updated to handle this better. The computation of the base URL here is roughly based on:
-    //        https://drafts.csswg.org/css-values-4/#style-resource-base-url
-    //        https://github.com/w3c/csswg-drafts/pull/12261
-    auto base_url = [&]() -> Optional<::URL::URL> {
-        if (m_style_sheet) {
-            return m_style_sheet->base_url()
-                .value_or_lazy_evaluated_optional([&]() { return m_style_sheet->location(); })
-                .value_or_lazy_evaluated_optional([&]() { return HTML::relevant_settings_object(*m_style_sheet).api_base_url(); });
-        }
-
-        if (m_document)
-            return m_document->base_url();
-
-        return {};
-    }();
-
-    if (base_url.has_value()) {
-        if (auto resolved_url = DOMURL::parse(m_url.url(), *base_url); resolved_url.has_value())
+    if (m_base_url.has_value()) {
+        if (auto resolved_url = DOMURL::parse(m_url.url(), *m_base_url); resolved_url.has_value())
             return ImageStyleValue::create(*resolved_url);
     }
 

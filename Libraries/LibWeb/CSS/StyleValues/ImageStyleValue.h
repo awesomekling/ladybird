@@ -11,6 +11,7 @@
 
 #include <LibGC/Weak.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibURL/URL.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/URL.h>
@@ -77,9 +78,9 @@ private:
     Gfx::ImmutableBitmap const* bitmap(size_t frame_index, Gfx::IntSize = {}) const;
 
     GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
-    GC::Ptr<CSSStyleSheet> m_style_sheet;
 
     URL m_url;
+    Optional<::URL::URL> m_base_url;
     GC::Weak<DOM::Document> m_document;
 
     size_t m_current_frame_index { 0 };
