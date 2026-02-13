@@ -221,6 +221,12 @@ pub struct Parser<'a> {
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
 
+    /// Expressions whose identifiers were registered with the scope collector
+    /// during an initial parse, then superseded by synthesize_binding_pattern.
+    /// Kept alive to prevent the scope collector's raw identifier pointers
+    /// from dangling after the expression would otherwise be dropped.
+    pub(crate) scope_anchor: Vec<Expr>,
+
     /// True while parsing a class body that has an `extends` clause.
     pub(crate) class_has_super_class: bool,
     pub(crate) has_default_export_name: bool,
@@ -274,6 +280,7 @@ impl<'a> Parser<'a> {
             last_class_name: Vec::new(),
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
+            scope_anchor: Vec::new(),
             class_has_super_class: false,
             has_default_export_name: false,
             for_loop_declaration_count: 0,

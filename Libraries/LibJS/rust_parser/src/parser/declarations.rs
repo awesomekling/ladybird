@@ -1089,6 +1089,7 @@ impl<'a> Parser<'a> {
                             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                                 if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
+                                    self.scope_anchor.push(expression);
                                     entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                                 }
                             } else if Self::is_member_expression(&expression) {
@@ -1134,6 +1135,7 @@ impl<'a> Parser<'a> {
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                         if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
+                            self.scope_anchor.push(expression);
                             entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                         }
                     } else if Self::is_member_expression(&expression) {

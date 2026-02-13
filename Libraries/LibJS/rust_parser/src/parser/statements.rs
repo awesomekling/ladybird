@@ -386,6 +386,7 @@ impl<'a> Parser<'a> {
                     if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                         if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
                             self.pattern_bound_names.clear();
+                            self.scope_anchor.push(expr);
                             ForInOfLhs::Pattern(pattern)
                         } else {
                             ForInOfLhs::Expression(Box::new(expr))
@@ -439,6 +440,7 @@ impl<'a> Parser<'a> {
                         if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                             if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
                                 self.pattern_bound_names.clear();
+                                self.scope_anchor.push(expr);
                                 ForInOfLhs::Pattern(pattern)
                             } else {
                                 ForInOfLhs::Expression(Box::new(expr))

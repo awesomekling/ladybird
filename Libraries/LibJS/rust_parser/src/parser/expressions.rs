@@ -513,6 +513,9 @@ impl<'a> Parser<'a> {
                 let op = token_to_assignment_op(tt);
                 if op == AssignmentOp::Assignment && (Self::is_object_expression(&lhs) || Self::is_array_expression(&lhs)) {
                     if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs_start) {
+                        // Keep the original expression alive so that the scope collector's
+                        // raw pointers to its identifiers don't dangle.
+                        self.scope_anchor.push(lhs);
                         // Clear pattern_bound_names — assignment patterns don't need scope registration.
                         self.pattern_bound_names.clear();
                         self.consume();
