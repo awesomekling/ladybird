@@ -153,6 +153,8 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
 
             if (exec_ptr)
                 executable = static_cast<Executable*>(exec_ptr);
+            else
+                executable = JS::Bytecode::Generator::generate_from_ast_node(vm, *script_record.parse_node(), {});
         } else {
             executable = JS::Bytecode::Generator::generate_from_ast_node(vm, *script_record.parse_node(), {});
         }
