@@ -244,6 +244,28 @@ pub fn generate_expr(
             gen.pending_lhs_name = None;
             let dst = choose_dst(gen, preferred_dst);
 
+            // If all elements are constant primitives, emit NewPrimitiveArray.
+            if !elements.is_empty() && elements.iter().all(|e| match e {
+                None => true, // holes
+                Some(e) => matches!(e.inner, Expression::NumericLiteral(_) | Expression::BooleanLiteral(_) | Expression::NullLiteral),
+            }) {
+                let values: Vec<u64> = elements.iter().map(|e| match e {
+                    None => nanboxed_empty(),
+                    Some(e) => match &e.inner {
+                        Expression::NumericLiteral(n) => nanboxed_number(*n),
+                        Expression::BooleanLiteral(b) => nanboxed_boolean(*b),
+                        Expression::NullLiteral => nanboxed_null(),
+                        _ => unreachable!(),
+                    },
+                }).collect();
+                gen.emit(Instruction::NewPrimitiveArray {
+                    dst: dst.operand(),
+                    element_count: values.len() as u32,
+                    elements: values,
+                });
+                return Some(dst);
+            }
+
             // Find the first spread element.
             let first_spread = elements.iter().position(|e| {
                 matches!(e, Some(elem) if matches!(elem.inner, Expression::Spread(_)))
@@ -6034,6 +6056,44 @@ fn collect_binding_pattern_names(
             BindingEntryAlias::MemberExpression(_) => {}
         }
     }
+}
+
+// NanBoxed Value encoding helpers matching C++ GC::NanBoxedValue.
+// Used by NewPrimitiveArray to encode constant primitive values inline.
+const NANBOX_TAG_SHIFT: u64 = 48;
+const NANBOX_BASE_TAG: u64 = 0x7FF8;
+const NANBOX_INT32_TAG: u64 = 0b010 | NANBOX_BASE_TAG;
+const NANBOX_BOOLEAN_TAG: u64 = 0b001 | NANBOX_BASE_TAG;
+const NANBOX_NULL_TAG: u64 = 0b111 | NANBOX_BASE_TAG;
+const NANBOX_EMPTY_TAG: u64 = 0b011 | NANBOX_BASE_TAG;
+const NEGATIVE_ZERO_BITS: u64 = 1u64 << 63;
+
+fn nanboxed_number(value: f64) -> u64 {
+    let is_negative_zero = value.to_bits() == NEGATIVE_ZERO_BITS;
+    if value >= i32::MIN as f64
+        && value <= i32::MAX as f64
+        && value.trunc() == value
+        && !is_negative_zero
+    {
+        (NANBOX_INT32_TAG << NANBOX_TAG_SHIFT) | ((value as i32 as u32) as u64)
+    } else if value.is_nan() {
+        // Canon NaN
+        0x7FF8_0000_0000_0000u64
+    } else {
+        value.to_bits()
+    }
+}
+
+fn nanboxed_boolean(value: bool) -> u64 {
+    (NANBOX_BOOLEAN_TAG << NANBOX_TAG_SHIFT) | (value as u64)
+}
+
+fn nanboxed_null() -> u64 {
+    NANBOX_NULL_TAG << NANBOX_TAG_SHIFT
+}
+
+fn nanboxed_empty() -> u64 {
+    NANBOX_EMPTY_TAG << NANBOX_TAG_SHIFT
 }
 
 /// Approximate a source expression as a string for error messages.
