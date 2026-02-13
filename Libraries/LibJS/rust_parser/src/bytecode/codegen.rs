@@ -5455,15 +5455,7 @@ fn generate_object_binding_pattern(
 
         match &entry.name {
             BindingEntryName::Identifier(ident) => {
-                let key = gen.intern_property_key(ident.name.clone());
-                let cache_index = gen.next_property_lookup_cache();
-                gen.emit(Instruction::GetById {
-                    dst: value.operand(),
-                    base: object.operand(),
-                    property: key,
-                    cache_index,
-                    base_identifier: None,
-                });
+                emit_get_by_id(gen, &value, object, &ident.name, None);
                 if has_rest {
                     let name_val = gen.add_constant_string(ident.name.clone());
                     excluded_names.push(name_val);
