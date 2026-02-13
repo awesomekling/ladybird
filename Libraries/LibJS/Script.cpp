@@ -75,7 +75,8 @@ Script::Script(Realm& realm, StringView filename, RefPtr<Program> parse_node, Ho
     // Pre-compute AnnexB candidates (GDI step 13).
     if (!m_is_strict_mode) {
         MUST(program.for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) -> ThrowCompletionOr<void> {
-            m_annex_b_candidates.append(function_declaration);
+            m_annex_b_candidate_names.append(function_declaration.name());
+            m_annex_b_function_declarations.append(function_declaration);
             return {};
         }));
     }
@@ -157,9 +158,9 @@ ThrowCompletionOr<void> Script::global_declaration_instantiation(VM& vm, GlobalE
     if (!m_is_strict_mode) {
         // a. Let declaredFunctionOrVarNames be the list-concatenation of declaredFunctionNames and declaredVarNames.
         // b. For each FunctionDeclaration f that is directly contained in the StatementList of a Block, CaseClause, or DefaultClause Contained within script, do
-        for (auto& function_declaration : m_annex_b_candidates) {
+        for (size_t i = 0; i < m_annex_b_candidate_names.size(); ++i) {
             // i. Let F be StringValue of the BindingIdentifier of f.
-            auto function_name = function_declaration->name();
+            auto& function_name = m_annex_b_candidate_names[i];
 
             // 1. If env.HasLexicalDeclaration(F) is false, then
             if (global_environment.has_lexical_declaration(function_name))
@@ -178,7 +179,8 @@ ThrowCompletionOr<void> Script::global_declaration_instantiation(VM& vm, GlobalE
             }
 
             // iii. When the FunctionDeclaration f is evaluated, perform the following steps in place of the FunctionDeclaration Evaluation algorithm provided in 15.2.6:
-            function_declaration->set_should_do_additional_annexB_steps();
+            if (i < m_annex_b_function_declarations.size())
+                m_annex_b_function_declarations[i]->set_should_do_additional_annexB_steps();
         }
     }
 
@@ -228,7 +230,7 @@ ThrowCompletionOr<void> Script::global_declaration_instantiation(VM& vm, GlobalE
 void Script::drop_ast()
 {
     m_parse_node = nullptr;
-    m_annex_b_candidates.clear();
+    m_annex_b_function_declarations.clear();
 }
 
 Script::~Script()
