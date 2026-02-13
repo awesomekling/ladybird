@@ -321,6 +321,18 @@ pub unsafe extern "C" fn rust_compile_function(
         gen.lexical_environment_register_stack.push(env_reg);
     }
 
+    // For async (non-generator) functions, emit the initial Yield BEFORE FDI
+    // so that parameter evaluation errors are caught by the async promise wrapper.
+    if gen.is_in_async_function() && !gen.is_in_generator_function() {
+        let start_block = gen.make_block();
+        let undef = gen.add_constant_undefined();
+        gen.emit(bytecode::instruction::Instruction::Yield {
+            continuation_label: Some(bytecode::operand::Label(start_block as u32)),
+            value: undef.operand(),
+        });
+        gen.switch_to_basic_block(start_block);
+    }
+
     // Emit FDI (FunctionDeclarationInstantiation) bytecode.
     if let Some(scope) = body_scope {
         bytecode::codegen::emit_function_declaration_instantiation(
@@ -328,9 +340,9 @@ pub unsafe extern "C" fn rust_compile_function(
         );
     }
 
-    // For async and generator functions, emit an initial Yield suspension point.
-    // The runtime resumes from here on the first call to .next() / await.
-    if gen.is_in_generator_or_async_function() {
+    // For generator functions (including async generators), emit the initial Yield
+    // AFTER FDI. Parameter evaluation happens synchronously before the generator starts.
+    if gen.is_in_generator_function() {
         let start_block = gen.make_block();
         let undef = gen.add_constant_undefined();
         gen.emit(bytecode::instruction::Instruction::Yield {
