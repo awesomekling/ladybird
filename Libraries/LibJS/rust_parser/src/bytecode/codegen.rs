@@ -137,6 +137,8 @@ pub fn generate_expr(
 
         // === Logical (short-circuit) ===
         Expression::Logical { op, lhs, rhs } => {
+            // Logical expressions are not named evaluations.
+            gen.pending_lhs_name = None;
             generate_logical(gen, *op, lhs, rhs, preferred_dst)
         }
 
@@ -145,10 +147,16 @@ pub fn generate_expr(
             test,
             consequent,
             alternate,
-        } => generate_conditional(gen, test, consequent, alternate, preferred_dst),
+        } => {
+            // Conditional expressions are not named evaluations.
+            gen.pending_lhs_name = None;
+            generate_conditional(gen, test, consequent, alternate, preferred_dst)
+        }
 
         // === Sequence ===
         Expression::Sequence(exprs) => {
+            // Sequence expressions are not named evaluations.
+            gen.pending_lhs_name = None;
             let mut last = None;
             for expr in exprs {
                 last = generate_expr(expr, gen, None);
@@ -230,6 +238,8 @@ pub fn generate_expr(
 
         // === Array ===
         Expression::Array(elements) => {
+            // Array literals are not named evaluations.
+            gen.pending_lhs_name = None;
             let dst = choose_dst(gen, preferred_dst);
 
             // Find the first spread element.
@@ -2080,7 +2090,9 @@ fn generate_assignment_expression(
                     }
                     // RHS block: evaluate RHS, assign, jump to end.
                     gen.switch_to_basic_block(rhs_block);
+                    gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
                     let rhs_val = generate_expr(rhs, gen, None)?;
+                    gen.pending_lhs_name = None;
                     gen.emit_mov(&dst, &rhs_val);
                     emit_set_variable(gen, ident, &dst);
                     gen.emit(Instruction::Jump { target: Label(end_block as u32) });
