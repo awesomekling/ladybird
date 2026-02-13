@@ -192,6 +192,379 @@ pub unsafe extern "C" fn rust_compile_program(
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
 }
 
+/// Compile a script and extract GDI (GlobalDeclarationInstantiation) metadata.
+///
+/// This is the Rust-only path for scripts. It:
+/// 1. Parses the program
+/// 2. Runs scope analysis
+/// 3. Generates bytecode → creates Executable
+/// 4. Extracts GDI metadata from the program AST
+/// 5. Populates the C++ ScriptGdiBuilder via callbacks
+///
+/// Returns the `Executable*` as `void*`, or nullptr on failure.
+///
+/// # Safety
+/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `gdi_context` must be a valid pointer to a C++ ScriptGdiBuilder.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_script(
+    source: *const u16,
+    source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    gdi_context: *mut c_void,
+) -> *mut c_void {
+    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let mut parser = Parser::new(source_slice, ProgramType::Script);
+
+    // Parse
+    let program = parser.parse_program(false);
+
+    // Check for parse errors
+    if parser.has_errors() {
+        return std::ptr::null_mut();
+    }
+
+    // Run scope analysis
+    parser.scope_collector.analyze(false);
+
+    // Extract program data before codegen consumes the generator
+    let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
+        (data.scope.clone(), data.is_strict_mode)
+    } else {
+        return std::ptr::null_mut();
+    };
+
+    // Generate bytecode
+    let mut gen = bytecode::generator::Generator::new();
+    gen.strict = is_strict;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
+
+    // Copy program's local variables from scope analysis into the generator.
+    {
+        let scope = scope_ref.borrow();
+        gen.local_variables = scope
+            .local_variables
+            .iter()
+            .map(|lv| bytecode::generator::LocalVariable {
+                name: lv.name.clone(),
+                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+                is_initialized_during_declaration_instantiation: false,
+            })
+            .collect();
+    }
+
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Initialize the lexical environment register.
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
+    }
+
+    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
+
+    if !gen.is_current_block_terminated() {
+        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(bytecode::instruction::Instruction::End {
+            value: value.operand(),
+        });
+    }
+
+    // Assemble
+    let assembled = gen.assemble();
+
+    // Create C++ Executable via FFI
+    let exec_ptr = bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr);
+    if exec_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    // Extract GDI metadata and populate via callbacks.
+    extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+
+    exec_ptr
+}
+
+/// Extract GDI metadata from a program-level ScopeData and populate
+/// the C++ ScriptGdiBuilder via callbacks.
+unsafe fn extract_script_gdi(
+    scope: &ast::ScopeData,
+    is_strict: bool,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    ctx: *mut c_void,
+) {
+    use ast::{DeclarationKind, Statement};
+    use bytecode::ffi::{
+        script_gdi_push_annex_b_name, script_gdi_push_function, script_gdi_push_lexical_binding,
+        script_gdi_push_lexical_name, script_gdi_push_var_name,
+    };
+
+    // 1. Lexical names (let/const/using/class at top level)
+    for child in &scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations }
+                if *kind != DeclarationKind::Var =>
+            {
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
+                    }
+                }
+            }
+            Statement::UsingDeclaration { declarations } => {
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name) = class_data.name {
+                    script_gdi_push_lexical_name(ctx, name.name.as_ptr(), name.name.len());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Var names (var declarations at any nesting level + top-level function declarations)
+    for child in &scope.children {
+        collect_var_names_recursive(&child.inner, ctx);
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name) = func_data.name {
+                script_gdi_push_var_name(ctx, name.name.as_ptr(), name.name.len());
+            }
+        }
+    }
+
+    // 3. Functions to initialize (reverse order, deduplicated by name).
+    //    For each, create an SFD via FFI.
+    let mut seen_names: Vec<Vec<u16>> = Vec::new();
+    let mut funcs_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
+    for child in scope.children.iter().rev() {
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name_ident) = func_data.name {
+                if !seen_names.iter().any(|n| *n == name_ident.name) {
+                    seen_names.push(name_ident.name.clone());
+                    funcs_to_init.push((func_data, name_ident.name.clone()));
+                }
+            }
+        }
+    }
+    for (func_data, name) in &funcs_to_init {
+        let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(func_data, vm_ptr, source_code_ptr, is_strict);
+        script_gdi_push_function(ctx, sfd_ptr, name.as_ptr(), name.len());
+    }
+
+    // 4. Var scoped names (var VariableDeclaration names at any nesting level, excluding function declarations)
+    for child in &scope.children {
+        collect_var_scoped_names_recursive(&child.inner, ctx);
+    }
+
+    // 5. Annex B candidate names
+    for name in &scope.annexb_function_names {
+        script_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len());
+    }
+
+    // 6. Lexical bindings (name + is_constant)
+    for child in &scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations }
+                if *kind != DeclarationKind::Var =>
+            {
+                let is_constant = *kind == DeclarationKind::Const;
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        script_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_constant);
+                    }
+                }
+            }
+            Statement::UsingDeclaration { declarations } => {
+                // `using` is like const
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        script_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), false);
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name) = class_data.name {
+                    // Class declarations are not constant (IsConstantDeclaration = false)
+                    script_gdi_push_lexical_binding(ctx, name.name.as_ptr(), name.name.len(), false);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Recursively collect var-declared names from a statement and all nested
+/// statements, excluding function/class bodies (which create new var scopes).
+/// Calls `script_gdi_push_var_name` for each discovered name.
+unsafe fn collect_var_names_recursive(stmt: &ast::Statement, ctx: *mut c_void) {
+    use ast::Statement;
+    use bytecode::ffi::script_gdi_push_var_name;
+
+    match stmt {
+        Statement::VariableDeclaration {
+            kind: ast::DeclarationKind::Var,
+            declarations,
+        } => {
+            for decl in declarations {
+                let mut names = Vec::new();
+                collect_bound_names_from_target(&decl.target, &mut names);
+                for name in &names {
+                    script_gdi_push_var_name(ctx, name.as_ptr(), name.len());
+                }
+            }
+        }
+        _ => {
+            for_each_child_statement(stmt, &mut |child| {
+                collect_var_names_recursive(child, ctx);
+            });
+        }
+    }
+}
+
+/// Recursively collect var-scoped variable declaration names (excluding function
+/// declarations) from a statement and all nested statements.
+unsafe fn collect_var_scoped_names_recursive(stmt: &ast::Statement, ctx: *mut c_void) {
+    use ast::Statement;
+    use bytecode::ffi::script_gdi_push_var_scoped_name;
+
+    match stmt {
+        Statement::VariableDeclaration {
+            kind: ast::DeclarationKind::Var,
+            declarations,
+        } => {
+            for decl in declarations {
+                let mut names = Vec::new();
+                collect_bound_names_from_target(&decl.target, &mut names);
+                for name in &names {
+                    script_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len());
+                }
+            }
+        }
+        _ => {
+            for_each_child_statement(stmt, &mut |child| {
+                collect_var_scoped_names_recursive(child, ctx);
+            });
+        }
+    }
+}
+
+/// Visit each child statement of a statement, excluding function/class bodies
+/// (which create new var scopes). This enables recursive var-declaration walking.
+fn for_each_child_statement(stmt: &ast::Statement, f: &mut dyn FnMut(&ast::Statement)) {
+    use ast::Statement;
+
+    match stmt {
+        Statement::Block(scope) => {
+            for child in &scope.borrow().children {
+                f(&child.inner);
+            }
+        }
+        Statement::If { consequent, alternate, .. } => {
+            f(&consequent.inner);
+            if let Some(alt) = alternate {
+                f(&alt.inner);
+            }
+        }
+        Statement::While { body, .. }
+        | Statement::DoWhile { body, .. }
+        | Statement::With { body, .. } => {
+            f(&body.inner);
+        }
+        Statement::For { init, body, .. } => {
+            if let Some(init) = init {
+                f(&init.inner);
+            }
+            f(&body.inner);
+        }
+        Statement::ForIn { lhs, body, .. }
+        | Statement::ForOf { lhs, body, .. }
+        | Statement::ForAwaitOf { lhs, body, .. } => {
+            if let ast::ForInOfLhs::Declaration(decl) = lhs {
+                f(&decl.inner);
+            }
+            f(&body.inner);
+        }
+        Statement::Switch(data) => {
+            for case in &data.cases {
+                for child in &case.scope.borrow().children {
+                    f(&child.inner);
+                }
+            }
+        }
+        Statement::Try(data) => {
+            f(&data.block.inner);
+            if let Some(ref handler) = data.handler {
+                f(&handler.body.inner);
+            }
+            if let Some(ref finalizer) = data.finalizer {
+                f(&finalizer.inner);
+            }
+        }
+        Statement::Labelled { item, .. } => {
+            f(&item.inner);
+        }
+        // Don't recurse into function/class bodies (new var scopes)
+        _ => {}
+    }
+}
+
+/// Collect bound names from a variable declarator target.
+fn collect_bound_names_from_target(target: &ast::VariableDeclaratorTarget, names: &mut Vec<Vec<u16>>) {
+    match target {
+        ast::VariableDeclaratorTarget::Identifier(id) => {
+            names.push(id.name.clone());
+        }
+        ast::VariableDeclaratorTarget::BindingPattern(pattern) => {
+            collect_bound_names_from_pattern(pattern, names);
+        }
+    }
+}
+
+/// Collect bound names from a binding pattern (recursively).
+fn collect_bound_names_from_pattern(pattern: &ast::BindingPattern, names: &mut Vec<Vec<u16>>) {
+    for entry in &pattern.entries {
+        match &entry.alias {
+            ast::BindingEntryAlias::Empty => {
+                if let ast::BindingEntryName::Identifier(id) = &entry.name {
+                    names.push(id.name.clone());
+                }
+            }
+            ast::BindingEntryAlias::Identifier(id) => {
+                names.push(id.name.clone());
+            }
+            ast::BindingEntryAlias::BindingPattern(inner) => {
+                collect_bound_names_from_pattern(inner, names);
+            }
+            ast::BindingEntryAlias::MemberExpression(_) => {}
+        }
+    }
+}
+
 /// Free a Rust `Box<FunctionData>` stored in a C++ SharedFunctionInstanceData.
 ///
 /// Called from the SFD's `finalize()` or `clear_compile_inputs()` when the

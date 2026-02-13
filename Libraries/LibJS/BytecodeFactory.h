@@ -59,6 +59,16 @@ struct FFIClassElement {
 extern "C" {
 #endif
 
+// Parse, compile, and extract GDI metadata for a script using the Rust
+// parser. Populates gdi_context (a ScriptGdiBuilder*) via callbacks.
+// Returns a Bytecode::Executable* cast to void*, or nullptr on failure.
+void* rust_compile_script(
+    uint16_t const* source,
+    size_t source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    void* gdi_context);
+
 // Parse and compile a JavaScript program using the Rust parser and
 // bytecode generator. Returns a Bytecode::Executable* cast to void*,
 // or nullptr on failure.
@@ -236,6 +246,14 @@ void* rust_create_class_blueprint(
     // Array of class element descriptors
     FFIClassElement const* elements,
     size_t element_count);
+
+// Callbacks used by rust_compile_script to populate GDI metadata.
+void script_gdi_push_lexical_name(void* ctx, uint16_t const* name, size_t len);
+void script_gdi_push_var_name(void* ctx, uint16_t const* name, size_t len);
+void script_gdi_push_function(void* ctx, void* sfd, uint16_t const* name, size_t len);
+void script_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
+void script_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
+void script_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
 
 #ifdef __cplusplus
 }

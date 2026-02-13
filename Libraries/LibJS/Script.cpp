@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGC/DeferGC.h>
 #include <LibJS/AST.h>
+#include <LibJS/Bytecode/Executable.h>
+#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
@@ -12,14 +15,105 @@
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Script.h>
+#include <LibJS/SourceCode.h>
 
 namespace JS {
 
 GC_DEFINE_ALLOCATOR(Script);
 
+// Builder populated by Rust via callbacks during rust_compile_script.
+struct ScriptGdiBuilder {
+    GC::Ptr<Bytecode::Executable> executable;
+    bool is_strict_mode { false };
+    Vector<Utf16FlyString> lexical_names;
+    Vector<Utf16FlyString> var_names;
+    Vector<Script::FunctionToInitialize> functions_to_initialize;
+    HashTable<Utf16FlyString> declared_function_names;
+    Vector<Utf16FlyString> var_scoped_names;
+    Vector<Utf16FlyString> annex_b_candidate_names;
+    Vector<Script::LexicalBinding> lexical_bindings;
+};
+
+}
+
+static Utf16FlyString utf16_fly_from(uint16_t const* data, size_t len)
+{
+    return Utf16FlyString::from_utf16(Utf16View { reinterpret_cast<char16_t const*>(data), len });
+}
+
+extern "C" void script_gdi_push_lexical_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::ScriptGdiBuilder*>(ctx)->lexical_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void script_gdi_push_var_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::ScriptGdiBuilder*>(ctx)->var_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void script_gdi_push_function(void* ctx, void* sfd_ptr, uint16_t const* name, size_t len)
+{
+    auto& builder = *static_cast<JS::ScriptGdiBuilder*>(ctx);
+    auto fn_name = utf16_fly_from(name, len);
+    builder.declared_function_names.set(fn_name);
+    auto& sfd = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    builder.functions_to_initialize.append({ sfd, move(fn_name) });
+}
+
+extern "C" void script_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::ScriptGdiBuilder*>(ctx)->var_scoped_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void script_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::ScriptGdiBuilder*>(ctx)->annex_b_candidate_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void script_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant)
+{
+    static_cast<JS::ScriptGdiBuilder*>(ctx)->lexical_bindings.append({ utf16_fly_from(name, len), is_constant });
+}
+
+namespace JS {
+
 // 16.1.5 ParseScript ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parse-script
 Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_text, Realm& realm, StringView filename, HostDefined* host_defined, size_t line_number_offset)
 {
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+
+    if (use_rust_codegen) {
+        auto source_code = SourceCode::create(
+            String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(),
+            Utf16String::from_utf8(source_text));
+
+        auto const& code_view = source_code->code_view();
+        auto length = code_view.length_in_code_units();
+
+        GC::DeferGC defer_gc(realm.vm().heap());
+        ScriptGdiBuilder builder;
+
+        void* exec_ptr;
+        if (code_view.has_ascii_storage()) {
+            auto ascii = code_view.ascii_span();
+            Vector<u16> utf16_buf;
+            utf16_buf.ensure_capacity(length);
+            for (size_t i = 0; i < length; ++i)
+                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+            exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder);
+        } else {
+            auto utf16 = code_view.utf16_span();
+            exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder);
+        }
+
+        if (exec_ptr) {
+            auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+            return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);
+        }
+
+        // Fall through to C++ parser on Rust failure.
+    }
+
     // 1. Let script be ParseText(sourceText, Script).
     auto parser = Parser(Lexer(SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text)), line_number_offset));
     auto script = parser.parse_program();
@@ -88,6 +182,22 @@ Script::Script(Realm& realm, StringView filename, RefPtr<Program> parse_node, Ho
             return {};
         });
     }));
+}
+
+Script::Script(Realm& realm, StringView filename, ScriptGdiBuilder&& builder, Bytecode::Executable& executable, HostDefined* host_defined)
+    : m_realm(realm)
+    , m_executable(&executable)
+    , m_lexical_names(move(builder.lexical_names))
+    , m_var_names(move(builder.var_names))
+    , m_functions_to_initialize(move(builder.functions_to_initialize))
+    , m_declared_function_names(move(builder.declared_function_names))
+    , m_var_scoped_names(move(builder.var_scoped_names))
+    , m_annex_b_candidate_names(move(builder.annex_b_candidate_names))
+    , m_lexical_bindings(move(builder.lexical_bindings))
+    , m_is_strict_mode(builder.is_strict_mode)
+    , m_filename(filename)
+    , m_host_defined(host_defined)
+{
 }
 
 // 16.1.7 GlobalDeclarationInstantiation ( script, env ), https://tc39.es/ecma262/#sec-globaldeclarationinstantiation

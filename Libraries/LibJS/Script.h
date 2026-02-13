@@ -19,6 +19,7 @@
 namespace JS {
 
 class FunctionDeclaration;
+struct ScriptGdiBuilder;
 
 // 16.1.4 Script Records, https://tc39.es/ecma262/#sec-script-records
 class JS_API Script final : public Cell {
@@ -71,7 +72,9 @@ public:
     };
 
 private:
+    friend struct ScriptGdiBuilder;
     Script(Realm&, StringView filename, RefPtr<Program>, HostDefined*);
+    Script(Realm&, StringView filename, ScriptGdiBuilder&&, Bytecode::Executable&, HostDefined*);
 
     virtual void visit_edges(Cell::Visitor&) override;
 

@@ -133,6 +133,95 @@ extern "C" {
         elements: *const FFIClassElement,
         element_count: usize,
     ) -> *mut c_void;
+
+    // Callbacks for populating Script GDI data from Rust.
+    pub fn script_gdi_push_lexical_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn script_gdi_push_var_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn script_gdi_push_function(ctx: *mut c_void, sfd: *mut c_void, name: *const u16, len: usize);
+    pub fn script_gdi_push_var_scoped_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn script_gdi_push_annex_b_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn script_gdi_push_lexical_binding(ctx: *mut c_void, name: *const u16, len: usize, is_constant: bool);
+}
+
+/// Create a SharedFunctionInstanceData for a FunctionData, for GDI use.
+///
+/// This is the same logic as `emit_new_function` in codegen.rs but without
+/// a Generator context. Used to create SFDs for top-level function
+/// declarations that GDI needs to instantiate.
+///
+/// # Safety
+/// `vm_ptr` and `source_code_ptr` must be valid pointers.
+pub unsafe fn create_sfd_for_gdi(
+    func_data: &crate::ast::FunctionData,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    is_strict: bool,
+) -> *mut c_void {
+    use crate::ast::FunctionParameterBinding;
+
+    let source_start = func_data.source_text_start as usize;
+    let source_end = func_data.source_text_end as usize;
+    let source_text_len = source_end - source_start;
+
+    let (name_ptr, name_len) = if let Some(ref name_ident) = func_data.name {
+        (name_ident.name.as_ptr(), name_ident.name.len())
+    } else {
+        (std::ptr::null(), 0)
+    };
+
+    let has_simple_parameter_list = func_data.parameters.iter().all(|p| {
+        !p.is_rest
+            && p.default_value.is_none()
+            && matches!(p.binding, FunctionParameterBinding::Identifier(_))
+    });
+
+    let param_name_slices: Vec<FFIUtf16Slice> = if has_simple_parameter_list {
+        func_data
+            .parameters
+            .iter()
+            .map(|p| {
+                if let FunctionParameterBinding::Identifier(ref id) = p.binding {
+                    FFIUtf16Slice {
+                        data: id.name.as_ptr(),
+                        length: id.name.len(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let cloned = Box::new(func_data.clone());
+    let rust_ast_ptr = Box::into_raw(cloned) as *mut c_void;
+
+    let function_kind = func_data.kind as u8;
+    let strict = func_data.is_strict_mode || is_strict;
+
+    let sfd_ptr = rust_create_sfd(
+        vm_ptr,
+        source_code_ptr,
+        name_ptr,
+        name_len,
+        function_kind,
+        func_data.function_length,
+        func_data.parameters.len() as u32,
+        strict,
+        func_data.is_arrow_function,
+        has_simple_parameter_list,
+        param_name_slices.as_ptr(),
+        param_name_slices.len(),
+        source_start,
+        source_text_len,
+        rust_ast_ptr,
+        func_data.parsing_insights.uses_this,
+        func_data.parsing_insights.uses_this_from_environment,
+    );
+
+    assert!(!sfd_ptr.is_null(), "create_sfd_for_gdi: rust_create_sfd returned null");
+    sfd_ptr
 }
 
 /// Encode constants into a tagged byte buffer for FFI.
