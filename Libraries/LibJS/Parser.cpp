@@ -20,11 +20,6 @@
 #include <LibJS/ScopeCollector.h>
 #include <LibRegex/Regex.h>
 
-#ifdef ENABLE_RUST_PARSER
-#    include <LibJS/ASTFactory.h>
-#    include <stdlib.h>
-#endif
-
 namespace JS {
 
 class OperatorPrecedenceTable {
@@ -248,22 +243,6 @@ bool Parser::parse_directive(ScopeNode& body)
 
 NonnullRefPtr<Program> Parser::parse_program(bool starts_in_strict_mode)
 {
-#ifdef ENABLE_RUST_PARSER
-    static bool const s_use_cpp_parser = getenv("USE_CPP_PARSER");
-    if (m_use_rust_parser && !s_use_cpp_parser) {
-        bool has_errors = false;
-        auto program = rust_parse(m_source_code, m_program_type, starts_in_strict_mode,
-            m_state.initiated_by_eval,
-            m_state.in_eval_function_context,
-            m_state.allow_super_property_lookup,
-            m_state.allow_super_constructor_call,
-            m_state.in_class_field_initializer,
-            has_errors);
-        if (!has_errors)
-            return program;
-        // Fall through to C++ parser for proper error reporting.
-    }
-#endif
     auto rule_start = push_start();
     auto program = adopt_ref(*new Program({ m_source_code, rule_start.position(), position() }, m_program_type));
     {

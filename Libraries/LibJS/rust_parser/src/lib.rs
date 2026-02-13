@@ -41,7 +41,7 @@
 //!
 //! ## Module overview
 //!
-//! - `lib.rs` — Entry point (`rust_parse_program`), called from C++
+//! - `lib.rs` — Entry point, called from C++
 //! - `token.rs` — Token types matching the C++ `TokenType` enum
 //! - `lexer.rs` — Tokenizer: UTF-16 input → Token stream
 //! - `parser.rs` — Parser state, helpers, token consumption
@@ -50,8 +50,7 @@
 //! - `parser/declarations.rs` — Functions, classes, variables, modules
 //! - `ast.rs` — Rust AST type definitions
 //! - `bytecode/` — Bytecode generator, instruction types, and FFI
-//! - `ast_bridge.rs` — (Legacy) Safe Rust wrappers around C++ factory FFI
-//! - `scope_collector.rs` — (Legacy) Scope analysis
+//! - `scope_collector.rs` — Scope analysis
 
 /// Compile-time conversion of an ASCII string literal to `&'static [u16]`.
 ///
@@ -80,66 +79,15 @@ macro_rules! utf16 {
 }
 
 pub mod ast;
-pub mod ast_bridge;
 pub mod bytecode;
-pub mod ffi_enums;
 pub mod lexer;
 pub mod parser;
 pub mod scope_collector;
 pub mod token;
 
 use ast::Statement;
-use ast_bridge::NodeHandle;
 use parser::{Parser, ProgramType};
 use std::ffi::c_void;
-
-/// Parse a JavaScript program from UTF-16 source code.
-///
-/// The Rust parser builds a Rust AST. When `USE_RUST_CODEGEN` is set
-/// (checked by the C++ caller), the codegen path produces a C++ Executable.
-/// Otherwise, this signals errors so Script.cpp falls back to the C++ parser.
-///
-/// # Safety
-/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
-#[no_mangle]
-pub unsafe extern "C" fn rust_parse_program(
-    source: *const u16,
-    source_len: usize,
-    _source_code: *const c_void,
-    program_type: u8,
-    starts_in_strict_mode: bool,
-    initiated_by_eval: bool,
-    in_eval_function_context: bool,
-    allow_super_property_lookup: bool,
-    allow_super_constructor_call: bool,
-    in_class_field_initializer: bool,
-    out_has_errors: *mut bool,
-) -> NodeHandle {
-    let source_slice = std::slice::from_raw_parts(source, source_len);
-    let pt = if program_type == 1 {
-        ProgramType::Module
-    } else {
-        ProgramType::Script
-    };
-    let mut parser = Parser::new(source_slice, pt);
-    if initiated_by_eval {
-        parser.initiated_by_eval = true;
-        parser.in_eval_function_context = in_eval_function_context;
-        parser.allow_super_property_lookup = allow_super_property_lookup;
-        parser.allow_super_constructor_call = allow_super_constructor_call;
-        parser.in_class_field_initializer = in_class_field_initializer;
-    }
-
-    // Run the parser to build the Rust AST.
-    let _program = parser.parse_program(starts_in_strict_mode);
-
-    // Always signal errors so the C++ caller falls back to the C++ parser.
-    // The Rust codegen path is not yet ready for production use.
-    if !out_has_errors.is_null() {
-        *out_has_errors = true;
-    }
-    std::ptr::null_mut()
-}
 
 /// Compile a JavaScript program using the Rust parser and bytecode generator.
 ///

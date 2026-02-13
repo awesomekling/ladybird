@@ -22,7 +22,6 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
 {
     // 1. Let script be ParseText(sourceText, Script).
     auto parser = Parser(Lexer(SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text)), line_number_offset));
-    parser.set_use_rust_parser();
     auto script = parser.parse_program();
 
     // 2. If script is a List of errors, return body.
