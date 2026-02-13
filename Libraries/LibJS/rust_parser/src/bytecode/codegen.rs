@@ -4529,6 +4529,54 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
 // For-in statement
 // =============================================================================
 
+/// Create a TDZ environment for lexical declarations in for-in/for-of heads.
+/// Returns true if a TDZ scope was entered (must call leave_for_in_of_head_tdz after RHS eval).
+fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
+    if let ForInOfLhs::Declaration(stmt) = lhs {
+        if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
+            if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                let mut names = Vec::new();
+                for decl in declarations {
+                    collect_target_names(&decl.target, &mut names);
+                }
+                if !names.is_empty() {
+                    let parent = gen.lexical_environment_register_stack.last().cloned()
+                        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                    let new_env = gen.allocate_register();
+                    gen.emit(Instruction::CreateLexicalEnvironment {
+                        dst: new_env.operand(),
+                        parent: parent.operand(),
+                        capacity: names.len() as u32,
+                    });
+                    gen.lexical_environment_register_stack.push(new_env);
+                    for (name, _) in &names {
+                        let id = gen.intern_identifier(name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Tear down the TDZ environment after RHS evaluation.
+fn leave_for_in_of_head_tdz(gen: &mut Generator) {
+    gen.lexical_environment_register_stack.pop();
+    if !gen.is_current_block_terminated() {
+        let parent = gen.lexical_environment_register_stack.last().cloned()
+            .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+    }
+}
+
 fn generate_for_in_statement(
     gen: &mut Generator,
     lhs: &ForInOfLhs,
@@ -4536,7 +4584,12 @@ fn generate_for_in_statement(
     body: &Stmt,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    // Create TDZ for lexical declarations before evaluating the RHS expression.
+    let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    if entered_tdz {
+        leave_for_in_of_head_tdz(gen);
+    }
     let end_block = gen.make_block();
     let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
 
@@ -4735,7 +4788,12 @@ fn generate_for_of_statement_inner(
     preferred_dst: Option<&ScopedOperand>,
     is_await: bool,
 ) -> Option<ScopedOperand> {
+    // Create TDZ for lexical declarations before evaluating the RHS expression.
+    let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
     let object = generate_expr(rhs, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
+    if entered_tdz {
+        leave_for_in_of_head_tdz(gen);
+    }
     let end_block = gen.make_block();
     let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
     let old_handler = gen.current_unwind_handler;
