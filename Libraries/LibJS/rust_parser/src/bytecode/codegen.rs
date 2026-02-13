@@ -3656,7 +3656,8 @@ fn generate_object_expression(
         };
 
         // Set pending LHS name for function name inference on non-computed properties.
-        if !prop.is_computed {
+        // ProtoSetter (__proto__) skips NamedEvaluation per spec.
+        if !prop.is_computed && prop.property_type != ObjectPropertyType::ProtoSetter {
             let base_name = match &prop.key.inner {
                 Expression::StringLiteral(s) => Some(s.clone()),
                 Expression::Identifier(ident) => Some(ident.name.clone()),
