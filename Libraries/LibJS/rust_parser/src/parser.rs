@@ -34,6 +34,8 @@
 
 use std::collections::HashMap;
 
+use std::rc::Rc;
+
 use crate::ast::{
     BindingPattern, Expr, Expression, Identifier,
     SourceRange, Stmt, Statement, ScopeData, ProgramData,
@@ -210,9 +212,9 @@ pub struct Parser<'a> {
 
     /// Bound names collected during parse_binding_pattern.
     /// Caller drains this after calling parse_binding_pattern.
-    /// Each entry is (name, identifier_pointer) — the pointer allows scope analysis
-    /// to annotate binding pattern identifiers with local variable info.
-    pub(crate) pattern_bound_names: Vec<(Vec<u16>, *const Identifier)>,
+    /// Each entry is (name, identifier) — allows scope analysis to annotate
+    /// binding pattern identifiers with local variable info.
+    pub(crate) pattern_bound_names: Vec<(Vec<u16>, Rc<Identifier>)>,
 
     /// Set by parse_primary_expression when the result is a bare Identifier("eval").
     /// Read and cleared by parse_secondary_expression for the ParenOpen (call) case.
@@ -221,11 +223,11 @@ pub struct Parser<'a> {
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
 
-    /// Expressions whose identifiers were registered with the scope collector
-    /// during an initial parse, then superseded by synthesize_binding_pattern.
-    /// Kept alive to prevent the scope collector's raw identifier pointers
-    /// from dangling after the expression would otherwise be dropped.
-    pub(crate) scope_anchor: Vec<Expr>,
+    /// Expressions replaced by synthesized binding patterns must stay alive
+    /// because the scope collector holds raw `*mut ScopeData` pointers to
+    /// scope nodes within the original expression's AST.
+    scope_anchor: Vec<Expr>,
+
 
     /// True while parsing a class body that has an `extends` clause.
     pub(crate) class_has_super_class: bool,
@@ -308,18 +310,18 @@ impl<'a> Parser<'a> {
         Stmt::new(self.range_from(start), statement)
     }
 
-    pub(crate) fn make_identifier(&self, start: Position, name: Vec<u16>) -> Box<Identifier> {
-        Box::new(Identifier::new(self.range_from(start), name))
+    pub(crate) fn make_identifier(&self, start: Position, name: Vec<u16>) -> Rc<Identifier> {
+        Rc::new(Identifier::new(self.range_from(start), name))
     }
 
     /// Register function parameters with the scope collector.
     pub(crate) fn register_function_params_with_scope(
         &mut self,
         params: &[crate::ast::FunctionParameter],
-        param_info: &[(Vec<u16>, bool, bool, *const Identifier)],
+        param_info: &[(Vec<u16>, bool, bool, Option<Rc<Identifier>>)],
     ) {
         use crate::ast::FunctionParameterBinding;
-        let mut entries: Vec<(Vec<u16>, *const Identifier, bool, bool)> = Vec::new();
+        let mut entries: Vec<(Vec<u16>, Option<Rc<Identifier>>, bool, bool)> = Vec::new();
         let mut info_idx = 0;
         for param in params {
             match &param.binding {
@@ -331,13 +333,13 @@ impl<'a> Parser<'a> {
                     } else {
                         (id.name.clone(), param.is_rest, false)
                     };
-                    entries.push((name, &**id as *const Identifier, is_rest, is_from_pattern));
+                    entries.push((name, Some(id.clone()), is_rest, is_from_pattern));
                 }
                 FunctionParameterBinding::BindingPattern(_pat) => {
                     // Pattern parameters have multiple bound names in param_info.
                     while info_idx < param_info.len() && param_info[info_idx].2 {
                         let pi = &param_info[info_idx];
-                        entries.push((pi.0.clone(), pi.3, pi.1, true));
+                        entries.push((pi.0.clone(), pi.3.clone(), pi.1, true));
                         info_idx += 1;
                     }
                 }
@@ -671,7 +673,7 @@ impl<'a> Parser<'a> {
     /// body or the function is a generator/async.
     pub(crate) fn check_parameters_post_body(
         &mut self,
-        param_info: &[(Vec<u16>, bool, bool, *const Identifier)],
+        param_info: &[(Vec<u16>, bool, bool, Option<Rc<Identifier>>)],
         force_strict: bool,
         _kind: FunctionKind,
     ) {

@@ -6,12 +6,14 @@
 
 //! Declaration parsing: variables, functions, classes, imports, exports.
 
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, Parser, Position, ProgramType};
 use crate::token::TokenType;
 
 /// Extract an Identifier from an Expression::Identifier node.
-fn expr_into_identifier(expr: Expr) -> Box<Identifier> {
+fn expr_into_identifier(expr: Expr) -> Rc<Identifier> {
     match expr.inner {
         Expression::Identifier(id) => id,
         _ => unreachable!("expected Identifier expression"),
@@ -137,7 +139,7 @@ impl<'a> Parser<'a> {
                 // Register with scope collector.
                 if kind == DeclarationKind::Var {
                     self.scope_collector.add_var_declaration(
-                        &[(&value, &*id as *const Identifier)],
+                        &[(&value, Some(id.clone()))],
                         decl_line, decl_column,
                     );
                 } else {
@@ -146,7 +148,7 @@ impl<'a> Parser<'a> {
                         decl_line, decl_column,
                     );
                     self.scope_collector.register_identifier(
-                        &*id as *const Identifier, &value, Some(kind),
+                        id.clone(), &value, Some(kind),
                     );
                 }
 
@@ -157,8 +159,8 @@ impl<'a> Parser<'a> {
 
                 // Register bound names with scope collector.
                 if kind == DeclarationKind::Var {
-                    let entries: Vec<(&[u16], *const Identifier)> = bound_names.iter()
-                        .map(|(n, id_ptr)| (n.as_slice(), *id_ptr))
+                    let entries: Vec<(&[u16], Option<Rc<Identifier>>)> = bound_names.iter()
+                        .map(|(n, id)| (n.as_slice(), Some(id.clone())))
                         .collect();
                     self.scope_collector.add_var_declaration(&entries, decl_line, decl_column);
                 } else {
@@ -166,10 +168,8 @@ impl<'a> Parser<'a> {
                     self.scope_collector.add_lexical_declaration(&refs, decl_line, decl_column);
                     // Register each binding pattern identifier for scope analysis
                     // so they get is_local() annotations.
-                    for (name, id_ptr) in &bound_names {
-                        if !id_ptr.is_null() {
-                            self.scope_collector.register_identifier(*id_ptr, name, Some(kind));
-                        }
+                    for (name, id) in &bound_names {
+                        self.scope_collector.register_identifier(id.clone(), name, Some(kind));
                     }
                 }
 
@@ -252,7 +252,7 @@ impl<'a> Parser<'a> {
             // Register as lexical declaration.
             self.scope_collector.add_lexical_declaration(&[&name as &[u16]], decl_line, decl_column);
             self.scope_collector.register_identifier(
-                &*id as *const Identifier, &name, Some(DeclarationKind::Const),
+                id.clone(), &name, Some(DeclarationKind::Const),
             );
 
             let init = if self.match_token(TokenType::Equals) {
@@ -341,9 +341,8 @@ impl<'a> Parser<'a> {
         self.last_function_kind = kind;
 
         // Register function declaration in parent scope (before opening function scope).
-        let name_id_ptr = name.as_ref().map_or(std::ptr::null(), |id| &**id as *const Identifier);
         self.scope_collector.add_function_declaration(
-            &fn_name, name_id_ptr,
+            &fn_name, name.clone(),
             kind, self.strict_mode, decl_line, decl_column,
         );
 
@@ -602,7 +601,7 @@ impl<'a> Parser<'a> {
                         start.line, start.column,
                     );
                     self.scope_collector.register_identifier(
-                        &**name_ident as *const Identifier,
+                        name_ident.clone(),
                         &name_ident.name,
                         Some(DeclarationKind::Let),
                     );
@@ -627,7 +626,7 @@ impl<'a> Parser<'a> {
             // Derived class: constructor(...args) { return super(...args); }
             let args_name: Vec<u16> = "args".encode_utf16().collect();
 
-            let args_ref = Box::new(Identifier::new(self.range_from(start), args_name.clone()));
+            let args_ref = Rc::new(Identifier::new(self.range_from(start), args_name.clone()));
             let args_expr = self.expr(start, Expression::Identifier(args_ref));
             let spread_expr = self.expr(start, Expression::Spread(Box::new(args_expr)));
 
@@ -641,7 +640,7 @@ impl<'a> Parser<'a> {
                 in_strict_mode: true,
             });
 
-            let args_binding = Box::new(Identifier::new(self.range_from(start), args_name));
+            let args_binding = Rc::new(Identifier::new(self.range_from(start), args_name));
             let params = vec![FunctionParameter {
                 binding: FunctionParameterBinding::Identifier(args_binding),
                 default_value: None,
@@ -892,14 +891,14 @@ impl<'a> Parser<'a> {
 
     // === Formal parameters ===
 
-    pub(crate) fn parse_formal_parameters(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, *const Identifier)>, bool) {
+    pub(crate) fn parse_formal_parameters(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)>, bool) {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
         self.consume_token(TokenType::ParenClose);
         result
     }
 
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, *const Identifier)>, bool) {
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)>, bool) {
         if self.match_token(TokenType::ParenClose) {
             return (Vec::new(), 0, Vec::new(), true);
         }
@@ -908,7 +907,7 @@ impl<'a> Parser<'a> {
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
         let mut has_seen_rest = false;
-        let mut param_info: Vec<(Vec<u16>, bool, bool, *const Identifier)> = Vec::new();
+        let mut param_info: Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)> = Vec::new();
 
         loop {
             let param_start = self.position();
@@ -939,20 +938,19 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                let id = Box::new(Identifier::new(self.range_from(param_start), value.clone()));
-                let id_ptr = &*id as *const Identifier;
-                param_info.push((value, rest, false, id_ptr));
+                let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
+                param_info.push((value, rest, false, Some(id.clone())));
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
-                for (n, id_ptr) in std::mem::take(&mut self.pattern_bound_names) {
-                    param_info.push((n, rest, true, id_ptr));
+                for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
+                    param_info.push((n, rest, true, Some(id)));
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)
             } else {
                 self.expected("parameter name");
                 self.consume();
-                let id = Box::new(Identifier::new(self.range_from(param_start), Vec::new()));
+                let id = Rc::new(Identifier::new(self.range_from(param_start), Vec::new()));
                 (FunctionParameterBinding::Identifier(id), false)
             };
 
@@ -1109,7 +1107,7 @@ impl<'a> Parser<'a> {
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
                             let id = self.make_identifier(alias_start, value.clone());
-                            self.pattern_bound_names.push((value, &*id as *const Identifier));
+                            self.pattern_bound_names.push((value, id.clone()));
                             entry_alias = BindingEntryAlias::Identifier(id);
                         } else {
                             self.expected("identifier or binding pattern");
@@ -1121,12 +1119,9 @@ impl<'a> Parser<'a> {
                     } else if !entry_name_value.is_empty() {
                         // Shorthand: name is the bound identifier.
                         // The identifier is in entry_name (BindingEntryName::Identifier).
-                        let id_ptr = if let BindingEntryName::Identifier(ref id) = entry_name {
-                            &**id as *const Identifier
-                        } else {
-                            std::ptr::null()
-                        };
-                        self.pattern_bound_names.push((entry_name_value, id_ptr));
+                        if let BindingEntryName::Identifier(ref id) = entry_name {
+                            self.pattern_bound_names.push((entry_name_value, id.clone()));
+                        }
                     }
                 }
             } else {
@@ -1143,8 +1138,7 @@ impl<'a> Parser<'a> {
                         entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
                     } else if Self::is_identifier(&expression) {
                         let id = expr_into_identifier(expression);
-                        let id_ptr = &*id as *const Identifier;
-                        self.pattern_bound_names.push((id.name.clone(), id_ptr));
+                        self.pattern_bound_names.push((id.name.clone(), id.clone()));
                         entry_alias = BindingEntryAlias::Identifier(id);
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
@@ -1158,7 +1152,7 @@ impl<'a> Parser<'a> {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     let id = self.make_identifier(alias_start, value.clone());
-                    self.pattern_bound_names.push((value, &*id as *const Identifier));
+                    self.pattern_bound_names.push((value, id.clone()));
                     entry_alias = BindingEntryAlias::Identifier(id);
                 } else {
                     self.expected("identifier or binding pattern");

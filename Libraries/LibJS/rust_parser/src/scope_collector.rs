@@ -50,6 +50,7 @@
 //!   name within one scope (multiple `foo` refs are grouped together)
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::ast::{
     FunctionScopeData, Identifier, IdentDeclarationKind, LocalVarKind,
@@ -109,15 +110,15 @@ struct ScopeVariable {
     /// Bit flags describing how this name was declared (FLAG_IS_* constants).
     flags: u16,
     /// The Identifier AST node for the `var` declaration (used to build
-    /// FunctionScopeData). Null if not a var.
-    var_identifier: *const Identifier,
+    /// FunctionScopeData). None if not a var.
+    var_identifier: Option<Rc<Identifier>>,
 }
 
 impl Default for ScopeVariable {
     fn default() -> Self {
         Self {
             flags: 0,
-            var_identifier: std::ptr::null(),
+            var_identifier: None,
         }
     }
 }
@@ -133,7 +134,7 @@ struct IdentifierGroup {
     /// (prevents local variable optimization since `with` can shadow anything).
     used_inside_with_statement: bool,
     /// All Identifier AST nodes with this name in this scope.
-    identifiers: Vec<*const Identifier>,
+    identifiers: Vec<Rc<Identifier>>,
     /// If this name was declared (var/let/const), tracks the declaration kind
     /// so we can annotate each Identifier AST node.
     declaration_kind: Option<DeclarationKind>,
@@ -419,16 +420,16 @@ impl ScopeCollector {
 
     pub fn add_var_declaration(
         &mut self,
-        bound_names: &[(&[u16], *const Identifier)],
+        bound_names: &[(&[u16], Option<Rc<Identifier>>)],
         decl_line: u32,
         decl_column: u32,
     ) {
         let idx = self.current.unwrap();
 
-        for &(name, identifier) in bound_names {
+        for (name, identifier) in bound_names {
             // Register the declaration identifier so it participates in scope analysis.
-            if !identifier.is_null() {
-                self.register_identifier(identifier, name, Some(DeclarationKind::Var));
+            if let Some(id) = identifier {
+                self.register_identifier(id.clone(), name, Some(DeclarationKind::Var));
             }
 
             let mut scope_idx = idx;
@@ -442,7 +443,7 @@ impl ScopeCollector {
                     });
                 }
                 var.flags |= FLAG_IS_VAR;
-                var.var_identifier = identifier;
+                var.var_identifier = identifier.clone();
                 if self.records[scope_idx].is_top_level() {
                     break;
                 }
@@ -454,7 +455,7 @@ impl ScopeCollector {
     pub fn add_function_declaration(
         &mut self,
         name: &[u16],
-        name_identifier: *const Identifier,
+        name_identifier: Option<Rc<Identifier>>,
         function_kind: FunctionKind,
         strict_mode: bool,
         decl_line: u32,
@@ -464,14 +465,14 @@ impl ScopeCollector {
         let scope_level = self.records[idx].scope_level;
 
         // Register the name identifier so it participates in scope analysis.
-        if !name_identifier.is_null() {
-            self.register_identifier(name_identifier, name, None);
+        if let Some(ref id) = name_identifier {
+            self.register_identifier(id.clone(), name, None);
         }
 
         if scope_level != ScopeLevel::NotTopLevel && scope_level != ScopeLevel::ModuleTopLevel {
             let var = self.records[idx].variable(name);
             var.flags |= FLAG_IS_VAR;
-            var.var_identifier = name_identifier;
+            var.var_identifier = name_identifier.clone();
         } else {
             // Check flags first, then modify. This avoids borrow checker issues
             // since we need to access both variables and functions_to_hoist.
@@ -518,16 +519,16 @@ impl ScopeCollector {
         }
     }
 
-    pub fn add_catch_parameter_identifier(&mut self, name: &[u16], identifier: *const Identifier) {
+    pub fn add_catch_parameter_identifier(&mut self, name: &[u16], identifier: Rc<Identifier>) {
         let idx = self.current.unwrap();
         let var = self.records[idx].variable(name);
         var.flags |= FLAG_IS_VAR | FLAG_IS_BOUND | FLAG_IS_CATCH_PARAMETER;
-        var.var_identifier = identifier;
+        var.var_identifier = Some(identifier);
     }
 
     // === Identifier registration ===
 
-    pub fn register_identifier(&mut self, id: *const Identifier, name: &[u16], declaration_kind: Option<DeclarationKind>) {
+    pub fn register_identifier(&mut self, id: Rc<Identifier>, name: &[u16], declaration_kind: Option<DeclarationKind>) {
         let idx = self.current.unwrap();
         if let Some(group) = self.records[idx].identifier_groups.get_mut(name) {
             group.identifiers.push(id);
@@ -545,7 +546,7 @@ impl ScopeCollector {
 
     pub fn set_function_parameters(
         &mut self,
-        entries: &[(Vec<u16>, *const Identifier, bool, bool)],
+        entries: &[(Vec<u16>, Option<Rc<Identifier>>, bool, bool)],
     ) {
         let idx = self.current.unwrap();
         self.records[idx].has_function_parameters = true;
@@ -564,8 +565,8 @@ impl ScopeCollector {
                 self.records[idx].parameter_names.push((name.clone(), *is_rest));
                 prev_was_pattern = false;
             }
-            if !identifier.is_null() {
-                self.register_identifier(*identifier, name, None);
+            if let Some(id) = identifier {
+                self.register_identifier(id.clone(), name, None);
             }
             let var = self.records[idx].variables.entry(name.clone()).or_default();
             var.flags |= FLAG_IS_PARAMETER_CANDIDATE | FLAG_IS_FORBIDDEN_LEXICAL;
@@ -790,8 +791,8 @@ impl ScopeCollector {
                     DeclarationKind::Let => IdentDeclarationKind::Let,
                     DeclarationKind::Const => IdentDeclarationKind::Const,
                 };
-                for &id in &group.identifiers {
-                    unsafe { (*id).declaration_kind.set(kind) };
+                for id in &group.identifiers {
+                    id.declaration_kind.set(kind);
                 }
             }
 
@@ -840,8 +841,8 @@ impl ScopeCollector {
                 && !records[idx].is_function_declaration
                 && (var_flags & FLAG_IS_BOUND) != 0
             {
-                for &id in &group.identifiers {
-                    unsafe { (*id).is_inside_scope_with_eval.set(true) };
+                for id in &group.identifiers {
+                    id.is_inside_scope_with_eval.set(true);
                 }
             }
 
@@ -869,10 +870,9 @@ impl ScopeCollector {
             if records[idx].scope_type == ScopeType::Program {
                 let can_use_global = !(group.used_inside_with_statement || initiated_by_eval);
                 if can_use_global {
-                    for &id in &group.identifiers {
-                        let is_eval_scope = unsafe { (*id).is_inside_scope_with_eval.get() };
-                        if !is_eval_scope {
-                            unsafe { (*id).is_global.set(true) };
+                    for id in &group.identifiers {
+                        if !id.is_inside_scope_with_eval.get() {
+                            id.is_global.set(true);
                         }
                     }
                 }
@@ -900,45 +900,33 @@ impl ScopeCollector {
                         if is_function_parameter {
                             let arg_index = records[ls].get_parameter_index(&name);
                             if let Some(ai) = arg_index {
-                                for &id in &group.identifiers {
-                                    unsafe {
-                                        (*id).local_index.set(ai);
-                                        (*id).local_type.set(crate::ast::LocalType::Argument);
-                                    }
+                                for id in &group.identifiers {
+                                    id.local_index.set(ai);
+                                    id.local_type.set(crate::ast::LocalType::Argument);
                                 }
                             } else {
-                                let lvi = unsafe {
-                                    let sd = &mut *scope_data;
-                                    let index = sd.local_variables.len() as u32;
-                                    sd.local_variables.push(LocalVariable {
-                                        name: name.clone(),
-                                        kind: LocalVarKind::Var,
-                                    });
-                                    index
-                                };
-                                for &id in &group.identifiers {
-                                    unsafe {
-                                        (*id).local_index.set(lvi);
-                                        (*id).local_type.set(crate::ast::LocalType::Variable);
-                                    }
+                                let sd = unsafe { &mut *scope_data };
+                                let lvi = sd.local_variables.len() as u32;
+                                sd.local_variables.push(LocalVariable {
+                                    name: name.clone(),
+                                    kind: LocalVarKind::Var,
+                                });
+                                for id in &group.identifiers {
+                                    id.local_index.set(lvi);
+                                    id.local_type.set(crate::ast::LocalType::Variable);
                                 }
                             }
                         } else {
                             let kind = local_var_kind.unwrap();
-                            let lvi = unsafe {
-                                let sd = &mut *scope_data;
-                                let index = sd.local_variables.len() as u32;
-                                sd.local_variables.push(LocalVariable {
-                                    name: name.clone(),
-                                    kind,
-                                });
-                                index
-                            };
-                            for &id in &group.identifiers {
-                                unsafe {
-                                    (*id).local_index.set(lvi);
-                                    (*id).local_type.set(crate::ast::LocalType::Variable);
-                                }
+                            let sd = unsafe { &mut *scope_data };
+                            let lvi = sd.local_variables.len() as u32;
+                            sd.local_variables.push(LocalVariable {
+                                name: name.clone(),
+                                kind,
+                            });
+                            for id in &group.identifiers {
+                                id.local_index.set(lvi);
+                                id.local_type.set(crate::ast::LocalType::Variable);
                             }
                         }
                     }
@@ -957,8 +945,8 @@ impl ScopeCollector {
                 }
 
                 if records[idx].eval_in_current_function {
-                    for &id in &group.identifiers {
-                        unsafe { (*id).is_inside_scope_with_eval.set(true) };
+                    for id in &group.identifiers {
+                        id.is_inside_scope_with_eval.set(true);
                     }
                 }
 
@@ -1031,8 +1019,7 @@ impl ScopeCollector {
             let is_function_name = var.flags & FLAG_IS_BOUND != 0;
 
             // Check if this var has been optimized to a local
-            let local_info = if !var.var_identifier.is_null() {
-                let ident = unsafe { &*var.var_identifier };
+            let local_info = if let Some(ref ident) = var.var_identifier {
                 if ident.is_local() {
                     Some((ident.local_type.get(), ident.local_index.get()))
                 } else {

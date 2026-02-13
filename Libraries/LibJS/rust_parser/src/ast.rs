@@ -23,6 +23,7 @@
 //!   block-like constructs (Program, BlockStatement, FunctionBody, etc.).
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 // =============================================================================
 // Source location
@@ -277,14 +278,14 @@ pub struct FunctionParameter {
 
 #[derive(Clone)]
 pub enum FunctionParameterBinding {
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
 }
 
 /// Shared data for FunctionDeclaration and FunctionExpression.
 #[derive(Clone)]
 pub struct FunctionData {
-    pub name: Option<Box<Identifier>>,
+    pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
     pub body: Box<Stmt>,
@@ -304,7 +305,7 @@ pub struct FunctionData {
 /// Shared data for ClassDeclaration and ClassExpression.
 #[derive(Clone)]
 pub struct ClassData {
-    pub name: Option<Box<Identifier>>,
+    pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
     pub constructor: Option<Box<Expr>>,
@@ -370,7 +371,7 @@ pub struct BindingEntry {
 #[derive(Clone)]
 pub enum BindingEntryName {
     Empty,
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     Expression(Box<Expr>),
 }
 
@@ -382,7 +383,7 @@ pub enum BindingEntryName {
 #[derive(Clone)]
 pub enum BindingEntryAlias {
     Empty,
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     BindingPattern(Box<BindingPattern>),
     MemberExpression(Box<Expr>),
 }
@@ -400,7 +401,7 @@ pub struct VariableDeclarator {
 
 #[derive(Clone)]
 pub enum VariableDeclaratorTarget {
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
 }
 
@@ -473,7 +474,7 @@ pub enum OptionalChainReference {
         mode: OptionalChainMode,
     },
     MemberReference {
-        identifier: Box<Identifier>,
+        identifier: Rc<Identifier>,
         mode: OptionalChainMode,
     },
     PrivateMemberReference {
@@ -523,7 +524,7 @@ pub struct CatchClause {
 #[derive(Clone)]
 pub enum CatchParameter {
     None,
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
 }
 
@@ -738,7 +739,7 @@ pub enum Expression {
     RegExpLiteral(RegExpLiteralData),
 
     // Identifiers
-    Identifier(Box<Identifier>),
+    Identifier(Rc<Identifier>),
     PrivateIdentifier(PrivateIdentifier),
 
     // Operators

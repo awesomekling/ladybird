@@ -7,6 +7,8 @@
 //! Expression parsing: primary, secondary (binary/postfix), unary, and
 //! precedence climbing.
 
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser, Position};
 use crate::token::{Token, TokenType};
@@ -301,7 +303,7 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 let id = self.make_identifier(start, value.clone());
-                self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
+                self.scope_collector.register_identifier(id.clone(), &value, None);
                 (self.expr(start, Expression::Identifier(id)), true)
             }
 
@@ -423,13 +425,13 @@ impl<'a> Parser<'a> {
                         self.last_parsed_identifier_is_eval = true;
                     }
                     let id = self.make_identifier(start, value.clone());
-                    self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
+                    self.scope_collector.register_identifier(id.clone(), &value, None);
                     (self.expr(start, Expression::Identifier(id)), true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     let id = self.make_identifier(start, value.clone());
-                    self.scope_collector.register_identifier(&*id as *const Identifier, &value, None);
+                    self.scope_collector.register_identifier(id.clone(), &value, None);
                     (self.expr(start, Expression::Identifier(id)), true)
                 } else {
                     self.expected("expression");
@@ -513,16 +515,14 @@ impl<'a> Parser<'a> {
                 let op = token_to_assignment_op(tt);
                 if op == AssignmentOp::Assignment && (Self::is_object_expression(&lhs) || Self::is_array_expression(&lhs)) {
                     if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs_start) {
-                        // Keep the original expression alive so that the scope collector's
-                        // raw pointers to its identifiers don't dangle.
-                        self.scope_anchor.push(lhs);
                         // Register synthesized identifiers with the scope collector so
                         // they get resolved as locals during analyze().
-                        for (name, id_ptr) in self.pattern_bound_names.drain(..) {
-                            if !id_ptr.is_null() {
-                                self.scope_collector.register_identifier(id_ptr, &name, None);
-                            }
+                        for (name, id) in self.pattern_bound_names.drain(..) {
+                            self.scope_collector.register_identifier(id, &name, None);
                         }
+                        // Keep the original expression alive: scope collector holds raw
+                        // *mut ScopeData pointers to scopes within it.
+                        self.scope_anchor.push(lhs);
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                         return (self.expr(lhs_start, Expression::Assignment {
@@ -1081,7 +1081,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Equals) {
             if let Some(kv) = &key_value {
                 let id = self.make_identifier(start, kv.clone());
-                self.scope_collector.register_identifier(&*id as *const Identifier, &id.name, None);
+                self.scope_collector.register_identifier(id.clone(), &id.name, None);
                 let value = self.expr(start, Expression::Identifier(id));
                 self.consume(); // consume '='
                 let saved_scope_state = self.scope_collector.save_state();
@@ -1101,7 +1101,7 @@ impl<'a> Parser<'a> {
         // Shorthand property: { x }
         if let Some(kv) = key_value {
             let id = self.make_identifier(start, kv);
-            self.scope_collector.register_identifier(&*id as *const Identifier, &id.name, None);
+            self.scope_collector.register_identifier(id.clone(), &id.name, None);
             let value = self.expr(start, Expression::Identifier(id));
             return ObjectProperty {
                 range: self.range_from(start),
@@ -1565,15 +1565,14 @@ impl<'a> Parser<'a> {
                 let param_start = self.position();
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                let binding = Box::new(Identifier::new(self.range_from(param_start), value.clone()));
-                let id_ptr = &*binding as *const Identifier;
+                let binding = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
                 params = vec![FunctionParameter {
-                    binding: FunctionParameterBinding::Identifier(binding),
+                    binding: FunctionParameterBinding::Identifier(binding.clone()),
                     default_value: None,
                     is_rest: false,
                 }];
                 function_length = 1;
-                param_info = vec![(value, false, false, id_ptr)];
+                param_info = vec![(value, false, false, Some(binding))];
                 is_simple = true;
             } else {
                 self.load_state();

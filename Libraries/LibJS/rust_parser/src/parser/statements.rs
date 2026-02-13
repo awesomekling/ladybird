@@ -6,6 +6,8 @@
 
 //! Statement parsing: if, for, while, switch, try, etc.
 
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::parser::{Associativity, ForbiddenTokens, Parser, Position};
 use crate::token::TokenType;
@@ -385,10 +387,8 @@ impl<'a> Parser<'a> {
                 ForInit::Expression(expr) => {
                     if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                         if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
-                            for (name, id_ptr) in self.pattern_bound_names.drain(..) {
-                                if !id_ptr.is_null() {
-                                    self.scope_collector.register_identifier(id_ptr, &name, None);
-                                }
+                            for (name, id) in self.pattern_bound_names.drain(..) {
+                                self.scope_collector.register_identifier(id, &name, None);
                             }
                             self.scope_anchor.push(expr);
                             ForInOfLhs::Pattern(pattern)
@@ -443,10 +443,8 @@ impl<'a> Parser<'a> {
                     ForInit::Expression(expr) => {
                         if Self::is_array_expression(&expr) || Self::is_object_expression(&expr) {
                             if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
-                                for (name, id_ptr) in self.pattern_bound_names.drain(..) {
-                                    if !id_ptr.is_null() {
-                                        self.scope_collector.register_identifier(id_ptr, &name, None);
-                                    }
+                                for (name, id) in self.pattern_bound_names.drain(..) {
+                                    self.scope_collector.register_identifier(id, &name, None);
                                 }
                                 self.scope_anchor.push(expr);
                                 ForInOfLhs::Pattern(pattern)
@@ -669,8 +667,8 @@ impl<'a> Parser<'a> {
                 let param_start = self.position();
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
-                let id = self.make_identifier(param_start, value.clone());
-                self.scope_collector.add_catch_parameter_identifier(&value, &*id as *const Identifier);
+                let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
+                self.scope_collector.add_catch_parameter_identifier(&value, id.clone());
                 CatchParameter::Identifier(id)
             } else {
                 self.expected("catch parameter");
