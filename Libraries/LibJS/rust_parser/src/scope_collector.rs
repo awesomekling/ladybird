@@ -287,9 +287,14 @@ impl ScopeCollector {
 
     /// Restore scope collector state after failed speculative parse.
     pub fn load_state(&mut self, state: (usize, Option<usize>, usize)) {
-        self.records.truncate(state.0);
+        let saved_len = state.0;
+        self.records.truncate(saved_len);
         self.current = state.1;
         self.errors.truncate(state.2);
+        // Remove any child indices that pointed to now-truncated records.
+        if let Some(current_idx) = self.current {
+            self.records[current_idx].children.retain(|&c| c < saved_len);
+        }
     }
 
     // === Open/close scopes ===

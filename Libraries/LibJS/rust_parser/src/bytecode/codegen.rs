@@ -1758,6 +1758,11 @@ fn generate_call_expression(
         (callee, None)
     };
 
+    // Copy callee/this into fresh registers so argument evaluation
+    // cannot mutate them (e.g. `foo.bar(foo = null)`).
+    let this_value = this_value.map(|tv| gen.copy_if_needed_to_preserve_evaluation_order(&tv));
+    let callee = gen.copy_if_needed_to_preserve_evaluation_order(&callee);
+
     let has_spread = data.arguments.iter().any(|a| a.is_spread);
 
     if has_spread {
@@ -1769,7 +1774,7 @@ fn generate_call_expression(
         for arg in &data.arguments[..first_spread] {
             let val = generate_expr(&arg.value, gen, None)
                 .unwrap_or_else(|| gen.add_constant_undefined());
-            pre_holders.push(val);
+            pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
         }
         let pre_args: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
         gen.emit(Instruction::NewArray {
@@ -1818,12 +1823,13 @@ fn generate_call_expression(
             });
         }
     } else {
-        // Keep ScopedOperands alive until the Call instruction is emitted,
-        // so argument registers don't get freed and reused between evaluations.
+        // Copy local variables into fresh registers so that evaluating
+        // later arguments cannot mutate earlier argument values (e.g.
+        // `bar(i, i++)` — the first arg must be the pre-increment value).
         let mut arg_holders = Vec::new();
         for arg in &data.arguments {
             let val = generate_expr(&arg.value, gen, None).unwrap_or_else(|| gen.add_constant_undefined());
-            arg_holders.push(val);
+            arg_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
         }
         let args: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
 
@@ -2032,15 +2038,62 @@ fn generate_assignment_expression(
             if let Expression::Identifier(ident) = &lhs_expr.inner {
                 if op == AssignmentOp::Assignment {
                     gen.pending_lhs_name = Some(gen.intern_identifier(ident.name.clone()));
-                }
-                let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
-                gen.pending_lhs_name = None;
-                if op == AssignmentOp::Assignment {
+                    let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+                    gen.pending_lhs_name = None;
                     emit_set_variable(gen, ident, &rhs_val);
                     return Some(rhs_val);
                 }
-                // Compound assignment
+
+                // Load LHS value first (needed for both compound and logical assignments).
                 let lhs_val = generate_identifier(ident, gen, None)?;
+
+                let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
+                if is_logical {
+                    // Logical assignments short-circuit: evaluate RHS only if condition met.
+                    let rhs_block = gen.make_block();
+                    let lhs_block = gen.make_block();
+                    let end_block = gen.make_block();
+                    let dst = choose_dst(gen, preferred_dst);
+                    match op {
+                        AssignmentOp::AndAssignment => {
+                            gen.emit(Instruction::JumpIf {
+                                condition: lhs_val.operand(),
+                                true_target: Label(rhs_block as u32),
+                                false_target: Label(lhs_block as u32),
+                            });
+                        }
+                        AssignmentOp::OrAssignment => {
+                            gen.emit(Instruction::JumpIf {
+                                condition: lhs_val.operand(),
+                                true_target: Label(lhs_block as u32),
+                                false_target: Label(rhs_block as u32),
+                            });
+                        }
+                        AssignmentOp::NullishAssignment => {
+                            gen.emit(Instruction::JumpNullish {
+                                condition: lhs_val.operand(),
+                                true_target: Label(rhs_block as u32),
+                                false_target: Label(lhs_block as u32),
+                            });
+                        }
+                        _ => unreachable!(),
+                    }
+                    // RHS block: evaluate RHS, assign, jump to end.
+                    gen.switch_to_basic_block(rhs_block);
+                    let rhs_val = generate_expr(rhs, gen, None)?;
+                    gen.emit_mov(&dst, &rhs_val);
+                    emit_set_variable(gen, ident, &dst);
+                    gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                    // LHS block: keep original value.
+                    gen.switch_to_basic_block(lhs_block);
+                    gen.emit_mov(&dst, &lhs_val);
+                    gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                    gen.switch_to_basic_block(end_block);
+                    return Some(dst);
+                }
+
+                // Regular compound assignment (+=, -=, etc.)
+                let rhs_val = generate_expr(rhs, gen, None)?;
                 let dst = choose_dst(gen, preferred_dst);
                 emit_compound_assignment(gen, op, &dst, &lhs_val, &rhs_val);
                 emit_set_variable(gen, ident, &dst);
@@ -2078,8 +2131,9 @@ fn generate_assignment_expression(
                     }
                     return Some(rhs_val);
                 }
-                // Compound member assignment
+                // Compound member assignment: load old value, then apply op.
                 let old_val = gen.allocate_register();
+                let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
                 if *computed {
                     let prop_raw = generate_expr(property, gen, None)?;
                     // Copy key into a fresh register so the RHS can't mutate it.
@@ -2091,6 +2145,28 @@ fn generate_assignment_expression(
                         property: prop.operand(),
                         base_identifier: None,
                     });
+                    if is_logical {
+                        let rhs_block = gen.make_block();
+                        let lhs_block = gen.make_block();
+                        let end_block = gen.make_block();
+                        let dst = choose_dst(gen, preferred_dst);
+                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                        gen.switch_to_basic_block(rhs_block);
+                        let rhs_val = generate_expr(rhs, gen, None)?;
+                        gen.emit_mov(&dst, &rhs_val);
+                        gen.emit(Instruction::PutNormalByValue {
+                            base: base.operand(),
+                            property: prop.operand(),
+                            src: dst.operand(),
+                            base_identifier: None,
+                        });
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(lhs_block);
+                        gen.emit_mov(&dst, &old_val);
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(end_block);
+                        return Some(dst);
+                    }
                     let rhs_val = generate_expr(rhs, gen, None)?;
                     let dst = choose_dst(gen, preferred_dst);
                     emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
@@ -2104,6 +2180,31 @@ fn generate_assignment_expression(
                 } else {
                     if let Expression::Identifier(ident) = &property.inner {
                         emit_get_by_id(gen, &old_val, &base, &ident.name, None);
+                        if is_logical {
+                            let rhs_block = gen.make_block();
+                            let lhs_block = gen.make_block();
+                            let end_block = gen.make_block();
+                            let dst = choose_dst(gen, preferred_dst);
+                            emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                            gen.switch_to_basic_block(rhs_block);
+                            let rhs_val = generate_expr(rhs, gen, None)?;
+                            gen.emit_mov(&dst, &rhs_val);
+                            let key = gen.intern_property_key(ident.name.clone());
+                            let cache2 = gen.next_property_lookup_cache();
+                            gen.emit(Instruction::PutNormalById {
+                                base: base.operand(),
+                                property: key,
+                                src: dst.operand(),
+                                cache_index: cache2,
+                                base_identifier: None,
+                            });
+                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                            gen.switch_to_basic_block(lhs_block);
+                            gen.emit_mov(&dst, &old_val);
+                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                            gen.switch_to_basic_block(end_block);
+                            return Some(dst);
+                        }
                         let rhs_val = generate_expr(rhs, gen, None)?;
                         let dst = choose_dst(gen, preferred_dst);
                         emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
@@ -2297,6 +2398,34 @@ fn emit_store_to_reference(
             emit_put_to_member(gen, &base, property, *computed, value);
         }
         _ => {}
+    }
+}
+
+/// Emit the conditional jump for a logical assignment (&&=, ||=, ??=).
+fn emit_logical_jump(gen: &mut Generator, op: AssignmentOp, condition: &ScopedOperand, rhs_block: usize, lhs_block: usize) {
+    match op {
+        AssignmentOp::AndAssignment => {
+            gen.emit(Instruction::JumpIf {
+                condition: condition.operand(),
+                true_target: Label(rhs_block as u32),
+                false_target: Label(lhs_block as u32),
+            });
+        }
+        AssignmentOp::OrAssignment => {
+            gen.emit(Instruction::JumpIf {
+                condition: condition.operand(),
+                true_target: Label(lhs_block as u32),
+                false_target: Label(rhs_block as u32),
+            });
+        }
+        AssignmentOp::NullishAssignment => {
+            gen.emit(Instruction::JumpNullish {
+                condition: condition.operand(),
+                true_target: Label(rhs_block as u32),
+                false_target: Label(lhs_block as u32),
+            });
+        }
+        _ => unreachable!(),
     }
 }
 

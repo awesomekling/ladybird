@@ -1501,6 +1501,13 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Open function scope before parsing parameters so that default
+        // value expressions are resolved inside the function scope.
+        // save_state() above captured scope collector state, so any
+        // load_state() rollback will undo this.
+        self.scope_collector.open_function_scope(None);
+        self.scope_collector.set_is_arrow_function();
+
         let (params, function_length, param_info, is_simple);
 
         if expect_parens {
@@ -1548,11 +1555,8 @@ impl<'a> Parser<'a> {
 
         self.discard_saved_state();
 
-        // Open function scope for arrow function.
-        self.scope_collector.open_function_scope(None);
-        self.scope_collector.set_is_arrow_function();
-
-        // Register parameters with scope collector.
+        // Register parameters with scope collector (scope was opened before
+        // parameter parsing so default value expressions resolve correctly).
         self.register_function_params_with_scope(&params, &param_info);
 
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };

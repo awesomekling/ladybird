@@ -355,6 +355,19 @@ impl Generator {
         self.this_value.clone()
     }
 
+    /// Copy a local variable into a fresh register to prevent later
+    /// side effects from changing its value. Returns the operand unchanged
+    /// if it is not a local.
+    pub fn copy_if_needed_to_preserve_evaluation_order(&mut self, operand: &ScopedOperand) -> ScopedOperand {
+        if operand.operand().is_local() {
+            let reg = self.allocate_register();
+            self.emit_mov(&reg, operand);
+            reg
+        } else {
+            operand.clone()
+        }
+    }
+
     pub fn scoped_operand(&mut self, operand: Operand) -> ScopedOperand {
         ScopedOperand {
             inner: std::rc::Rc::new(ScopedOperandInner {
