@@ -5559,6 +5559,11 @@ fn generate_try_statement(
 
         if created_catch_scope {
             gen.lexical_environment_register_stack.pop();
+            if !gen.is_current_block_terminated() {
+                let parent = gen.lexical_environment_register_stack.last().cloned()
+                    .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+                gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+            }
         }
 
         if !gen.is_current_block_terminated() {
