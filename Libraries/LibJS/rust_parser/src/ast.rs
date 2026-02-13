@@ -713,6 +713,8 @@ pub struct VarToInit {
     pub name: Utf16String,
     pub is_parameter: bool,
     pub is_function_name: bool,
+    /// If the scope analysis optimized this var to a local, stores the operand type and index.
+    pub local: Option<(LocalType, u32)>,
 }
 
 // =============================================================================

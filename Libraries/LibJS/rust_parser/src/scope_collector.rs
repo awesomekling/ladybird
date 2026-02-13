@@ -1019,13 +1019,18 @@ impl ScopeCollector {
             let is_function_name = var.flags & FLAG_IS_BOUND != 0;
 
             // Check if this var has been optimized to a local
-            let is_local = if !var.var_identifier.is_null() {
-                unsafe { (*var.var_identifier).is_local() }
+            let local_info = if !var.var_identifier.is_null() {
+                let ident = unsafe { &*var.var_identifier };
+                if ident.is_local() {
+                    Some((ident.local_type.get(), ident.local_index.get()))
+                } else {
+                    None
+                }
             } else {
-                false
+                None
             };
 
-            if !is_local {
+            if local_info.is_none() {
                 non_local_var_count += 1;
             }
 
@@ -1033,6 +1038,7 @@ impl ScopeCollector {
                 name: name.clone(),
                 is_parameter,
                 is_function_name,
+                local: local_info,
             });
 
         }

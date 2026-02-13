@@ -1626,6 +1626,14 @@ fn generate_variable_declaration(
 
         match &decl.target {
             VariableDeclaratorTarget::Identifier(ident) => {
+                // var declarations without initializer don't need to assign undefined.
+                // The FDI already handles initialization for var bindings.
+                if init_value.is_none() && kind == DeclarationKind::Var {
+                    if ident.is_local() {
+                        gen.mark_local_initialized(ident.local_index.get());
+                    }
+                    continue;
+                }
                 let value = init_value.unwrap_or_else(|| gen.add_constant_undefined());
                 if ident.is_local() {
                     let local_index = ident.local_index.get();
@@ -5050,10 +5058,9 @@ pub fn emit_function_declaration_instantiation(
                     continue;
                 }
 
-                // Check if this var is a local variable.
-                if let Some(local_idx) = find_local_var(gen, &var.name) {
+                if let Some((local_type, idx)) = var.local {
                     let undef = gen.add_constant_undefined();
-                    let local = gen.local(local_idx);
+                    let local = var_local_operand(gen, local_type, idx);
                     gen.emit_mov(&local, &undef);
                 } else {
                     let id = gen.intern_identifier(var.name.clone());
@@ -5074,9 +5081,7 @@ pub fn emit_function_declaration_instantiation(
             }
         } else {
             // Parameter expressions: vars get a separate environment.
-            let has_non_local_vars = fsd.vars_to_initialize.iter().any(|v| {
-                find_local_var(gen, &v.name).is_none()
-            });
+            let has_non_local_vars = fsd.vars_to_initialize.iter().any(|v| v.local.is_none());
 
             if has_non_local_vars {
                 gen.emit(Instruction::CreateVariableEnvironment {
@@ -5090,8 +5095,8 @@ pub fn emit_function_declaration_instantiation(
 
                 let initial_value = if !is_in_parameter_bindings || var.is_function_name {
                     gen.add_constant_undefined()
-                } else if let Some(local_idx) = find_local_var(gen, &var.name) {
-                    let local = gen.local(local_idx);
+                } else if let Some((local_type, idx)) = var.local {
+                    let local = var_local_operand(gen, local_type, idx);
                     let tmp = gen.allocate_register();
                     gen.emit_mov(&tmp, &local);
                     tmp
@@ -5106,8 +5111,8 @@ pub fn emit_function_declaration_instantiation(
                     tmp
                 };
 
-                if let Some(local_idx) = find_local_var(gen, &var.name) {
-                    let local = gen.local(local_idx);
+                if let Some((local_type, idx)) = var.local {
+                    let local = var_local_operand(gen, local_type, idx);
                     gen.emit_mov(&local, &initial_value);
                 } else {
                     let id = gen.intern_identifier(var.name.clone());
@@ -5266,6 +5271,15 @@ fn find_local_var(gen: &Generator, name: &[u16]) -> Option<u32> {
         .iter()
         .position(|lv| lv.name == name)
         .map(|i| i as u32)
+}
+
+/// Create a ScopedOperand for a VarToInit's local variable (argument or variable).
+fn var_local_operand(gen: &mut Generator, local_type: LocalType, idx: u32) -> ScopedOperand {
+    match local_type {
+        LocalType::Variable => gen.local(idx),
+        LocalType::Argument => gen.scoped_operand(Operand::argument(idx)),
+        LocalType::None => unreachable!("var_local_operand called with LocalType::None"),
+    }
 }
 
 /// Collect bound names from a binding pattern into the parameter_names list.
