@@ -442,20 +442,46 @@ pub fn generate_expr(
         // === SuperCall ===
         Expression::SuperCall(data) => {
             let dst = choose_dst(gen, preferred_dst);
-            // Build arguments array — keep ScopedOperands alive.
             let args_array_dst = gen.allocate_register();
-            let mut arg_holders = Vec::new();
-            for arg in &data.arguments {
-                let val = generate_expr(&arg.value, gen, None)
+
+            if data.is_synthetic {
+                // Synthetic constructor: super(...args) — single spread arg,
+                // don't call @@iterator on %Array.prototype%.
+                assert!(data.arguments.len() == 1 && data.arguments[0].is_spread);
+                let val = generate_expr(&data.arguments[0].value, gen, None)
                     .unwrap_or_else(|| gen.add_constant_undefined());
-                arg_holders.push(val);
+                gen.emit_mov(&args_array_dst, &val);
+            } else {
+                // Build arguments array with proper spread handling.
+                let first_spread = data.arguments.iter()
+                    .position(|a| a.is_spread)
+                    .unwrap_or(data.arguments.len());
+
+                let mut pre_holders = Vec::new();
+                for arg in &data.arguments[..first_spread] {
+                    let val = generate_expr(&arg.value, gen, None)
+                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
+                }
+                let pre_ops: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
+                gen.emit(Instruction::NewArray {
+                    dst: args_array_dst.operand(),
+                    element_count: pre_ops.len() as u32,
+                    elements: pre_ops,
+                });
+                drop(pre_holders);
+
+                for arg in &data.arguments[first_spread..] {
+                    let val = generate_expr(&arg.value, gen, None)
+                        .unwrap_or_else(|| gen.add_constant_undefined());
+                    gen.emit(Instruction::ArrayAppend {
+                        dst: args_array_dst.operand(),
+                        src: val.operand(),
+                        is_spread: arg.is_spread,
+                    });
+                }
             }
-            let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
-            gen.emit(Instruction::NewArray {
-                dst: args_array_dst.operand(),
-                element_count: arg_ops.len() as u32,
-                elements: arg_ops,
-            });
+
             gen.emit(Instruction::SuperCallWithArgumentArray {
                 dst: dst.operand(),
                 arguments: args_array_dst.operand(),
