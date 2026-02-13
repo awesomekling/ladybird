@@ -402,7 +402,7 @@ extern "C" void* rust_create_sfd(
     bool has_simple_parameter_list,
     FFIUtf16Slice const* param_names,
     size_t param_name_count,
-    uint16_t const* source_text,
+    size_t source_text_offset,
     size_t source_text_len,
     void* rust_function_ast,
     bool uses_this,
@@ -439,15 +439,11 @@ extern "C" void* rust_create_sfd(
     if (uses_this_from_environment)
         shared->m_function_environment_needed = true;
 
-    // Set source text as a view into the original source buffer.
+    // Set source text as a view into the original source code.
     shared->m_source_code = &source_code;
-    auto const& code_view = source_code.code_view();
-    auto original_start = reinterpret_cast<uint16_t const*>(
-        code_view.is_ascii() ? static_cast<void const*>(code_view.ascii_span().data())
-                             : static_cast<void const*>(code_view.utf16_span().data()));
-    if (source_text >= original_start && source_text + source_text_len <= original_start + code_view.length_in_code_units()) {
-        auto offset = source_text - original_start;
-        shared->m_source_text = code_view.substring_view(offset, source_text_len);
+    if (source_text_len > 0) {
+        auto const& code_view = source_code.code_view();
+        shared->m_source_text = code_view.substring_view(source_text_offset, source_text_len);
     }
 
     return shared.ptr();
@@ -485,9 +481,10 @@ extern "C" void rust_sfd_set_class_field_initializer_name(
 }
 
 extern "C" void* rust_create_class_blueprint(
+    void const* source_code_ptr,
     uint16_t const* name,
     size_t name_len,
-    uint16_t const* source_text,
+    size_t source_text_offset,
     size_t source_text_len,
     uint32_t constructor_sfd_index,
     bool has_super_class,
@@ -503,9 +500,12 @@ extern "C" void* rust_create_class_blueprint(
     if (name_len > 0)
         blueprint->name = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len));
 
-    // Store source text as a view into the original source buffer.
-    // The buffer is owned by SourceCode which lives for the script's lifetime.
-    blueprint->source_text = Utf16View(reinterpret_cast<char16_t const*>(source_text), source_text_len);
+    // Store source text as a view into the SourceCode buffer.
+    if (source_text_len > 0) {
+        auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
+        auto const& code_view = source_code.code_view();
+        blueprint->source_text = code_view.substring_view(source_text_offset, source_text_len);
+    }
 
     for (size_t i = 0; i < element_count; ++i) {
         auto const& elem = elements[i];

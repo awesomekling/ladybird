@@ -4077,15 +4077,15 @@ fn generate_class_expression(
 
     let source_start = data.source_text_start as usize;
     let source_end = data.source_text_end as usize;
-    let source_text_ptr = unsafe { gen.source.add(source_start) };
     let source_text_len = source_end - source_start;
 
     // Create the ClassBlueprint via FFI
     let bp_ptr = unsafe {
         super::ffi::rust_create_class_blueprint(
+            gen.source_code_ptr,
             name_ptr,
             name_len,
-            source_text_ptr,
+            source_start,
             source_text_len,
             constructor_sfd_index,
             has_super,
@@ -5535,11 +5535,6 @@ fn emit_new_function(
     let source_start = data.source_text_start as usize;
     let source_end = data.source_text_end as usize;
 
-    // Get the function source text pointer from the original source buffer.
-    assert!(
-        !gen.source.is_null() && gen.source_len > 0,
-        "Generator must have source set for function compilation"
-    );
     assert!(
         source_end <= gen.source_len,
         "Function source range out of bounds: {}..{} (source len {})",
@@ -5548,7 +5543,6 @@ fn emit_new_function(
         gen.source_len
     );
 
-    let source_text_ptr = unsafe { gen.source.add(source_start) };
     let source_text_len = source_end - source_start;
 
     // Get function name.
@@ -5608,7 +5602,7 @@ fn emit_new_function(
             has_simple_parameter_list,
             param_name_slices.as_ptr(),
             param_name_slices.len(),
-            source_text_ptr,
+            source_start,
             source_text_len,
             rust_ast_ptr,
             data.parsing_insights.uses_this,

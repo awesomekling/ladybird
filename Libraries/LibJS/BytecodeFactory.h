@@ -173,7 +173,7 @@ void* rust_create_sfd(
     FFIUtf16Slice const* param_names,
     size_t param_name_count,
     // Source text range (for Function.prototype.toString)
-    uint16_t const* source_text,
+    size_t source_text_offset,
     size_t source_text_len,
     // Opaque Rust AST pointer (Box<FunctionData>)
     void* rust_function_ast,
@@ -221,11 +221,13 @@ void rust_sfd_set_metadata(
 //
 // Returns a heap-allocated ClassBlueprint* cast to void*.
 void* rust_create_class_blueprint(
+    // Source code object for substring_view
+    void const* source_code_ptr,
     // Class name (empty for anonymous)
     uint16_t const* name,
     size_t name_len,
     // Source text of the entire class (for Function.prototype.toString)
-    uint16_t const* source_text,
+    size_t source_text_offset,
     size_t source_text_len,
     // Index into shared_function_data for the constructor
     uint32_t constructor_sfd_index,

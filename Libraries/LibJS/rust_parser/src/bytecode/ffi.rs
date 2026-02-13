@@ -107,7 +107,7 @@ extern "C" {
         has_simple_parameter_list: bool,
         param_names: *const FFIUtf16Slice,
         param_name_count: usize,
-        source_text: *const u16,
+        source_text_offset: usize,
         source_text_len: usize,
         rust_function_ast: *mut c_void,
         uses_this: bool,
@@ -122,9 +122,10 @@ extern "C" {
     );
 
     pub fn rust_create_class_blueprint(
+        source_code_ptr: *const c_void,
         name: *const u16,
         name_len: usize,
-        source_text: *const u16,
+        source_text_offset: usize,
         source_text_len: usize,
         constructor_sfd_index: u32,
         has_super_class: bool,
