@@ -3896,7 +3896,50 @@ fn generate_optional_chain(
     let this_value = gen.allocate_register();
     gen.emit_mov(&this_value, &undef);
 
-    let mut current = generate_expr(base, gen, None)?;
+    // When the base is a MemberExpression, we need to separately track the
+    // object (for use as `this` in calls) and the property value.
+    // When the base is a nested OptionalChain, recursively generate it to
+    // propagate its this_value.
+    let mut current = match &base.inner {
+        Expression::Member { object, property, computed } => {
+            let obj = generate_expr(object, gen, None)?;
+            gen.emit_mov(&this_value, &obj);
+            let val = gen.allocate_register();
+            if *computed {
+                let prop = generate_expr(property, gen, None)?;
+                gen.emit(Instruction::GetByValue {
+                    dst: val.operand(),
+                    base: obj.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+            } else if let Expression::Identifier(ident) = &property.inner {
+                emit_get_by_id(gen, &val, &obj, &ident.name, None);
+            } else if let Expression::PrivateIdentifier(name) = &property.inner {
+                let id = gen.intern_identifier(name.name.clone());
+                gen.emit(Instruction::GetPrivateById {
+                    dst: val.operand(),
+                    base: obj.operand(),
+                    property: id,
+                });
+            } else {
+                let prop = generate_expr(property, gen, None)?;
+                gen.emit(Instruction::GetByValue {
+                    dst: val.operand(),
+                    base: obj.operand(),
+                    property: prop.operand(),
+                    base_identifier: None,
+                });
+            }
+            val
+        }
+        Expression::OptionalChain { base: inner_base, references: inner_refs } => {
+            let (val, inner_this) = generate_optional_chain(gen, inner_base, inner_refs, None)?;
+            gen.emit_mov(&this_value, &inner_this);
+            val
+        }
+        _ => generate_expr(base, gen, None)?,
+    };
 
     for reference in references {
         let is_optional = match reference {
