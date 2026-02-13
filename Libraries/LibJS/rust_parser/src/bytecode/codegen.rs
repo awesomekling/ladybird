@@ -353,7 +353,7 @@ pub fn generate_expr(
         // === Yield ===
         Expression::Yield {
             argument,
-            is_yield_from: _,
+            is_yield_from,
         } => {
             let value = if let Some(arg) = argument {
                 generate_expr(arg, gen, None)
@@ -362,7 +362,9 @@ pub fn generate_expr(
                 gen.add_constant_undefined()
             };
 
-            if !gen.is_in_async_generator_function() {
+            if *is_yield_from {
+                Some(generate_yield_from(gen, value, preferred_dst))
+            } else if !gen.is_in_async_generator_function() {
                 // Regular generator: yield + completion protocol.
                 Some(generate_regular_yield(gen, value, preferred_dst))
             } else {
@@ -1037,6 +1039,517 @@ fn generate_async_generator_yield(
     let dst = choose_dst(gen, preferred_dst);
     gen.emit_mov(&dst, &received_completion_value);
     dst
+}
+
+/// Yield* (yield from) delegation.
+///
+/// Implements the iterator delegation protocol from
+/// https://tc39.es/ecma262/#sec-generator-function-definitions-runtime-semantics-evaluation
+///
+/// The delegating generator forwards next/throw/return to the inner iterator.
+fn generate_yield_from(
+    gen: &mut Generator,
+    value: ScopedOperand,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    let is_async = gen.is_in_async_generator_function();
+
+    let received_completion = gen.allocate_register();
+    let received_completion_type = gen.allocate_register();
+    let received_completion_value = gen.allocate_register();
+
+    // 4. Let iteratorRecord be ? GetIterator(value, generatorKind).
+    let iterator = gen.allocate_register();
+    let next_method = gen.allocate_register();
+    let iterator_done_property = gen.allocate_register();
+    let hint: u32 = if is_async { 1 } else { 0 };
+    gen.emit(Instruction::GetIterator {
+        dst_iterator_object: iterator.operand(),
+        dst_iterator_next: next_method.operand(),
+        dst_iterator_done: iterator_done_property.operand(),
+        iterable: value.operand(),
+        hint,
+    });
+
+    // 6. Let received be NormalCompletion(undefined).
+    let normal_const = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    gen.emit_mov(&received_completion_type, &normal_const);
+    let undef = gen.add_constant_undefined();
+    gen.emit_mov(&received_completion_value, &undef);
+
+    // 7. Repeat,
+    let loop_block = gen.make_block();
+    let continuation_block = gen.make_block();
+    let loop_end_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(loop_block as u32),
+    });
+    gen.switch_to_basic_block(loop_block);
+
+    // Branch on received.[[Type]].
+    let type_is_normal_block = gen.make_block();
+    let is_type_throw_block = gen.make_block();
+    let is_normal = gen.allocate_register();
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_normal.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: normal_const.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_normal.operand(),
+        true_target: Label(type_is_normal_block as u32),
+        false_target: Label(is_type_throw_block as u32),
+    });
+
+    // =========================================================================
+    // a. If received.[[Type]] is normal, then
+    // =========================================================================
+    gen.switch_to_basic_block(type_is_normal_block);
+
+    // i. Let innerResult be ? Call(next, iterator, « received.[[Value]] »).
+    let inner_result = gen.allocate_register();
+    gen.emit(Instruction::Call {
+        dst: inner_result.operand(),
+        callee: next_method.operand(),
+        this_value: iterator.operand(),
+        argument_count: 1,
+        expression_string: None,
+        arguments: vec![received_completion_value.operand()],
+    });
+
+    // ii. If generatorKind is async, set innerResult to ? Await(innerResult).
+    if is_async {
+        let awaited = generate_await_with_completions(
+            gen,
+            inner_result.clone(),
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+        );
+        gen.emit_mov(&inner_result, &awaited);
+    }
+
+    // iii. If innerResult is not an Object, throw a TypeError exception.
+    gen.emit(Instruction::ThrowIfNotObject {
+        src: inner_result.operand(),
+    });
+
+    // iv. Let done be ? IteratorComplete(innerResult).
+    let done = gen.allocate_register();
+    emit_get_by_id(gen, &done, &inner_result, utf16!("done"), None);
+
+    // v. If done is true, then return ? IteratorValue(innerResult).
+    let type_is_normal_done_block = gen.make_block();
+    let type_is_normal_not_done_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(type_is_normal_done_block as u32),
+        false_target: Label(type_is_normal_not_done_block as u32),
+    });
+
+    gen.switch_to_basic_block(type_is_normal_done_block);
+    let return_value = gen.allocate_register();
+    emit_get_by_id(gen, &return_value, &inner_result, utf16!("value"), None);
+    gen.emit(Instruction::Jump {
+        target: Label(loop_end_block as u32),
+    });
+
+    // vi/vii. Yield IteratorValue(innerResult), receive new completion.
+    gen.switch_to_basic_block(type_is_normal_not_done_block);
+    let current_value = gen.allocate_register();
+    emit_get_by_id(gen, &current_value, &inner_result, utf16!("value"), None);
+
+    generate_yield_for_yield_from(
+        gen,
+        Label(continuation_block as u32),
+        &current_value,
+        &received_completion,
+        &received_completion_type,
+        &received_completion_value,
+        is_async,
+    );
+
+    // =========================================================================
+    // b. Else if received.[[Type]] is throw, then
+    // =========================================================================
+    gen.switch_to_basic_block(is_type_throw_block);
+    let type_is_throw_block = gen.make_block();
+    let type_is_return_block = gen.make_block();
+    let throw_const = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    let is_throw = gen.allocate_register();
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_throw.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: throw_const.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_throw.operand(),
+        true_target: Label(type_is_throw_block as u32),
+        false_target: Label(type_is_return_block as u32),
+    });
+
+    gen.switch_to_basic_block(type_is_throw_block);
+
+    // i. Let throw be ? GetMethod(iterator, "throw").
+    let throw_method = gen.allocate_register();
+    let throw_key = gen.intern_property_key(utf16!("throw").to_vec());
+    gen.emit(Instruction::GetMethod {
+        dst: throw_method.operand(),
+        object: iterator.operand(),
+        property: throw_key,
+    });
+
+    // ii. If throw is not undefined, then
+    let throw_method_defined_block = gen.make_block();
+    let throw_method_undefined_block = gen.make_block();
+    gen.emit(Instruction::JumpUndefined {
+        condition: throw_method.operand(),
+        true_target: Label(throw_method_undefined_block as u32),
+        false_target: Label(throw_method_defined_block as u32),
+    });
+
+    gen.switch_to_basic_block(throw_method_defined_block);
+
+    // 1. Let innerResult be ? Call(throw, iterator, « received.[[Value]] »).
+    gen.emit(Instruction::Call {
+        dst: inner_result.operand(),
+        callee: throw_method.operand(),
+        this_value: iterator.operand(),
+        argument_count: 1,
+        expression_string: None,
+        arguments: vec![received_completion_value.operand()],
+    });
+
+    // 2. If generatorKind is async, set innerResult to ? Await(innerResult).
+    if is_async {
+        let awaited = generate_await_with_completions(
+            gen,
+            inner_result.clone(),
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+        );
+        gen.emit_mov(&inner_result, &awaited);
+    }
+
+    // 4. If innerResult is not an Object, throw a TypeError exception.
+    gen.emit(Instruction::ThrowIfNotObject {
+        src: inner_result.operand(),
+    });
+
+    // 5. Let done be ? IteratorComplete(innerResult).
+    emit_get_by_id(gen, &done, &inner_result, utf16!("done"), None);
+
+    // 6. If done is true, return ? IteratorValue(innerResult).
+    let type_is_throw_done_block = gen.make_block();
+    let type_is_throw_not_done_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(type_is_throw_done_block as u32),
+        false_target: Label(type_is_throw_not_done_block as u32),
+    });
+
+    gen.switch_to_basic_block(type_is_throw_done_block);
+    emit_get_by_id(gen, &return_value, &inner_result, utf16!("value"), None);
+    gen.emit(Instruction::Jump {
+        target: Label(loop_end_block as u32),
+    });
+
+    // 7/8. Yield IteratorValue(innerResult), receive new completion.
+    gen.switch_to_basic_block(type_is_throw_not_done_block);
+    let yield_value = gen.allocate_register();
+    emit_get_by_id(gen, &yield_value, &inner_result, utf16!("value"), None);
+    generate_yield_for_yield_from(
+        gen,
+        Label(continuation_block as u32),
+        &yield_value,
+        &received_completion,
+        &received_completion_type,
+        &received_completion_value,
+        is_async,
+    );
+
+    // throw is undefined: close iterator, throw TypeError.
+    gen.switch_to_basic_block(throw_method_undefined_block);
+
+    if is_async {
+        // AsyncIteratorClose: get return method, call it, await, check object.
+        let return_method = gen.allocate_register();
+        let return_key = gen.intern_property_key(utf16!("return").to_vec());
+        gen.emit(Instruction::GetMethod {
+            dst: return_method.operand(),
+            object: iterator.operand(),
+            property: return_key,
+        });
+
+        let call_return_block = gen.make_block();
+        let after_close = gen.make_block();
+        gen.emit(Instruction::JumpUndefined {
+            condition: return_method.operand(),
+            true_target: Label(after_close as u32),
+            false_target: Label(call_return_block as u32),
+        });
+        gen.switch_to_basic_block(call_return_block);
+
+        let close_result = gen.allocate_register();
+        gen.emit(Instruction::Call {
+            dst: close_result.operand(),
+            callee: return_method.operand(),
+            this_value: iterator.operand(),
+            argument_count: 0,
+            expression_string: None,
+            arguments: vec![],
+        });
+
+        let awaited = generate_await_with_completions(
+            gen,
+            close_result,
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+        );
+        gen.emit(Instruction::ThrowIfNotObject {
+            src: awaited.operand(),
+        });
+
+        gen.emit(Instruction::Jump {
+            target: Label(after_close as u32),
+        });
+        gen.switch_to_basic_block(after_close);
+    } else {
+        // Sync: IteratorClose with Normal completion.
+        let undef = gen.add_constant_undefined();
+        gen.emit(Instruction::IteratorClose {
+            iterator_object: iterator.operand(),
+            iterator_next: next_method.operand(),
+            iterator_done: done.operand(),
+            completion_type: COMPLETION_TYPE_NORMAL as u32,
+            completion_value: undef.operand(),
+        });
+    }
+
+    // Throw a TypeError: iterator does not have a throw method.
+    let exception = gen.allocate_register();
+    let error_msg = utf16!("yield* protocol violation: iterator must have a throw method").to_vec();
+    let error_string = gen.intern_string(error_msg);
+    gen.emit(Instruction::NewTypeError {
+        dst: exception.operand(),
+        error_string,
+    });
+    gen.emit(Instruction::Throw {
+        src: exception.operand(),
+    });
+
+    // =========================================================================
+    // c. Else (received.[[Type]] is return)
+    // =========================================================================
+    gen.switch_to_basic_block(type_is_return_block);
+
+    // ii. Let return be ? GetMethod(iterator, "return").
+    let return_method = gen.allocate_register();
+    let return_key = gen.intern_property_key(utf16!("return").to_vec());
+    gen.emit(Instruction::GetMethod {
+        dst: return_method.operand(),
+        object: iterator.operand(),
+        property: return_key,
+    });
+
+    // iii. If return is undefined, then return received.[[Value]].
+    let return_is_undefined_block = gen.make_block();
+    let return_is_defined_block = gen.make_block();
+    gen.emit(Instruction::JumpUndefined {
+        condition: return_method.operand(),
+        true_target: Label(return_is_undefined_block as u32),
+        false_target: Label(return_is_defined_block as u32),
+    });
+
+    gen.switch_to_basic_block(return_is_undefined_block);
+    // 1. If generatorKind is async, set received.[[Value]] to ? Await(received.[[Value]]).
+    if is_async {
+        generate_await_with_completions(
+            gen,
+            received_completion_value.clone(),
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+        );
+    }
+    // 2. Return received (return completion).
+    gen.generate_return(&received_completion_value);
+
+    gen.switch_to_basic_block(return_is_defined_block);
+
+    // iv. Let innerReturnResult be ? Call(return, iterator, « received.[[Value]] »).
+    let inner_return_result = gen.allocate_register();
+    gen.emit(Instruction::Call {
+        dst: inner_return_result.operand(),
+        callee: return_method.operand(),
+        this_value: iterator.operand(),
+        argument_count: 1,
+        expression_string: None,
+        arguments: vec![received_completion_value.operand()],
+    });
+
+    // v. If generatorKind is async, set innerReturnResult to ? Await(innerReturnResult).
+    if is_async {
+        let awaited = generate_await_with_completions(
+            gen,
+            inner_return_result.clone(),
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+        );
+        gen.emit_mov(&inner_return_result, &awaited);
+    }
+
+    // vi. If innerReturnResult is not an Object, throw a TypeError exception.
+    gen.emit(Instruction::ThrowIfNotObject {
+        src: inner_return_result.operand(),
+    });
+
+    // vii. Let done be ? IteratorComplete(innerReturnResult).
+    emit_get_by_id(gen, &done, &inner_return_result, utf16!("done"), None);
+
+    // viii. If done is true, return IteratorValue(innerReturnResult).
+    let type_is_return_done_block = gen.make_block();
+    let type_is_return_not_done_block = gen.make_block();
+    gen.emit(Instruction::JumpIf {
+        condition: done.operand(),
+        true_target: Label(type_is_return_done_block as u32),
+        false_target: Label(type_is_return_not_done_block as u32),
+    });
+
+    gen.switch_to_basic_block(type_is_return_done_block);
+    let inner_return_result_value = gen.allocate_register();
+    emit_get_by_id(gen, &inner_return_result_value, &inner_return_result, utf16!("value"), None);
+    gen.generate_return(&inner_return_result_value);
+
+    // ix/x. Yield IteratorValue(innerReturnResult), receive new completion.
+    gen.switch_to_basic_block(type_is_return_not_done_block);
+    let received = gen.allocate_register();
+    emit_get_by_id(gen, &received, &inner_return_result, utf16!("value"), None);
+    generate_yield_for_yield_from(
+        gen,
+        Label(continuation_block as u32),
+        &received,
+        &received_completion,
+        &received_completion_type,
+        &received_completion_value,
+        is_async,
+    );
+
+    // =========================================================================
+    // Continuation block: resume after any yield, extract completion, loop back.
+    // =========================================================================
+    gen.switch_to_basic_block(continuation_block);
+    let acc = gen.accumulator();
+    gen.emit_mov(&received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+    gen.emit(Instruction::Jump {
+        target: Label(loop_block as u32),
+    });
+
+    // =========================================================================
+    // Loop end: return the accumulated return_value.
+    // =========================================================================
+    gen.switch_to_basic_block(loop_end_block);
+    let dst = choose_dst(gen, preferred_dst);
+    gen.emit_mov(&dst, &return_value);
+    dst
+}
+
+/// Yield within yield* delegation, handling both sync and async generators.
+///
+/// For sync generators: just emit Yield to the continuation label.
+/// For async generators: emit Yield, then handle AsyncGeneratorUnwrapYieldResumption
+/// (if type is return, await the value, adjust type accordingly).
+fn generate_yield_for_yield_from(
+    gen: &mut Generator,
+    continuation_label: Label,
+    argument: &ScopedOperand,
+    received_completion: &ScopedOperand,
+    received_completion_type: &ScopedOperand,
+    received_completion_value: &ScopedOperand,
+    is_async: bool,
+) {
+    if !is_async {
+        // Sync generator: just yield directly.
+        gen.emit(Instruction::Yield {
+            continuation_label: Some(continuation_label),
+            value: argument.operand(),
+        });
+        return;
+    }
+
+    // Async generator: Yield, then UnwrapYieldResumption.
+    let unwrap_block = gen.make_block();
+    gen.emit(Instruction::Yield {
+        continuation_label: Some(Label(unwrap_block as u32)),
+        value: argument.operand(),
+    });
+    gen.switch_to_basic_block(unwrap_block);
+
+    let acc = gen.accumulator();
+    gen.emit_mov(received_completion, &acc);
+    gen.emit(Instruction::GetCompletionFields {
+        type_dst: received_completion_type.operand(),
+        value_dst: received_completion_value.operand(),
+        completion: received_completion.operand(),
+    });
+
+    // If resumptionValue.[[Type]] is not return, jump to continuation.
+    let return_block = gen.make_block();
+    let is_not_return = gen.allocate_register();
+    let return_type = gen.add_constant_number(COMPLETION_TYPE_RETURN);
+    gen.emit(Instruction::StrictlyInequals {
+        dst: is_not_return.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: return_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_not_return.operand(),
+        true_target: continuation_label,
+        false_target: Label(return_block as u32),
+    });
+
+    // Return path: Await(resumptionValue.[[Value]]).
+    gen.switch_to_basic_block(return_block);
+    generate_await_with_completions(
+        gen,
+        received_completion_value.clone(),
+        received_completion,
+        received_completion_type,
+        received_completion_value,
+    );
+
+    // If awaited.[[Type]] is throw, jump to continuation (which will handle it).
+    let awaited_normal_block = gen.make_block();
+    let is_throw = gen.allocate_register();
+    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    gen.emit(Instruction::StrictlyEquals {
+        dst: is_throw.operand(),
+        lhs: received_completion_type.operand(),
+        rhs: throw_type.operand(),
+    });
+    gen.emit(Instruction::JumpIf {
+        condition: is_throw.operand(),
+        true_target: continuation_label,
+        false_target: Label(awaited_normal_block as u32),
+    });
+
+    // awaited.[[Type]] is normal: set type to Return and jump to continuation.
+    gen.switch_to_basic_block(awaited_normal_block);
+    gen.emit(Instruction::SetCompletionType {
+        completion: received_completion.operand(),
+        completion_type: COMPLETION_TYPE_RETURN as u32,
+    });
+    gen.emit(Instruction::Jump {
+        target: continuation_label,
+    });
 }
 
 // =============================================================================
