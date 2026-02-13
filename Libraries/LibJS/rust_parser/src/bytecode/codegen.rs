@@ -3154,7 +3154,20 @@ fn emit_store_to_reference(
                 .unwrap_or_else(|| gen.add_constant_undefined());
             emit_put_to_member(gen, &base, property, *computed, value, Some(object));
         }
-        _ => {}
+        _ => {
+            // Evaluate the expression for side effects, then throw ReferenceError.
+            generate_expr(target, gen, None);
+            let exception = gen.allocate_register();
+            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
+            let error_string = gen.intern_string(error_msg);
+            gen.emit(Instruction::NewReferenceError {
+                dst: exception.operand(),
+                error_string,
+            });
+            gen.emit(Instruction::Throw { src: exception.operand() });
+            let dead_block = gen.make_block();
+            gen.switch_to_basic_block(dead_block);
+        }
     }
 }
 
