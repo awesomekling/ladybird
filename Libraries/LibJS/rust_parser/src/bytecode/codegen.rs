@@ -5667,8 +5667,8 @@ pub fn emit_function_declaration_instantiation(
         }
     }
 
-    // Determine if arguments object is needed (from scope analysis).
-    let mut arguments_object_needed = body_scope.contains_access_to_arguments_object;
+    // Determine if arguments object is needed (from parsing insights).
+    let mut arguments_object_needed = func_data.parsing_insights.might_need_arguments_object;
 
     if is_arrow {
         arguments_object_needed = false;
