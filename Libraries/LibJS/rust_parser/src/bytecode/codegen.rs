@@ -3405,6 +3405,10 @@ fn generate_switch_statement(
     let labels = std::mem::take(&mut gen.pending_labels);
     gen.begin_breakable_scope(Label(end_block as u32), labels);
 
+    // Block declaration instantiation: create lexical environment for
+    // function declarations and let/const across all switch cases.
+    let did_create_env = emit_switch_block_declaration_instantiation(gen, data);
+
     // Create blocks for each case
     let case_blocks: Vec<usize> = data.cases.iter().map(|_| gen.make_block()).collect();
 
@@ -3445,6 +3449,29 @@ fn generate_switch_statement(
     for (i, case) in data.cases.iter().enumerate() {
         gen.switch_to_basic_block(case_blocks[i]);
         for child in &case.scope.children {
+            // For function declarations in switch cases: the scope collector
+            // cannot set is_hoisted because block_scope_data doesn't contain
+            // case children. Emit the AnnexB hoisting step here.
+            if did_create_env {
+                if let Statement::FunctionDeclaration(func_data) = &child.inner {
+                    if !func_data.is_hoisted {
+                        if let Some(ref name_ident) = func_data.name {
+                            let id = gen.intern_identifier(name_ident.name.clone());
+                            let value = gen.allocate_register();
+                            gen.emit(Instruction::GetBinding {
+                                dst: value.operand(),
+                                identifier: id,
+                                cache: EnvironmentCoordinate::empty(),
+                            });
+                            gen.emit(Instruction::SetVariableBinding {
+                                identifier: id,
+                                src: value.operand(),
+                                cache: EnvironmentCoordinate::empty(),
+                            });
+                        }
+                    }
+                }
+            }
             generate_stmt(child, gen, None);
             if gen.is_current_block_terminated() {
                 break;
@@ -3464,7 +3491,152 @@ fn generate_switch_statement(
 
     gen.end_breakable_scope();
     gen.switch_to_basic_block(end_block);
+
+    if did_create_env {
+        gen.lexical_environment_register_stack.pop();
+        if !gen.is_current_block_terminated() {
+            let parent = gen.lexical_environment_register_stack.last().cloned()
+                .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+        }
+    }
     None
+}
+
+/// Create block declaration instantiation for switch statements.
+/// Function declarations and let/const declarations across all cases
+/// share a single lexical environment.
+fn emit_switch_block_declaration_instantiation(
+    gen: &mut Generator,
+    data: &SwitchStatementData,
+) -> bool {
+    // Collect all statements across all cases.
+    let all_children: Vec<&Stmt> = data.cases.iter()
+        .flat_map(|case| case.scope.children.iter())
+        .collect();
+
+    // Check if we need a lexical environment.
+    let needs_env = all_children.iter().any(|child| match &child.inner {
+        Statement::FunctionDeclaration(_) => true,
+        Statement::VariableDeclaration { kind, .. } => {
+            *kind == DeclarationKind::Let || *kind == DeclarationKind::Const
+        }
+        Statement::ClassDeclaration(class_data) => {
+            class_data.name.as_ref().is_some_and(|n| !n.is_local())
+        }
+        _ => false,
+    });
+
+    if !needs_env {
+        return false;
+    }
+
+    let parent = gen.lexical_environment_register_stack.last().cloned()
+        .unwrap_or_else(|| gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)));
+    let new_env = gen.allocate_register();
+    gen.emit(Instruction::CreateLexicalEnvironment {
+        dst: new_env.operand(),
+        parent: parent.operand(),
+        capacity: 0,
+    });
+    gen.lexical_environment_register_stack.push(new_env);
+
+    // Pass 1: Create bindings for non-local lexical declarations.
+    let mut func_binding_created: Vec<Vec<u16>> = Vec::new();
+    for child in &all_children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations } => {
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    let is_constant = *kind == DeclarationKind::Const;
+                    for decl in declarations {
+                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                            if !ident.is_local() {
+                                let id = gen.intern_identifier(ident.name.clone());
+                                gen.emit(Instruction::CreateVariable {
+                                    identifier: id,
+                                    mode: ENV_MODE_LEXICAL,
+                                    is_immutable: is_constant,
+                                    is_global: false,
+                                    is_strict: is_constant,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name_ident) = class_data.name {
+                    if !name_ident.is_local() {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                    }
+                }
+            }
+            Statement::FunctionDeclaration(func_data) => {
+                if let Some(ref name_ident) = func_data.name {
+                    if !name_ident.is_local() && !func_binding_created.contains(&name_ident.name) {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::CreateVariable {
+                            identifier: id,
+                            mode: ENV_MODE_LEXICAL,
+                            is_immutable: false,
+                            is_global: false,
+                            is_strict: false,
+                        });
+                        func_binding_created.push(name_ident.name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Pass 2: Instantiate function declarations (last one wins for duplicates).
+    let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
+    for (i, child) in all_children.iter().enumerate().rev() {
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name_ident) = func_data.name {
+                if !last_func_indices.iter().any(|(n, _)| *n == name_ident.name) {
+                    last_func_indices.push((name_ident.name.clone(), i));
+                }
+            }
+        }
+    }
+    for (i, child) in all_children.iter().enumerate() {
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name_ident) = func_data.name {
+                if last_func_indices.iter().any(|(n, idx)| *n == name_ident.name && *idx == i) {
+                    let sfd_index = emit_new_function(gen, func_data, None);
+                    let fo = gen.allocate_register();
+                    gen.emit(Instruction::NewFunction {
+                        dst: fo.operand(),
+                        shared_function_data_index: sfd_index,
+                        home_object: None,
+                        lhs_name: None,
+                    });
+                    if name_ident.is_local() {
+                        let local = gen.local(name_ident.local_index.get());
+                        gen.emit_mov(&local, &fo);
+                    } else {
+                        let id = gen.intern_identifier(name_ident.name.clone());
+                        gen.emit(Instruction::InitializeLexicalBinding {
+                            identifier: id,
+                            src: fo.operand(),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    true
 }
 
 // =============================================================================
