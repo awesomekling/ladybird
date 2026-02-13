@@ -2908,6 +2908,45 @@ fn generate_assignment_expression(
                             base_identifier: base_id,
                         });
                         return Some(dst);
+                    } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
+                        let id = gen.intern_identifier(priv_ident.name.clone());
+                        gen.emit(Instruction::GetPrivateById {
+                            dst: old_val.operand(),
+                            base: base.operand(),
+                            property: id,
+                        });
+                        if is_logical {
+                            let rhs_block = gen.make_block();
+                            let lhs_block = gen.make_block();
+                            let end_block = gen.make_block();
+                            let dst = choose_dst(gen, preferred_dst);
+                            emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                            gen.switch_to_basic_block(rhs_block);
+                            let rhs_val = generate_expr(rhs, gen, None)?;
+                            gen.emit_mov(&dst, &rhs_val);
+                            let id2 = gen.intern_identifier(priv_ident.name.clone());
+                            gen.emit(Instruction::PutPrivateById {
+                                base: base.operand(),
+                                property: id2,
+                                src: dst.operand(),
+                            });
+                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                            gen.switch_to_basic_block(lhs_block);
+                            gen.emit_mov(&dst, &old_val);
+                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                            gen.switch_to_basic_block(end_block);
+                            return Some(dst);
+                        }
+                        let rhs_val = generate_expr(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
+                        emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                        let id2 = gen.intern_identifier(priv_ident.name.clone());
+                        gen.emit(Instruction::PutPrivateById {
+                            base: base.operand(),
+                            property: id2,
+                            src: dst.operand(),
+                        });
+                        return Some(dst);
                     }
                 }
             }
