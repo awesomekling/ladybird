@@ -6693,6 +6693,6 @@ fn expression_to_string_approximation(expr: &Expr) -> Vec<u16> {
             s.encode_utf16().collect()
         }
         Expression::This => utf16!("this").to_vec(),
-        _ => utf16!("<expression>").to_vec(),
+        _ => utf16!("<object>").to_vec(),
     }
 }
