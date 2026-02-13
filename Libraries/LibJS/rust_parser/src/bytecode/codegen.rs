@@ -691,8 +691,16 @@ pub fn generate_stmt(
         }
 
         // === UsingDeclaration ===
-        Statement::UsingDeclaration { declarations, .. } => {
-            generate_variable_declaration(gen, DeclarationKind::Let, declarations);
+        Statement::UsingDeclaration { .. } => {
+            // Disposal semantics are not yet implemented in the Rust codegen.
+            // Emit the same TODO error as the C++ codegen to match behavior.
+            let error = gen.allocate_register();
+            let msg = gen.intern_string(utf16!("TODO: UsingDeclaration").to_vec());
+            gen.emit(Instruction::NewTypeError {
+                dst: error.operand(),
+                error_string: msg,
+            });
+            gen.emit(Instruction::Throw { src: error.operand() });
             None
         }
 
