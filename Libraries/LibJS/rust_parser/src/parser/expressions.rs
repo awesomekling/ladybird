@@ -769,6 +769,7 @@ impl<'a> Parser<'a> {
         let arguments = self.parse_arguments();
         if callee_is_eval {
             self.scope_collector.set_contains_direct_call_to_eval();
+            self.scope_collector.set_uses_this();
         }
         self.expr(start, Expression::Call(CallExpressionData {
             callee: Box::new(callee),
