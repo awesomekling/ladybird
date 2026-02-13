@@ -404,7 +404,9 @@ extern "C" void* rust_create_sfd(
     size_t param_name_count,
     uint16_t const* source_text,
     size_t source_text_len,
-    void* rust_function_ast)
+    void* rust_function_ast,
+    bool uses_this,
+    bool uses_this_from_environment)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
@@ -431,6 +433,11 @@ extern "C" void* rust_create_sfd(
         has_simple_parameter_list,
         move(mapped_param_names),
         rust_function_ast);
+
+    // Set parsing insights that must be available before lazy compilation.
+    shared->m_uses_this = uses_this;
+    if (uses_this_from_environment)
+        shared->m_function_environment_needed = true;
 
     // Set source text as a view into the original source buffer.
     shared->m_source_code = &source_code;

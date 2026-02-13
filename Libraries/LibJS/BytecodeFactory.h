@@ -176,7 +176,10 @@ void* rust_create_sfd(
     uint16_t const* source_text,
     size_t source_text_len,
     // Opaque Rust AST pointer (Box<FunctionData>)
-    void* rust_function_ast);
+    void* rust_function_ast,
+    // Parsing insights needed before lazy compilation
+    bool uses_this,
+    bool uses_this_from_environment);
 
 // Compile a function body using the Rust pipeline.
 // Takes ownership of the Rust AST (frees it after compilation).

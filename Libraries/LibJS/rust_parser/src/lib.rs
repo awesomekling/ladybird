@@ -399,7 +399,9 @@ unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData
 
     let (uses_this, contains_eval, might_need_arguments) = if let Some(scope) = body_scope {
         (
-            scope.uses_this,
+            // Respect both scope analysis AND explicit parsing insights
+            // (e.g. for class field initializers / static initializers).
+            scope.uses_this || func_data.parsing_insights.uses_this,
             scope.contains_direct_call_to_eval,
             scope.contains_access_to_arguments_object,
         )
@@ -407,7 +409,6 @@ unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData
         // Conservative defaults if no scope data.
         (true, false, true)
     };
-
     rust_sfd_set_metadata(
         sfd_ptr,
         uses_this,

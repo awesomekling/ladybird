@@ -3257,6 +3257,7 @@ fn generate_class_expression(
                         Statement::Block(Box::new(ScopeData::with_children(vec![body_stmt]))),
                     );
 
+                    // Class bodies are always strict mode.
                     let func_data = FunctionData {
                         name: None,
                         source_text_start: init_expr.range.start.offset,
@@ -3265,7 +3266,7 @@ fn generate_class_expression(
                         parameters: Vec::new(),
                         function_length: 0,
                         kind: FunctionKind::Normal,
-                        is_strict_mode: gen.strict,
+                        is_strict_mode: true,
                         is_arrow_function: false,
                         parsing_insights: FunctionParsingInsights {
                             uses_this: true,
@@ -3302,6 +3303,7 @@ fn generate_class_expression(
             }
             ClassElement::StaticInitializer { body } => {
                 // Wrap the static block body in a function.
+                // Class bodies are always strict mode.
                 let func_data = FunctionData {
                     name: None,
                     source_text_start: body.range.start.offset,
@@ -3310,7 +3312,7 @@ fn generate_class_expression(
                     parameters: Vec::new(),
                     function_length: 0,
                     kind: FunctionKind::Normal,
-                    is_strict_mode: gen.strict,
+                    is_strict_mode: true,
                     is_arrow_function: false,
                     parsing_insights: FunctionParsingInsights {
                         uses_this: true,
@@ -4817,6 +4819,8 @@ fn emit_new_function(
             source_text_ptr,
             source_text_len,
             rust_ast_ptr,
+            data.parsing_insights.uses_this,
+            data.parsing_insights.uses_this_from_environment,
         )
     };
 

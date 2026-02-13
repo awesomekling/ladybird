@@ -110,6 +110,8 @@ extern "C" {
         source_text: *const u16,
         source_text_len: usize,
         rust_function_ast: *mut c_void,
+        uses_this: bool,
+        uses_this_from_environment: bool,
     ) -> *mut c_void;
 
     pub fn rust_create_class_blueprint(
