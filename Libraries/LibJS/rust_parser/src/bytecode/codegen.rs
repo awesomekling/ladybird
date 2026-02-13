@@ -5068,8 +5068,10 @@ fn assign_to_for_in_of_lhs(
             // The declaration is a VariableDeclaration with a single declarator
             if let Statement::VariableDeclaration { kind, declarations } = &stmt.inner {
                 if let Some(decl) = declarations.first() {
+                    // For var: FDI already initialized the binding, so use Set.
+                    // For let/const: per-iteration env created new bindings needing Initialize.
                     let mode = match kind {
-                        DeclarationKind::Var => BindingMode::InitializeVariable,
+                        DeclarationKind::Var => BindingMode::Set,
                         DeclarationKind::Let | DeclarationKind::Const => {
                             BindingMode::InitializeLexical
                         }
@@ -5103,9 +5105,7 @@ fn assign_to_for_in_of_lhs(
 enum BindingMode {
     /// `const` or `let` declarations: emit InitializeLexicalBinding.
     InitializeLexical,
-    /// `var` declarations: emit InitializeVariableBinding.
-    InitializeVariable,
-    /// Assignment expressions: emit SetLexicalBinding or SetGlobal.
+    /// Assignment expressions / var iteration: emit SetLexicalBinding or SetGlobal.
     Set,
 }
 
@@ -5164,13 +5164,6 @@ fn emit_set_variable_with_mode(
         match mode {
             BindingMode::InitializeLexical => {
                 gen.emit(Instruction::InitializeLexicalBinding {
-                    identifier: id,
-                    src: value.operand(),
-                    cache: EnvironmentCoordinate::empty(),
-                });
-            }
-            BindingMode::InitializeVariable => {
-                gen.emit(Instruction::InitializeVariableBinding {
                     identifier: id,
                     src: value.operand(),
                     cache: EnvironmentCoordinate::empty(),
