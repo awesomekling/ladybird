@@ -1356,6 +1356,7 @@ void HTMLImageElement::animate()
     }
 
     m_current_frame_index = (m_current_frame_index + 1) % image_data->frame_count();
+    image_data->notify_frame_advanced(m_current_frame_index);
     auto current_frame_duration = image_data->frame_duration(m_current_frame_index);
 
     if (current_frame_duration != m_animation_timer->interval()) {

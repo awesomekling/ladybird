@@ -17,6 +17,33 @@ namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(StreamingAnimatedBitmapDecodedImageData);
 
+HashMap<i64, GC::RawPtr<StreamingAnimatedBitmapDecodedImageData>>& StreamingAnimatedBitmapDecodedImageData::session_registry()
+{
+    static HashMap<i64, GC::RawPtr<StreamingAnimatedBitmapDecodedImageData>> s_registry;
+    return s_registry;
+}
+
+void StreamingAnimatedBitmapDecodedImageData::install_frame_delivery_callback()
+{
+    static bool s_installed = false;
+    if (s_installed)
+        return;
+    s_installed = true;
+
+    Platform::ImageCodecPlugin::the().on_animation_frames_decoded = [](i64 session_id, Vector<NonnullRefPtr<Gfx::Bitmap>> bitmaps) {
+        deliver_frames_for_session(session_id, move(bitmaps));
+    };
+}
+
+void StreamingAnimatedBitmapDecodedImageData::deliver_frames_for_session(i64 session_id, Vector<NonnullRefPtr<Gfx::Bitmap>> bitmaps)
+{
+    auto it = session_registry().find(session_id);
+    if (it == session_registry().end())
+        return;
+    if (auto data = it->value)
+        data->receive_frames(move(bitmaps), data->m_last_requested_start_frame);
+}
+
 GC::Ref<StreamingAnimatedBitmapDecodedImageData> StreamingAnimatedBitmapDecodedImageData::create(
     JS::Realm& realm,
     i64 session_id,
@@ -43,6 +70,9 @@ GC::Ref<StreamingAnimatedBitmapDecodedImageData> StreamingAnimatedBitmapDecodedI
     if (!initial_bitmaps.is_empty())
         data->m_last_displayed_bitmap = data->m_buffer_slots[0].bitmap;
 
+    install_frame_delivery_callback();
+    session_registry().set(session_id, data.ptr());
+
     return data;
 }
 
@@ -67,6 +97,7 @@ StreamingAnimatedBitmapDecodedImageData::~StreamingAnimatedBitmapDecodedImageDat
 void StreamingAnimatedBitmapDecodedImageData::finalize()
 {
     Base::finalize();
+    session_registry().remove(m_session_id);
     Platform::ImageCodecPlugin::the().stop_animation_decode(m_session_id);
 }
 
@@ -187,6 +218,7 @@ void StreamingAnimatedBitmapDecodedImageData::maybe_request_more_frames(size_t c
     u32 request_count = BUFFER_POOL_SIZE;
 
     m_request_in_flight = true;
+    m_last_requested_start_frame = request_start;
     m_highest_requested_frame = max(m_highest_requested_frame, request_start + request_count);
     Platform::ImageCodecPlugin::the().request_animation_frames(m_session_id, request_start, request_count);
 }

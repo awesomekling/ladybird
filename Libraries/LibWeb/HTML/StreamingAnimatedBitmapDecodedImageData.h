@@ -7,6 +7,8 @@
 #pragma once
 
 #include <AK/Array.h>
+#include <AK/HashMap.h>
+#include <LibGC/Ptr.h>
 #include <LibGfx/ColorSpace.h>
 #include <LibGfx/Forward.h>
 #include <LibWeb/HTML/DecodedImageData.h>
@@ -51,7 +53,12 @@ public:
 
     i64 session_id() const { return m_session_id; }
 
+    static void deliver_frames_for_session(i64 session_id, Vector<NonnullRefPtr<Gfx::Bitmap>>);
+    static void install_frame_delivery_callback();
+
 private:
+    static HashMap<i64, GC::RawPtr<StreamingAnimatedBitmapDecodedImageData>>& session_registry();
+
     static constexpr u32 BUFFER_POOL_SIZE = 4;
 
     struct BufferSlot {
@@ -83,6 +90,7 @@ private:
     mutable RefPtr<Gfx::ImmutableBitmap> m_last_displayed_bitmap;
     u64 m_write_generation { 0 };
     bool m_request_in_flight { false };
+    u32 m_last_requested_start_frame { 0 };
     u32 m_highest_requested_frame { 0 };
 };
 
