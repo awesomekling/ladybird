@@ -130,6 +130,20 @@ pub fn generate_expr(
 
         // === Binary ===
         Expression::Binary { op, lhs, rhs } => {
+            // Special case: `#privateId in obj` uses HasPrivateId instead of In.
+            if *op == BinaryOp::In {
+                if let Expression::PrivateIdentifier(priv_ident) = &lhs.inner {
+                    let base = generate_expr(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    let id = gen.intern_identifier(priv_ident.name.clone());
+                    gen.emit(Instruction::HasPrivateId {
+                        dst: dst.operand(),
+                        base: base.operand(),
+                        property: id,
+                    });
+                    return Some(dst);
+                }
+            }
             let lhs_val = generate_expr(lhs, gen, None)?;
             let rhs_val = generate_expr(rhs, gen, None)?;
             // OPTIMIZATION: constant folding for binary operations on constants.
