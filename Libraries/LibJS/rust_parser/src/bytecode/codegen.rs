@@ -3904,6 +3904,8 @@ fn generate_optional_chain(
     let undef = gen.add_constant_undefined();
 
     let mut current = generate_expr(base, gen, None)?;
+    // Track the base object for method calls (e.g., obj?.a() needs obj as this).
+    let mut this_value_for_call: Option<ScopedOperand> = None;
 
     for reference in references {
         let is_optional = match reference {
@@ -3933,11 +3935,13 @@ fn generate_optional_chain(
 
         match reference {
             OptionalChainReference::MemberReference { identifier, .. } => {
+                this_value_for_call = Some(current.clone());
                 let next = gen.allocate_register();
                 emit_get_by_id(gen, &next, &current, &identifier.name, None);
                 current = next;
             }
             OptionalChainReference::ComputedReference { expression, .. } => {
+                this_value_for_call = Some(current.clone());
                 let next = gen.allocate_register();
                 let prop = generate_expr(expression, gen, None)?;
                 gen.emit(Instruction::GetByValue {
@@ -3957,11 +3961,12 @@ fn generate_optional_chain(
                     arg_holders.push(val);
                 }
                 let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
-                let this_value = gen.add_constant_undefined();
+                let this_val = this_value_for_call.take()
+                    .unwrap_or_else(|| gen.add_constant_undefined());
                 gen.emit(Instruction::Call {
                     dst: next.operand(),
                     callee: current.operand(),
-                    this_value: this_value.operand(),
+                    this_value: this_val.operand(),
                     argument_count: arg_ops.len() as u32,
                     expression_string: None,
                     arguments: arg_ops,
@@ -3969,6 +3974,7 @@ fn generate_optional_chain(
                 current = next;
             }
             OptionalChainReference::PrivateMemberReference { private_identifier, .. } => {
+                this_value_for_call = Some(current.clone());
                 let next = gen.allocate_register();
                 let id = gen.intern_identifier(private_identifier.name.clone());
                 gen.emit(Instruction::GetPrivateById {
