@@ -2196,17 +2196,17 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                     let is_constant = *kind == DeclarationKind::Const;
                     for decl in declarations {
-                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                            if !ident.is_local() {
-                                let id = gen.intern_identifier(ident.name.clone());
-                                gen.emit(Instruction::CreateVariable {
-                                    identifier: id,
-                                    mode: ENV_MODE_LEXICAL,
-                                    is_immutable: is_constant,
-                                    is_global: false,
-                                    is_strict: is_constant,
-                                });
-                            }
+                        let mut names = Vec::new();
+                        collect_target_names(&decl.target, &mut names);
+                        for (name, _) in &names {
+                            let id = gen.intern_identifier(name.clone());
+                            gen.emit(Instruction::CreateVariable {
+                                identifier: id,
+                                mode: ENV_MODE_LEXICAL,
+                                is_immutable: is_constant,
+                                is_global: false,
+                                is_strict: is_constant,
+                            });
                         }
                     }
                 }
@@ -3562,17 +3562,17 @@ fn emit_switch_block_declaration_instantiation(
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                     let is_constant = *kind == DeclarationKind::Const;
                     for decl in declarations {
-                        if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
-                            if !ident.is_local() {
-                                let id = gen.intern_identifier(ident.name.clone());
-                                gen.emit(Instruction::CreateVariable {
-                                    identifier: id,
-                                    mode: ENV_MODE_LEXICAL,
-                                    is_immutable: is_constant,
-                                    is_global: false,
-                                    is_strict: is_constant,
-                                });
-                            }
+                        let mut names = Vec::new();
+                        collect_target_names(&decl.target, &mut names);
+                        for (name, _) in &names {
+                            let id = gen.intern_identifier(name.clone());
+                            gen.emit(Instruction::CreateVariable {
+                                identifier: id,
+                                mode: ENV_MODE_LEXICAL,
+                                is_immutable: is_constant,
+                                is_global: false,
+                                is_strict: is_constant,
+                            });
                         }
                     }
                 }
