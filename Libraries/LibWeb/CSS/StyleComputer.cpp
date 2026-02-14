@@ -2262,10 +2262,7 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
     CSSPixels current_size_in_px = default_monospace_font_size_in_px;
 
     for (auto& ancestor : ancestors.in_reverse()) {
-        auto ancestor_computed = ancestor.computed_properties();
-        if (!ancestor_computed)
-            continue;
-        auto font_size_value = ancestor_computed->cascaded_font_size();
+        auto font_size_value = ancestor.element().cascaded_font_size();
 
         if (!font_size_value)
             continue;
@@ -2325,7 +2322,10 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
         computed_style->set_property(PropertyID::FontSize, *new_font_size, ComputedProperties::Inherited::No, Important::No);
 
     // Store the cascaded font-size for recascade_font_size_if_needed() on descendant elements.
-    computed_style->set_cascaded_font_size(cascaded_properties.property(PropertyID::FontSize));
+    if (!abstract_element.pseudo_element().has_value()) {
+        abstract_element.element().set_cascaded_font_size(cascaded_properties.property(PropertyID::FontSize));
+        abstract_element.element().clear_pre_absolutized_values();
+    }
 
     auto const& computed_properties_to_inherit_from = abstract_element.element_to_inherit_style_from().map([](auto const& element) { return element.computed_properties(); }).value_or(nullptr);
 
@@ -2355,8 +2355,8 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
             bool depends_on_inherited_style = (value->is_length() && value->as_length().length().is_font_relative())
                 || (property_id == PropertyID::FontWeight && first_is_one_of(value->to_keyword(), Keyword::Bolder, Keyword::Lighter))
                 || (property_id == PropertyID::FontSize && first_is_one_of(value->to_keyword(), Keyword::Larger, Keyword::Smaller));
-            if (depends_on_inherited_style)
-                computed_style->set_pre_absolutized_value(property_id, *value);
+            if (depends_on_inherited_style && !abstract_element.pseudo_element().has_value())
+                abstract_element.element().set_pre_absolutized_value(property_id, *value);
         }
 
         // NOTE: We've already handled font-size above.

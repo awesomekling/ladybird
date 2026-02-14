@@ -242,6 +242,13 @@ public:
     CSS::ComputedValues const* computed_values() const { return m_computed_values.ptr(); }
     CSS::ComputedValues& ensure_computed_values();
 
+    HashMap<CSS::PropertyID, NonnullRefPtr<CSS::StyleValue const>> const& pre_absolutized_values() const { return m_pre_absolutized_values; }
+    void set_pre_absolutized_value(CSS::PropertyID property_id, NonnullRefPtr<CSS::StyleValue const> value) { m_pre_absolutized_values.set(property_id, move(value)); }
+    void clear_pre_absolutized_values() { m_pre_absolutized_values.clear(); }
+
+    RefPtr<CSS::StyleValue const> cascaded_font_size() const { return m_cascaded_font_size; }
+    void set_cascaded_font_size(RefPtr<CSS::StyleValue const> value) { m_cascaded_font_size = move(value); }
+
     Optional<PseudoElement&> get_pseudo_element(CSS::PseudoElement) const;
 
     GC::Ptr<CSS::CSSStyleProperties> inline_style() { return m_inline_style; }
@@ -610,6 +617,15 @@ private:
     OwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     CSS::PseudoClassBitmap m_attempted_pseudo_class_matches;
+
+    // Pre-absolutized values for properties that depend on inherited style
+    // (font-relative lengths, bolder/lighter, larger/smaller).
+    // Used by recompute_inherited_style() to re-resolve these properties.
+    HashMap<CSS::PropertyID, NonnullRefPtr<CSS::StyleValue const>> m_pre_absolutized_values;
+
+    // Stored for recascade_font_size_if_needed() which walks ancestors
+    // and reads their pre-resolution font-size values.
+    RefPtr<CSS::StyleValue const> m_cascaded_font_size;
 
     using PseudoElementData = HashMap<CSS::PseudoElement, GC::Ref<PseudoElement>>;
     mutable OwnPtr<PseudoElementData> m_pseudo_element_data;

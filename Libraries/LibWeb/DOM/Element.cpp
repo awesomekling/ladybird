@@ -962,7 +962,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
 
     // Re-resolve properties whose cascaded values depend on inherited style
     // (font-relative lengths, bolder/lighter, larger/smaller).
-    for (auto const& [property_id, preabsolutized_value] : computed_properties->pre_absolutized_values()) {
+    for (auto const& [property_id, preabsolutized_value] : m_pre_absolutized_values) {
         RefPtr old_value = computed_properties->property(property_id);
         computed_properties->set_property_without_modifying_flags(property_id, preabsolutized_value);
         property_values_affected_by_inherited_style.set(to_underlying(property_id), old_value);
