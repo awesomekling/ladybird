@@ -491,7 +491,16 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Standard for loop
+        // Standard for loop — const requires initializer.
+        if let ForInit::Declaration(ref decl) = init {
+            if let Statement::VariableDeclaration { kind: DeclarationKind::Const, ref declarations } = decl.inner {
+                for d in declarations {
+                    if d.init.is_none() {
+                        self.syntax_error("Missing initializer in const declaration");
+                    }
+                }
+            }
+        }
         self.consume_token(TokenType::Semicolon);
         let init_stmt = match init {
             ForInit::Declaration(decl) => Some(Box::new(decl)),
