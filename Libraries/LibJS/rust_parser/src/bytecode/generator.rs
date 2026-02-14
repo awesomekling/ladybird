@@ -25,7 +25,7 @@ use super::operand::*;
 /// returns it to the generator's register pool for reuse.
 #[derive(Debug, Clone)]
 pub struct ScopedOperand {
-    inner: std::rc::Rc<ScopedOperandInner>,
+    pub(crate) inner: std::rc::Rc<ScopedOperandInner>,
 }
 
 struct ScopedOperandInner {
@@ -574,6 +574,97 @@ impl Generator {
         if dst != src {
             self.emit(Instruction::Mov { dst, src });
         }
+    }
+
+    /// Emit a conditional jump, with comparison fusion and constant folding.
+    /// Matches C++ Generator::emit_jump_if().
+    pub fn emit_jump_if(
+        &mut self,
+        condition: &ScopedOperand,
+        true_target: Label,
+        false_target: Label,
+    ) {
+        // OPTIMIZATION: If condition is a constant, emit an unconditional jump.
+        if let Some(constant) = self.get_constant(condition) {
+            let is_truthy = constant_to_boolean(constant);
+            self.emit(Instruction::Jump {
+                target: if is_truthy { true_target } else { false_target },
+            });
+            return;
+        }
+
+        // OPTIMIZATION: If the condition is a register with ref_count == 1 and the last
+        // instruction is a comparison whose dst matches condition, fuse into a JumpXxx.
+        if condition.operand().is_register()
+            && std::rc::Rc::strong_count(&condition.inner) == 1
+        {
+            let block = &mut self.basic_blocks[self.current_block_index];
+            if let Some((last_inst, _)) = block.instructions.last() {
+                let fused = match last_inst {
+                    Instruction::LessThan { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpLessThan {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::LessThanEquals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpLessThanEquals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::GreaterThan { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpGreaterThan {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::GreaterThanEquals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpGreaterThanEquals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::LooselyEquals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpLooselyEquals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::LooselyInequals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpLooselyInequals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::StrictlyEquals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpStrictlyEquals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    Instruction::StrictlyInequals { dst, lhs, rhs } if *dst == condition.operand() => {
+                        Some(Instruction::JumpStrictlyInequals {
+                            lhs: *lhs, rhs: *rhs,
+                            true_target, false_target,
+                        })
+                    }
+                    _ => None,
+                };
+                if let Some(fused_inst) = fused {
+                    // Remove the comparison instruction and emit the fused jump.
+                    block.instructions.pop();
+                    self.emit(fused_inst);
+                    return;
+                }
+            }
+        }
+
+        self.emit(Instruction::JumpIf {
+            condition: condition.operand(),
+            true_target,
+            false_target,
+        });
     }
 
     // --- Cache index allocation ---
@@ -1228,6 +1319,17 @@ pub enum ConstantValue {
     Empty,
     String(Vec<u16>),
     BigInt(String),
+}
+
+/// Convert a constant value to a boolean, matching JS `ToBoolean`.
+pub fn constant_to_boolean(value: &ConstantValue) -> bool {
+    match value {
+        ConstantValue::Boolean(b) => *b,
+        ConstantValue::Null | ConstantValue::Undefined | ConstantValue::Empty => false,
+        ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
+        ConstantValue::String(s) => !s.is_empty(),
+        ConstantValue::BigInt(s) => s != "0",
+    }
 }
 
 /// Use `preferred_dst` if available, otherwise allocate a fresh register.
