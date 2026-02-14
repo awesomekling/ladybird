@@ -133,8 +133,8 @@ RefPtr<CSS::ComputedProperties const> AbstractElement::computed_properties() con
 CSS::ComputedValues const* AbstractElement::computed_values() const
 {
     if (m_pseudo_element.has_value()) {
-        if (auto node = layout_node())
-            return &node->computed_values();
+        if (auto pseudo_element = m_element->get_pseudo_element(*m_pseudo_element); pseudo_element.has_value())
+            return pseudo_element->computed_values();
         return nullptr;
     }
     return m_element->computed_values();

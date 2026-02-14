@@ -901,6 +901,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
         }
 
         set_computed_properties(pseudo_element, move(new_pseudo_element_style));
+
+        // Populate concrete ComputedValues on the PseudoElement.
+        if (auto new_style = computed_properties(pseudo_element)) {
+            auto& pseudo_computed_values = static_cast<CSS::MutableComputedValues&>(ensure_pseudo_element(pseudo_element).ensure_computed_values());
+            CSS::StyleComputer::populate_computed_values(pseudo_computed_values, *new_style, document());
+        }
+
         style_computer.pop_ancestor(*this);
     };
 

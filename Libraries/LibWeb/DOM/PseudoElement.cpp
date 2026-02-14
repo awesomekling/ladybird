@@ -15,6 +15,16 @@ GC_DEFINE_ALLOCATOR(PseudoElement);
 GC_DEFINE_ALLOCATOR(PseudoElementTreeNode);
 
 RefPtr<CSS::ComputedProperties> PseudoElement::computed_properties() const { return m_computed_properties; }
+
+CSS::ComputedValues const* PseudoElement::computed_values() const { return m_computed_values.ptr(); }
+
+CSS::ComputedValues& PseudoElement::ensure_computed_values()
+{
+    if (!m_computed_values)
+        m_computed_values = make<CSS::ComputedValues>();
+    return *m_computed_values;
+}
+
 void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> value)
 {
     m_computed_properties = move(value);
@@ -31,6 +41,8 @@ void PseudoElement::visit_edges(JS::Cell::Visitor& visitor)
     Base::visit_edges(visitor);
 
     visitor.visit(m_layout_node);
+    if (m_computed_values)
+        m_computed_values->visit_edges(visitor);
     if (m_counters_set)
         m_counters_set->visit_edges(visitor);
 }

@@ -9,6 +9,7 @@
 #include <AK/OwnPtr.h>
 #include <LibGC/CellAllocator.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/PseudoClassBitmap.h>
 #include <LibWeb/Export.h>
@@ -27,6 +28,9 @@ class WEB_API PseudoElement : public JS::Cell {
 
     RefPtr<CSS::ComputedProperties> computed_properties() const;
     void set_computed_properties(RefPtr<CSS::ComputedProperties> value);
+
+    CSS::ComputedValues const* computed_values() const;
+    CSS::ComputedValues& ensure_computed_values();
 
     CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
     CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
@@ -50,6 +54,7 @@ class WEB_API PseudoElement : public JS::Cell {
 private:
     GC::Ptr<Layout::NodeWithStyle> m_layout_node;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
+    OwnPtr<CSS::ComputedValues> m_computed_values;
     OwnPtr<CSS::AnimatedPropertyData> m_animated_property_data;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     OwnPtr<CSS::CountersSet> m_counters_set;
