@@ -1088,6 +1088,11 @@ impl<'a> Parser<'a> {
             };
         }
 
+        // async modifier requires a method (must have parens)
+        if is_async {
+            self.syntax_error("Expected function after async keyword");
+        }
+
         // Getter/setter
         if is_getter || is_setter {
             let func = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
@@ -1355,7 +1360,7 @@ impl<'a> Parser<'a> {
                     c if c == b'f' as u16 => result.push(12),
                     c if c == b'v' as u16 => result.push(11),
                     c if c == b'0' as u16 => {
-                        if i + 1 < raw.len() && is_octal_char(raw[i + 1]) {
+                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == b'8' as u16 || raw[i + 1] == b'9' as u16) {
                             return None;
                         }
                         result.push(0);
@@ -1472,6 +1477,10 @@ impl<'a> Parser<'a> {
                             let (val, consumed) = parse_octal_escape(inner, i);
                             result.push(val);
                             i += consumed;
+                        } else if i + 1 < inner.len() && (inner[i + 1] == b'8' as u16 || inner[i + 1] == b'9' as u16) {
+                            // \08 and \09 are NonOctalDecimalEscapeSequences
+                            has_legacy_octal = true;
+                            result.push(0);
                         } else {
                             result.push(0);
                         }
