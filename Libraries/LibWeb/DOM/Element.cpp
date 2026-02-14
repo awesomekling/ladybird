@@ -1014,7 +1014,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
     if (invalidation.is_none())
         return invalidation;
 
-    CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(ensure_computed_values()), *computed_properties);
+    CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(ensure_computed_values()), *computed_properties, document());
     layout_node()->apply_style(*computed_properties);
     return invalidation;
 }

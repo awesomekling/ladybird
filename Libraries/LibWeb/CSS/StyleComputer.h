@@ -89,7 +89,7 @@ public:
     };
     static Optional<AnimatedInheritValue> get_animated_inherit_value(PropertyID, DOM::AbstractElement);
 
-    static void populate_computed_values(MutableComputedValues&, ComputedProperties const&);
+    static void populate_computed_values(MutableComputedValues&, ComputedProperties const&, DOM::Document&);
 
     static Optional<String> user_agent_style_sheet_source(StringView name);
 

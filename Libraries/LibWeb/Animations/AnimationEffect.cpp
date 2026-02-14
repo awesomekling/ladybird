@@ -831,7 +831,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
         });
 
         if (!element.pseudo_element().has_value()) {
-            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *style);
+            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *style, target->document());
             if (target->layout_node())
                 target->layout_node()->apply_style(*style);
         } else {

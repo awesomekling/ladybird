@@ -74,6 +74,7 @@
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
+#include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -83,6 +84,7 @@
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTableElement.h>
+#include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
@@ -1714,12 +1716,149 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
     return style;
 }
 
-void StyleComputer::populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style)
+void StyleComputer::populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style, DOM::Document& document)
 {
     // NB: float, clear, position, inset, margin, and z_index are NOT set here because
     //     transfer_table_box_computed_values_to_wrapper_computed_values() modifies these
     //     on table boxes, and populate_computed_values() would clobber those modifications
     //     on subsequent style recomputations where apply_style() is not called.
+
+    // Resolve color-scheme first (needed for system colors and color resolution).
+    auto color_scheme = computed_style.color_scheme(document.page().preferred_color_scheme(), document.supported_color_schemes());
+    computed_values.set_color_scheme(color_scheme);
+
+    // Resolve font properties (needed by Length::ResolutionContext for calc() in colors/shadows).
+    computed_values.set_font_list(computed_style.computed_font_list(document.font_computer()));
+    computed_values.set_font_size(computed_style.font_size());
+    computed_values.set_font_weight(computed_style.font_weight());
+    computed_values.set_line_height(computed_style.line_height());
+
+    // Build resolution contexts for color and calc() resolution.
+    auto font_metrics = Length::FontMetrics {
+        computed_style.font_size(),
+        computed_style.first_available_computed_font(document.font_computer())->pixel_metrics(),
+        computed_style.line_height()
+    };
+    auto const* root_element = document.document_element();
+    auto root_font_metrics = root_element && root_element->computed_properties()
+        ? Length::FontMetrics {
+              root_element->computed_properties()->font_size(),
+              root_element->computed_properties()->first_available_computed_font(document.font_computer())->pixel_metrics(),
+              root_element->computed_properties()->line_height()
+          }
+        : font_metrics;
+    auto length_context = Length::ResolutionContext {
+        .viewport_rect = document.navigable() ? document.navigable()->viewport_rect() : CSSPixelRect {},
+        .font_metrics = font_metrics,
+        .root_font_metrics = root_font_metrics,
+    };
+    auto calculation_context = CalculationResolutionContext { .length_resolution_context = length_context };
+
+    // Bootstrap color resolution: resolve 'color' first, then build the full context.
+    auto bootstrap_color_context = ColorResolutionContext {
+        .color_scheme = color_scheme,
+        .current_color = InitialValues::color(),
+        .accent_color = SystemColor::accent_color(color_scheme),
+        .document = document,
+        .calculation_resolution_context = calculation_context,
+    };
+    auto color = computed_style.color_or_fallback(PropertyID::Color, bootstrap_color_context, InitialValues::color());
+    computed_values.set_color(color);
+
+    auto accent_color = computed_style.color_or_fallback(
+        PropertyID::AccentColor,
+        ColorResolutionContext { .color_scheme = color_scheme, .current_color = color, .accent_color = SystemColor::accent_color(color_scheme), .document = document, .calculation_resolution_context = calculation_context },
+        SystemColor::accent_color(color_scheme));
+    // If accent-color has an explicit color value, use that instead of the system default.
+    if (auto explicit_accent = computed_style.accent_color(bootstrap_color_context); explicit_accent.has_value())
+        accent_color = explicit_accent.value();
+    computed_values.set_accent_color(accent_color);
+
+    auto color_resolution_context = ColorResolutionContext {
+        .color_scheme = color_scheme,
+        .current_color = color,
+        .accent_color = accent_color,
+        .document = document,
+        .calculation_resolution_context = calculation_context,
+    };
+
+    // Color-dependent properties.
+    computed_values.set_background_color(computed_style.color_or_fallback(PropertyID::BackgroundColor, color_resolution_context, InitialValues::background_color()));
+    computed_values.set_flood_color(computed_style.color_or_fallback(PropertyID::FloodColor, color_resolution_context, InitialValues::flood_color()));
+    computed_values.set_stop_color(computed_style.color_or_fallback(PropertyID::StopColor, color_resolution_context, InitialValues::stop_color()));
+    computed_values.set_text_decoration_color(computed_style.color_or_fallback(PropertyID::TextDecorationColor, color_resolution_context, color));
+    computed_values.set_webkit_text_fill_color(computed_style.color_or_fallback(PropertyID::WebkitTextFillColor, color_resolution_context, color));
+    if (auto const& outline_color = computed_style.property(PropertyID::OutlineColor); outline_color.has_color())
+        computed_values.set_outline_color(outline_color.to_color(color_resolution_context).value());
+
+    auto const& fill = computed_style.property(PropertyID::Fill);
+    if (fill.has_color())
+        computed_values.set_fill(fill.to_color(color_resolution_context).value());
+    else if (fill.is_url())
+        computed_values.set_fill(fill.as_url().url());
+    auto const& stroke = computed_style.property(PropertyID::Stroke);
+    if (stroke.has_color())
+        computed_values.set_stroke(stroke.to_color(color_resolution_context).value());
+    else if (stroke.is_url())
+        computed_values.set_stroke(stroke.as_url().url());
+
+    // Shadow properties (need both color and calc resolution).
+    computed_values.set_text_shadow(computed_style.text_shadow(color_resolution_context, calculation_context));
+    computed_values.set_box_shadow(computed_style.box_shadow(color_resolution_context, calculation_context));
+
+    // Border data (color + style + width).
+    auto do_border_style = [&](BorderData& border, PropertyID width_property, PropertyID color_property, PropertyID style_property) {
+        border.color = computed_style.color_or_fallback(color_property, color_resolution_context, color);
+        border.line_style = computed_style.line_style(style_property);
+        if (border.line_style == LineStyle::None || border.line_style == LineStyle::Hidden) {
+            border.width = 0;
+        } else {
+            border.width = max(CSSPixels { 0 }, computed_style.length(width_property).absolute_length_to_px());
+        }
+    };
+    do_border_style(computed_values.border_left(), PropertyID::BorderLeftWidth, PropertyID::BorderLeftColor, PropertyID::BorderLeftStyle);
+    do_border_style(computed_values.border_top(), PropertyID::BorderTopWidth, PropertyID::BorderTopColor, PropertyID::BorderTopStyle);
+    do_border_style(computed_values.border_right(), PropertyID::BorderRightWidth, PropertyID::BorderRightColor, PropertyID::BorderRightStyle);
+    do_border_style(computed_values.border_bottom(), PropertyID::BorderBottomWidth, PropertyID::BorderBottomColor, PropertyID::BorderBottomStyle);
+
+    // Calc-dependent properties.
+    computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal(calculation_context));
+    computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical(calculation_context));
+
+    auto const& transition_delay_property = computed_style.property(PropertyID::TransitionDelay);
+    if (transition_delay_property.is_time()) {
+        computed_values.set_transition_delay(transition_delay_property.as_time().time());
+    } else if (transition_delay_property.is_calculated()) {
+        computed_values.set_transition_delay(transition_delay_property.as_calculated().resolve_time(calculation_context).value());
+    }
+
+    // Color context-dependent properties.
+    computed_values.set_scrollbar_color(computed_style.scrollbar_color(color_resolution_context));
+    computed_values.set_caret_color(computed_style.caret_color(color_resolution_context, color));
+
+    // Background layers (need document for CSS image resources).
+    auto background_layers = computed_style.background_layers();
+    for (auto& layer : background_layers) {
+        if (layer.background_image->is_image())
+            layer.image_resource = document.ensure_css_image_resource(layer.background_image->as_image().url());
+    }
+    computed_values.set_background_layers(move(background_layers));
+
+    // Mask image (needs document for CSS image resources).
+    auto const& mask_image = [&] -> StyleValue const& {
+        auto const& value = computed_style.property(PropertyID::MaskImage);
+        if (value.is_value_list())
+            return value.as_value_list().values()[0];
+        return value;
+    }();
+    if (mask_image.is_url()) {
+        computed_values.set_mask(mask_image.as_url().url());
+    } else if (mask_image.is_abstract_image()) {
+        auto const& abstract_image = mask_image.as_abstract_image();
+        computed_values.set_mask_image(abstract_image);
+        if (abstract_image.is_image())
+            computed_values.set_mask_image_resource(document.ensure_css_image_resource(abstract_image.as_image().url()));
+    }
 
     computed_values.set_display(computed_style.display());
     computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
@@ -1973,7 +2112,7 @@ RefPtr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElemen
         // Populate the shadow DOM element's ComputedValues since it represents
         // a pseudo-element and won't be populated through the normal path.
         auto& element_computed_values = static_cast<MutableComputedValues&>(element.ensure_computed_values());
-        populate_computed_values(element_computed_values, *style);
+        populate_computed_values(element_computed_values, *style, element.document());
 
         return style;
     }
@@ -2298,7 +2437,7 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     // Populate concrete ComputedValues on the Element.
     if (!abstract_element.pseudo_element().has_value()) {
         auto& computed_values = static_cast<MutableComputedValues&>(abstract_element.element().ensure_computed_values());
-        populate_computed_values(computed_values, *computed_style);
+        populate_computed_values(computed_values, *computed_style, m_document);
     }
 
     return computed_style;
