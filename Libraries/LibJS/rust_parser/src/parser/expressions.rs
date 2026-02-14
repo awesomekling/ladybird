@@ -995,6 +995,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
 
         let mut properties = Vec::new();
+        let mut has_proto_setter = false;
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::TripleDot) {
                 let spread_start = self.position();
@@ -1010,6 +1011,12 @@ impl<'a> Parser<'a> {
                 });
             } else {
                 let prop = self.parse_object_property();
+                if prop.property_type == ObjectPropertyType::ProtoSetter {
+                    if has_proto_setter {
+                        self.syntax_error("Duplicate __proto__ fields are not allowed in object expressions");
+                    }
+                    has_proto_setter = true;
+                }
                 properties.push(prop);
             }
 
@@ -1054,6 +1061,13 @@ impl<'a> Parser<'a> {
         }
 
         let (key, key_value, is_proto, is_computed) = self.parse_property_key();
+
+        // Private names are not allowed in object literals.
+        if let Expression::PrivateIdentifier(_) = key.inner {
+            if self.class_scope_depth == 0 {
+                self.syntax_error("Private field or method is not allowed in object literal");
+            }
+        }
 
         // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
