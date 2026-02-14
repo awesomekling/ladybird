@@ -8,6 +8,7 @@
 #include <LibWeb/Bindings/CSSStylePropertiesPrototype.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/AnimatedPropertyData.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/ComputedProperties.h>
@@ -655,13 +656,19 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
 
     auto const& computed_values = layout_node.computed_values();
 
-    auto& element = owner_node()->element();
-    auto pseudo_element = owner_node()->pseudo_element();
-    auto const* source = element.computed_properties(pseudo_element).ptr();
-    VERIFY(source);
+    auto abstract_element = *owner_node();
 
-    auto get_computed_value = [source](PropertyID property_id) -> auto const& {
-        return source->property(property_id);
+    // Read property values with animation overrides applied.
+    // Animated values take priority over base values from the overflow map.
+    auto* animated_data = abstract_element.animated_property_data();
+    auto get_computed_value = [&computed_values, animated_data](PropertyID property_id) -> StyleValue const& {
+        if (animated_data) {
+            if (auto it = animated_data->values.find(property_id); it != animated_data->values.end())
+                return *it->value;
+        }
+        if (auto value = computed_values.property_value(property_id))
+            return *value;
+        return *property_initial_value(property_id);
     };
 
     if (property_is_logical_alias(property_id)) {
@@ -1003,7 +1010,7 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         }
 
         if (!property_is_shorthand(property_id)) {
-            if (!pseudo_element.has_value()) {
+            if (!abstract_element.pseudo_element().has_value()) {
                 if (auto value = style_value_for_property(property_id, computed_values))
                     return value;
             }
