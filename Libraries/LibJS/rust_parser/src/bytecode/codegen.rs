@@ -830,10 +830,33 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
     )
 }
 
-// Completion::Type constants matching C++ enum.
-const COMPLETION_TYPE_NORMAL: f64 = 1.0;
-const COMPLETION_TYPE_RETURN: f64 = 4.0;
-const COMPLETION_TYPE_THROW: f64 = 5.0;
+/// Completion::Type values matching C++ enum.
+#[repr(u32)]
+enum CompletionType {
+    Normal = 1,
+    Return = 4,
+    Throw = 5,
+}
+
+impl CompletionType {
+    fn to_f64(self) -> f64 {
+        self as u32 as f64
+    }
+}
+
+/// Environment binding mode matching C++ EnvironmentMode.
+#[repr(u32)]
+enum EnvironmentMode {
+    Lexical = 0,
+    Var = 1,
+}
+
+/// Arguments object creation mode.
+#[repr(u32)]
+enum ArgumentsKind {
+    Mapped = 0,
+    Unmapped = 1,
+}
 
 /// Like generate_await but uses caller-provided completion registers.
 ///
@@ -864,7 +887,7 @@ fn generate_await_with_completions(
     let normal_block = gen.make_block();
     let throw_block = gen.make_block();
     let is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: is_normal.operand(),
         lhs: received_completion_type.operand(),
@@ -920,7 +943,7 @@ fn generate_regular_yield(
     let normal_block = gen.make_block();
     let not_normal_block = gen.make_block();
     let type_is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: type_is_normal.operand(),
         lhs: received_completion_type.operand(),
@@ -937,7 +960,7 @@ fn generate_regular_yield(
     let throw_block = gen.make_block();
     let return_block = gen.make_block();
     let type_is_throw = gen.allocate_register();
-    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: type_is_throw.operand(),
         lhs: received_completion_type.operand(),
@@ -1012,7 +1035,7 @@ fn generate_async_generator_yield(
     let main_continuation = gen.make_block();
     let return_block = gen.make_block();
     let is_not_return = gen.allocate_register();
-    let return_type = gen.add_constant_number(COMPLETION_TYPE_RETURN);
+    let return_type = gen.add_constant_number(CompletionType::Return.to_f64());
     gen.emit(Instruction::StrictlyInequals {
         dst: is_not_return.operand(),
         lhs: received_completion_type.operand(),
@@ -1034,7 +1057,7 @@ fn generate_async_generator_yield(
     // If awaited.[[Type]] is throw, jump to main continuation (which will handle it).
     let awaited_normal_block = gen.make_block();
     let is_throw = gen.allocate_register();
-    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: is_throw.operand(),
         lhs: received_completion_type.operand(),
@@ -1069,7 +1092,7 @@ fn generate_async_generator_yield(
     let normal_cont = gen.make_block();
     let throw_cont = gen.make_block();
     let is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: is_normal.operand(),
         lhs: received_completion_type.operand(),
@@ -1145,7 +1168,7 @@ fn generate_yield_from(
     });
 
     // 6. Let received be NormalCompletion(undefined).
-    let normal_const = gen.add_constant_number(COMPLETION_TYPE_NORMAL);
+    let normal_const = gen.add_constant_number(CompletionType::Normal.to_f64());
     gen.emit_mov(&received_completion_type, &normal_const);
     let undef = gen.add_constant_undefined();
     gen.emit_mov(&received_completion_value, &undef);
@@ -1248,7 +1271,7 @@ fn generate_yield_from(
     gen.switch_to_basic_block(is_type_throw_block);
     let type_is_throw_block = gen.make_block();
     let type_is_return_block = gen.make_block();
-    let throw_const = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    let throw_const = gen.add_constant_number(CompletionType::Throw.to_f64());
     let is_throw = gen.allocate_register();
     gen.emit(Instruction::StrictlyEquals {
         dst: is_throw.operand(),
@@ -1396,7 +1419,7 @@ fn generate_yield_from(
             iterator_object: iterator.operand(),
             iterator_next: next_method.operand(),
             iterator_done: done.operand(),
-            completion_type: COMPLETION_TYPE_NORMAL as u32,
+            completion_type: CompletionType::Normal as u32,
             completion_value: undef.operand(),
         });
     }
@@ -1577,7 +1600,7 @@ fn generate_yield_for_yield_from(
     // If resumptionValue.[[Type]] is not return, jump to continuation.
     let return_block = gen.make_block();
     let is_not_return = gen.allocate_register();
-    let return_type = gen.add_constant_number(COMPLETION_TYPE_RETURN);
+    let return_type = gen.add_constant_number(CompletionType::Return.to_f64());
     gen.emit(Instruction::StrictlyInequals {
         dst: is_not_return.operand(),
         lhs: received_completion_type.operand(),
@@ -1602,7 +1625,7 @@ fn generate_yield_for_yield_from(
     // If awaited.[[Type]] is throw, jump to continuation (which will handle it).
     let awaited_normal_block = gen.make_block();
     let is_throw = gen.allocate_register();
-    let throw_type = gen.add_constant_number(COMPLETION_TYPE_THROW);
+    let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
     gen.emit(Instruction::StrictlyEquals {
         dst: is_throw.operand(),
         lhs: received_completion_type.operand(),
@@ -1618,7 +1641,7 @@ fn generate_yield_for_yield_from(
     gen.switch_to_basic_block(awaited_normal_block);
     gen.emit(Instruction::SetCompletionType {
         completion: received_completion.operand(),
-        completion_type: COMPLETION_TYPE_RETURN as u32,
+        completion_type: CompletionType::Return as u32,
     });
     gen.emit(Instruction::Jump {
         target: continuation_label,
@@ -2071,7 +2094,7 @@ fn generate_for_statement(
                         let id = gen.intern_identifier(name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: is_const,
                             is_global: false,
                             is_strict: false,
@@ -2218,7 +2241,7 @@ fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Vec<u16>]) {
     for (reg, id) in &saved {
         gen.emit(Instruction::CreateVariable {
             identifier: *id,
-            mode: ENV_MODE_LEXICAL,
+            mode: EnvironmentMode::Lexical as u32,
             is_immutable: false,
             is_global: false,
             is_strict: false,
@@ -2302,7 +2325,7 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                             let id = gen.intern_identifier(name.clone());
                             gen.emit(Instruction::CreateVariable {
                                 identifier: id,
-                                mode: ENV_MODE_LEXICAL,
+                                mode: EnvironmentMode::Lexical as u32,
                                 is_immutable: is_constant,
                                 is_global: false,
                                 is_strict: is_constant,
@@ -2317,7 +2340,7 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                         let id = gen.intern_identifier(name_ident.name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: false,
                             is_global: false,
                             is_strict: false,
@@ -2331,7 +2354,7 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                         let id = gen.intern_identifier(name_ident.name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: false,
                             is_global: false,
                             is_strict: false,
@@ -4963,7 +4986,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
         let id = gen.intern_identifier(name.clone());
         gen.emit(Instruction::CreateVariable {
             identifier: id,
-            mode: ENV_MODE_LEXICAL,
+            mode: EnvironmentMode::Lexical as u32,
             is_immutable: is_constant,
             is_global: false,
             is_strict: is_constant,
@@ -5001,7 +5024,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
                         let id = gen.intern_identifier(name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: false,
                             is_global: false,
                             is_strict: false,
@@ -5905,7 +5928,7 @@ fn generate_array_binding_pattern(
         iterator_object: iterator_object.operand(),
         iterator_next: iterator_next.operand(),
         iterator_done: iterator_done.operand(),
-        completion_type: COMPLETION_TYPE_NORMAL as u32,
+        completion_type: CompletionType::Normal as u32,
         completion_value: undef.operand(),
     });
     gen.emit(Instruction::Jump {
@@ -6099,7 +6122,7 @@ fn generate_try_statement(
                     let id = gen.intern_identifier(ident.name.clone());
                     gen.emit(Instruction::CreateVariable {
                         identifier: id,
-                        mode: ENV_MODE_LEXICAL,
+                        mode: EnvironmentMode::Lexical as u32,
                         is_immutable: false,
                         is_global: false,
                         is_strict: false,
@@ -6130,7 +6153,7 @@ fn generate_try_statement(
                         let id = gen.intern_identifier(name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: false,
                             is_global: false,
                             is_strict: false,
@@ -6440,11 +6463,6 @@ fn emit_new_function(
 // FunctionDeclarationInstantiation (FDI)
 // =============================================================================
 
-const ENV_MODE_LEXICAL: u32 = 0;
-const ENV_MODE_VAR: u32 = 1;
-const ARGUMENTS_KIND_MAPPED: u32 = 0;
-const ARGUMENTS_KIND_UNMAPPED: u32 = 1;
-
 /// Emit FDI bytecode for a function body.
 ///
 /// This is a port of `Generator::emit_function_declaration_instantiation`
@@ -6539,7 +6557,7 @@ pub fn emit_function_declaration_instantiation(
             let id = gen.intern_identifier(name.clone());
             gen.emit(Instruction::CreateVariable {
                 identifier: id,
-                mode: ENV_MODE_LEXICAL,
+                mode: EnvironmentMode::Lexical as u32,
                 is_immutable: false,
                 is_global: false,
                 is_strict: false,
@@ -6570,9 +6588,9 @@ pub fn emit_function_declaration_instantiation(
                 && p.default_value.is_none()
                 && matches!(p.binding, FunctionParameterBinding::Identifier(_))
         }) {
-            ARGUMENTS_KIND_UNMAPPED
+            ArgumentsKind::Unmapped as u32
         } else {
-            ARGUMENTS_KIND_MAPPED
+            ArgumentsKind::Mapped as u32
         };
 
         gen.emit(Instruction::CreateArguments {
@@ -6678,7 +6696,7 @@ pub fn emit_function_declaration_instantiation(
                     let undef = gen.add_constant_undefined();
                     gen.emit(Instruction::CreateVariable {
                         identifier: id,
-                        mode: ENV_MODE_VAR,
+                        mode: EnvironmentMode::Var as u32,
                         is_immutable: false,
                         is_global: false,
                         is_strict: false,
@@ -6739,7 +6757,7 @@ pub fn emit_function_declaration_instantiation(
                     let id = gen.intern_identifier(var.name.clone());
                     gen.emit(Instruction::CreateVariable {
                         identifier: id,
-                        mode: ENV_MODE_VAR,
+                        mode: EnvironmentMode::Var as u32,
                         is_immutable: false,
                         is_global: false,
                         is_strict: false,
@@ -6761,7 +6779,7 @@ pub fn emit_function_declaration_instantiation(
             let id = gen.intern_identifier(name.clone());
             gen.emit(Instruction::CreateVariable {
                 identifier: id,
-                mode: ENV_MODE_VAR,
+                mode: EnvironmentMode::Var as u32,
                 is_immutable: false,
                 is_global: false,
                 is_strict: false,
@@ -6804,7 +6822,7 @@ pub fn emit_function_declaration_instantiation(
                             let id = gen.intern_identifier(name);
                             gen.emit(Instruction::CreateVariable {
                                 identifier: id,
-                                mode: ENV_MODE_LEXICAL,
+                                mode: EnvironmentMode::Lexical as u32,
                                 is_immutable: is_constant,
                                 is_global: false,
                                 is_strict: is_constant,
@@ -6820,7 +6838,7 @@ pub fn emit_function_declaration_instantiation(
                         let id = gen.intern_identifier(name_ident.name.clone());
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
-                            mode: ENV_MODE_LEXICAL,
+                            mode: EnvironmentMode::Lexical as u32,
                             is_immutable: false,
                             is_global: false,
                             is_strict: false,
