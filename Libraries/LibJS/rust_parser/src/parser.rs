@@ -509,6 +509,22 @@ impl<'a> Parser<'a> {
         self.syntax_error(&msg);
     }
 
+    pub(crate) fn validate_regex_flags(&mut self, flags: &[u16]) {
+        let valid_flags: &[u16] = &[b'd' as u16, b'g' as u16, b'i' as u16, b'm' as u16, b's' as u16, b'u' as u16, b'v' as u16, b'y' as u16];
+        let mut seen = [false; 128];
+        for &ch in flags {
+            if ch >= 128 || !valid_flags.contains(&ch) {
+                self.syntax_error(&format!("Invalid RegExp flag '{}'", char::from_u32(ch as u32).unwrap_or('?')));
+                return;
+            }
+            if seen[ch as usize] {
+                self.syntax_error(&format!("Repeated RegExp flag '{}'", char::from_u32(ch as u32).unwrap_or('?')));
+                return;
+            }
+            seen[ch as usize] = true;
+        }
+    }
+
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
