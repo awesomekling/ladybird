@@ -607,6 +607,14 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     // FIXME: We should resolve colors to their absolute forms at compute time (i.e. by implementing the relevant absolutized methods)
     auto color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*this);
 
+    // NB: float, clear, position, inset, margin, and z_index must be set in apply_style(),
+    //     NOT in populate_computed_values(), because transfer_table_box_computed_values_to_wrapper_computed_values()
+    //     modifies them on table boxes and populate_computed_values() would clobber those changes.
+    computed_values.set_float(computed_style.float_());
+    computed_values.set_clear(computed_style.clear());
+    computed_values.set_position(computed_style.position());
+    computed_values.set_z_index(computed_style.z_index());
+
     computed_values.set_vertical_align(computed_style.vertical_align());
 
     auto background_layers = computed_style.background_layers();
@@ -931,9 +939,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     if (m_owned_computed_values) {
         computed_values.set_display(computed_style.display());
         computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
-        computed_values.set_float(computed_style.float_());
-        computed_values.set_clear(computed_style.clear());
-        computed_values.set_position(computed_style.position());
         computed_values.set_overflow_x(computed_style.overflow_x());
         computed_values.set_overflow_y(computed_style.overflow_y());
         computed_values.set_box_sizing(computed_style.box_sizing());
@@ -958,7 +963,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         computed_values.set_user_select(computed_style.user_select());
         computed_values.set_unicode_bidi(computed_style.unicode_bidi());
         computed_values.set_table_layout(computed_style.table_layout());
-        computed_values.set_z_index(computed_style.z_index());
     }
 
     propagate_style_to_anonymous_wrappers();

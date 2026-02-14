@@ -1714,9 +1714,11 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
 
 static void populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style)
 {
-    computed_values.set_float(computed_style.float_());
-    computed_values.set_clear(computed_style.clear());
-    computed_values.set_position(computed_style.position());
+    // NB: float, clear, position, inset, margin, and z_index are NOT set here because
+    //     transfer_table_box_computed_values_to_wrapper_computed_values() modifies these
+    //     on table boxes, and populate_computed_values() would clobber those modifications
+    //     on subsequent style recomputations where apply_style() is not called.
+
     computed_values.set_display(computed_style.display());
     computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
     computed_values.set_overflow_x(computed_style.overflow_x());
@@ -1743,7 +1745,6 @@ static void populate_computed_values(MutableComputedValues& computed_values, Com
     computed_values.set_user_select(computed_style.user_select());
     computed_values.set_unicode_bidi(computed_style.unicode_bidi());
     computed_values.set_table_layout(computed_style.table_layout());
-    computed_values.set_z_index(computed_style.z_index());
 }
 
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
