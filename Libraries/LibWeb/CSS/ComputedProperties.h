@@ -53,8 +53,6 @@ struct AnimatedPropertyData {
 
 class WEB_API ComputedProperties final : public RefCounted<ComputedProperties> {
 public:
-    static constexpr double normal_line_height_scale = 1.15;
-
     ComputedProperties();
     ~ComputedProperties();
 
@@ -296,8 +294,6 @@ private:
 
     RefPtr<Gfx::FontCascadeList const> m_cached_computed_font_list;
     RefPtr<Gfx::Font const> m_cached_first_available_computed_font;
-
-    Optional<CSSPixels> m_line_height;
 };
 
 }

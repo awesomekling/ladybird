@@ -36,6 +36,8 @@
 
 namespace Web::CSS {
 
+static constexpr double normal_line_height_scale = 1.15;
+
 using ClipRule = FillRule;
 
 struct FlexBasisContent { };
