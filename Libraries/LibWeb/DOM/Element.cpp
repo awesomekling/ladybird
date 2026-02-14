@@ -862,14 +862,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     auto& style_computer = document().style_computer();
     auto new_computed_properties = style_computer.compute_style({ *this }, did_change_custom_properties);
 
-    // Tables must not inherit -libweb-* values for text-align.
-    // FIXME: Find the spec for this.
-    if (is<HTML::HTMLTableElement>(*this)) {
-        auto text_align = new_computed_properties->text_align();
-        if (text_align == CSS::TextAlign::LibwebLeft || text_align == CSS::TextAlign::LibwebCenter || text_align == CSS::TextAlign::LibwebRight)
-            new_computed_properties->set_property(CSS::PropertyID::TextAlign, CSS::KeywordStyleValue::create(CSS::Keyword::Start));
-    }
-
     bool had_list_marker = false;
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;

@@ -626,55 +626,15 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_background_color(computed_style.color_or_fallback(CSS::PropertyID::BackgroundColor, color_resolution_context, CSS::InitialValues::background_color()));
 
-    if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
-        computed_values.set_font_language_override(maybe_font_language_override.release_value());
-    computed_values.set_font_variation_settings(computed_style.font_variation_settings());
-
-    auto border_radius_data_from_style_value = [](CSS::StyleValue const& value) -> CSS::BorderRadiusData {
-        return CSS::BorderRadiusData {
-            CSS::LengthPercentage::from_style_value(value.as_border_radius().horizontal_radius()),
-            CSS::LengthPercentage::from_style_value(value.as_border_radius().vertical_radius())
-        };
-    };
-
-    computed_values.set_border_bottom_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomLeftRadius)));
-    computed_values.set_border_bottom_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomRightRadius)));
-    computed_values.set_border_top_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopLeftRadius)));
-    computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopRightRadius)));
-
     computed_values.set_flood_color(computed_style.color_or_fallback(CSS::PropertyID::FloodColor, color_resolution_context, CSS::InitialValues::flood_color()));
 
     auto accent_color = computed_style.accent_color(*this);
     if (accent_color.has_value())
         computed_values.set_accent_color(accent_color.value());
 
-    computed_values.set_text_align(computed_style.text_align());
-    computed_values.set_text_justify(computed_style.text_justify());
-    computed_values.set_text_underline_offset(computed_style.text_underline_offset());
-    computed_values.set_text_underline_position(computed_style.text_underline_position());
-
-    computed_values.set_text_indent(computed_style.text_indent());
-    computed_values.set_text_wrap_mode(computed_style.text_wrap_mode());
-    computed_values.set_tab_size(computed_style.tab_size());
-
-    computed_values.set_white_space_collapse(computed_style.white_space_collapse());
-    computed_values.set_word_break(computed_style.word_break());
-
-    computed_values.set_word_spacing(computed_style.word_spacing());
-    computed_values.set_letter_spacing(computed_style.letter_spacing());
-
     computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal(*this));
     computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical(*this));
 
-    computed_values.set_caption_side(computed_style.caption_side());
-    computed_values.set_cursor(computed_style.cursor());
-    computed_values.set_image_rendering(computed_style.image_rendering());
-    computed_values.set_pointer_events(computed_style.pointer_events());
-    computed_values.set_text_decoration_line(computed_style.text_decoration_line());
-    computed_values.set_text_transform(computed_style.text_transform());
-
-    computed_values.set_list_style_type(computed_style.list_style_type());
-    computed_values.set_list_style_position(computed_style.list_style_position());
     auto const& list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
     if (list_style_image.is_abstract_image()) {
         m_list_style_image = list_style_image.as_abstract_image();
@@ -690,8 +650,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_webkit_text_fill_color(computed_style.color_or_fallback(CSS::PropertyID::WebkitTextFillColor, color_resolution_context, computed_values.color()));
 
     computed_values.set_text_shadow(computed_style.text_shadow(*this));
-
-    computed_values.set_visibility(computed_style.visibility());
 
     computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
     computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
@@ -731,19 +689,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     if (auto const& outline_color = computed_style.property(CSS::PropertyID::OutlineColor); outline_color.has_color())
         computed_values.set_outline_color(outline_color.to_color(color_resolution_context).value());
-    if (auto const& outline_offset = computed_style.property(CSS::PropertyID::OutlineOffset); outline_offset.is_length())
-        computed_values.set_outline_offset(outline_offset.as_length().length());
-
-    // FIXME: Interpolation can cause negative values - we clamp here but should instead clamp as part of interpolation.
-    computed_values.set_outline_width(max(CSSPixels { 0 }, computed_style.length(CSS::PropertyID::OutlineWidth).absolute_length_to_px()));
-
-    computed_values.set_cx(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cx)));
-    computed_values.set_cy(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cy)));
-    computed_values.set_r(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::R)));
-    computed_values.set_rx(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Rx)));
-    computed_values.set_ry(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Ry)));
-    computed_values.set_x(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::X)));
-    computed_values.set_y(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Y)));
 
     auto const& fill = computed_style.property(CSS::PropertyID::Fill);
     if (fill.has_color())
@@ -757,18 +702,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         computed_values.set_stroke(stroke.as_url().url());
 
     computed_values.set_stop_color(computed_style.color_or_fallback(CSS::PropertyID::StopColor, color_resolution_context, CSS::InitialValues::stop_color()));
-
-    auto const& stroke_width = computed_style.property(CSS::PropertyID::StrokeWidth);
-    // FIXME: Converting to pixels isn't really correct - values should be in "user units"
-    //        https://svgwg.org/svg2-draft/coords.html#TermUserUnits
-    if (stroke_width.is_number())
-        computed_values.set_stroke_width(CSS::Length::make_px(CSSPixels::nearest_value_for(stroke_width.as_number().number())));
-    else if (stroke_width.is_length())
-        computed_values.set_stroke_width(stroke_width.as_length().length());
-    else if (stroke_width.is_percentage())
-        computed_values.set_stroke_width(CSS::LengthPercentage { stroke_width.as_percentage().percentage() });
-    computed_values.set_shape_rendering(computed_style.shape_rendering());
-    computed_values.set_paint_order(computed_style.paint_order());
 
     // FIXME: We should actually support more than one mask image rather than just using the first
     auto const& mask_image = [&] -> CSS::StyleValue const& {
@@ -788,82 +721,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
             computed_values.set_mask_image_resource(document().ensure_css_image_resource(abstract_image.as_image().url()));
     }
 
-    auto const& clip_path = computed_style.property(CSS::PropertyID::ClipPath);
-    if (clip_path.is_url())
-        computed_values.set_clip_path(clip_path.as_url().url());
-    else if (clip_path.is_basic_shape())
-        computed_values.set_clip_path(clip_path.as_basic_shape());
-    computed_values.set_clip_rule(computed_style.clip_rule());
-    computed_values.set_fill_rule(computed_style.fill_rule());
-
-    computed_values.set_fill_opacity(computed_style.fill_opacity());
-    computed_values.set_stroke_dasharray(computed_style.stroke_dasharray());
-
-    auto const& stroke_dashoffset = computed_style.property(CSS::PropertyID::StrokeDashoffset);
-    // FIXME: Converting to pixels isn't really correct - values should be in "user units"
-    //        https://svgwg.org/svg2-draft/coords.html#TermUserUnits
-    if (stroke_dashoffset.is_number())
-        computed_values.set_stroke_dashoffset(CSS::Length::make_px(CSSPixels::nearest_value_for(stroke_dashoffset.as_number().number())));
-    else if (stroke_dashoffset.is_length())
-        computed_values.set_stroke_dashoffset(stroke_dashoffset.as_length().length());
-    else if (stroke_dashoffset.is_percentage())
-        computed_values.set_stroke_dashoffset(CSS::LengthPercentage { stroke_dashoffset.as_percentage().percentage() });
-
-    computed_values.set_stroke_linecap(computed_style.stroke_linecap());
-    computed_values.set_stroke_linejoin(computed_style.stroke_linejoin());
-    computed_values.set_stroke_miterlimit(computed_style.stroke_miterlimit());
-
-    computed_values.set_stroke_opacity(computed_style.stroke_opacity());
-
-    computed_values.set_text_anchor(computed_style.text_anchor());
-
-    if (auto const& column_count = computed_style.property(CSS::PropertyID::ColumnCount); column_count.is_integer())
-        computed_values.set_column_count(CSS::ColumnCount::make_integer(column_count.as_integer().integer()));
-
-    computed_values.set_border_collapse(computed_style.border_collapse());
-
-    computed_values.set_empty_cells(computed_style.empty_cells());
-
-    auto const& aspect_ratio = computed_style.property(CSS::PropertyID::AspectRatio);
-    if (aspect_ratio.is_value_list()) {
-        auto const& values_list = aspect_ratio.as_value_list().values();
-        if (values_list.size() == 2
-            && values_list[0]->is_keyword() && values_list[0]->as_keyword().keyword() == CSS::Keyword::Auto
-            && values_list[1]->is_ratio()) {
-            computed_values.set_aspect_ratio({ true, values_list[1]->as_ratio().ratio() });
-        }
-    } else if (aspect_ratio.is_keyword() && aspect_ratio.as_keyword().keyword() == CSS::Keyword::Auto) {
-        computed_values.set_aspect_ratio({ true, {} });
-    } else if (aspect_ratio.is_ratio()) {
-        // https://drafts.csswg.org/css-sizing-4/#aspect-ratio
-        // If the <ratio> is degenerate, the property instead behaves as auto.
-        if (aspect_ratio.as_ratio().ratio().is_degenerate())
-            computed_values.set_aspect_ratio({ true, {} });
-        else
-            computed_values.set_aspect_ratio({ false, aspect_ratio.as_ratio().ratio() });
-    }
-
-    auto const& math_shift_value = computed_style.property(CSS::PropertyID::MathShift);
-    if (auto math_shift = keyword_to_math_shift(math_shift_value.to_keyword()); math_shift.has_value())
-        computed_values.set_math_shift(math_shift.value());
-
-    auto const& math_style_value = computed_style.property(CSS::PropertyID::MathStyle);
-    if (auto math_style = keyword_to_math_style(math_style_value.to_keyword()); math_style.has_value())
-        computed_values.set_math_style(math_style.value());
-
-    computed_values.set_math_depth(computed_style.math_depth());
-    computed_values.set_quotes(computed_style.quotes());
-    computed_values.set_counter_increment(computed_style.counter_data(CSS::PropertyID::CounterIncrement));
-    computed_values.set_counter_reset(computed_style.counter_data(CSS::PropertyID::CounterReset));
-    computed_values.set_counter_set(computed_style.counter_data(CSS::PropertyID::CounterSet));
-
-    computed_values.set_direction(computed_style.direction());
     computed_values.set_scrollbar_color(computed_style.scrollbar_color(*this));
-    computed_values.set_writing_mode(computed_style.writing_mode());
-    computed_values.set_shape_rendering(computed_values.shape_rendering());
-
     computed_values.set_caret_color(computed_style.caret_color(*this));
-    computed_values.set_color_interpolation(computed_style.color_interpolation());
 
     // For nodes that own their ComputedValues (pseudo-elements), these properties
     // need to be set here since they aren't populated during style computation.
@@ -955,6 +814,125 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         computed_values.set_grid_row_start(computed_style.grid_row_start());
         computed_values.set_grid_template_areas(computed_style.grid_template_areas());
         computed_values.set_grid_auto_flow(computed_style.grid_auto_flow());
+
+        if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
+            computed_values.set_font_language_override(maybe_font_language_override.release_value());
+        computed_values.set_font_variation_settings(computed_style.font_variation_settings());
+
+        auto border_radius_data_from_style_value = [](CSS::StyleValue const& value) -> CSS::BorderRadiusData {
+            return CSS::BorderRadiusData {
+                CSS::LengthPercentage::from_style_value(value.as_border_radius().horizontal_radius()),
+                CSS::LengthPercentage::from_style_value(value.as_border_radius().vertical_radius())
+            };
+        };
+        computed_values.set_border_bottom_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomLeftRadius)));
+        computed_values.set_border_bottom_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomRightRadius)));
+        computed_values.set_border_top_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopLeftRadius)));
+        computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopRightRadius)));
+
+        computed_values.set_text_align(computed_style.text_align());
+        computed_values.set_text_justify(computed_style.text_justify());
+        computed_values.set_text_underline_offset(computed_style.text_underline_offset());
+        computed_values.set_text_underline_position(computed_style.text_underline_position());
+        computed_values.set_text_indent(computed_style.text_indent());
+        computed_values.set_text_wrap_mode(computed_style.text_wrap_mode());
+        computed_values.set_tab_size(computed_style.tab_size());
+        computed_values.set_white_space_collapse(computed_style.white_space_collapse());
+        computed_values.set_word_break(computed_style.word_break());
+        computed_values.set_word_spacing(computed_style.word_spacing());
+        computed_values.set_letter_spacing(computed_style.letter_spacing());
+        computed_values.set_caption_side(computed_style.caption_side());
+        computed_values.set_cursor(computed_style.cursor());
+        computed_values.set_image_rendering(computed_style.image_rendering());
+        computed_values.set_pointer_events(computed_style.pointer_events());
+        computed_values.set_text_decoration_line(computed_style.text_decoration_line());
+        computed_values.set_text_transform(computed_style.text_transform());
+        computed_values.set_list_style_type(computed_style.list_style_type());
+        computed_values.set_list_style_position(computed_style.list_style_position());
+        computed_values.set_visibility(computed_style.visibility());
+
+        if (auto const& outline_offset = computed_style.property(CSS::PropertyID::OutlineOffset); outline_offset.is_length())
+            computed_values.set_outline_offset(outline_offset.as_length().length());
+        computed_values.set_outline_width(max(CSSPixels { 0 }, computed_style.length(CSS::PropertyID::OutlineWidth).absolute_length_to_px()));
+
+        computed_values.set_cx(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cx)));
+        computed_values.set_cy(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Cy)));
+        computed_values.set_r(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::R)));
+        computed_values.set_rx(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Rx)));
+        computed_values.set_ry(CSS::LengthPercentageOrAuto::from_style_value(computed_style.property(CSS::PropertyID::Ry)));
+        computed_values.set_x(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::X)));
+        computed_values.set_y(CSS::LengthPercentage::from_style_value(computed_style.property(CSS::PropertyID::Y)));
+
+        auto const& clip_path = computed_style.property(CSS::PropertyID::ClipPath);
+        if (clip_path.is_url())
+            computed_values.set_clip_path(clip_path.as_url().url());
+        else if (clip_path.is_basic_shape())
+            computed_values.set_clip_path(clip_path.as_basic_shape());
+        computed_values.set_clip_rule(computed_style.clip_rule());
+        computed_values.set_fill_rule(computed_style.fill_rule());
+        computed_values.set_fill_opacity(computed_style.fill_opacity());
+        computed_values.set_stroke_dasharray(computed_style.stroke_dasharray());
+
+        auto const& stroke_dashoffset = computed_style.property(CSS::PropertyID::StrokeDashoffset);
+        if (stroke_dashoffset.is_number())
+            computed_values.set_stroke_dashoffset(CSS::Length::make_px(CSSPixels::nearest_value_for(stroke_dashoffset.as_number().number())));
+        else if (stroke_dashoffset.is_length())
+            computed_values.set_stroke_dashoffset(stroke_dashoffset.as_length().length());
+        else if (stroke_dashoffset.is_percentage())
+            computed_values.set_stroke_dashoffset(CSS::LengthPercentage { stroke_dashoffset.as_percentage().percentage() });
+
+        computed_values.set_stroke_linecap(computed_style.stroke_linecap());
+        computed_values.set_stroke_linejoin(computed_style.stroke_linejoin());
+        computed_values.set_stroke_miterlimit(computed_style.stroke_miterlimit());
+        computed_values.set_stroke_opacity(computed_style.stroke_opacity());
+        computed_values.set_text_anchor(computed_style.text_anchor());
+
+        auto const& stroke_width = computed_style.property(CSS::PropertyID::StrokeWidth);
+        if (stroke_width.is_number())
+            computed_values.set_stroke_width(CSS::Length::make_px(CSSPixels::nearest_value_for(stroke_width.as_number().number())));
+        else if (stroke_width.is_length())
+            computed_values.set_stroke_width(stroke_width.as_length().length());
+        else if (stroke_width.is_percentage())
+            computed_values.set_stroke_width(CSS::LengthPercentage { stroke_width.as_percentage().percentage() });
+        computed_values.set_shape_rendering(computed_style.shape_rendering());
+        computed_values.set_paint_order(computed_style.paint_order());
+
+        if (auto const& column_count = computed_style.property(CSS::PropertyID::ColumnCount); column_count.is_integer())
+            computed_values.set_column_count(CSS::ColumnCount::make_integer(column_count.as_integer().integer()));
+        computed_values.set_border_collapse(computed_style.border_collapse());
+        computed_values.set_empty_cells(computed_style.empty_cells());
+
+        auto const& aspect_ratio = computed_style.property(CSS::PropertyID::AspectRatio);
+        if (aspect_ratio.is_value_list()) {
+            auto const& values_list = aspect_ratio.as_value_list().values();
+            if (values_list.size() == 2
+                && values_list[0]->is_keyword() && values_list[0]->as_keyword().keyword() == CSS::Keyword::Auto
+                && values_list[1]->is_ratio()) {
+                computed_values.set_aspect_ratio({ true, values_list[1]->as_ratio().ratio() });
+            }
+        } else if (aspect_ratio.is_keyword() && aspect_ratio.as_keyword().keyword() == CSS::Keyword::Auto) {
+            computed_values.set_aspect_ratio({ true, {} });
+        } else if (aspect_ratio.is_ratio()) {
+            if (aspect_ratio.as_ratio().ratio().is_degenerate())
+                computed_values.set_aspect_ratio({ true, {} });
+            else
+                computed_values.set_aspect_ratio({ false, aspect_ratio.as_ratio().ratio() });
+        }
+
+        auto const& math_shift_value = computed_style.property(CSS::PropertyID::MathShift);
+        if (auto math_shift = keyword_to_math_shift(math_shift_value.to_keyword()); math_shift.has_value())
+            computed_values.set_math_shift(math_shift.value());
+        auto const& math_style_value = computed_style.property(CSS::PropertyID::MathStyle);
+        if (auto math_style = keyword_to_math_style(math_style_value.to_keyword()); math_style.has_value())
+            computed_values.set_math_style(math_style.value());
+        computed_values.set_math_depth(computed_style.math_depth());
+        computed_values.set_quotes(computed_style.quotes());
+        computed_values.set_counter_increment(computed_style.counter_data(CSS::PropertyID::CounterIncrement));
+        computed_values.set_counter_reset(computed_style.counter_data(CSS::PropertyID::CounterReset));
+        computed_values.set_counter_set(computed_style.counter_data(CSS::PropertyID::CounterSet));
+        computed_values.set_direction(computed_style.direction());
+        computed_values.set_writing_mode(computed_style.writing_mode());
+        computed_values.set_color_interpolation(computed_style.color_interpolation());
     }
 
     propagate_style_to_anonymous_wrappers();

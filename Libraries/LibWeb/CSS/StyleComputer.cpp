@@ -72,6 +72,7 @@
 #include <LibWeb/CSS/StyleValues/SuperellipseStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
+#include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/Document.h>
@@ -81,6 +82,7 @@
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
+#include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
@@ -1805,6 +1807,125 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_grid_row_start(computed_style.grid_row_start());
     computed_values.set_grid_template_areas(computed_style.grid_template_areas());
     computed_values.set_grid_auto_flow(computed_style.grid_auto_flow());
+
+    if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
+        computed_values.set_font_language_override(maybe_font_language_override.release_value());
+    computed_values.set_font_variation_settings(computed_style.font_variation_settings());
+
+    auto border_radius_data_from_style_value = [](StyleValue const& value) -> BorderRadiusData {
+        return BorderRadiusData {
+            LengthPercentage::from_style_value(value.as_border_radius().horizontal_radius()),
+            LengthPercentage::from_style_value(value.as_border_radius().vertical_radius())
+        };
+    };
+    computed_values.set_border_bottom_left_radius(border_radius_data_from_style_value(computed_style.property(PropertyID::BorderBottomLeftRadius)));
+    computed_values.set_border_bottom_right_radius(border_radius_data_from_style_value(computed_style.property(PropertyID::BorderBottomRightRadius)));
+    computed_values.set_border_top_left_radius(border_radius_data_from_style_value(computed_style.property(PropertyID::BorderTopLeftRadius)));
+    computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(PropertyID::BorderTopRightRadius)));
+
+    computed_values.set_text_align(computed_style.text_align());
+    computed_values.set_text_justify(computed_style.text_justify());
+    computed_values.set_text_underline_offset(computed_style.text_underline_offset());
+    computed_values.set_text_underline_position(computed_style.text_underline_position());
+    computed_values.set_text_indent(computed_style.text_indent());
+    computed_values.set_text_wrap_mode(computed_style.text_wrap_mode());
+    computed_values.set_tab_size(computed_style.tab_size());
+    computed_values.set_white_space_collapse(computed_style.white_space_collapse());
+    computed_values.set_word_break(computed_style.word_break());
+    computed_values.set_word_spacing(computed_style.word_spacing());
+    computed_values.set_letter_spacing(computed_style.letter_spacing());
+    computed_values.set_caption_side(computed_style.caption_side());
+    computed_values.set_cursor(computed_style.cursor());
+    computed_values.set_image_rendering(computed_style.image_rendering());
+    computed_values.set_pointer_events(computed_style.pointer_events());
+    computed_values.set_text_decoration_line(computed_style.text_decoration_line());
+    computed_values.set_text_transform(computed_style.text_transform());
+    computed_values.set_list_style_type(computed_style.list_style_type());
+    computed_values.set_list_style_position(computed_style.list_style_position());
+    computed_values.set_visibility(computed_style.visibility());
+
+    if (auto const& outline_offset = computed_style.property(PropertyID::OutlineOffset); outline_offset.is_length())
+        computed_values.set_outline_offset(outline_offset.as_length().length());
+    computed_values.set_outline_width(max(CSSPixels { 0 }, computed_style.length(PropertyID::OutlineWidth).absolute_length_to_px()));
+
+    computed_values.set_cx(LengthPercentage::from_style_value(computed_style.property(PropertyID::Cx)));
+    computed_values.set_cy(LengthPercentage::from_style_value(computed_style.property(PropertyID::Cy)));
+    computed_values.set_r(LengthPercentage::from_style_value(computed_style.property(PropertyID::R)));
+    computed_values.set_rx(LengthPercentageOrAuto::from_style_value(computed_style.property(PropertyID::Rx)));
+    computed_values.set_ry(LengthPercentageOrAuto::from_style_value(computed_style.property(PropertyID::Ry)));
+    computed_values.set_x(LengthPercentage::from_style_value(computed_style.property(PropertyID::X)));
+    computed_values.set_y(LengthPercentage::from_style_value(computed_style.property(PropertyID::Y)));
+
+    auto const& clip_path = computed_style.property(PropertyID::ClipPath);
+    if (clip_path.is_url())
+        computed_values.set_clip_path(clip_path.as_url().url());
+    else if (clip_path.is_basic_shape())
+        computed_values.set_clip_path(clip_path.as_basic_shape());
+    computed_values.set_clip_rule(computed_style.clip_rule());
+    computed_values.set_fill_rule(computed_style.fill_rule());
+    computed_values.set_fill_opacity(computed_style.fill_opacity());
+    computed_values.set_stroke_dasharray(computed_style.stroke_dasharray());
+
+    auto const& stroke_dashoffset = computed_style.property(PropertyID::StrokeDashoffset);
+    if (stroke_dashoffset.is_number())
+        computed_values.set_stroke_dashoffset(Length::make_px(CSSPixels::nearest_value_for(stroke_dashoffset.as_number().number())));
+    else if (stroke_dashoffset.is_length())
+        computed_values.set_stroke_dashoffset(stroke_dashoffset.as_length().length());
+    else if (stroke_dashoffset.is_percentage())
+        computed_values.set_stroke_dashoffset(LengthPercentage { stroke_dashoffset.as_percentage().percentage() });
+
+    computed_values.set_stroke_linecap(computed_style.stroke_linecap());
+    computed_values.set_stroke_linejoin(computed_style.stroke_linejoin());
+    computed_values.set_stroke_miterlimit(computed_style.stroke_miterlimit());
+    computed_values.set_stroke_opacity(computed_style.stroke_opacity());
+    computed_values.set_text_anchor(computed_style.text_anchor());
+
+    auto const& stroke_width = computed_style.property(PropertyID::StrokeWidth);
+    if (stroke_width.is_number())
+        computed_values.set_stroke_width(Length::make_px(CSSPixels::nearest_value_for(stroke_width.as_number().number())));
+    else if (stroke_width.is_length())
+        computed_values.set_stroke_width(stroke_width.as_length().length());
+    else if (stroke_width.is_percentage())
+        computed_values.set_stroke_width(LengthPercentage { stroke_width.as_percentage().percentage() });
+    computed_values.set_shape_rendering(computed_style.shape_rendering());
+    computed_values.set_paint_order(computed_style.paint_order());
+
+    if (auto const& column_count = computed_style.property(PropertyID::ColumnCount); column_count.is_integer())
+        computed_values.set_column_count(ColumnCount::make_integer(column_count.as_integer().integer()));
+    computed_values.set_border_collapse(computed_style.border_collapse());
+    computed_values.set_empty_cells(computed_style.empty_cells());
+
+    auto const& aspect_ratio = computed_style.property(PropertyID::AspectRatio);
+    if (aspect_ratio.is_value_list()) {
+        auto const& values_list = aspect_ratio.as_value_list().values();
+        if (values_list.size() == 2
+            && values_list[0]->is_keyword() && values_list[0]->as_keyword().keyword() == Keyword::Auto
+            && values_list[1]->is_ratio()) {
+            computed_values.set_aspect_ratio({ true, values_list[1]->as_ratio().ratio() });
+        }
+    } else if (aspect_ratio.is_keyword() && aspect_ratio.as_keyword().keyword() == Keyword::Auto) {
+        computed_values.set_aspect_ratio({ true, {} });
+    } else if (aspect_ratio.is_ratio()) {
+        if (aspect_ratio.as_ratio().ratio().is_degenerate())
+            computed_values.set_aspect_ratio({ true, {} });
+        else
+            computed_values.set_aspect_ratio({ false, aspect_ratio.as_ratio().ratio() });
+    }
+
+    auto const& math_shift_value = computed_style.property(PropertyID::MathShift);
+    if (auto math_shift = keyword_to_math_shift(math_shift_value.to_keyword()); math_shift.has_value())
+        computed_values.set_math_shift(math_shift.value());
+    auto const& math_style_value = computed_style.property(PropertyID::MathStyle);
+    if (auto math_style = keyword_to_math_style(math_style_value.to_keyword()); math_style.has_value())
+        computed_values.set_math_style(math_style.value());
+    computed_values.set_math_depth(computed_style.math_depth());
+    computed_values.set_quotes(computed_style.quotes());
+    computed_values.set_counter_increment(computed_style.counter_data(PropertyID::CounterIncrement));
+    computed_values.set_counter_reset(computed_style.counter_data(PropertyID::CounterReset));
+    computed_values.set_counter_set(computed_style.counter_data(PropertyID::CounterSet));
+    computed_values.set_direction(computed_style.direction());
+    computed_values.set_writing_mode(computed_style.writing_mode());
+    computed_values.set_color_interpolation(computed_style.color_interpolation());
 }
 
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
@@ -2164,6 +2285,14 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     compute_transitioned_properties(computed_style, abstract_element);
     if (auto previous_style = abstract_element.computed_properties()) {
         start_needed_transitions(*previous_style, computed_style, abstract_element);
+    }
+
+    // Tables must not inherit -libweb-* values for text-align.
+    // FIXME: Find the spec for this.
+    if (!abstract_element.pseudo_element().has_value() && is<HTML::HTMLTableElement>(abstract_element.element())) {
+        auto text_align = computed_style->text_align();
+        if (text_align == TextAlign::LibwebLeft || text_align == TextAlign::LibwebCenter || text_align == TextAlign::LibwebRight)
+            computed_style->set_property(PropertyID::TextAlign, KeywordStyleValue::create(Keyword::Start));
     }
 
     // Populate concrete ComputedValues on the Element.
