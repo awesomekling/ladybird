@@ -234,6 +234,11 @@ pub struct Parser<'a> {
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
 
+    /// Position of the opening bracket/brace in binding patterns.
+    /// Used so all identifiers inside a binding pattern share the pattern's start position,
+    /// matching C++ parser behavior.
+    binding_pattern_start: Option<Position>,
+
     /// True while parsing a class body that has an `extends` clause.
     pub(crate) class_has_super_class: bool,
     /// Depth counter for class bodies — used to reject `#name` outside classes.
@@ -278,6 +283,7 @@ impl<'a> Parser<'a> {
             last_class_name: Vec::new(),
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
+            binding_pattern_start: None,
             class_has_super_class: false,
             class_scope_depth: 0,
             has_default_export_name: false,
@@ -409,9 +415,6 @@ impl<'a> Parser<'a> {
                     self.syntax_error("'arguments' is not allowed in class field initializer");
                 }
                 self.flags.function_might_need_arguments_object = true;
-                if !self.flags.strict_mode {
-                    self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();
-                }
             } else if value == utf16!("eval") {
                 self.flags.function_might_need_arguments_object = true;
             }

@@ -20,6 +20,7 @@
 #include <LibJS/Contrib/Test262/GlobalObject.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Print.h>
+#include <LibJS/Script.h>
 #include <LibJS/Runtime/ConsoleObject.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
@@ -845,6 +846,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.parse(arguments);
 
     [[maybe_unused]] bool syntax_highlight = !disable_syntax_highlight;
+
+    JS::g_dump_ast = s_dump_ast;
+    JS::g_dump_ast_use_color = !s_strip_ansi;
 
     AK::set_debug_enabled(!disable_debug_printing);
     s_history_path = TRY(String::formatted("{}/.js-history", Core::StandardPaths::home_directory()));

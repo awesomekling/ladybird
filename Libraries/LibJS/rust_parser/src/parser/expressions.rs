@@ -124,6 +124,19 @@ impl<'a> Parser<'a> {
 
         let lhs_start = self.position();
         let (expr, should_continue) = self.parse_primary_expression();
+
+        // C++ checks for freestanding `arguments` references here (after
+        // parse_primary_expression), NOT during consume(). This avoids
+        // falsely flagging parameter names like `function f(arguments)`.
+        if let ExpressionKind::Identifier(ref id) = expr.inner {
+            if id.name == utf16!("arguments")
+                && !self.flags.strict_mode
+                && !self.scope_collector.has_declaration_in_current_function(&id.name)
+            {
+                self.scope_collector.set_contains_access_to_arguments_object_in_non_strict_mode();
+            }
+        }
+
         if !should_continue {
             return expr;
         }
@@ -221,6 +234,9 @@ impl<'a> Parser<'a> {
             // NB: `super` must be followed by `.`, `[`, or `(`; bare `super` is invalid.
             TokenType::Super => {
                 self.consume();
+                // C++ creates SuperCall in parse_call_expression which does
+                // push_start() after `super` is consumed, so position is at `(`.
+                let after_super = self.position();
                 if self.scope_collector.has_current_scope() {
                     self.scope_collector.set_uses_new_target();
                 }
@@ -229,7 +245,7 @@ impl<'a> Parser<'a> {
                         self.syntax_error("'super' keyword unexpected here");
                     }
                     let arguments = self.parse_arguments();
-                    (self.expr(start, ExpressionKind::SuperCall(SuperCallData {
+                    (self.expr(after_super, ExpressionKind::SuperCall(SuperCallData {
                         arguments,
                         is_synthetic: false,
                     })), true)
@@ -273,6 +289,9 @@ impl<'a> Parser<'a> {
 
             TokenType::StringLiteral => {
                 let tok = self.consume();
+                // C++ calls consume() before push_start() for StringLiteral,
+                // so its position is the token AFTER the string.
+                let after_string = self.position();
                 let (value, has_octal) = self.parse_string_value(&tok);
                 if has_octal {
                     if self.flags.strict_mode {
@@ -281,7 +300,7 @@ impl<'a> Parser<'a> {
                         self.flags.string_legacy_octal_escape_sequence_in_scope = true;
                     }
                 }
-                (self.expr(start, ExpressionKind::StringLiteral(value)), true)
+                (self.expr(after_string, ExpressionKind::StringLiteral(value)), true)
             }
 
             TokenType::NullLiteral => {
@@ -568,7 +587,7 @@ impl<'a> Parser<'a> {
                         }
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
-                        return (self.expr(lhs_start, ExpressionKind::Assignment {
+                        return (self.expr(start, ExpressionKind::Assignment {
                             op,
                             lhs: AssignmentLhs::Pattern(binding_pattern),
                             rhs: Box::new(rhs),
@@ -612,11 +631,11 @@ impl<'a> Parser<'a> {
                         let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
                         self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                     }
-                    let prop_start = self.position();
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    let prop = self.expr(prop_start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
-                        range: self.range_from(prop_start),
+                    // C++ uses rule_start (period position) for property identifiers.
+                    let prop = self.expr(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
+                        range: self.range_from(start),
                         name: value,
                     }));
                     (self.expr(start, ExpressionKind::Member {
@@ -625,11 +644,11 @@ impl<'a> Parser<'a> {
                         computed: false,
                     }), ForbiddenTokens::none())
                 } else if self.match_identifier_name() {
-                    let prop_start = self.position();
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
-                    let prop = self.expr(prop_start, ExpressionKind::Identifier(
-                        self.make_identifier(prop_start, value),
+                    // C++ uses rule_start (period position) for property identifiers.
+                    let prop = self.expr(start, ExpressionKind::Identifier(
+                        self.make_identifier(start, value),
                     ));
                     (self.expr(start, ExpressionKind::Member {
                         object: Box::new(lhs),
@@ -1090,11 +1109,11 @@ impl<'a> Parser<'a> {
         let mut has_proto_setter = false;
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::TripleDot) {
-                let spread_start = self.position();
                 self.consume();
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                // C++ uses object expression start position for all ObjectProperty nodes.
                 properties.push(ObjectProperty {
-                    range: self.range_from(spread_start),
+                    range: self.range_from(start),
                     property_type: ObjectPropertyType::Spread,
                     key: Box::new(expr),
                     is_computed: false,
@@ -1102,7 +1121,7 @@ impl<'a> Parser<'a> {
                     is_method: false,
                 });
             } else {
-                let prop = self.parse_object_property();
+                let prop = self.parse_object_property(start);
                 // https://tc39.es/ecma262/#sec-object-initializer-static-semantics-early-errors
                 // It is a Syntax Error if PropertyNameList of PropertyDefinitionList
                 // contains any duplicate entries for "__proto__" and at least two of
@@ -1127,7 +1146,7 @@ impl<'a> Parser<'a> {
         self.expr(start, ExpressionKind::Object(properties))
     }
 
-    fn parse_object_property(&mut self) -> ObjectProperty {
+    fn parse_object_property(&mut self, obj_start: Position) -> ObjectProperty {
         let start = self.position();
         let mut is_getter = false;
         let mut is_setter = false;
@@ -1157,7 +1176,7 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let (key, key_value, is_proto, is_computed) = self.parse_property_key();
+        let (key, key_value, is_proto, is_computed) = self.parse_property_key_with_override(Some(obj_start));
 
         // Private names are not allowed in object literals.
         if let ExpressionKind::PrivateIdentifier(_) = key.inner {
@@ -1171,7 +1190,7 @@ impl<'a> Parser<'a> {
             let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, false, start);
             let prop_type = if is_getter { ObjectPropertyType::Getter } else if is_setter { ObjectPropertyType::Setter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
-                range: self.range_from(start),
+                range: self.range_from(obj_start),
                 property_type: prop_type,
                 key: Box::new(key),
                 value: Some(Box::new(func)),
@@ -1190,7 +1209,7 @@ impl<'a> Parser<'a> {
             let func = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
             let prop_type = if is_getter { ObjectPropertyType::Getter } else { ObjectPropertyType::Setter };
             return ObjectProperty {
-                range: self.range_from(start),
+                range: self.range_from(obj_start),
                 property_type: prop_type,
                 key: Box::new(key),
                 value: Some(Box::new(func)),
@@ -1205,7 +1224,7 @@ impl<'a> Parser<'a> {
             let value = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             let prop_type = if is_proto { ObjectPropertyType::ProtoSetter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
-                range: self.range_from(start),
+                range: self.range_from(obj_start),
                 property_type: prop_type,
                 key: Box::new(key),
                 value: Some(Box::new(value)),
@@ -1224,15 +1243,15 @@ impl<'a> Parser<'a> {
         // re-parse from source and create the real scope records.
         if self.match_token(TokenType::Equals) && matches!(key.inner, ExpressionKind::Identifier(_)) {
             if let Some(kv) = &key_value {
-                let id = self.make_identifier(start, kv.clone());
+                let id = self.make_identifier(obj_start, kv.clone());
                 self.scope_collector.register_identifier(id.clone(), &id.name, None);
-                let value = self.expr(start, ExpressionKind::Identifier(id));
+                let value = self.expr(obj_start, ExpressionKind::Identifier(id));
                 self.consume(); // consume '='
                 let saved_scope_state = self.scope_collector.save_state();
                 let _initializer = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.scope_collector.load_state(saved_scope_state);
                 return ObjectProperty {
-                    range: self.range_from(start),
+                    range: self.range_from(obj_start),
                     property_type: ObjectPropertyType::KeyValue,
                     key: Box::new(key),
                     value: Some(Box::new(value)),
@@ -1245,11 +1264,11 @@ impl<'a> Parser<'a> {
         // Shorthand property: { x }
         // Only identifiers can be shorthand properties, not string/numeric literals.
         if let Some(kv) = key_value.filter(|_| matches!(key.inner, ExpressionKind::Identifier(_))) {
-            let id = self.make_identifier(start, kv);
+            let id = self.make_identifier(obj_start, kv);
             self.scope_collector.register_identifier(id.clone(), &id.name, None);
-            let value = self.expr(start, ExpressionKind::Identifier(id));
+            let value = self.expr(obj_start, ExpressionKind::Identifier(id));
             return ObjectProperty {
-                range: self.range_from(start),
+                range: self.range_from(obj_start),
                 property_type: ObjectPropertyType::KeyValue,
                 key: Box::new(key),
                 value: Some(Box::new(value)),
@@ -1260,7 +1279,7 @@ impl<'a> Parser<'a> {
 
         self.expected("':' or '('");
         ObjectProperty {
-            range: self.range_from(start),
+            range: self.range_from(obj_start),
             property_type: ObjectPropertyType::KeyValue,
             key: Box::new(key),
             value: None,
@@ -1282,6 +1301,10 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_property_key(&mut self) -> (Expression, Option<Vec<u16>>, bool, bool) {
+        self.parse_property_key_with_override(None)
+    }
+
+    pub(crate) fn parse_property_key_with_override(&mut self, ident_pos_override: Option<Position>) -> (Expression, Option<Vec<u16>>, bool, bool) {
         let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {
@@ -1293,6 +1316,9 @@ impl<'a> Parser<'a> {
             }
             TokenType::StringLiteral => {
                 let tok = self.consume();
+                // C++ calls consume() before push_start() for StringLiteral,
+                // so its position is the token AFTER the string.
+                let after_string = self.position();
                 let (value, has_octal) = self.parse_string_value(&tok);
                 if has_octal {
                     if self.flags.strict_mode {
@@ -1302,7 +1328,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expr(start, ExpressionKind::StringLiteral(value.clone())), Some(value), is_proto, false)
+                (self.expr(after_string, ExpressionKind::StringLiteral(value.clone())), Some(value), is_proto, false)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
@@ -1328,7 +1354,9 @@ impl<'a> Parser<'a> {
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     let is_proto = value == proto_name;
-                    let key = self.expr(start, ExpressionKind::StringLiteral(value.clone()));
+                    // C++ uses the object expression start position for identifier-name keys.
+                    let key_start = ident_pos_override.unwrap_or(start);
+                    let key = self.expr(key_start, ExpressionKind::StringLiteral(value.clone()));
                     (key, Some(value), is_proto, false)
                 } else {
                     self.expected("property key");
@@ -1694,7 +1722,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn try_parse_arrow_function_expression_impl(&mut self, expect_parens: bool, is_async: bool, source_start_override: Option<Position>) -> Option<Expression> {
-        let start = self.position();
+        let start = source_start_override.unwrap_or_else(|| self.position());
 
         if !expect_parens && !is_async {
             if !self.match_identifier() {
@@ -1800,7 +1828,7 @@ impl<'a> Parser<'a> {
         let src_start = source_start_override.unwrap_or(start).offset;
 
         if self.match_token(TokenType::CurlyOpen) {
-            let (body, has_use_strict, _insights) = self.parse_function_body(is_async, false, is_simple);
+            let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);
 
             // Close function scope.
             self.scope_collector.close_scope();
@@ -1820,19 +1848,27 @@ impl<'a> Parser<'a> {
                 kind: fn_kind,
                 is_strict_mode: self.flags.strict_mode || has_use_strict,
                 is_arrow_function: true,
-                parsing_insights: FunctionParsingInsights::default(),
+                parsing_insights: insights,
                 is_hoisted: false,
             }))))
         } else {
-            let body_start = self.position();
             let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-            let return_stmt = Statement::new(self.range_from(body_start), StatementKind::Return(Some(Box::new(expr))));
+            // C++ uses rule_start (function start) for ReturnStatement and FunctionBody.
+            let return_stmt = Statement::new(self.range_from(start), StatementKind::Return(Some(Box::new(expr))));
             let scope = ScopeData::shared_with_children(vec![return_stmt]);
             self.scope_collector.set_scope_node(scope.clone());
-            let body = Statement::new(self.range_from(body_start), StatementKind::FunctionBody {
+            let body = Statement::new(self.range_from(start), StatementKind::FunctionBody {
                 scope,
                 in_strict_mode: self.flags.strict_mode,
             });
+
+            // C++ only sets contains_direct_call_to_eval and uses_this_from_environment
+            // for expression-body arrows (not uses_this).
+            let insights = FunctionParsingInsights {
+                contains_direct_call_to_eval: self.scope_collector.contains_direct_call_to_eval(),
+                uses_this_from_environment: self.scope_collector.uses_this_from_environment(),
+                ..FunctionParsingInsights::default()
+            };
 
             // Close function scope.
             self.scope_collector.close_scope();
@@ -1848,15 +1884,15 @@ impl<'a> Parser<'a> {
                 kind: fn_kind,
                 is_strict_mode: self.flags.strict_mode,
                 is_arrow_function: true,
-                parsing_insights: FunctionParsingInsights::default(),
+                parsing_insights: insights,
                 is_hoisted: false,
             }))))
         }
     }
 
     /// Parse a method definition for object/class.
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, source_text_start: Position) -> Expression {
-        let start = self.position();
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, function_start: Position) -> Expression {
+        let start = function_start;
 
         let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = false;
@@ -1897,7 +1933,7 @@ impl<'a> Parser<'a> {
             self.flags.allow_super_constructor_call = false;
         }
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
+        let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;
 
         // Close function scope.
@@ -1907,16 +1943,12 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&parsed.param_info, has_use_strict, fn_kind);
         }
 
-        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         // Class constructors always need a function environment for `this` binding
         // management (super() binds this in derived constructors, and base constructors
         // need it for OrdinaryCallBindThis).
-        let mut insights = FunctionParsingInsights {
-            might_need_arguments_object: might_need_arguments,
-            ..FunctionParsingInsights::default()
-        };
         if is_constructor {
             insights.uses_this = true;
             insights.uses_this_from_environment = true;
@@ -1924,7 +1956,7 @@ impl<'a> Parser<'a> {
 
         self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
             name: None,
-            source_text_start: source_text_start.offset,
+            source_text_start: function_start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
             parameters: parsed.params,

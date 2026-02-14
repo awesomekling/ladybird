@@ -146,6 +146,7 @@ impl<'a> Parser<'a> {
                     self.scope_collector.add_var_declaration(
                         &[(&value, Some(id.clone()))],
                         decl_line, decl_column,
+                        Some(DeclarationKind::Var),
                     );
                 } else {
                     self.scope_collector.add_lexical_declaration(
@@ -183,14 +184,18 @@ impl<'a> Parser<'a> {
                     let entries: Vec<(&[u16], Option<Rc<Identifier>>)> = bound_names.iter()
                         .map(|(n, id)| (n.as_slice(), Some(id.clone())))
                         .collect();
-                    self.scope_collector.add_var_declaration(&entries, decl_line, decl_column);
+                    // NOTE: Binding pattern identifiers don't get declaration_kind,
+                    // matching C++ behavior where only simple identifiers do.
+                    self.scope_collector.add_var_declaration(&entries, decl_line, decl_column, None);
                 } else {
                     let refs: Vec<&[u16]> = bound_names.iter().map(|(n, _)| n.as_slice()).collect();
                     self.scope_collector.add_lexical_declaration(&refs, decl_line, decl_column);
                     // Register each binding pattern identifier for scope analysis
                     // so they get is_local() annotations.
+                    // NOTE: C++ does not pass declaration_kind for binding pattern identifiers,
+                    // only for simple identifier declarations.
                     for (name, id) in &bound_names {
-                        self.scope_collector.register_identifier(id.clone(), name, Some(kind));
+                        self.scope_collector.register_identifier(id.clone(), name, None);
                     }
                 }
 
@@ -216,7 +221,7 @@ impl<'a> Parser<'a> {
             };
 
             declarators.push(VariableDeclarator {
-                range: self.range_from(decl_start),
+                range: self.range_from(start),
                 target,
                 init,
             });
@@ -372,7 +377,7 @@ impl<'a> Parser<'a> {
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
+        let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         // Close function scope.
         self.scope_collector.close_scope();
@@ -384,7 +389,7 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
         }
 
-        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         self.stmt(start, StatementKind::FunctionDeclaration(Box::new(FunctionData {
@@ -397,10 +402,7 @@ impl<'a> Parser<'a> {
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
-            parsing_insights: FunctionParsingInsights {
-                might_need_arguments_object: might_need_arguments,
-                ..FunctionParsingInsights::default()
-            },
+            parsing_insights: insights,
             is_hoisted: false,
         })))
     }
@@ -448,7 +450,7 @@ impl<'a> Parser<'a> {
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
+        let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         // Close function scope.
         self.scope_collector.close_scope();
@@ -460,7 +462,7 @@ impl<'a> Parser<'a> {
             self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
         }
 
-        let might_need_arguments = self.flags.function_might_need_arguments_object;
+        insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
         self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
@@ -473,10 +475,7 @@ impl<'a> Parser<'a> {
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
-            parsing_insights: FunctionParsingInsights {
-                might_need_arguments_object: might_need_arguments,
-                ..FunctionParsingInsights::default()
-            },
+            parsing_insights: insights,
             is_hoisted: false,
         })))
     }
@@ -544,7 +543,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let (element, maybe_ctor) = self.parse_class_element();
+            let (element, maybe_ctor) = self.parse_class_element(start);
             if let Some(ctor) = maybe_ctor {
                 // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
                 // It is a Syntax Error if PrototypePropertyNameList of ClassElementList
@@ -603,7 +602,7 @@ impl<'a> Parser<'a> {
                     self.scope_collector.register_identifier(
                         name_ident.clone(),
                         &name_ident.name,
-                        Some(DeclarationKind::Let),
+                        None,
                     );
                 }
                 self.stmt(start, StatementKind::ClassDeclaration(data))
@@ -639,10 +638,9 @@ impl<'a> Parser<'a> {
                 is_synthetic: true,
             }));
             let return_stmt = self.stmt(start, StatementKind::Return(Some(Box::new(super_call))));
-            let body = self.stmt(start, StatementKind::FunctionBody {
-                scope: ScopeData::shared_with_children(vec![return_stmt]),
-                in_strict_mode: true,
-            });
+            let body = self.stmt(start, StatementKind::Block(
+                ScopeData::shared_with_children(vec![return_stmt]),
+            ));
 
             let args_binding = Rc::new(Identifier::new(self.range_from(start), args_name));
             let params = vec![FunctionParameter {
@@ -670,10 +668,9 @@ impl<'a> Parser<'a> {
             })))
         } else {
             // Base class: empty constructor() {}
-            let body = self.stmt(start, StatementKind::FunctionBody {
-                scope: ScopeData::shared_with_children(Vec::new()),
-                in_strict_mode: true,
-            });
+            let body = self.stmt(start, StatementKind::Block(
+                ScopeData::shared_with_children(Vec::new()),
+            ));
 
             self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: ctor_name,
@@ -702,7 +699,7 @@ impl<'a> Parser<'a> {
     //             | `static` FieldDefinition `;`
     //             | ClassStaticBlock
     //             | `;`
-    fn parse_class_element(&mut self) -> (Option<Node<ClassElement>>, Option<Expression>) {
+    fn parse_class_element(&mut self, class_start: Position) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
         let is_static = if self.match_token(TokenType::Static) {
             self.consume();
@@ -779,8 +776,8 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        // Parse key.
-        let (key, key_value, _is_proto, _is_computed) = self.parse_property_key();
+        // Parse key. C++ uses the class start position for identifier-name keys.
+        let (key, key_value, _is_proto, _is_computed) = self.parse_property_key_with_override(Some(class_start));
 
         // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
         // It is a Syntax Error if PropName of ClassElement is "prototype"
@@ -824,7 +821,7 @@ impl<'a> Parser<'a> {
                 return (None, Some(func));
             }
 
-            return (Some(Node::new(self.range_from(start), ClassElement::Method {
+            return (Some(Node::new(self.range_from(class_start), ClassElement::Method {
                 key: Box::new(key),
                 function: Box::new(func),
                 kind: method_kind,
@@ -854,7 +851,7 @@ impl<'a> Parser<'a> {
         };
 
         self.consume_or_insert_semicolon();
-        (Some(Node::new(self.range_from(start), ClassElement::Field {
+        (Some(Node::new(self.range_from(class_start), ClassElement::Field {
             key: Box::new(key),
             initializer: init,
             is_static,
@@ -865,8 +862,9 @@ impl<'a> Parser<'a> {
     // It is a Syntax Error if FunctionBodyContainsUseStrict of FunctionBody is true
     // and IsSimpleParameterList of FormalParameters is false.
     pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, is_simple: bool) -> (Statement, bool, FunctionParsingInsights) {
-        let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
+        // C++ captures FunctionBody position AFTER consuming `{`.
+        let start = self.position();
 
         let in_function_before = self.flags.in_function_context;
         let in_generator_before = self.flags.in_generator_function_context;
@@ -898,7 +896,13 @@ impl<'a> Parser<'a> {
         self.flags.in_formal_parameter_context = formal_param_before;
         self.labels_in_scope = old_labels;
 
-        let insights = FunctionParsingInsights::default();
+        // Read scope analysis flags before the function scope is closed.
+        let insights = FunctionParsingInsights {
+            contains_direct_call_to_eval: self.scope_collector.contains_direct_call_to_eval(),
+            uses_this: self.scope_collector.uses_this(),
+            uses_this_from_environment: self.scope_collector.uses_this_from_environment(),
+            ..FunctionParsingInsights::default()
+        };
 
         self.consume_token(TokenType::CurlyClose);
 
@@ -946,6 +950,10 @@ impl<'a> Parser<'a> {
         let mut has_seen_rest = false;
         let mut param_info: Vec<ParamInfo> = Vec::new();
 
+        // C++ uses the position at the start of parse_formal_parameters for all
+        // parameter identifiers (i.e., the position of the first parameter).
+        let formal_params_start = self.position();
+
         loop {
             let param_start = self.position();
             let rest = self.eat(TokenType::TripleDot);
@@ -973,7 +981,7 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
+                let id = Rc::new(Identifier::new(self.range_from(formal_params_start), value.clone()));
                 param_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
@@ -1042,6 +1050,12 @@ impl<'a> Parser<'a> {
         if !is_object && !is_array {
             return BindingPattern { kind: BindingPatternKind::Object, entries: Vec::new() };
         }
+        // Save the position before consuming '[' or '{'. C++ uses
+        // rule_start.position() (from push_start()) for all identifiers inside
+        // the binding pattern. Each recursive call gets its own push_start(),
+        // so nested patterns use the inner pattern's start position.
+        let outer_pattern_start = self.binding_pattern_start;
+        self.binding_pattern_start = Some(self.position());
         self.consume();
 
         let kind = if is_object { BindingPatternKind::Object } else { BindingPatternKind::Array };
@@ -1085,7 +1099,8 @@ impl<'a> Parser<'a> {
                     let mut entry_is_keyword = false;
 
                     if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
-                        let entry_start = self.position();
+                        // C++ uses the binding pattern start position for all name identifiers.
+                        let entry_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
 
                         if self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) {
                             needs_alias = true;
@@ -1111,7 +1126,11 @@ impl<'a> Parser<'a> {
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
                             entry_name_value = value.clone();
-                            entry_name = BindingEntryName::Identifier(self.make_identifier(entry_start, value));
+                            let id = self.make_identifier(entry_start, value);
+                            // C++ calls parse_identifier() for binding pattern property
+                            // keys, which registers them. Do the same here.
+                            self.scope_collector.register_identifier(id.clone(), &id.name, None);
+                            entry_name = BindingEntryName::Identifier(id);
                         }
                     } else if self.match_token(TokenType::BracketOpen) {
                         self.consume();
@@ -1145,7 +1164,7 @@ impl<'a> Parser<'a> {
                             let nested = self.parse_binding_pattern();
                             entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
                         } else if self.match_identifier_name() {
-                            let alias_start = self.position();
+                            let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
                             let tok = self.consume();
                             let value = self.token_value(&tok).to_vec();
                             let id = self.make_identifier(alias_start, value.clone());
@@ -1192,7 +1211,7 @@ impl<'a> Parser<'a> {
                     let nested = self.parse_binding_pattern();
                     entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
                 } else if self.match_identifier_name() {
-                    let alias_start = self.position();
+                    let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     let id = self.make_identifier(alias_start, value.clone());
@@ -1234,6 +1253,7 @@ impl<'a> Parser<'a> {
         }
 
         self.consume_token(closing_token);
+        self.binding_pattern_start = outer_pattern_start;
         BindingPattern { kind, entries }
     }
 

@@ -19,6 +19,9 @@
 
 namespace JS {
 
+bool g_dump_ast = false;
+bool g_dump_ast_use_color = false;
+
 GC_DEFINE_ALLOCATOR(Script);
 
 // Builder populated by Rust via callbacks during rust_compile_script.
@@ -100,10 +103,10 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
             utf16_buf.ensure_capacity(length);
             for (size_t i = 0; i < length; ++i)
                 utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder);
+            exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color);
         } else {
             auto utf16 = code_view.utf16_span();
-            exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder);
+            exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color);
         }
 
         if (exec_ptr) {

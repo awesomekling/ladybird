@@ -67,7 +67,9 @@ void* rust_compile_script(
     size_t source_len,
     void* vm_ptr,
     void const* source_code_ptr,
-    void* gdi_context);
+    void* gdi_context,
+    bool dump_ast,
+    bool use_color);
 
 // Parse and compile a JavaScript program using the Rust parser and
 // bytecode generator. Returns a Bytecode::Executable* cast to void*,

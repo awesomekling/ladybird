@@ -464,13 +464,14 @@ impl ScopeCollector {
         bound_names: &[(&[u16], Option<Rc<Identifier>>)],
         decl_line: u32,
         decl_column: u32,
+        declaration_kind: Option<DeclarationKind>,
     ) {
         let index = self.current.unwrap();
 
         for (name, identifier) in bound_names {
             // Register the declaration identifier so it participates in scope analysis.
             if let Some(id) = identifier {
-                self.register_identifier(id.clone(), name, Some(DeclarationKind::Var));
+                self.register_identifier(id.clone(), name, declaration_kind);
             }
 
             let mut scope_idx = index;
@@ -887,10 +888,7 @@ impl ScopeCollector {
             if records[index].scope_type == ScopeType::Catch
                 && var_flags.intersects(VarFlags::CATCH_PARAMETER)
             {
-                // Catch parameters are handled by the catch codegen, not as
-                // local variables. Skip this group entirely so it doesn't
-                // get optimized to a local or propagated further.
-                continue;
+                local_var_kind = Some(LocalVarKind::CatchClauseParameter);
             }
 
             let hoistable = records[index].has_hoistable_function_named(&name);

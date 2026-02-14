@@ -79,6 +79,7 @@ macro_rules! utf16 {
 }
 
 pub mod ast;
+pub mod ast_dump;
 pub mod bytecode;
 pub mod lexer;
 pub mod parser;
@@ -242,6 +243,8 @@ pub unsafe extern "C" fn rust_compile_script(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     gdi_context: *mut c_void,
+    dump_ast: bool,
+    use_color: bool,
 ) -> *mut c_void {
     let source_slice = std::slice::from_raw_parts(source, source_len);
     let mut parser = Parser::new(source_slice, ProgramType::Script);
@@ -259,6 +262,11 @@ pub unsafe extern "C" fn rust_compile_script(
 
     if parser.scope_collector.has_errors() {
         return std::ptr::null_mut();
+    }
+
+    // Dump AST if requested (after scope analysis so identifier metadata is populated).
+    if dump_ast {
+        ast_dump::dump_program(&program, use_color);
     }
 
     let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
@@ -811,6 +819,7 @@ pub unsafe extern "C" fn rust_compile_function(
     // Extract local variables from the function body's scope data.
     let body_scope = match &func_data.body.inner {
         StatementKind::FunctionBody { ref scope, .. } => Some(scope),
+        StatementKind::Block(ref scope) => Some(scope),
         _ => None,
     };
 

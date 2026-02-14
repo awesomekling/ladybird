@@ -18,6 +18,9 @@
 
 namespace JS {
 
+JS_API extern bool g_dump_ast;
+JS_API extern bool g_dump_ast_use_color;
+
 class FunctionDeclaration;
 struct ScriptGdiBuilder;
 

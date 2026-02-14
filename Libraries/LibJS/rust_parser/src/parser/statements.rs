@@ -371,6 +371,8 @@ impl<'a> Parser<'a> {
         // Initializer is present. (Only a single, non-initialized ForBinding
         // is allowed; except in Annex B sloppy var with one declarator.)
         if self.match_token(TokenType::In) && !is_await {
+            // C++ captures ForInStatement position at the `in` keyword.
+            let forin_start = self.position();
             if is_using {
                 self.syntax_error("Using declaration not allowed in for-in loop");
             } else if is_declaration {
@@ -420,7 +422,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             };
-            let result = self.stmt(start, StatementKind::ForIn {
+            let result = self.stmt(forin_start, StatementKind::ForIn {
                 lhs,
                 rhs: Box::new(rhs),
                 body: Box::new(body),
@@ -432,6 +434,8 @@ impl<'a> Parser<'a> {
         if self.match_identifier_name() {
             let value = self.token_original_value(&self.current_token).to_vec();
             if value == utf16!("of") {
+                // C++ captures ForOfStatement position at the `of` keyword.
+                let forof_start = self.position();
                 if is_declaration {
                     if self.for_loop_declaration_count > 1 {
                         self.syntax_error("Multiple declarations not allowed in for..in/of");
@@ -476,14 +480,14 @@ impl<'a> Parser<'a> {
                     }
                 };
                 if is_await {
-                    let result = self.stmt(start, StatementKind::ForAwaitOf {
+                    let result = self.stmt(forof_start, StatementKind::ForAwaitOf {
                         lhs,
                         rhs: Box::new(rhs),
                         body: Box::new(body),
                     });
                     return self.close_for_loop_scope(start, result);
                 }
-                let result = self.stmt(start, StatementKind::ForOf {
+                let result = self.stmt(forof_start, StatementKind::ForOf {
                     lhs,
                     rhs: Box::new(rhs),
                     body: Box::new(body),
@@ -708,6 +712,7 @@ impl<'a> Parser<'a> {
                 let value = self.token_value(&tok).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
                 let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
+                self.scope_collector.register_identifier(id.clone(), &value, None);
                 self.scope_collector.add_catch_parameter_identifier(&value, id.clone());
                 CatchParameter::Identifier(id)
             } else {
