@@ -749,6 +749,8 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         // Fall through to C++ parser on Rust failure.
     }
 
+    RefPtr<Program> cpp_program;
+
     if (!executable) {
         Parser::EvalInitialState initial_state {
             .in_eval_function_context = in_function,
@@ -758,7 +760,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         };
 
         Parser parser(Lexer(SourceCode::create({}, code_string->utf16_string())), Program::Type::Script, move(initial_state));
-        auto program = parser.parse_program(strict_caller == CallerMode::Strict);
+        cpp_program = parser.parse_program(strict_caller == CallerMode::Strict);
 
         //     b. If script is a List of errors, throw a SyntaxError exception.
         if (parser.has_errors()) {
@@ -771,16 +773,13 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
             strict_eval = true;
         // 15. Else, let strictEval be IsStrict of script.
         else
-            strict_eval = program->is_strict_mode();
+            strict_eval = cpp_program->is_strict_mode();
 
-        eval_declaration_data = EvalDeclarationData::create(vm, program, strict_eval);
+        eval_declaration_data = EvalDeclarationData::create(vm, *cpp_program, strict_eval);
 
-        executable = Bytecode::Generator::generate_from_ast_node(vm, program, {});
-        executable->name = "eval"_utf16_fly_string;
+        // NB: Bytecode compilation is deferred until after EvalDeclarationInstantiation,
+        //     which sets annex B flags on AST nodes that affect codegen.
     }
-
-    if (Bytecode::g_dump_bytecode)
-        executable->dump();
 
     // 16. Let runningContext be the running execution context.
     // 17. NOTE: If direct is true, runningContext will be the execution context that performed the direct eval. If direct is false, runningContext will be the execution context for the invocation of the eval function.
@@ -831,6 +830,15 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
 
     // 30. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
     TRY(eval_declaration_instantiation(vm, eval_declaration_data, variable_environment, lexical_environment, private_environment, strict_eval));
+
+    // Compile C++ AST after EDI, since EDI sets annex B flags on AST nodes.
+    if (cpp_program) {
+        executable = Bytecode::Generator::generate_from_ast_node(vm, *cpp_program, {});
+        executable->name = "eval"_utf16_fly_string;
+    }
+
+    if (Bytecode::g_dump_bytecode)
+        executable->dump();
 
     // 22. Let evalContext be a new ECMAScript code execution context.
     ExecutionContext* eval_context = nullptr;
