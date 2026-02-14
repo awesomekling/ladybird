@@ -6,7 +6,7 @@
 
 #include <LibGfx/Bitmap.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -157,11 +157,12 @@ Optional<CSSPixels> SVGDecodedImageData::intrinsic_width() const
 {
     // https://www.w3.org/TR/SVG2/coords.html#SizingSVGInCSS
     m_document->update_style();
-    auto const root_element_style = m_root_element->computed_properties();
-    VERIFY(root_element_style);
-    auto const& width_value = root_element_style->size_value(CSS::PropertyID::Width);
-    if (width_value.is_length() && width_value.length().is_absolute())
-        return width_value.length().absolute_length_to_px();
+    auto const* computed_values = m_root_element->computed_values();
+    if (!computed_values)
+        return {};
+    auto const& width = computed_values->width();
+    if (width.is_length() && width.length().is_absolute())
+        return width.length().absolute_length_to_px();
     return {};
 }
 
@@ -169,11 +170,12 @@ Optional<CSSPixels> SVGDecodedImageData::intrinsic_height() const
 {
     // https://www.w3.org/TR/SVG2/coords.html#SizingSVGInCSS
     m_document->update_style();
-    auto const root_element_style = m_root_element->computed_properties();
-    VERIFY(root_element_style);
-    auto const& height_value = root_element_style->size_value(CSS::PropertyID::Height);
-    if (height_value.is_length() && height_value.length().is_absolute())
-        return height_value.length().absolute_length_to_px();
+    auto const* computed_values = m_root_element->computed_values();
+    if (!computed_values)
+        return {};
+    auto const& height = computed_values->height();
+    if (height.is_length() && height.length().is_absolute())
+        return height.length().absolute_length_to_px();
     return {};
 }
 

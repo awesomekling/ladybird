@@ -7,7 +7,7 @@
 
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/SVGStopElementPrototype.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGStopElement.h>
@@ -48,15 +48,15 @@ void SVGStopElement::apply_presentational_hints(CSS::CascadedProperties& cascade
 
 Gfx::Color SVGStopElement::stop_color()
 {
-    if (auto computed_properties = this->computed_properties())
-        return computed_properties->color_or_fallback(CSS::PropertyID::StopColor, CSS::ColorResolutionContext::for_element({ *this }), CSS::InitialValues::stop_color());
+    if (auto const* computed_values = this->computed_values())
+        return computed_values->stop_color();
     return CSS::InitialValues::stop_color();
 }
 
 float SVGStopElement::stop_opacity() const
 {
-    if (auto computed_properties = this->computed_properties())
-        return computed_properties->stop_opacity();
+    if (auto const* computed_values = this->computed_values())
+        return computed_values->stop_opacity();
     return 1;
 }
 
