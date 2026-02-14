@@ -67,11 +67,10 @@ def test(file: Path, rebaseline: bool) -> bool:
         print(stdout)
         sys.exit(1)
 
+    expected_file = AST_TEST_DIR / "expected" / file.with_suffix(".txt")
     if USE_RUST_CODEGEN:
-        expected_file = AST_TEST_DIR / "expected-rust" / file.with_suffix(".txt")
         output_file = AST_TEST_DIR / "output-rust" / file.with_suffix(".txt")
     else:
-        expected_file = AST_TEST_DIR / "expected" / file.with_suffix(".txt")
         output_file = AST_TEST_DIR / "output" / file.with_suffix(".txt")
 
     output_file.write_text(stdout + "\n", encoding="utf8")
