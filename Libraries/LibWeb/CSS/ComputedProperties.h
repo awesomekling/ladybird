@@ -215,6 +215,9 @@ public:
     RefPtr<StyleValue const> cascaded_font_size() const { return m_cascaded_font_size; }
     void set_cascaded_font_size(RefPtr<StyleValue const> value) { m_cascaded_font_size = move(value); }
 
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& pre_absolutized_values() const { return m_pre_absolutized_values; }
+    void set_pre_absolutized_value(PropertyID property_id, NonnullRefPtr<StyleValue const> value) { m_pre_absolutized_values.set(property_id, move(value)); }
+
     static Vector<NonnullRefPtr<TransformationStyleValue const>> transformations_for_style_value(StyleValue const& value);
     Vector<NonnullRefPtr<TransformationStyleValue const>> transformations() const;
     TransformBox transform_box() const;
@@ -307,6 +310,12 @@ private:
     // Stored for recascade_font_size_if_needed() which needs to walk ancestors
     // and read their pre-resolution font-size values.
     RefPtr<StyleValue const> m_cascaded_font_size;
+
+    // Pre-absolutized values for properties that depend on inherited style
+    // (e.g. font-relative lengths, bolder/lighter, larger/smaller).
+    // Used by recompute_inherited_style() to re-resolve these properties
+    // when an ancestor's style changes.
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_pre_absolutized_values;
 
     PseudoClassBitmap m_attempted_pseudo_class_matches;
 };

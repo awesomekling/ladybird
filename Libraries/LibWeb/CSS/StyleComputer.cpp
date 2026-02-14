@@ -2341,6 +2341,14 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
                 computed_style->set_property_important(property_id, Important::Yes);
             value = cascaded_style_property->value;
             requires_computation = property_requires_computation_with_cascaded_value(property_id);
+
+            // Store pre-absolutized values for properties that depend on inherited style,
+            // so that recompute_inherited_style() can re-resolve them when ancestor style changes.
+            bool depends_on_inherited_style = (value->is_length() && value->as_length().length().is_font_relative())
+                || (property_id == PropertyID::FontWeight && first_is_one_of(value->to_keyword(), Keyword::Bolder, Keyword::Lighter))
+                || (property_id == PropertyID::FontSize && first_is_one_of(value->to_keyword(), Keyword::Larger, Keyword::Smaller));
+            if (depends_on_inherited_style)
+                computed_style->set_pre_absolutized_value(property_id, *value);
         }
 
         // NOTE: We've already handled font-size above.
