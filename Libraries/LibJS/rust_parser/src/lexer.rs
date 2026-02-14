@@ -1207,10 +1207,15 @@ impl<'a> Lexer<'a> {
         debug_assert!(self.position > 0);
         let mut value_start = self.position - 1;
 
+        // Capture line position at the start of the '/' token, before consuming the regex body.
+        let token_line_number = self.line_number;
+        let mut token_line_column = self.line_column - 1;
+
         if has_equals {
             value_start -= 1;
             self.position -= 1;
             self.current_code_unit = b'=' as u16;
+            token_line_column -= 1;
         }
 
         let token_type = self.consume_regex_literal();
@@ -1222,8 +1227,8 @@ impl<'a> Lexer<'a> {
             trivia_len: 0,
             value_start: value_start.saturating_sub(1) as u32,
             value_len: (self.position - value_start) as u32,
-            line_number: 0,
-            line_column: 0,
+            line_number: token_line_number,
+            line_column: token_line_column,
             offset: value_start.saturating_sub(1) as u32,
             trivia_has_line_terminator: false,
             identifier_value: None,
