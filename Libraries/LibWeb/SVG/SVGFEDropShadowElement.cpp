@@ -5,7 +5,7 @@
  */
 
 #include <LibWeb/Bindings/SVGFEDropShadowElementPrototype.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/SVG/SVGFEDropShadowElement.h>
 
 namespace Web::SVG {
