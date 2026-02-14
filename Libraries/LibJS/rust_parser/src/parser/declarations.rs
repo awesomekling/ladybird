@@ -157,6 +157,10 @@ impl<'a> Parser<'a> {
                 let pat = self.parse_binding_pattern();
                 let bound_names = std::mem::take(&mut self.pattern_bound_names);
 
+                for (name, _) in &bound_names {
+                    self.check_identifier_name_for_assignment_validity(name, false);
+                }
+
                 // Register bound names with scope collector.
                 if kind == DeclarationKind::Var {
                     let entries: Vec<(&[u16], Option<Rc<Identifier>>)> = bound_names.iter()

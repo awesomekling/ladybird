@@ -678,6 +678,10 @@ impl<'a> Parser<'a> {
             self.consume();
             let param = if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pattern = self.parse_binding_pattern();
+                let names_to_check: Vec<Vec<u16>> = self.pattern_bound_names.iter().map(|(n, _)| n.clone()).collect();
+                for name in &names_to_check {
+                    self.check_identifier_name_for_assignment_validity(name, false);
+                }
                 let bound_names: Vec<&[u16]> = self.pattern_bound_names.iter().map(|(n, _)| n.as_slice()).collect();
                 self.scope_collector.add_catch_parameter_pattern(&bound_names);
                 CatchParameter::BindingPattern(pattern)
