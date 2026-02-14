@@ -38,6 +38,9 @@ impl<'a> Parser<'a> {
             TokenType::Yield => true,
             TokenType::Await => true,
 
+            // https://tc39.es/ecma262/#sec-import-calls
+            // https://tc39.es/ecma262/#sec-import-meta
+            // `import` is only a valid expression start if followed by `(` or `.`.
             TokenType::Import => {
                 let next = self.next_token();
                 next.token_type == TokenType::ParenOpen || next.token_type == TokenType::Period
@@ -106,6 +109,12 @@ impl<'a> Parser<'a> {
             let start = self.position();
             let expr = self.parse_unary_prefixed_expression();
 
+            // https://tc39.es/ecma262/#sec-exp-operator
+            // ExponentiationExpression :
+            //   UnaryExpression
+            //   UpdateExpression `**` ExponentiationExpression
+            // NB: UnaryExpression cannot be the base of `**`, only UpdateExpression can.
+            // This prevents ambiguity like `-x ** y` (is it `(-x) ** y` or `-(x ** y)`?).
             if self.match_token(TokenType::DoubleAsterisk) {
                 self.syntax_error("Unparenthesized unary expression can't appear on the left-hand side of '**'");
             }
@@ -205,6 +214,11 @@ impl<'a> Parser<'a> {
                 (expr, true)
             }
 
+            // https://tc39.es/ecma262/#sec-super-keyword
+            // SuperProperty : `super` `.` IdentifierName
+            //               | `super` `[` Expression `]`
+            // SuperCall     : `super` Arguments
+            // NB: `super` must be followed by `.`, `[`, or `(`; bare `super` is invalid.
             TokenType::Super => {
                 self.consume();
                 if self.scope_collector.has_current_scope() {
@@ -290,6 +304,10 @@ impl<'a> Parser<'a> {
                 (expr, true)
             }
 
+            // https://tc39.es/ecma262/#sec-async-function-definitions
+            // `async` [no LineTerminator here] `function` starts an async function expression.
+            // `async` [no LineTerminator here] ArrowParameters `=>` starts an async arrow.
+            // Otherwise, `async` is just an identifier reference.
             TokenType::Async => {
                 let next = self.next_token();
                 if next.token_type == TokenType::Function && !next.trivia_has_line_terminator {
@@ -316,6 +334,11 @@ impl<'a> Parser<'a> {
                 (expr, true)
             }
 
+            // https://tc39.es/ecma262/#sec-import-calls
+            // ImportCall : `import` `(` AssignmentExpression `,`? `)
+            //            | `import` `(` AssignmentExpression `,` AssignmentExpression `,`? `)`
+            // https://tc39.es/ecma262/#sec-import-meta
+            // `import.meta` is only valid in module code.
             TokenType::Import => {
                 self.consume();
                 if self.match_token(TokenType::Period) {
@@ -358,11 +381,17 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            // https://tc39.es/ecma262/#sec-generator-function-definitions
+            // YieldExpression : `yield`
+            //                 | `yield` [no LineTerminator here] AssignmentExpression
+            //                 | `yield` [no LineTerminator here] `*` AssignmentExpression
             TokenType::Yield if self.flags.in_generator_function_context => {
                 let expr = self.parse_yield_expression();
                 (expr, false)
             }
 
+            // https://tc39.es/ecma262/#sec-async-function-definitions
+            // AwaitExpression : `await` UnaryExpression
             TokenType::Await if self.flags.await_expression_is_valid => {
                 let expr = self.parse_await_expression();
                 (expr, false)
@@ -485,6 +514,10 @@ impl<'a> Parser<'a> {
             }
 
             // === Logical operators ===
+            // https://tc39.es/ecma262/#sec-binary-logical-operators
+            // It is a Syntax Error if ShortCircuitExpression includes both
+            // LogicalORExpression (||/&&) and CoalesceExpression (??), since
+            // their precedence is ambiguous without explicit parentheses.
             TokenType::DoubleAmpersand => {
                 self.consume();
                 let new_forbidden = forbidden.forbid(&[TokenType::DoubleQuestionMark]);
@@ -634,6 +667,11 @@ impl<'a> Parser<'a> {
             }
 
             // === Postfix ===
+            // https://tc39.es/ecma262/#sec-update-expressions
+            // UpdateExpression : LeftHandSideExpression [no LineTerminator here] `++`
+            //                  | LeftHandSideExpression [no LineTerminator here] `--`
+            // NB: The [no LineTerminator here] is enforced by match_secondary_expression
+            // which checks trivia_has_line_terminator for PlusPlus/MinusMinus.
             TokenType::PlusPlus => {
                 if !Self::is_simple_assignment_target(&lhs, true) {
                     self.syntax_error("Invalid left-hand side in postfix operation");
@@ -732,6 +770,9 @@ impl<'a> Parser<'a> {
                     operand: Box::new(expr),
                 })
             }
+            // https://tc39.es/ecma262/#sec-delete-operator-static-semantics-early-errors
+            // It is a Syntax Error if the UnaryExpression is an IdentifierReference
+            // and the source text matched by the enclosing Script or Module is strict mode code.
             TokenType::Delete => {
                 self.consume();
                 let rhs_start = self.position();
@@ -753,6 +794,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a `new` expression, handling `new.target` and nested `new` calls.
+    // https://tc39.es/ecma262/#sec-new-operator
+    // MemberExpression : `new` MemberExpression Arguments
+    // NewExpression    : `new` NewExpression
+    // https://tc39.es/ecma262/#sec-meta-properties
+    // NewTarget : `new` `.` `target`
     fn parse_new_expression(&mut self) -> Expression {
         let start = self.position();
         self.consume_token(TokenType::New);
@@ -764,6 +810,10 @@ impl<'a> Parser<'a> {
             if self.token_original_value(&target_token) != utf16!("target") {
                 self.syntax_error("Expected 'target' after 'new.'");
             }
+            // https://tc39.es/ecma262/#sec-new.target
+            // It is a Syntax Error if NewTarget is not enclosed, directly or indirectly
+            // (but not crossing function or class static initialization block boundaries),
+            // within a FunctionBody, ConciseBody, ClassStaticBlock, or ClassBody.
             if !self.flags.in_function_context && !self.in_eval_function_context && !self.flags.in_class_static_init_block {
                 self.syntax_error("'new.target' not allowed outside of a function");
             }
@@ -799,6 +849,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a call expression `callee(args...)`.
+    // https://tc39.es/ecma262/#sec-function-calls
+    // https://tc39.es/ecma262/#sec-function-calls-runtime-semantics-evaluation
+    // NB: A direct call to `eval` (bare identifier `eval` as callee) uses the
+    // running execution context's variable environment, not a fresh one.
     pub(crate) fn parse_call_expression(&mut self, callee: Expression, callee_is_eval: bool) -> Expression {
         let start = self.position();
         let arguments = self.parse_arguments();
@@ -833,6 +887,16 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an optional chaining expression (`a?.b`, `a?.[x]`, `a?.()`).
+    // https://tc39.es/ecma262/#sec-optional-chains
+    // OptionalExpression : MemberExpression OptionalChain
+    // OptionalChain : `?.` Arguments
+    //               | `?.` `[` Expression `]`
+    //               | `?.` IdentifierName
+    //               | `?.` TemplateLiteral  -- NOTE: this is a syntax error (see below)
+    //               | OptionalChain Arguments
+    //               | OptionalChain `[` Expression `]`
+    //               | OptionalChain `.` IdentifierName
+    //               | OptionalChain TemplateLiteral  -- also a syntax error
     fn parse_optional_chain(&mut self, start: Position, base: Expression) -> Expression {
         let mut references = Vec::new();
 
@@ -872,6 +936,10 @@ impl<'a> Parser<'a> {
                             mode: OptionalChainMode::Optional,
                         });
                     }
+                    // https://tc39.es/ecma262/#sec-optional-chaining-chain-production
+                    // It is a Syntax Error if any code matches this production:
+                    //   OptionalChain : `?.` TemplateLiteral
+                    // Tagged templates cannot be used with optional chaining.
                     TokenType::TemplateLiteralStart => {
                         self.syntax_error("Invalid tagged template literal after ?.");
                         break;
@@ -953,6 +1021,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a `yield` or `yield*` expression.
+    // https://tc39.es/ecma262/#sec-generator-function-definitions
+    // YieldExpression : `yield`
+    //                 | `yield` [no LineTerminator here] AssignmentExpression
+    //                 | `yield` [no LineTerminator here] `*` AssignmentExpression
+    // https://tc39.es/ecma262/#sec-generator-function-definitions-static-semantics-early-errors
+    // It is a Syntax Error if YieldExpression appears within FormalParameters.
     fn parse_yield_expression(&mut self) -> Expression {
         let start = self.position();
 
@@ -990,6 +1064,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an `await` expression.
+    // https://tc39.es/ecma262/#sec-async-function-definitions
+    // AwaitExpression : `await` UnaryExpression
+    // https://tc39.es/ecma262/#sec-async-function-definitions-static-semantics-early-errors
+    // It is a Syntax Error if AwaitExpression appears within FormalParameters.
     fn parse_await_expression(&mut self) -> Expression {
         let start = self.position();
 
@@ -1025,6 +1103,11 @@ impl<'a> Parser<'a> {
                 });
             } else {
                 let prop = self.parse_object_property();
+                // https://tc39.es/ecma262/#sec-object-initializer-static-semantics-early-errors
+                // It is a Syntax Error if PropertyNameList of PropertyDefinitionList
+                // contains any duplicate entries for "__proto__" and at least two of
+                // those entries were obtained from productions of the form
+                // PropertyDefinition : PropertyName `:` AssignmentExpression.
                 if prop.property_type == ObjectPropertyType::ProtoSetter {
                     if has_proto_setter {
                         self.syntax_error("Duplicate __proto__ fields are not allowed in object expressions");
@@ -1131,9 +1214,12 @@ impl<'a> Parser<'a> {
             };
         }
 
-        // CoverInitializedName: { x = defaultValue }
-        // Not a valid object literal, but a valid destructuring assignment target.
-        // Parse the initializer to advance the lexer, but roll back scope records
+        // https://tc39.es/ecma262/#sec-object-initializer
+        // CoverInitializedName : IdentifierReference Initializer
+        // https://tc39.es/ecma262/#sec-object-initializer-static-semantics-early-errors
+        // It is a Syntax Error if PropertyDefinitionList contains any CoverInitializedName.
+        // NB: This is not a valid object literal, but is a valid destructuring assignment
+        // target. We parse the initializer to advance the lexer, but roll back scope records
         // since this expression is discarded. synthesize_binding_pattern will
         // re-parse from source and create the real scope records.
         if self.match_token(TokenType::Equals) && matches!(key.inner, ExpressionKind::Identifier(_)) {
@@ -1224,6 +1310,8 @@ impl<'a> Parser<'a> {
                 let value = parse_numeric_value(value_str);
                 (self.expr(start, ExpressionKind::NumericLiteral(value)), None, false, false)
             }
+            // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+            // It is a Syntax Error if the StringValue of PrivateIdentifier is "#constructor".
             TokenType::PrivateIdentifier => {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
@@ -1282,6 +1370,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a template literal (`` `...${expr}...` ``).
+    // https://tc39.es/ecma262/#sec-template-literals
+    // TemplateLiteral : NoSubstitutionTemplate
+    //                 | SubstitutionTemplate
+    // SubstitutionTemplate : TemplateHead Expression TemplateSpans
+    // NB: In tagged templates, invalid escape sequences produce `undefined` for the
+    // cooked value instead of a syntax error (sec-template-literals-static-semantics-early-errors).
     pub(crate) fn parse_template_literal(&mut self, is_tagged: bool) -> Expression {
         let start = self.position();
         self.consume_token(TokenType::TemplateLiteralStart);
@@ -1591,6 +1685,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Try to parse an arrow function expression. Returns `None` on failure.
+    // https://tc39.es/ecma262/#sec-arrow-function-definitions
+    // ArrowFunction : ArrowParameters [no LineTerminator here] `=>` ConciseBody
+    // ConciseBody   : [lookahead != `{`] ExpressionBody
+    //               | `{` FunctionBody `}`
     pub(crate) fn try_parse_arrow_function_expression(&mut self, expect_parens: bool, is_async: bool) -> Option<Expression> {
         self.try_parse_arrow_function_expression_impl(expect_parens, is_async, None)
     }
@@ -1683,6 +1781,7 @@ impl<'a> Parser<'a> {
 
         self.flags.await_expression_is_valid = saved_await;
 
+        // [no LineTerminator here] before `=>`
         if !self.match_token(TokenType::Arrow) || self.current_token.trivia_has_line_terminator {
             self.load_state();
             return None;

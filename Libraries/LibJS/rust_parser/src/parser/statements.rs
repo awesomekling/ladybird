@@ -110,6 +110,8 @@ impl<'a> Parser<'a> {
         self.stmt(start, StatementKind::Expression(Box::new(expr)))
     }
 
+    // https://tc39.es/ecma262/#sec-return-statement
+    // ReturnStatement : `return` [no LineTerminator here] Expression? `;`
     fn parse_return_statement(&mut self) -> Statement {
         let start = self.position();
         if !self.flags.in_function_context {
@@ -117,6 +119,8 @@ impl<'a> Parser<'a> {
         }
         self.consume_token(TokenType::Return);
 
+        // [no LineTerminator here]: if a line terminator follows `return`,
+        // ASI inserts a semicolon and the return has no argument.
         if self.current_token.trivia_has_line_terminator
             || self.match_token(TokenType::Semicolon)
             || self.match_token(TokenType::CurlyClose)
@@ -131,10 +135,14 @@ impl<'a> Parser<'a> {
         self.stmt(start, StatementKind::Return(Some(Box::new(argument))))
     }
 
+    // https://tc39.es/ecma262/#sec-throw-statement
+    // ThrowStatement : `throw` [no LineTerminator here] Expression `;`
     fn parse_throw_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Throw);
 
+        // [no LineTerminator here]: unlike `return`, a line terminator after
+        // `throw` is always an error because `throw;` is never valid.
         if self.current_token.trivia_has_line_terminator {
             self.syntax_error("No line break is allowed between 'throw' and its expression");
         }
@@ -144,6 +152,8 @@ impl<'a> Parser<'a> {
         self.stmt(start, StatementKind::Throw(Box::new(argument)))
     }
 
+    // https://tc39.es/ecma262/#sec-break-statement
+    // BreakStatement : `break` [no LineTerminator here] LabelIdentifier? `;`
     fn parse_break_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Break);
@@ -177,6 +187,8 @@ impl<'a> Parser<'a> {
         self.stmt(start, StatementKind::Break { target_label: label })
     }
 
+    // https://tc39.es/ecma262/#sec-continue-statement
+    // ContinueStatement : `continue` [no LineTerminator here] LabelIdentifier? `;`
     fn parse_continue_statement(&mut self) -> Statement {
         let start = self.position();
         if !self.flags.in_continue_context {
@@ -311,6 +323,8 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // https://tc39.es/ecma262/#sec-for-statement
+    // https://tc39.es/ecma262/#sec-for-in-and-for-of-statements
     fn parse_for_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::For);
@@ -352,6 +366,10 @@ impl<'a> Parser<'a> {
         };
 
         // Check for in
+        // https://tc39.es/ecma262/#sec-for-in-and-for-of-statements
+        // It is a Syntax Error if IsDestructuring of ForBinding is false and
+        // Initializer is present. (Only a single, non-initialized ForBinding
+        // is allowed; except in Annex B sloppy var with one declarator.)
         if self.match_token(TokenType::In) && !is_await {
             if is_using {
                 self.syntax_error("Using declaration not allowed in for-in loop");
@@ -360,6 +378,8 @@ impl<'a> Parser<'a> {
                     self.syntax_error("Multiple declarations not allowed in for..in/of");
                 }
                 if self.for_loop_declaration_has_init {
+                    // https://tc39.es/ecma262/#sec-initializers-in-forin-statement-heads
+                    // Annex B: In sloppy mode, a single `var` with an initializer is permitted.
                     if !(self.for_loop_declaration_is_var && self.for_loop_declaration_count == 1 && !self.flags.strict_mode) {
                         self.syntax_error("Variable initializer not allowed in for..in/of");
                     }
@@ -536,6 +556,8 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // https://tc39.es/ecma262/#sec-with-statement
+    // NOTE: The with statement is forbidden in strict mode code.
     fn parse_with_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::With);
@@ -551,6 +573,8 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // https://tc39.es/ecma262/#sec-switch-statement
+    // All case clauses in a switch statement share a single block scope.
     fn parse_switch_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Switch);
@@ -621,6 +645,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-try-statement
+    // TryStatement :
+    //   `try` Block Catch
+    //   `try` Block Finally
+    //   `try` Block Catch Finally
     fn parse_try_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Try);
@@ -651,6 +680,10 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    // https://tc39.es/ecma262/#sec-try-statement
+    // Catch : `catch` `(` CatchParameter `)` Block
+    //       | `catch` Block
+    // The catch parameter creates its own scope that wraps the block body.
     fn parse_catch_clause(&mut self) -> CatchClause {
         let start = self.position();
         self.consume_token(TokenType::Catch);
@@ -698,6 +731,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-labelled-statements
+    // It is a Syntax Error if any source text is matched by this production
+    // and a `continue` statement with label targets that production.
+    // (i.e., `continue` with a label can only target an iteration statement.)
     fn try_parse_labelled_statement(&mut self, allow_labelled_function: bool) -> Option<Statement> {
         let start = self.position();
 

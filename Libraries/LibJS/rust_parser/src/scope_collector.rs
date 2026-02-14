@@ -399,6 +399,10 @@ impl ScopeCollector {
         self.open_scope(ScopeType::ForLoop, scope_data, ScopeLevel::NotTopLevel);
     }
 
+    // https://tc39.es/ecma262/#sec-with-statement
+    // The `with` statement creates an object environment record that intercepts
+    // identifier lookups, preventing any local variable optimization for
+    // identifiers used within its scope.
     pub fn open_with_scope(&mut self, scope_data: Option<Rc<RefCell<ScopeData>>>) {
         self.open_scope(ScopeType::With, scope_data, ScopeLevel::NotTopLevel);
     }
@@ -425,6 +429,10 @@ impl ScopeCollector {
 
     // === Declaration registration ===
 
+    // https://tc39.es/ecma262/#sec-let-and-const-declarations
+    // https://tc39.es/ecma262/#sec-block-level-function-declarations-web-legacy-compatibility-semantics
+    // Lexical declarations (let/const) are block-scoped and must not collide
+    // with any existing var, function, or lexical binding in the same scope.
     pub fn add_lexical_declaration(
         &mut self,
         bound_names: &[&[u16]],
@@ -446,6 +454,11 @@ impl ScopeCollector {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-variable-statement
+    // `var` declarations hoist to the enclosing function or script scope.
+    // They walk the scope chain upward, registering in every scope along
+    // the way until reaching a top-level scope (function, program, or
+    // class static initializer).
     pub fn add_var_declaration(
         &mut self,
         bound_names: &[(&[u16], Option<Rc<Identifier>>)],
@@ -480,6 +493,13 @@ impl ScopeCollector {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-function-definitions
+    // https://tc39.es/ecma262/#sec-block-level-function-declarations-web-legacy-compatibility-semantics
+    // At top level (function/script scope), function declarations act like `var`.
+    // At block level in sloppy mode, Annex B.3.3 allows hoisting the name as
+    // a `var` binding to the enclosing function scope.
+    // In strict mode (or for async/generator functions), block-scoped function
+    // declarations are treated as lexical bindings and are NOT Annex-B hoisted.
     pub fn add_function_declaration(
         &mut self,
         name: &[u16],
@@ -539,6 +559,10 @@ impl ScopeCollector {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-try-statement
+    // Catch clause parameters create a new scope. The bound names in a
+    // catch pattern forbid `var` declarations with the same name in the
+    // catch block (unlike regular block-scoped variables).
     pub fn add_catch_parameter_pattern(&mut self, bound_names: &[&[u16]]) {
         let index = self.current.unwrap();
         for name in bound_names {
@@ -616,6 +640,10 @@ impl ScopeCollector {
 
     // === Flag setters ===
 
+    // https://tc39.es/ecma262/#sec-function-calls-runtime-semantics-evaluation
+    // A direct call to eval (identifier `eval` as callee) can introduce new
+    // bindings at runtime, so the entire scope chain must retain its environment
+    // records (no local variable optimization through eval-poisoned scopes).
     pub fn set_contains_direct_call_to_eval(&mut self) {
         let index = self.current.unwrap();
         self.records[index].contains_direct_call_to_eval = true;
@@ -633,6 +661,9 @@ impl ScopeCollector {
         self.records[index].contains_await_expression = true;
     }
 
+    // https://tc39.es/ecma262/#sec-arrow-function-definitions-runtime-semantics-evaluation
+    // Arrow functions don't have their own `this`; they inherit it from the
+    // enclosing lexical environment (uses_this_from_environment).
     pub fn set_uses_this(&mut self) {
         let index = self.current.unwrap();
         let closest_fn = last_function_scope(index, &self.records);
@@ -836,8 +867,12 @@ impl ScopeCollector {
                 local_var_kind = Some(LocalVarKind::Function);
             }
 
-            // Non-arrow functions implicitly declare `arguments` as a local.
-            // Arrow functions inherit `arguments` from their enclosing function.
+            // https://tc39.es/ecma262/#sec-functiondeclarationinstantiation
+            // Non-arrow functions implicitly declare `arguments` as a local
+            // (an Arguments exotic object or a mapped arguments object).
+            // https://tc39.es/ecma262/#sec-arrow-function-definitions-runtime-semantics-evaluation
+            // Arrow functions do NOT have their own `arguments` binding;
+            // references to `arguments` resolve to the enclosing function's.
             if records[index].scope_type == ScopeType::Function
                 && !records[index].is_arrow_function
                 && name == utf16!("arguments")
@@ -998,6 +1033,11 @@ impl ScopeCollector {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-functiondeclarationinstantiation
+    // Builds the data needed by FunctionDeclarationInstantiation at runtime:
+    // - vars_to_initialize: var-declared names and their local variable indices
+    // - functions_to_initialize: function declarations to instantiate (in reverse order)
+    // - arguments object metadata (has_argument_parameter, has_function_named_arguments, etc.)
     fn build_function_scope_data(records: &[ScopeRecord], index: usize) {
         let record = &records[index];
         let scope_data = match record.scope_data {
@@ -1115,8 +1155,10 @@ impl ScopeCollector {
         }
     }
 
-    /// Annex B function hoisting: in sloppy mode, function declarations inside
-    /// blocks can create `var` bindings in the enclosing function scope.
+    /// https://tc39.es/ecma262/#sec-block-level-function-declarations-web-legacy-compatibility-semantics
+    ///
+    /// Annex B.3.3 function hoisting: in sloppy mode, function declarations
+    /// inside blocks can create `var` bindings in the enclosing function scope.
     ///
     /// For example:
     /// ```js

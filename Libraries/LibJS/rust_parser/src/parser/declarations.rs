@@ -107,6 +107,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-variable-statement
+    // https://tc39.es/ecma262/#sec-let-and-const-declarations
+    // VariableStatement : `var` VariableDeclarationList `;`
+    // LexicalDeclaration : LetOrConst BindingList `;`
+    // NB: `var` declarations are hoisted to the enclosing function/script scope,
+    // while `let`/`const` are block-scoped (sec-declarations-and-the-variable-statement).
     pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
@@ -237,6 +243,10 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // https://tc39.es/ecma262/#sec-let-and-const-declarations
+    // UsingDeclaration : `using` BindingList `;`
+    // NB: `using` declarations have lexical scoping like `const` and invoke
+    // the Symbol.dispose method when the enclosing scope exits.
     pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
@@ -304,6 +314,10 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // https://tc39.es/ecma262/#sec-function-definitions
+    // FunctionDeclaration : `function` BindingIdentifier `(` FormalParameters `)` `{` FunctionBody `}`
+    //                     | [+Default] `function` `(` FormalParameters `)` `{` FunctionBody `}`
+    // NB: The second form (without name) is only valid in `export default` context.
     pub(crate) fn parse_function_declaration(&mut self) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
@@ -391,6 +405,10 @@ impl<'a> Parser<'a> {
         })))
     }
 
+    // https://tc39.es/ecma262/#sec-function-definitions
+    // FunctionExpression : `function` BindingIdentifier? `(` FormalParameters `)` `{` FunctionBody `}`
+    // NB: The function name, if present, is bound within the function's own scope
+    // (not the enclosing scope), allowing recursive self-reference.
     pub(crate) fn parse_function_expression(&mut self) -> Expression {
         let start = self.position();
 
@@ -463,6 +481,12 @@ impl<'a> Parser<'a> {
         })))
     }
 
+    // https://tc39.es/ecma262/#sec-class-definitions
+    // ClassDeclaration : `class` BindingIdentifier ClassTail
+    // ClassExpression  : `class` BindingIdentifier? ClassTail
+    // ClassTail        : ClassHeritage? `{` ClassBody `}`
+    // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+    // NB: All code within a ClassBody is in strict mode.
     pub(crate) fn parse_class_expression(&mut self, expect_name: bool) -> Expression {
         let start = self.position();
 
@@ -522,6 +546,9 @@ impl<'a> Parser<'a> {
 
             let (element, maybe_ctor) = self.parse_class_element();
             if let Some(ctor) = maybe_ctor {
+                // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+                // It is a Syntax Error if PrototypePropertyNameList of ClassElementList
+                // contains more than one occurrence of "constructor".
                 if constructor.is_some() {
                     self.syntax_error("Classes may not have more than one constructor");
                 }
@@ -585,6 +612,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
+    // If no constructor is present in the ClassBody:
+    //   - Base class: constructor() {}
+    //   - Derived class: constructor(...args) { super(...args); }
     fn synthesize_default_constructor(&mut self, start: Position, class_name: &[u16], has_super: bool) -> Expression {
         let ctor_name = if !class_name.is_empty() {
             Some(self.make_identifier(start, class_name.to_vec()))
@@ -664,11 +695,19 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-class-definitions
+    // ClassElement : MethodDefinition
+    //             | `static` MethodDefinition
+    //             | FieldDefinition `;`
+    //             | `static` FieldDefinition `;`
+    //             | ClassStaticBlock
+    //             | `;`
     fn parse_class_element(&mut self) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
         let is_static = if self.match_token(TokenType::Static) {
             self.consume();
-            // static { } block
+            // https://tc39.es/ecma262/#sec-class-static-initialization-blocks
+            // ClassStaticBlock : `static` `{` ClassStaticBlockBody `}`
             if self.match_token(TokenType::CurlyOpen) {
                 self.consume(); // consume '{'
                 let saved_break = self.flags.in_break_context;
@@ -743,6 +782,9 @@ impl<'a> Parser<'a> {
         // Parse key.
         let (key, key_value, _is_proto, _is_computed) = self.parse_property_key();
 
+        // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+        // It is a Syntax Error if PropName of ClassElement is "prototype"
+        // and ClassElement is `static` MethodDefinition or `static` FieldDefinition.
         if is_static && key_value.as_deref() == Some(utf16!("prototype")) {
             self.syntax_error("Classes may not have a static property named 'prototype'");
         }
@@ -754,6 +796,9 @@ impl<'a> Parser<'a> {
                 && !is_getter && !is_setter
                 && key_value.as_deref() == Some(ctor_name);
 
+            // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+            // It is a Syntax Error if SpecialMethod of MethodDefinition is true
+            // and PropName of MethodDefinition is "constructor".
             if is_constructor {
                 if is_getter || is_setter {
                     self.syntax_error("Class constructor may not be an accessor");
@@ -787,7 +832,9 @@ impl<'a> Parser<'a> {
             })), None);
         }
 
-        // Field named "constructor" is not allowed.
+        // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+        // It is a Syntax Error if PropName of ClassElement is "constructor"
+        // and ClassElement is FieldDefinition.
         if !is_static && key_value.as_deref() == Some(utf16!("constructor")) {
             self.syntax_error("Class cannot have field named 'constructor'");
         }
@@ -814,6 +861,9 @@ impl<'a> Parser<'a> {
         })), None)
     }
 
+    // https://tc39.es/ecma262/#sec-function-definitions-static-semantics-early-errors
+    // It is a Syntax Error if FunctionBodyContainsUseStrict of FunctionBody is true
+    // and IsSimpleParameterList of FormalParameters is false.
     pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, is_simple: bool) -> (Statement, bool, FunctionParsingInsights) {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
@@ -863,6 +913,12 @@ impl<'a> Parser<'a> {
         (body, has_use_strict, insights)
     }
 
+    // https://tc39.es/ecma262/#sec-function-definitions
+    // FormalParameters : [empty]
+    //                  | FunctionRestParameter
+    //                  | FormalParameterList
+    //                  | FormalParameterList `,`
+    //                  | FormalParameterList `,` FunctionRestParameter
     pub(crate) fn parse_formal_parameters(&mut self) -> ParsedParameters {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
@@ -898,7 +954,10 @@ impl<'a> Parser<'a> {
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
-                // Check for duplicate parameter names.
+                // https://tc39.es/ecma262/#sec-function-definitions-static-semantics-early-errors
+                // It is a Syntax Error if IsSimpleParameterList is false and
+                // BoundNames of FormalParameters contains any duplicate elements.
+                // In strict mode, duplicates are always an error.
                 for prev in &param_info {
                     if prev.name == value {
                         if self.flags.strict_mode {
@@ -968,6 +1027,15 @@ impl<'a> Parser<'a> {
         ParsedParameters { params, function_length, param_info, is_simple }
     }
 
+    // https://tc39.es/ecma262/#sec-destructuring-binding-patterns
+    // BindingPattern : ObjectBindingPattern | ArrayBindingPattern
+    // ObjectBindingPattern : `{` `}`
+    //                      | `{` BindingRestProperty `}`
+    //                      | `{` BindingPropertyList `}`
+    //                      | `{` BindingPropertyList `,` BindingRestProperty? `}`
+    // ArrayBindingPattern  : `[` Elision? BindingRestElement? `]`
+    //                      | `[` BindingElementList `]`
+    //                      | `[` BindingElementList `,` Elision? BindingRestElement? `]`
     pub(crate) fn parse_binding_pattern(&mut self) -> BindingPattern {
         let is_object = self.match_token(TokenType::CurlyOpen);
         let is_array = self.match_token(TokenType::BracketOpen);
@@ -1169,6 +1237,14 @@ impl<'a> Parser<'a> {
         BindingPattern { kind, entries }
     }
 
+    // https://tc39.es/ecma262/#sec-imports
+    // ImportDeclaration : `import` ImportClause FromClause `;`
+    //                   | `import` ModuleSpecifier `;`
+    // ImportClause : ImportedDefaultBinding
+    //             | NameSpaceImport
+    //             | NamedImports
+    //             | ImportedDefaultBinding `,` NameSpaceImport
+    //             | ImportedDefaultBinding `,` NamedImports
     pub(crate) fn parse_import_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Import);
@@ -1303,6 +1379,14 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    // https://tc39.es/ecma262/#sec-exports
+    // ExportDeclaration : `export` ExportFromClause FromClause `;`
+    //                   | `export` NamedExports `;`
+    //                   | `export` VariableStatement
+    //                   | `export` Declaration
+    //                   | `export` `default` HoistableDeclaration
+    //                   | `export` `default` ClassDeclaration
+    //                   | `export` `default` AssignmentExpression `;`
     pub(crate) fn parse_export_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Export);
@@ -1532,6 +1616,9 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // https://tc39.es/ecma262/#sec-imports
+    // WithClause : `with` `{` WithEntries `}`
+    // WithEntries : AttributeKey `:` StringLiteral
     fn parse_with_clause(&mut self) -> Vec<ImportAttribute> {
         if !self.match_token(TokenType::With) {
             return Vec::new();

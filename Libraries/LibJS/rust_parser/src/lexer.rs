@@ -68,7 +68,9 @@ pub struct Lexer<'a> {
     pub(crate) saved_states: Vec<SavedLexerState>,
 }
 
-// Unicode constants
+// Unicode constants used by the lexical grammar.
+// https://tc39.es/ecma262/#sec-white-space
+// https://tc39.es/ecma262/#sec-line-terminators
 const NO_BREAK_SPACE: u16 = 0x00A0;
 const ZERO_WIDTH_NON_JOINER: u32 = 0x200C;
 const ZERO_WIDTH_JOINER: u32 = 0x200D;
@@ -137,10 +139,15 @@ fn decode_code_point(source: &[u16], pos: usize) -> (u32, usize) {
     }
 }
 
+// https://tc39.es/ecma262/#sec-line-terminators
+// LineTerminator :: <LF> | <CR> | <LS> | <PS>
 fn is_line_terminator_cp(cp: u32) -> bool {
     cp == '\n' as u32 || cp == '\r' as u32 || cp == LINE_SEPARATOR as u32 || cp == PARAGRAPH_SEPARATOR as u32
 }
 
+// https://tc39.es/ecma262/#sec-white-space
+// WhiteSpace :: <TAB> | <VT> | <FF> | <ZWNBSP> | <USP>
+// where <USP> is any code point with General Category "Space_Separator" (Zs).
 fn is_whitespace_cp(cp: u32) -> bool {
     if cp < 128 {
         return is_ascii_space(cp as u16);
@@ -148,13 +155,15 @@ fn is_whitespace_cp(cp: u32) -> bool {
     if cp == NO_BREAK_SPACE as u32 || cp == ZERO_WIDTH_NO_BREAK_SPACE as u32 {
         return true;
     }
-    // Unicode Space_Separator category
+    // Unicode General Category "Space_Separator" (Zs)
     matches!(
         cp,
         0x1680 | 0x2000..=0x200A | 0x202F | 0x205F | 0x3000
     )
 }
 
+// https://tc39.es/ecma262/#sec-identifier-names
+// IdentifierStartChar :: UnicodeIDStart | $ | _
 fn is_identifier_start_cp(cp: u32) -> bool {
     if is_ascii_alpha(cp) || cp == '_' as u32 || cp == '$' as u32 {
         return true;
@@ -165,6 +174,8 @@ fn is_identifier_start_cp(cp: u32) -> bool {
     unicode_id_start(cp)
 }
 
+// https://tc39.es/ecma262/#sec-identifier-names
+// IdentifierPartChar :: UnicodeIDContinue | $ | <ZWNJ> | <ZWJ>
 fn is_identifier_continue_cp(cp: u32) -> bool {
     if is_ascii_alphanumeric(cp) || cp == '$' as u32 || cp == '_' as u32 || cp == ZERO_WIDTH_NON_JOINER || cp == ZERO_WIDTH_JOINER {
         return true;
@@ -185,6 +196,7 @@ fn unicode_id_continue(cp: u32) -> bool {
     char::from_u32(cp).is_some_and(unicode_ident::is_xid_continue)
 }
 
+// https://tc39.es/ecma262/#sec-keywords-and-reserved-words
 fn keyword_from_str(s: &[u16]) -> Option<TokenType> {
     // Dispatch by length first to minimize comparisons, then compare
     // against compile-time UTF-16 constants (zero allocation).
@@ -362,6 +374,8 @@ impl<'a> Lexer<'a> {
         lexer
     }
 
+    // https://tc39.es/ecma262/#sec-html-like-comments
+    // HTML-like comments are only recognized in Script (not Module) code.
     pub fn disallow_html_comments(&mut self) {
         self.allow_html_comments = false;
     }
@@ -448,6 +462,9 @@ impl<'a> Lexer<'a> {
 
     /// Try to parse a unicode escape sequence at the current position.
     /// Returns (code_point, number_of_code_units_consumed) if successful.
+    ///
+    /// https://tc39.es/ecma262/#sec-names-and-keywords
+    /// UnicodeEscapeSequence :: `u` Hex4Digits | `u{` CodePoint `}`
     fn is_identifier_unicode_escape(&self) -> Option<(u32, usize)> {
         // Current code unit should be '\', and we look ahead from position - 1
         let start = self.position - 1;
@@ -634,6 +651,16 @@ impl<'a> Lexer<'a> {
         self.current_code_unit == b'_' as u16 && check(self.source[self.position])
     }
 
+    // https://tc39.es/ecma262/#sec-comments
+    // SingleLineComment :: `//` SingleLineCommentChars?
+    //
+    // https://tc39.es/ecma262/#sec-html-like-comments
+    // SingleLineHTMLOpenComment :: `<!--` ...
+    // SingleLineHTMLCloseComment :: [LT] WhiteSpace? `-->` ...
+    // (HTML-like comments are only allowed in scripts, not modules.)
+    //
+    // https://tc39.es/ecma262/#sec-hashbang
+    // HashbangComment :: `#!` SingleLineCommentChars?
     fn is_line_comment_start(&self, line_has_token_yet: bool) -> bool {
         self.match2(b'/' as u16, b'/' as u16)
             || (self.allow_html_comments && self.match4(b'<' as u16, b'!' as u16, b'-' as u16, b'-' as u16))
@@ -656,6 +683,11 @@ impl<'a> Lexer<'a> {
                 && is_ascii_digit(self.source[self.position]))
     }
 
+    // https://tc39.es/ecma262/#sec-lexical-and-regexp-grammars
+    // The InputElementRegExp and InputElementRegExpOrTemplateTail goals are
+    // used in syntactic contexts where a RegularExpressionLiteral is permitted.
+    // The slash is a division operator when the preceding token could end an
+    // expression; otherwise it starts a regex literal.
     fn slash_means_division(&self) -> bool {
         let tt = self.current_token_type;
         tt.is_identifier_name()
@@ -933,7 +965,10 @@ impl<'a> Lexer<'a> {
             }
 
             if has_escape {
-                // Escapes present: build decoded value, then check keywords.
+                // https://tc39.es/ecma262/#sec-identifier-names-static-semantics-early-errors
+                // IdentifierName :: IdentifierName IdentifierPart
+                // It is a Syntax Error if the source text matched by this production
+                // is a ReservedWord after processing unicode escape sequences.
                 let decoded = self.build_identifier_value(value_start);
                 if keyword_from_str(&decoded).is_some() {
                     token_type = TokenType::EscapedKeyword;
@@ -1089,7 +1124,9 @@ impl<'a> Lexer<'a> {
                 let ch1 = self.source[self.position];
                 let tt = parse_two_char_token(ch0, ch1);
                 if tt != TokenType::Invalid {
-                    // OptionalChainingPunctuator :: ?. [lookahead not in DecimalDigit]
+                    // https://tc39.es/ecma262/#sec-punctuators
+                    // OptionalChainingPunctuator :: `?.` [lookahead ∉ DecimalDigit]
+                    // This prevents `a?.3:b` from being parsed as optional chaining.
                     if !(tt == TokenType::QuestionMarkPeriod
                         && self.position + 1 < self.source_len()
                         && is_ascii_digit(self.source[self.position + 1]))

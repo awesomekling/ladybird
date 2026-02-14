@@ -428,6 +428,11 @@ impl<'a> Parser<'a> {
     }
 
     #[allow(dead_code)]
+    // https://tc39.es/ecma262/#sec-identifier-reference
+    // IdentifierReference[Yield, Await] :
+    //   Identifier
+    //   [~Yield] `yield`
+    //   [~Await] `await`
     pub(crate) fn consume_identifier_reference(&mut self) -> Token {
         if self.match_identifier() {
             return self.consume();
@@ -444,9 +449,16 @@ impl<'a> Parser<'a> {
         self.consume()
     }
 
+    // https://tc39.es/ecma262/#sec-numeric-literals-early-errors
+    // It is a Syntax Error if IsStringWellFormedUnicode of the source text matched
+    // by NumericLiteral is not true.
+    // The source character immediately following a NumericLiteral must not be an
+    // IdentifierStart or DecimalDigit.
     pub(crate) fn consume_and_validate_numeric_literal(&mut self) -> Token {
         let tok = self.consume();
         if self.flags.strict_mode {
+            // https://tc39.es/ecma262/#sec-additional-syntax-numeric-literals
+            // In strict mode, legacy octal literals (0-prefixed) are not permitted.
             let value = self.token_value(&tok);
             if value.len() > 1 && value[0] == b'0' as u16
                 && value[1] >= b'0' as u16 && value[1] <= b'9' as u16
@@ -460,6 +472,14 @@ impl<'a> Parser<'a> {
         tok
     }
 
+    // https://tc39.es/ecma262/#sec-automatic-semicolon-insertion
+    // A semicolon is automatically inserted when:
+    //   1. The offending token is separated from the previous token by at least
+    //      one LineTerminator.
+    //   2. The offending token is `}`.
+    //   3. The previous token is `)` and the inserted semicolon would then be
+    //      parsed as the terminating semicolon of a do-while statement.
+    //   4. The end of the input stream of tokens is reached.
     pub(crate) fn consume_or_insert_semicolon(&mut self) {
         if self.match_token(TokenType::Semicolon) {
             self.consume();
@@ -828,6 +848,8 @@ impl<'a> Parser<'a> {
         (children, is_strict)
     }
 
+    // https://tc39.es/ecma262/#sec-modules
+    // Module code is always strict mode code.
     fn parse_module(&mut self) -> (Vec<Statement>, bool) {
         // Open program scope — will be closed in parse_program after ScopeData is created.
         self.scope_collector.open_program_scope(ProgramType::Module);
@@ -864,6 +886,11 @@ impl<'a> Parser<'a> {
         (children, has_top_level_await)
     }
 
+    // https://tc39.es/ecma262/#sec-directive-prologues-and-the-use-strict-directive
+    // A Directive Prologue is a sequence of ExpressionStatements at the beginning
+    // of a FunctionBody, ScriptBody, or ModuleBody that each consist entirely of
+    // a StringLiteral followed by semicolon. A "use strict" directive causes
+    // subsequent code to be interpreted in strict mode.
     pub(crate) fn parse_directive(&mut self) -> (bool, Vec<Statement>) {
         let mut found_use_strict = false;
         let mut stmts = Vec::new();
@@ -1033,6 +1060,9 @@ fn is_use_strict(raw: &[u16]) -> bool {
     raw == utf16!("'use strict'") || raw == utf16!("\"use strict\"")
 }
 
+// https://tc39.es/ecma262/#sec-keywords-and-reserved-words
+// In strict mode code, the following tokens are also reserved:
+// `implements` `interface` `let` `package` `private` `protected` `public` `static` `yield`
 fn is_strict_reserved_word(name: &[u16]) -> bool {
     name == utf16!("implements")
         || name == utf16!("interface")
