@@ -213,7 +213,7 @@ static ErrorOr<bool> parse_and_run(JS::Realm& realm, StringView source, StringVi
             result = vm.throw_completion<JS::SyntaxError>(move(error_string));
         } else {
             auto script = script_or_error.release_value();
-            if (s_dump_ast)
+            if (s_dump_ast && script->parse_node())
                 dump_ast(*script->parse_node());
             if (!parse_only)
                 result = vm.bytecode_interpreter().run(*script);

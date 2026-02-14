@@ -236,6 +236,9 @@ void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals
                 m_shared_data->m_rust_function_ast));
             m_shared_data->m_rust_function_ast = nullptr;
             executable = exec;
+            executable->name = m_shared_data->m_name;
+            if (Bytecode::g_dump_bytecode)
+                executable->dump();
         } else if (is_module_wrapper()) {
             executable = Bytecode::compile(vm(), ecmascript_code(), kind(), name());
         } else {

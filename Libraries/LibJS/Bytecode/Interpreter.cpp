@@ -133,10 +133,10 @@ ThrowCompletionOr<Value> Interpreter::run(Script& script_record, GC::Ptr<Environ
         if (executable) {
             script_record.cache_executable(*executable);
             script_record.drop_ast();
-            if (g_dump_bytecode)
-                executable->dump();
         }
     }
+    if (executable && g_dump_bytecode)
+        executable->dump();
 
     u32 registers_and_locals_count = 0;
     u32 constants_count = 0;
