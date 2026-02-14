@@ -10,7 +10,6 @@
 #include <LibWeb/ARIA/Roles.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/HTMLElementPrototype.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/EditingHostManager.h>
 #include <LibWeb/DOM/ElementFactory.h>
