@@ -239,11 +239,19 @@ impl<'a> Parser<'a> {
         let predicate = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
 
-        let consequent = self.parse_statement(false);
+        let consequent = if !self.flags.strict_mode && self.match_token(TokenType::Function) {
+            self.parse_function_declaration_as_block_statement()
+        } else {
+            self.parse_statement(false)
+        };
 
         let alternate = if self.match_token(TokenType::Else) {
             self.consume();
-            Some(Box::new(self.parse_statement(false)))
+            if !self.flags.strict_mode && self.match_token(TokenType::Function) {
+                Some(Box::new(self.parse_function_declaration_as_block_statement()))
+            } else {
+                Some(Box::new(self.parse_statement(false)))
+            }
         } else {
             None
         };
@@ -253,6 +261,18 @@ impl<'a> Parser<'a> {
             consequent: Box::new(consequent),
             alternate,
         })
+    }
+
+    /// Annex B: Parse a function declaration as if wrapped in a synthetic block.
+    /// See https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses
+    fn parse_function_declaration_as_block_statement(&mut self) -> Stmt {
+        let start = self.position();
+        self.scope_collector.open_block_scope(None);
+        let decl = self.parse_function_declaration();
+        let scope = ScopeData::shared_with_children(vec![decl]);
+        self.scope_collector.set_scope_node(scope.clone());
+        self.scope_collector.close_scope();
+        self.stmt(start, Statement::Block(scope))
     }
 
     // === While statement ===

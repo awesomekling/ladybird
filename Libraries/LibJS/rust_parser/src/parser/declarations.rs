@@ -293,7 +293,7 @@ impl<'a> Parser<'a> {
 
     // === Function declaration ===
 
-    fn parse_function_declaration(&mut self) -> Stmt {
+    pub(crate) fn parse_function_declaration(&mut self) -> Stmt {
         let start = self.position();
         let decl_line = self.current_token().line_number;
         let decl_column = self.current_token().line_column;
