@@ -3427,6 +3427,131 @@ fn emit_delete_reference(
     }
 }
 
+
+/// Pre-evaluated reference operands for deferred store.
+/// Used when the spec requires evaluating the assignment target reference
+/// before performing some other operation (like iterating a spread element).
+enum EvaluatedReference {
+    Member {
+        base: ScopedOperand,
+        property: ScopedOperand,
+        base_identifier: Option<IdentifierTableIndex>,
+    },
+    MemberId {
+        base: ScopedOperand,
+        property: PropertyKeyTableIndex,
+        cache: u32,
+        base_identifier: Option<IdentifierTableIndex>,
+    },
+    PrivateMember {
+        base: ScopedOperand,
+        property: IdentifierTableIndex,
+    },
+    SuperMember {
+        base: ScopedOperand,
+        property: ScopedOperand,
+        this_value: ScopedOperand,
+    },
+    SuperMemberId {
+        base: ScopedOperand,
+        property: PropertyKeyTableIndex,
+        cache: u32,
+        this_value: ScopedOperand,
+    },
+}
+
+/// Evaluate a member expression target to get pre-computed reference operands
+/// without performing a load. This implements the "Let lref be ? Evaluation of
+/// DestructuringAssignmentTarget" step from the spec.
+fn emit_evaluate_member_reference(gen: &mut Generator, target: &Expr) -> EvaluatedReference {
+    if let Expression::Member { object, property, computed } = &target.inner {
+        let is_super = matches!(object.inner, Expression::Super);
+        let base = generate_expr_or_undefined(object, gen, None);
+
+        if is_super {
+            let this_value = emit_resolve_this_binding(gen);
+            if *computed {
+                let prop = generate_expr_or_undefined(property, gen, None);
+                let saved_prop = gen.allocate_register();
+                gen.emit_mov(&saved_prop, &prop);
+                EvaluatedReference::SuperMember { base, property: saved_prop, this_value }
+            } else if let Expression::Identifier(ident) = &property.inner {
+                let key = gen.intern_property_key(ident.name.clone());
+                let cache = gen.next_property_lookup_cache();
+                EvaluatedReference::SuperMemberId { base, property: key, cache, this_value }
+            } else {
+                unreachable!()
+            }
+        } else {
+            let base_id = intern_base_identifier(gen, object);
+            if *computed {
+                let prop = generate_expr_or_undefined(property, gen, None);
+                let saved_prop = gen.allocate_register();
+                gen.emit_mov(&saved_prop, &prop);
+                EvaluatedReference::Member { base, property: saved_prop, base_identifier: base_id }
+            } else if let Expression::Identifier(ident) = &property.inner {
+                let key = gen.intern_property_key(ident.name.clone());
+                let cache = gen.next_property_lookup_cache();
+                EvaluatedReference::MemberId { base, property: key, cache, base_identifier: base_id }
+            } else if let Expression::PrivateIdentifier(priv_ident) = &property.inner {
+                let id = gen.intern_identifier(priv_ident.name.clone());
+                EvaluatedReference::PrivateMember { base, property: id }
+            } else {
+                unreachable!()
+            }
+        }
+    } else {
+        unreachable!("emit_evaluate_member_reference called on non-member expression")
+    }
+}
+
+/// Store a value to a pre-evaluated reference.
+fn emit_store_to_evaluated_reference(gen: &mut Generator, reference: &EvaluatedReference, value: &ScopedOperand) {
+    match reference {
+        EvaluatedReference::Member { base, property, base_identifier } => {
+            gen.emit(Instruction::PutNormalByValue {
+                base: base.operand(),
+                property: property.operand(),
+                src: value.operand(),
+                base_identifier: *base_identifier,
+            });
+        }
+        EvaluatedReference::MemberId { base, property, cache, base_identifier } => {
+            gen.emit(Instruction::PutNormalById {
+                base: base.operand(),
+                property: *property,
+                src: value.operand(),
+                cache_index: *cache,
+                base_identifier: *base_identifier,
+            });
+        }
+        EvaluatedReference::PrivateMember { base, property } => {
+            gen.emit(Instruction::PutPrivateById {
+                base: base.operand(),
+                property: *property,
+                src: value.operand(),
+            });
+        }
+        EvaluatedReference::SuperMember { base, property, this_value } => {
+            gen.emit(Instruction::PutNormalByValueWithThis {
+                base: base.operand(),
+                property: property.operand(),
+                this_value: this_value.operand(),
+                src: value.operand(),
+            });
+        }
+        EvaluatedReference::SuperMemberId { base, property, cache, this_value } => {
+            gen.emit(Instruction::PutNormalByIdWithThis {
+                base: base.operand(),
+                this_value: this_value.operand(),
+                property: *property,
+                src: value.operand(),
+                cache_index: *cache,
+            });
+        }
+    }
+}
+
 fn emit_store_to_reference(
     gen: &mut Generator,
     target: &Expr,
@@ -5617,6 +5742,14 @@ fn generate_array_binding_pattern(
     let mut first = true;
     for entry in &pattern.entries {
         if entry.is_rest {
+            // 13.15.5.3 AssignmentRestElement: ... DestructuringAssignmentTarget
+            // Step 1: Evaluate the reference BEFORE iterating remaining elements.
+            let evaluated_ref = if let BindingEntryAlias::MemberExpression(expr) = &entry.alias {
+                Some(emit_evaluate_member_reference(gen, expr))
+            } else {
+                None
+            };
+
             // Rest element: collect remaining into array.
             let value = gen.allocate_register();
             if first {
@@ -5661,9 +5794,21 @@ fn generate_array_binding_pattern(
                 gen.switch_to_basic_block(continuation);
             }
 
-            assign_binding_entry_alias(gen, entry, &value, mode);
+            if let Some(ref eref) = evaluated_ref {
+                emit_store_to_evaluated_reference(gen, eref, &value);
+            } else {
+                assign_binding_entry_alias(gen, entry, &value, mode);
+            }
             return; // rest consumes the iterator
         }
+
+        // 13.15.5.5 AssignmentElement: DestructuringAssignmentTarget Initializer(opt)
+        // Step 1: Evaluate the reference BEFORE calling IteratorStepValue.
+        let evaluated_ref = if let BindingEntryAlias::MemberExpression(expr) = &entry.alias {
+            Some(emit_evaluate_member_reference(gen, expr))
+        } else {
+            None
+        };
 
         // For elisions (BindingEntryName::Empty), we still advance the iterator
         // but don't bind anything.
@@ -5736,7 +5881,11 @@ fn generate_array_binding_pattern(
         }
 
         if !is_elision {
-            assign_binding_entry_alias(gen, entry, &value, mode);
+            if let Some(ref eref) = evaluated_ref {
+                emit_store_to_evaluated_reference(gen, eref, &value);
+            } else {
+                assign_binding_entry_alias(gen, entry, &value, mode);
+            }
         }
 
         first = false;
