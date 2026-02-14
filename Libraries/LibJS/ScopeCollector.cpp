@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/QuickSort.h>
 #include <AK/String.h>
 #include <LibJS/Parser.h>
 #include <LibJS/ScopeCollector.h>
@@ -381,9 +382,14 @@ void ScopeCollector::propagate_eval_poisoning(ScopeRecord& scope)
 
 void ScopeCollector::resolve_identifiers(ScopeRecord& scope, bool initiated_by_eval)
 {
-    for (auto& it : scope.identifier_groups) {
-        auto const& identifier_group_name = it.key;
-        auto& identifier_group = it.value;
+    // Sort identifier groups alphabetically for deterministic local variable indices.
+    Vector<Utf16FlyString> sorted_keys;
+    for (auto& it : scope.identifier_groups)
+        sorted_keys.append(it.key);
+    quick_sort(sorted_keys, [](auto const& a, auto const& b) { return a.view() < b.view(); });
+
+    for (auto const& identifier_group_name : sorted_keys) {
+        auto& identifier_group = scope.identifier_groups.get(identifier_group_name).value();
 
         if (identifier_group.declaration_kind.has_value()) {
             for (auto& identifier : identifier_group.identifiers) {
