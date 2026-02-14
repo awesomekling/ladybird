@@ -223,9 +223,9 @@ pub struct Generator {
 macro_rules! next_cache_method {
     ($method:ident, $field:ident) => {
         pub fn $method(&mut self) -> u32 {
-            let idx = self.$field;
+            let index = self.$field;
             self.$field += 1;
-            idx
+            index
         }
     };
 }
@@ -681,8 +681,8 @@ impl Generator {
     /// Register a jump target with the current FinallyContext.
     /// Assigns a unique completion_type index and emits code to set it and jump to finally.
     pub fn register_jump_in_finally_context(&mut self, target: Label) {
-        let idx = self.current_finally_context.unwrap();
-        let ctx = &mut self.finally_contexts[idx];
+        let index = self.current_finally_context.unwrap();
+        let ctx = &mut self.finally_contexts[index];
         let jump_index = ctx.next_jump_index;
         ctx.next_jump_index += 1;
         ctx.registered_jumps.push(FinallyJump {
@@ -704,8 +704,8 @@ impl Generator {
         self.register_jump_in_finally_context(Label(trampoline_block as u32));
         self.switch_to_basic_block(trampoline_block);
         // Pop to the parent FinallyContext (simulating the inner finally completing).
-        let idx = self.current_finally_context.unwrap();
-        self.current_finally_context = self.finally_contexts[idx].parent_index;
+        let index = self.current_finally_context.unwrap();
+        self.current_finally_context = self.finally_contexts[index].parent_index;
         let _ = is_break;
     }
 
@@ -873,8 +873,8 @@ impl Generator {
 
     /// Generate a return, routing through FinallyContext if needed.
     pub fn generate_return(&mut self, value: &ScopedOperand) {
-        if let Some(idx) = self.current_finally_context {
-            let ctx = &self.finally_contexts[idx];
+        if let Some(index) = self.current_finally_context {
+            let ctx = &self.finally_contexts[index];
             let completion_value = ctx.completion_value.clone();
             let completion_type = ctx.completion_type.clone();
             let finally_body = ctx.finally_body;
@@ -910,11 +910,11 @@ impl Generator {
     }
 
     pub fn mark_local_initialized(&mut self, index: u32) {
-        let idx = index as usize;
-        if idx >= self.initialized_locals.len() {
-            self.initialized_locals.resize(idx + 1, false);
+        let index = index as usize;
+        if index >= self.initialized_locals.len() {
+            self.initialized_locals.resize(index + 1, false);
         }
-        self.initialized_locals[idx] = true;
+        self.initialized_locals[index] = true;
     }
 
     // --- Compile/assemble/link pipeline ---

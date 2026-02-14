@@ -224,7 +224,7 @@ pub fn generate_expr(
             // For anonymous function expressions, use the pending LHS name
             // as the function's .name property.
             let lhs_name = if !has_name { gen.pending_lhs_name.take() } else { None };
-            let lhs_name_str: Option<Vec<u16>> = lhs_name.map(|idx| gen.identifier_table[idx.0 as usize].clone());
+            let lhs_name_str: Option<Vec<u16>> = lhs_name.map(|index| gen.identifier_table[index.0 as usize].clone());
             let name_override = if !has_name {
                 lhs_name_str.as_deref()
             } else {
@@ -2401,8 +2401,8 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
     }
     // Emit in forward order.
     last_func_indices.reverse();
-    for (_, idx) in &last_func_indices {
-        if let StatementKind::FunctionDeclaration(func_data) = &scope.children[*idx].inner {
+    for (_, index) in &last_func_indices {
+        if let StatementKind::FunctionDeclaration(func_data) = &scope.children[*index].inner {
             let sfd_index = emit_new_function(gen, func_data, None);
             let fo = gen.allocate_register();
             gen.emit(Instruction::NewFunction {
@@ -4034,7 +4034,7 @@ fn emit_switch_block_declaration_instantiation(
     for (i, child) in all_children.iter().enumerate() {
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
-                if last_func_indices.iter().any(|(n, idx)| *n == name_ident.name && *idx == i) {
+                if last_func_indices.iter().any(|(n, index)| *n == name_ident.name && *index == i) {
                     let sfd_index = emit_new_function(gen, func_data, None);
                     let fo = gen.allocate_register();
                     gen.emit(Instruction::NewFunction {
@@ -4712,12 +4712,12 @@ fn generate_class_expression(
                         },
                         is_hoisted: false,
                     };
-                    let idx = emit_new_function(gen, &func_data, Some(utf16!("field")));
+                    let index = emit_new_function(gen, &func_data, Some(utf16!("field")));
 
                     // Set class_field_initializer_name on the SFD so that
                     // eval("arguments") inside field initializers correctly
                     // throws a SyntaxError.
-                    let sfd_ptr = gen.shared_function_data[idx as usize];
+                    let sfd_ptr = gen.shared_function_data[index as usize];
                     let key_is_private = is_private_key(key);
                     let key_name: Vec<u16> = match &key.inner {
                         ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
@@ -4740,7 +4740,7 @@ fn generate_class_expression(
                         }
                     }
 
-                    idx as i32
+                    index as i32
                 } else {
                     -1i32
                 };
@@ -6237,7 +6237,7 @@ fn generate_try_statement(
     } else if has_finally {
         if let Some(ctx_idx) = gen.current_finally_context {
             let ep = match gen.finally_contexts[ctx_idx].exception_preamble {
-                Label(idx) => idx as usize,
+                Label(index) => index as usize,
             };
             gen.current_unwind_handler = Some(ep);
         }
@@ -6581,7 +6581,7 @@ pub fn emit_function_declaration_instantiation(
             lv.name == utf16!("arguments") && !lv.is_lexically_declared
         });
 
-        let dst = args_local_index.map(|idx| Operand::local(idx as u32));
+        let dst = args_local_index.map(|index| Operand::local(index as u32));
 
         let kind = if strict || !func_data.parameters.iter().all(|p| {
             !p.is_rest
@@ -6599,8 +6599,8 @@ pub fn emit_function_declaration_instantiation(
             is_immutable: strict,
         });
 
-        if let Some(idx) = args_local_index {
-            gen.mark_local_initialized(idx as u32);
+        if let Some(index) = args_local_index {
+            gen.mark_local_initialized(index as u32);
         }
     }
 
@@ -6687,9 +6687,9 @@ pub fn emit_function_declaration_instantiation(
                     continue;
                 }
 
-                if let Some((local_type, idx)) = var.local {
+                if let Some((local_type, index)) = var.local {
                     let undef = gen.add_constant_undefined();
-                    let local = var_local_operand(gen, local_type, idx);
+                    let local = var_local_operand(gen, local_type, index);
                     gen.emit_mov(&local, &undef);
                 } else {
                     let id = gen.intern_identifier(&var.name);
@@ -6734,8 +6734,8 @@ pub fn emit_function_declaration_instantiation(
 
                 let initial_value = if !is_in_parameter_bindings || var.is_function_name {
                     gen.add_constant_undefined()
-                } else if let Some((local_type, idx)) = var.local {
-                    let local = var_local_operand(gen, local_type, idx);
+                } else if let Some((local_type, index)) = var.local {
+                    let local = var_local_operand(gen, local_type, index);
                     let tmp = gen.allocate_register();
                     gen.emit_mov(&tmp, &local);
                     tmp
@@ -6750,8 +6750,8 @@ pub fn emit_function_declaration_instantiation(
                     tmp
                 };
 
-                if let Some((local_type, idx)) = var.local {
-                    let local = var_local_operand(gen, local_type, idx);
+                if let Some((local_type, index)) = var.local {
+                    let local = var_local_operand(gen, local_type, index);
                     gen.emit_mov(&local, &initial_value);
                 } else {
                     let id = gen.intern_identifier(&var.name);
@@ -6924,10 +6924,10 @@ fn needs_block_declaration_instantiation(scope: &ScopeData) -> bool {
 }
 
 /// Create a ScopedOperand for a VarToInit's local variable (argument or variable).
-fn var_local_operand(gen: &mut Generator, local_type: LocalType, idx: u32) -> ScopedOperand {
+fn var_local_operand(gen: &mut Generator, local_type: LocalType, index: u32) -> ScopedOperand {
     match local_type {
-        LocalType::Variable => gen.local(idx),
-        LocalType::Argument => gen.scoped_operand(Operand::argument(idx)),
+        LocalType::Variable => gen.local(index),
+        LocalType::Argument => gen.scoped_operand(Operand::argument(index)),
         LocalType::None => unreachable!("var_local_operand called with LocalType::None"),
     }
 }

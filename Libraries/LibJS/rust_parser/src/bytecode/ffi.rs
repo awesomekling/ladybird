@@ -405,7 +405,7 @@ pub unsafe fn create_executable(
         gen.next_object_shape_cache,
         assembled.number_of_registers,
         gen.strict,
-        gen.length_identifier.map_or(-1i32, |idx| idx.0 as i32),
+        gen.length_identifier.map_or(-1i32, |index| index.0 as i32),
         sfd_ptrs.as_ptr(),
         sfd_ptrs.len(),
         bp_ptrs.as_ptr(),
