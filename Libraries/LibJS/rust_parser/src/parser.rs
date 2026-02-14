@@ -41,7 +41,7 @@ use crate::ast::{
     SourceRange, Stmt, Statement, ScopeData, ProgramData,
 };
 use crate::lexer::Lexer;
-use crate::scope_collector::ScopeCollector;
+use crate::scope_collector::{ScopeCollector, ScopeCollectorState};
 use crate::token::{Token, TokenType};
 
 mod declarations;
@@ -178,7 +178,7 @@ struct SavedState {
     token: Token,
     errors_len: usize,
     flags: ParserFlags,
-    scope_collector_state: (usize, Option<usize>, usize),
+    scope_collector_state: ScopeCollectorState,
 }
 
 /// The main JavaScript parser.

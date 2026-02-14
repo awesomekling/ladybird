@@ -273,6 +273,13 @@ pub struct ScopeError {
     pub column: u32,
 }
 
+/// Saved state for speculative parsing backtracking.
+pub struct ScopeCollectorState {
+    records_len: usize,
+    current: Option<usize>,
+    errors_len: usize,
+}
+
 pub struct ScopeCollector {
     records: Vec<ScopeRecord>,
     current: Option<usize>,
@@ -301,16 +308,20 @@ impl ScopeCollector {
     }
 
     /// Save scope collector state for speculative parsing.
-    pub fn save_state(&self) -> (usize, Option<usize>, usize) {
-        (self.records.len(), self.current, self.errors.len())
+    pub fn save_state(&self) -> ScopeCollectorState {
+        ScopeCollectorState {
+            records_len: self.records.len(),
+            current: self.current,
+            errors_len: self.errors.len(),
+        }
     }
 
     /// Restore scope collector state after failed speculative parse.
-    pub fn load_state(&mut self, state: (usize, Option<usize>, usize)) {
-        let saved_len = state.0;
+    pub fn load_state(&mut self, state: ScopeCollectorState) {
+        let saved_len = state.records_len;
         self.records.truncate(saved_len);
-        self.current = state.1;
-        self.errors.truncate(state.2);
+        self.current = state.current;
+        self.errors.truncate(state.errors_len);
         // Remove any child indices that pointed to now-truncated records.
         if let Some(current_idx) = self.current {
             self.records[current_idx].children.retain(|&c| c < saved_len);
