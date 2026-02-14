@@ -1073,6 +1073,10 @@ impl ScopeCollector {
 
         }
 
+        // Sort by name for deterministic output (HashMap iteration order is arbitrary).
+        vars_to_initialize.sort_by(|a, b| a.name.cmp(&b.name));
+        var_names.sort();
+
         // Check if any function declaration is named "arguments".
         if seen_function_names.iter().any(|n| n == utf16!("arguments")) {
             has_function_named_arguments = true;
