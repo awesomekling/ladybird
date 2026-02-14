@@ -430,9 +430,9 @@ impl<'a> Parser<'a> {
             return self.close_for_loop_scope(start, result);
         }
 
-        // Check for of
+        // Check for of (keyword must not contain escapes)
         if self.match_identifier_name() {
-            let value = self.token_value(&self.current_token).to_vec();
+            let value = self.token_original_value(&self.current_token).to_vec();
             if value == utf16!("of") {
                 if is_declaration {
                     if self.for_loop_declaration_count > 1 {

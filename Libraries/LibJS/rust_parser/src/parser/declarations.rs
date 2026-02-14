@@ -717,9 +717,9 @@ impl<'a> Parser<'a> {
         let mut is_setter = false;
         let function_start = self.position();
 
-        // Check modifiers.
+        // Check modifiers (must not contain escape sequences).
         if self.match_identifier_name() {
-            let value = self.token_value(&self.current_token).to_vec();
+            let value = self.token_original_value(&self.current_token).to_vec();
             if value == utf16!("get") && self.match_property_key_ahead() {
                 is_getter = true;
                 self.consume();

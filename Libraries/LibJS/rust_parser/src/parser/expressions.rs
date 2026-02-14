@@ -755,7 +755,11 @@ impl<'a> Parser<'a> {
 
         if self.match_token(TokenType::Period) {
             self.consume();
+            let target_token = self.current_token.clone();
             self.consume_token(TokenType::Identifier);
+            if self.token_original_value(&target_token) != utf16!("target") {
+                self.syntax_error("Expected 'target' after 'new.'");
+            }
             if !self.flags.in_function_context && !self.in_eval_function_context && !self.flags.in_class_static_init_block {
                 self.syntax_error("'new.target' not allowed outside of a function");
             }
@@ -1039,7 +1043,7 @@ impl<'a> Parser<'a> {
         let mut is_generator = false;
 
         if self.match_identifier_name() {
-            let value = self.token_value(&self.current_token).to_vec();
+            let value = self.token_original_value(&self.current_token).to_vec();
             if value == utf16!("get") && self.match_property_key_ahead() {
                 is_getter = true;
                 self.consume();
