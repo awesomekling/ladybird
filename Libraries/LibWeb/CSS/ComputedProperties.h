@@ -72,8 +72,10 @@ public:
         Yes
     };
 
-    AnimatedPropertyData const& animated_property_data() const { return m_animated_properties; }
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_animated_properties.values; }
+    void set_external_animated_data(AnimatedPropertyData* data) { m_external_animated_data = data; }
+
+    AnimatedPropertyData const& animated_property_data() const { return m_external_animated_data ? *m_external_animated_data : m_animated_properties; }
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return animated_property_data().values; }
     void reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>);
 
     bool is_property_important(PropertyID property_id) const;
@@ -305,6 +307,7 @@ private:
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_important {};
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_inherited {};
     AnimatedPropertyData m_animated_properties;
+    AnimatedPropertyData* m_external_animated_data { nullptr };
 
     Display m_display_before_box_type_transformation { InitialValues::display() };
 

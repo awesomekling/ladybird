@@ -3227,10 +3227,14 @@ void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_elemen
         return;
     }
     m_computed_properties = style;
-    if (m_computed_properties && !m_computed_properties->animated_property_data().values.is_empty())
+    if (m_computed_properties) {
+        // Move animated data from ComputedProperties' local storage to Element,
+        // and set the external pointer so future reads/writes go through Element.
         m_animated_property_data = make<CSS::AnimatedPropertyData>(m_computed_properties->animated_property_data());
-    else
+        m_computed_properties->set_external_animated_data(m_animated_property_data.ptr());
+    } else {
         m_animated_property_data = nullptr;
+    }
     computed_properties_changed();
 }
 
