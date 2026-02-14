@@ -1927,12 +1927,9 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_perspective(computed_style.perspective());
     computed_values.set_perspective_origin(computed_style.perspective_origin());
 
-    if (auto value = computed_style.rotate())
-        computed_values.set_rotate(value.release_nonnull());
-    if (auto value = computed_style.translate())
-        computed_values.set_translate(value.release_nonnull());
-    if (auto value = computed_style.scale())
-        computed_values.set_scale(value.release_nonnull());
+    computed_values.set_rotate(computed_style.rotate());
+    computed_values.set_translate(computed_style.translate());
+    computed_values.set_scale(computed_style.scale());
 
     computed_values.set_width(computed_style.size_value(CSS::PropertyID::Width));
     computed_values.set_min_width(computed_style.size_value(CSS::PropertyID::MinWidth));
