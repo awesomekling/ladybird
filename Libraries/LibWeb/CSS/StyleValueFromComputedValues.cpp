@@ -168,8 +168,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.flex_direction()));
     case PropertyID::FlexWrap:
         return KeywordStyleValue::create(to_keyword(computed_values.flex_wrap()));
-    // NB: Float is not handled here because it's not set in populate_computed_values()
-    //     due to table-transferred property handling. Fall through to ComputedProperties.
+    case PropertyID::Float:
+        return KeywordStyleValue::create(to_keyword(computed_values.float_()));
     // NB: ImageRendering is not handled here because the legacy keyword aliases
     //     (optimizequality -> smooth, optimizespeed -> pixelated) cause a different
     //     serialization when round-tripping through the enum.
@@ -201,8 +201,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.overflow_y()));
     case PropertyID::PointerEvents:
         return KeywordStyleValue::create(to_keyword(computed_values.pointer_events()));
-    // NB: Position is not handled here because it's not set in populate_computed_values()
-    //     due to table-transferred property handling. Fall through to ComputedProperties.
+    case PropertyID::Position:
+        return KeywordStyleValue::create(to_keyword(computed_values.position()));
     case PropertyID::Resize:
         return KeywordStyleValue::create(to_keyword(computed_values.resize()));
     case PropertyID::ScrollbarWidth:
