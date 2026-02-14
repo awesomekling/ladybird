@@ -621,8 +621,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_background_color(computed_style.color_or_fallback(CSS::PropertyID::BackgroundColor, color_resolution_context, CSS::InitialValues::background_color()));
     computed_values.set_background_color_clip(computed_style.background_color_clip());
 
-    computed_values.set_box_sizing(computed_style.box_sizing());
-
     if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
         computed_values.set_font_language_override(maybe_font_language_override.release_value());
     computed_values.set_font_variation_settings(computed_style.font_variation_settings());
@@ -638,15 +636,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_border_bottom_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderBottomRightRadius)));
     computed_values.set_border_top_left_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopLeftRadius)));
     computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(CSS::PropertyID::BorderTopRightRadius)));
-    computed_values.set_display(computed_style.display());
-    computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
-
-    computed_values.set_flex_direction(computed_style.flex_direction());
-    computed_values.set_flex_wrap(computed_style.flex_wrap());
     computed_values.set_flex_basis(computed_style.flex_basis());
-    computed_values.set_flex_grow(computed_style.flex_grow());
-    computed_values.set_flex_shrink(computed_style.flex_shrink());
-    computed_values.set_order(computed_style.order());
     computed_values.set_clip(computed_style.clip());
 
     computed_values.set_backdrop_filter(computed_style.backdrop_filter());
@@ -655,25 +645,12 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_flood_color(computed_style.color_or_fallback(CSS::PropertyID::FloodColor, color_resolution_context, CSS::InitialValues::flood_color()));
     computed_values.set_flood_opacity(computed_style.flood_opacity());
 
-    computed_values.set_justify_content(computed_style.justify_content());
-    computed_values.set_justify_items(computed_style.justify_items());
-    computed_values.set_justify_self(computed_style.justify_self());
-
     auto accent_color = computed_style.accent_color(*this);
     if (accent_color.has_value())
         computed_values.set_accent_color(accent_color.value());
 
-    computed_values.set_align_content(computed_style.align_content());
-    computed_values.set_align_items(computed_style.align_items());
-    computed_values.set_align_self(computed_style.align_self());
-
-    computed_values.set_appearance(computed_style.appearance());
-
-    computed_values.set_position(computed_style.position());
-
     computed_values.set_text_align(computed_style.text_align());
     computed_values.set_text_justify(computed_style.text_justify());
-    computed_values.set_text_overflow(computed_style.text_overflow());
     computed_values.set_text_underline_offset(computed_style.text_underline_offset());
     computed_values.set_text_underline_position(computed_style.text_underline_position());
 
@@ -687,21 +664,15 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_word_spacing(computed_style.word_spacing());
     computed_values.set_letter_spacing(computed_style.letter_spacing());
 
-    computed_values.set_float(computed_style.float_());
-
     computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal(*this));
     computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical(*this));
 
     computed_values.set_caption_side(computed_style.caption_side());
-    computed_values.set_clear(computed_style.clear());
-    computed_values.set_overflow_x(computed_style.overflow_x());
-    computed_values.set_overflow_y(computed_style.overflow_y());
     computed_values.set_content_visibility(computed_style.content_visibility());
     computed_values.set_cursor(computed_style.cursor());
     computed_values.set_image_rendering(computed_style.image_rendering());
     computed_values.set_pointer_events(computed_style.pointer_events());
     computed_values.set_text_decoration_line(computed_style.text_decoration_line());
-    computed_values.set_text_decoration_style(computed_style.text_decoration_style());
     computed_values.set_text_transform(computed_style.text_transform());
 
     computed_values.set_list_style_type(computed_style.list_style_type());
@@ -722,9 +693,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_webkit_text_fill_color(computed_style.color_or_fallback(CSS::PropertyID::WebkitTextFillColor, color_resolution_context, computed_values.color()));
 
     computed_values.set_text_shadow(computed_style.text_shadow(*this));
-
-    computed_values.set_z_index(computed_style.z_index());
-    computed_values.set_opacity(computed_style.opacity());
 
     computed_values.set_visibility(computed_style.visibility());
 
@@ -907,8 +875,6 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_empty_cells(computed_style.empty_cells());
 
-    computed_values.set_table_layout(computed_style.table_layout());
-
     auto const& aspect_ratio = computed_style.property(CSS::PropertyID::AspectRatio);
     if (aspect_ratio.is_value_list()) {
         auto const& values_list = aspect_ratio.as_value_list().values();
@@ -944,16 +910,11 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_counter_reset(computed_style.counter_data(CSS::PropertyID::CounterReset));
     computed_values.set_counter_set(computed_style.counter_data(CSS::PropertyID::CounterSet));
 
-    computed_values.set_object_fit(computed_style.object_fit());
     computed_values.set_object_position(computed_style.object_position());
     computed_values.set_direction(computed_style.direction());
-    computed_values.set_unicode_bidi(computed_style.unicode_bidi());
     computed_values.set_scrollbar_color(computed_style.scrollbar_color(*this));
     computed_values.set_scrollbar_width(computed_style.scrollbar_width());
     computed_values.set_writing_mode(computed_style.writing_mode());
-    computed_values.set_user_select(computed_style.user_select());
-    computed_values.set_isolation(computed_style.isolation());
-    computed_values.set_mix_blend_mode(computed_style.mix_blend_mode());
     computed_values.set_view_transition_name(computed_style.view_transition_name());
     computed_values.set_contain(computed_style.contain());
     computed_values.set_container_type(computed_style.container_type());
@@ -963,6 +924,42 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_caret_color(computed_style.caret_color(*this));
     computed_values.set_color_interpolation(computed_style.color_interpolation());
     computed_values.set_resize(computed_style.resize());
+
+    // For nodes that own their ComputedValues (pseudo-elements), these properties
+    // need to be set here since they aren't populated during style computation.
+    // For element-backed nodes, populate_computed_values() in StyleComputer handles this.
+    if (m_owned_computed_values) {
+        computed_values.set_display(computed_style.display());
+        computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
+        computed_values.set_float(computed_style.float_());
+        computed_values.set_clear(computed_style.clear());
+        computed_values.set_position(computed_style.position());
+        computed_values.set_overflow_x(computed_style.overflow_x());
+        computed_values.set_overflow_y(computed_style.overflow_y());
+        computed_values.set_box_sizing(computed_style.box_sizing());
+        computed_values.set_flex_direction(computed_style.flex_direction());
+        computed_values.set_flex_wrap(computed_style.flex_wrap());
+        computed_values.set_flex_grow(computed_style.flex_grow());
+        computed_values.set_flex_shrink(computed_style.flex_shrink());
+        computed_values.set_order(computed_style.order());
+        computed_values.set_align_content(computed_style.align_content());
+        computed_values.set_align_items(computed_style.align_items());
+        computed_values.set_align_self(computed_style.align_self());
+        computed_values.set_justify_content(computed_style.justify_content());
+        computed_values.set_justify_items(computed_style.justify_items());
+        computed_values.set_justify_self(computed_style.justify_self());
+        computed_values.set_appearance(computed_style.appearance());
+        computed_values.set_text_decoration_style(computed_style.text_decoration_style());
+        computed_values.set_text_overflow(computed_style.text_overflow());
+        computed_values.set_object_fit(computed_style.object_fit());
+        computed_values.set_opacity(computed_style.opacity());
+        computed_values.set_isolation(computed_style.isolation());
+        computed_values.set_mix_blend_mode(computed_style.mix_blend_mode());
+        computed_values.set_user_select(computed_style.user_select());
+        computed_values.set_unicode_bidi(computed_style.unicode_bidi());
+        computed_values.set_table_layout(computed_style.table_layout());
+        computed_values.set_z_index(computed_style.z_index());
+    }
 
     propagate_style_to_anonymous_wrappers();
 

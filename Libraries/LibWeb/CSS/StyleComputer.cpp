@@ -1712,6 +1712,40 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
     return style;
 }
 
+static void populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style)
+{
+    computed_values.set_float(computed_style.float_());
+    computed_values.set_clear(computed_style.clear());
+    computed_values.set_position(computed_style.position());
+    computed_values.set_display(computed_style.display());
+    computed_values.set_display_before_box_type_transformation(computed_style.display_before_box_type_transformation());
+    computed_values.set_overflow_x(computed_style.overflow_x());
+    computed_values.set_overflow_y(computed_style.overflow_y());
+    computed_values.set_box_sizing(computed_style.box_sizing());
+    computed_values.set_flex_direction(computed_style.flex_direction());
+    computed_values.set_flex_wrap(computed_style.flex_wrap());
+    computed_values.set_flex_grow(computed_style.flex_grow());
+    computed_values.set_flex_shrink(computed_style.flex_shrink());
+    computed_values.set_order(computed_style.order());
+    computed_values.set_align_content(computed_style.align_content());
+    computed_values.set_align_items(computed_style.align_items());
+    computed_values.set_align_self(computed_style.align_self());
+    computed_values.set_justify_content(computed_style.justify_content());
+    computed_values.set_justify_items(computed_style.justify_items());
+    computed_values.set_justify_self(computed_style.justify_self());
+    computed_values.set_appearance(computed_style.appearance());
+    computed_values.set_text_decoration_style(computed_style.text_decoration_style());
+    computed_values.set_text_overflow(computed_style.text_overflow());
+    computed_values.set_object_fit(computed_style.object_fit());
+    computed_values.set_opacity(computed_style.opacity());
+    computed_values.set_isolation(computed_style.isolation());
+    computed_values.set_mix_blend_mode(computed_style.mix_blend_mode());
+    computed_values.set_user_select(computed_style.user_select());
+    computed_values.set_unicode_bidi(computed_style.unicode_bidi());
+    computed_values.set_table_layout(computed_style.table_layout());
+    computed_values.set_z_index(computed_style.z_index());
+}
+
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
 {
     auto& style_scope = abstract_element.style_scope();
@@ -1753,6 +1787,12 @@ RefPtr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElemen
                 style->set_property(property.property_id, property.value);
         }
         abstract_element.element().adjust_computed_style(style);
+
+        // Populate the shadow DOM element's ComputedValues since it represents
+        // a pseudo-element and won't be populated through the normal path.
+        auto& element_computed_values = static_cast<MutableComputedValues&>(element.ensure_computed_values());
+        populate_computed_values(element_computed_values, *style);
+
         return style;
     }
 
@@ -2063,6 +2103,12 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     compute_transitioned_properties(computed_style, abstract_element);
     if (auto previous_style = abstract_element.computed_properties()) {
         start_needed_transitions(*previous_style, computed_style, abstract_element);
+    }
+
+    // Populate concrete ComputedValues on the Element.
+    if (!abstract_element.pseudo_element().has_value()) {
+        auto& computed_values = static_cast<MutableComputedValues&>(abstract_element.element().ensure_computed_values());
+        populate_computed_values(computed_values, *computed_style);
     }
 
     return computed_style;
