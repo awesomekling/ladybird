@@ -434,6 +434,7 @@ impl<'a> Parser<'a> {
                     self.scope_collector.register_identifier(id.clone(), &value, None);
                     (self.expr(start, Expression::Identifier(id)), true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
+                    self.syntax_error("Keyword must not contain escaped characters");
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
                     let id = self.make_identifier(start, value.clone());
