@@ -11,7 +11,7 @@
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontStyleMapping.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
@@ -92,16 +92,15 @@ namespace Web::CSS {
 
 ColorResolutionContext ColorResolutionContext::for_element(DOM::AbstractElement const& element)
 {
-    auto color_scheme = element.computed_properties()->color_scheme(element.document().page().preferred_color_scheme(), element.document().supported_color_schemes());
-
-    CalculationResolutionContext calculation_resolution_context { .length_resolution_context = Length::ResolutionContext::for_element(element) };
+    auto const* computed_values = element.computed_values();
+    VERIFY(computed_values);
 
     return {
-        .color_scheme = color_scheme,
-        .current_color = element.computed_properties()->color_or_fallback(PropertyID::Color, { color_scheme, CSS::InitialValues::color(), CSS::SystemColor::accent_color(color_scheme), element.document(), calculation_resolution_context }, CSS::InitialValues::color()),
-        .accent_color = element.computed_properties()->color_or_fallback(PropertyID::AccentColor, { color_scheme, CSS::InitialValues::color(), CSS::SystemColor::accent_color(color_scheme), element.document(), calculation_resolution_context }, CSS::SystemColor::accent_color(color_scheme)),
+        .color_scheme = computed_values->color_scheme(),
+        .current_color = computed_values->color(),
+        .accent_color = computed_values->accent_color().value_or(CSS::SystemColor::accent_color(computed_values->color_scheme())),
         .document = element.document(),
-        .calculation_resolution_context = calculation_resolution_context
+        .calculation_resolution_context = { .length_resolution_context = Length::ResolutionContext::for_element(element) }
     };
 }
 
