@@ -914,9 +914,8 @@ pub unsafe extern "C" fn rust_compile_function(
     // Assemble
     let assembled = gen.assemble();
 
-    // Write FDI runtime metadata to the SFD.
-    // For now, set conservative defaults. Full FDI will be implemented
-    // when we port emit_function_declaration_instantiation to Rust.
+    // Write FDI runtime metadata (parameter names, function hoisting info, etc.)
+    // to the SFD so the VM can perform function declaration instantiation.
     write_sfd_metadata(sfd_ptr, &func_data);
 
     // Create C++ Executable via FFI

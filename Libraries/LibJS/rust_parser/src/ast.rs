@@ -261,8 +261,9 @@ pub struct PrivateIdentifier {
 
 /// Parsing insights collected during function body parsing.
 ///
-/// Without scope collector, these default to `false`. They'll be
-/// populated properly once the Rust scope collector is implemented.
+/// The scope collector populates `uses_this`, `uses_this_from_environment`,
+/// and `contains_direct_call_to_eval` during scope analysis.
+/// `might_need_arguments_object` is set by the parser during body parsing.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FunctionParsingInsights {
     pub uses_this: bool,

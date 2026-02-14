@@ -240,7 +240,10 @@ pub struct Parser<'a> {
     pub(crate) class_scope_depth: u32,
     pub(crate) has_default_export_name: bool,
 
-    /// Set by parse_variable_declaration when is_for_loop is true.
+    /// Communication channel from `parse_variable_declaration` back to
+    /// `parse_for_statement` when parsing `for (let/const/var ... ; ...)`.
+    /// These are set when `is_for_loop` is true and read by the for-loop
+    /// parser to validate for-in/of restrictions.
     pub(crate) for_loop_declaration_count: usize,
     pub(crate) for_loop_declaration_has_init: bool,
     pub(crate) for_loop_declaration_is_var: bool,

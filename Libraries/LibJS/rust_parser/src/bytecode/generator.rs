@@ -21,9 +21,9 @@ use super::operand::*;
 /// Identifies an operand that auto-frees its register when the last
 /// clone is dropped.
 ///
-/// In C++, `ScopedOperand` is a ref-counted wrapper. In Rust, we use
-/// a simple `Rc`-based approach. When the last clone drops and the
-/// operand is a non-reserved register, it gets freed back to the pool.
+/// Wraps `Rc<ScopedOperandInner>`. When the last `Rc` clone drops
+/// and the operand is a non-reserved register, the `Drop` impl
+/// returns it to the generator's register pool for reuse.
 #[derive(Debug, Clone)]
 pub struct ScopedOperand {
     inner: std::rc::Rc<ScopedOperandInner>,
@@ -540,7 +540,6 @@ impl Generator {
         self.basic_blocks[index].terminated
     }
 
-    /// Dump all basic blocks and their instructions to a writer (for debugging).
     // --- Instruction emission ---
 
     /// Emit an instruction to the current basic block.

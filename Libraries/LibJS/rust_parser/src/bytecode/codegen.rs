@@ -7,7 +7,7 @@
 //! Bytecode generation from Rust AST.
 //!
 //! This module walks the Rust AST and emits bytecode instructions via
-//! the `Generator`, mirroring C++ `ASTCodegen.cpp`.
+//! the `Generator`, sharing the same instruction set as C++ codegen.
 //!
 //! Each AST node's codegen returns `Option<ScopedOperand>`:
 //! - `Some(op)` if the node produces a value (expressions)
@@ -591,12 +591,14 @@ pub fn generate_stmt(
         Statement::FunctionBody { ref scope, .. } => generate_scope_children(gen, &scope.borrow(), preferred_dst),
 
         // === Program ===
-        // Note: GlobalDeclarationInstantiation (GDI) runs before this bytecode.
-        // GDI already hoists top-level function declarations and handles Annex B
-        // at the global scope. We only need to generate the program body here.
+        // Note: GlobalDeclarationInstantiation (GDI) runs before this bytecode
+        // executes. GDI hoists top-level function declarations and var bindings
+        // to the global scope, including Annex B function-in-block hoisting.
         Statement::Program(ref data) => {
             // Populate annexb_function_names so switch codegen can emit
-            // GetBinding + SetVariableBinding for AnnexB-hoisted functions.
+            // GetBinding + SetVariableBinding for AnnexB-hoisted functions
+            // (Annex B requires switch cases to copy the block-scoped binding
+            // into the var-scoped binding on each case entry).
             let scope = data.scope.borrow();
             for name in &scope.annexb_function_names {
                 gen.annexb_function_names.insert(name.clone());
@@ -764,8 +766,8 @@ pub fn generate_stmt(
         Statement::ClassDeclaration(data) => {
             let value = generate_class_expression(gen, data, None);
             // Bind the class name in the outer scope (classes are lexically scoped).
-            // Use InitializeLexicalBinding since the name was registered as
-            // an uninitialized lexical binding by the scope collector.
+            // Use InitializeLexicalBinding since the name starts in the TDZ
+            // (temporal dead zone) until this point, matching `let` semantics.
             if let (Some(name_ident), Some(val)) = (&data.name, &value) {
                 if name_ident.is_local() {
                     let local_index = name_ident.local_index.get();
