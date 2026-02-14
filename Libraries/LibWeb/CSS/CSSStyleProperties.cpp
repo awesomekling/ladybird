@@ -654,15 +654,9 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
 
     auto const& computed_values = layout_node.computed_values();
 
-    // Prefer reading StyleValues from source_computed_properties stored on ComputedValues.
-    // Fall back to Element::computed_properties() for layout nodes that don't have it
-    // (e.g. anonymous wrappers, certain pseudo-element boxes).
-    auto const* source = computed_values.source_computed_properties();
-    if (!source) {
-        auto& element = owner_node()->element();
-        auto pseudo_element = owner_node()->pseudo_element();
-        source = element.computed_properties(pseudo_element);
-    }
+    auto& element = owner_node()->element();
+    auto pseudo_element = owner_node()->pseudo_element();
+    auto const* source = element.computed_properties(pseudo_element).ptr();
     VERIFY(source);
 
     auto get_computed_value = [source](PropertyID property_id) -> auto const& {

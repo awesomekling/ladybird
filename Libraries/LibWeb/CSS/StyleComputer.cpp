@@ -1725,8 +1725,6 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
 
 void StyleComputer::populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style, DOM::Document& document)
 {
-    computed_values.set_source_computed_properties(computed_style);
-
     // NB: float, clear, position, inset, margin, and z_index are NOT set here because
     //     transfer_table_box_computed_values_to_wrapper_computed_values() modifies these
     //     on table boxes, and populate_computed_values() would clobber those modifications
