@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 use crate::ast::*;
 
-use super::generator::{choose_dst, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
+use super::generator::{choose_dst, constant_to_boolean, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
 use super::operand::*;
 
@@ -1633,6 +1633,13 @@ fn generate_identifier(
         return Some(local);
     }
 
+    // OPTIMIZATION: Generate builtin constants (undefined, NaN, Infinity) directly.
+    if ident.is_global.get() {
+        if let Some(constant) = maybe_generate_builtin_constant(gen, &ident.name) {
+            return Some(constant);
+        }
+    }
+
     let dst = choose_dst(gen, preferred_dst);
     if ident.is_global.get() {
         let id = gen.intern_identifier(&ident.name);
@@ -1651,6 +1658,19 @@ fn generate_identifier(
         });
     }
     Some(dst)
+}
+
+fn maybe_generate_builtin_constant(gen: &mut Generator, name: &[u16]) -> Option<ScopedOperand> {
+    if name == utf16!("undefined") {
+        return Some(gen.add_constant_undefined());
+    }
+    if name == utf16!("NaN") {
+        return Some(gen.add_constant_number(f64::NAN));
+    }
+    if name == utf16!("Infinity") {
+        return Some(gen.add_constant_number(f64::INFINITY));
+    }
+    None
 }
 
 // =============================================================================
@@ -1758,6 +1778,14 @@ fn generate_conditional(
     let dst = choose_dst(gen, preferred_dst);
     let predicate = generate_expr(test, gen, None)?;
 
+    // OPTIMIZATION: if the predicate is always true/false, only generate the taken expression.
+    if let Some(constant) = gen.get_constant(&predicate) {
+        if constant_to_boolean(constant) {
+            return generate_expr(consequent, gen, Some(&dst));
+        }
+        return generate_expr(alternate, gen, Some(&dst));
+    }
+
     let true_block = gen.make_block();
     let false_block = gen.make_block();
     let end_block = gen.make_block();
@@ -1811,6 +1839,37 @@ fn generate_if_statement(
     } else {
         None
     };
+
+    // OPTIMIZATION: if the predicate is always true/false, only build the taken branch.
+    if let Some(constant) = gen.get_constant(&pred) {
+        let is_truthy = constant_to_boolean(constant);
+        if is_truthy {
+            let saved_completion = gen.current_completion_register.clone();
+            if let Some(ref c) = completion {
+                gen.current_completion_register = Some(c.clone());
+            }
+            let val = generate_stmt(consequent, gen, preferred_dst);
+            if !gen.is_current_block_terminated() {
+                if let (Some(ref c), Some(ref v)) = (&completion, &val) {
+                    gen.emit_mov(c, v);
+                }
+            }
+            gen.current_completion_register = saved_completion;
+        } else if let Some(alt) = alternate {
+            let saved_completion = gen.current_completion_register.clone();
+            if let Some(ref c) = completion {
+                gen.current_completion_register = Some(c.clone());
+            }
+            let val = generate_stmt(alt, gen, preferred_dst);
+            if !gen.is_current_block_terminated() {
+                if let (Some(ref c), Some(ref v)) = (&completion, &val) {
+                    gen.emit_mov(c, v);
+                }
+            }
+            gen.current_completion_register = saved_completion;
+        }
+        return completion;
+    }
 
     let true_block = gen.make_block();
     let false_block = gen.make_block();
@@ -1869,8 +1928,6 @@ fn generate_while_statement(
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
     let test_block = gen.make_block();
-    let body_block = gen.make_block();
-    let end_block = gen.make_block();
 
     let completion = if gen.must_propagate_completion {
         let reg = gen.allocate_register();
@@ -1887,6 +1944,17 @@ fn generate_while_statement(
 
     gen.switch_to_basic_block(test_block);
     let test_val = generate_expr_or_undefined(test, gen, None);
+
+    // OPTIMIZATION: If predicate is always false, ignore body and exit early.
+    if let Some(constant) = gen.get_constant(&test_val) {
+        if !constant_to_boolean(constant) {
+            return completion;
+        }
+    }
+
+    let body_block = gen.make_block();
+    let end_block = gen.make_block();
+
     gen.emit_jump_if(&test_val, Label(body_block as u32), Label(end_block as u32));
 
     gen.switch_to_basic_block(body_block);
@@ -2068,6 +2136,25 @@ fn generate_for_statement(
     if test.is_some() {
         gen.switch_to_basic_block(test_block);
         let test_val = generate_expr_or_undefined(test.unwrap(), gen, None);
+
+        // OPTIMIZATION: test value is always falsey, skip body entirely.
+        if let Some(constant) = gen.get_constant(&test_val) {
+            if !constant_to_boolean(constant) {
+                gen.emit(Instruction::Jump {
+                    target: Label(end_block as u32),
+                });
+                gen.switch_to_basic_block(end_block);
+                if has_lexical_environment {
+                    gen.lexical_environment_register_stack.pop();
+                    if !gen.is_current_block_terminated() {
+                        let parent = gen.current_lexical_environment();
+                        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+                    }
+                }
+                return completion;
+            }
+        }
+
         gen.emit_jump_if(&test_val, Label(body_block as u32), Label(end_block as u32));
     }
 
