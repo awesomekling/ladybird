@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/CSS/VisualViewport.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
@@ -2944,8 +2944,8 @@ void Navigable::reset_zoom()
 bool Navigable::has_inclusive_ancestor_with_visibility_hidden() const
 {
     if (auto container = this->container()) {
-        if (auto container_computed_properties = container->computed_properties()) {
-            if (container_computed_properties->visibility() == CSS::Visibility::Hidden)
+        if (auto const* container_computed_values = container->computed_values()) {
+            if (container_computed_values->visibility() == CSS::Visibility::Hidden)
                 return true;
         }
         if (auto ancestor_navigable = container->document().navigable()) {
