@@ -1709,13 +1709,13 @@ impl<'a> Parser<'a> {
         // Register parameters with scope collector.
         self.register_function_params_with_scope(&params, &param_info);
 
-        if is_getter && !param_info.is_empty() {
+        if is_getter && !params.is_empty() {
             self.syntax_error("Getter function must have no arguments");
         }
         if is_setter {
-            if param_info.is_empty() || param_info.len() > 1 {
+            if params.is_empty() || params.len() > 1 {
                 self.syntax_error("Setter function must have one argument");
-            } else if param_info[0].1 {
+            } else if params[0].is_rest {
                 self.syntax_error("Setter function must have one argument");
             }
         }
