@@ -1003,6 +1003,7 @@ impl<'a> Parser<'a> {
                     // Object binding pattern entry: parse name.
                     let mut needs_alias = false;
                     let mut entry_name_value: Vec<u16> = Vec::new();
+                    let mut entry_is_keyword = false;
 
                     if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
                         let entry_start = self.position();
@@ -1010,6 +1011,9 @@ impl<'a> Parser<'a> {
                         if self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) {
                             needs_alias = true;
                         }
+
+                        entry_is_keyword = self.current_token.token_type.is_identifier_name()
+                            && !self.match_identifier();
 
                         if self.match_token(TokenType::StringLiteral) {
                             let tok = self.consume();
@@ -1077,6 +1081,9 @@ impl<'a> Parser<'a> {
                         break;
                     } else if !entry_name_value.is_empty() {
                         // Shorthand: name is the bound identifier.
+                        if entry_is_keyword {
+                            self.syntax_error("Binding pattern target may not be a reserved word");
+                        }
                         // The identifier is in entry_name (BindingEntryName::Identifier).
                         if let BindingEntryName::Identifier(ref id) = entry_name {
                             self.pattern_bound_names.push((entry_name_value, id.clone()));
