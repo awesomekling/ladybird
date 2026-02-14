@@ -907,7 +907,7 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
 {
     // FIXME: For now we don't bother registering transitions on the first computation since they can't run (because
     //        there is nothing to transition from) but this will change once we implement @starting-style
-    if (!abstract_element.computed_properties())
+    if (!abstract_element.computed_values())
         return;
     // FIXME: Add transition helpers on AbstractElement.
     auto& element = abstract_element.element();
@@ -1532,7 +1532,7 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
     if (text_align_keyword == Keyword::MatchParent) {
         if (auto const parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
             auto const& parent_text_align = parent->computed_properties()->property(PropertyID::TextAlign);
-            auto const& parent_direction = parent->computed_properties()->direction();
+            auto parent_direction = parent->computed_values() ? parent->computed_values()->direction() : Direction::Ltr;
             switch (parent_text_align.to_keyword()) {
             case Keyword::Start:
                 if (parent_direction == Direction::Ltr) {
