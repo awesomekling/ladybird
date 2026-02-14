@@ -1432,7 +1432,7 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
     // user agents must instead apply the overflow-* values of the first such child element to the viewport.
     if (root_element.is_html_html_element()) {
         auto root_element_layout_node = root_element.layout_node();
-        auto& root_element_computed_values = root_element_layout_node->mutable_computed_values();
+        auto const& root_element_computed_values = root_element_layout_node->computed_values();
         if (root_element_computed_values.overflow_x() == CSS::Overflow::Visible && root_element_computed_values.overflow_y() == CSS::Overflow::Visible) {
             auto* body_element = root_element.first_child_of_type<HTML::HTMLBodyElement>();
             if (body_element && body_element->layout_node())
@@ -1441,7 +1441,7 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
     }
 
     // If 'visible' is applied to the viewport, it must be interpreted as 'auto'. If 'clip' is applied to the viewport, it must be interpreted as 'hidden'.
-    auto& overflow_origin_computed_values = overflow_origin_node->mutable_computed_values();
+    auto const& overflow_origin_computed_values = overflow_origin_node->computed_values();
     auto overflow_x_to_apply = overflow_origin_computed_values.overflow_x();
     if (overflow_x_to_apply == CSS::Overflow::Visible) {
         overflow_x_to_apply = CSS::Overflow::Auto;
@@ -1458,9 +1458,7 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
     viewport_computed_values.set_overflow_y(overflow_y_to_apply);
 
     // The element from which the value is propagated must then have a used overflow value of visible.
-    // FIXME: Apply this to the used values, not the computed ones.
-    overflow_origin_computed_values.set_overflow_x(CSS::Overflow::Visible);
-    overflow_origin_computed_values.set_overflow_y(CSS::Overflow::Visible);
+    overflow_origin_node->set_overflow_propagated_to_viewport();
 }
 
 void Document::update_layout(UpdateLayoutReason reason)

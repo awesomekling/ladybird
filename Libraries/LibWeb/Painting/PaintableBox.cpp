@@ -364,7 +364,8 @@ bool PaintableBox::could_be_scrolled_by_wheel_event(ScrollDirection direction) c
 {
     bool is_horizontal = direction == ScrollDirection::Horizontal;
     Gfx::Orientation orientation = is_horizontal ? Gfx::Orientation::Horizontal : Gfx::Orientation::Vertical;
-    auto overflow = is_horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
+    auto& layout = layout_node_with_style_and_box_metrics();
+    auto overflow = is_horizontal ? layout.overflow_x() : layout.overflow_y();
 
     auto scrollable_overflow_rect = this->scrollable_overflow_rect();
     if (!scrollable_overflow_rect.has_value())
@@ -460,7 +461,8 @@ Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(Scrol
 {
     bool is_horizontal = direction == ScrollDirection::Horizontal;
     auto orientation = is_horizontal ? Gfx::Orientation::Horizontal : Gfx::Orientation::Vertical;
-    auto overflow = is_horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
+    auto& layout = layout_node_with_style_and_box_metrics();
+    auto overflow = is_horizontal ? layout.overflow_x() : layout.overflow_y();
 
     if (overflow != CSS::Overflow::Scroll && !could_be_scrolled_by_wheel_event(direction))
         return {};

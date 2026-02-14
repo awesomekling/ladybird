@@ -330,8 +330,8 @@ void ViewportPaintable::assign_accumulated_visual_contexts()
         if (auto perspective_matrix = compute_perspective_matrix(paintable_box, computed_values); perspective_matrix.has_value())
             state_for_descendants = append_node(state_for_descendants, PerspectiveData { *perspective_matrix });
 
-        auto overflow_x = computed_values.overflow_x();
-        auto overflow_y = computed_values.overflow_y();
+        auto overflow_x = paintable_box.layout_node_with_style_and_box_metrics().overflow_x();
+        auto overflow_y = paintable_box.layout_node_with_style_and_box_metrics().overflow_y();
         auto has_hidden_overflow = overflow_x != CSS::Overflow::Visible || overflow_y != CSS::Overflow::Visible;
 
         auto should_clip_overflow = has_hidden_overflow && paintable_box.overflow_property_applies();

@@ -793,8 +793,22 @@ bool NodeWithStyle::is_scroll_container() const
     if (is_viewport())
         return true;
 
-    return overflow_value_makes_box_a_scroll_container(computed_values().overflow_x())
-        || overflow_value_makes_box_a_scroll_container(computed_values().overflow_y());
+    return overflow_value_makes_box_a_scroll_container(overflow_x())
+        || overflow_value_makes_box_a_scroll_container(overflow_y());
+}
+
+CSS::Overflow NodeWithStyle::overflow_x() const
+{
+    if (m_overflow_propagated_to_viewport)
+        return CSS::Overflow::Visible;
+    return computed_values().overflow_x();
+}
+
+CSS::Overflow NodeWithStyle::overflow_y() const
+{
+    if (m_overflow_propagated_to_viewport)
+        return CSS::Overflow::Visible;
+    return computed_values().overflow_y();
 }
 
 void Node::add_paintable(GC::Ptr<Painting::Paintable> paintable)

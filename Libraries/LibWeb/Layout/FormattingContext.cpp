@@ -91,10 +91,10 @@ bool FormattingContext::creates_block_formatting_context(Box const& box)
     //        (which is the default for HTML tables, table rows, table bodies, table headers, and table footers, respectively), or inline-table.
 
     // Block elements where overflow has a value other than visible and clip.
-    CSS::Overflow overflow_x = box.computed_values().overflow_x();
+    CSS::Overflow overflow_x = box.overflow_x();
     if ((overflow_x != CSS::Overflow::Visible) && (overflow_x != CSS::Overflow::Clip))
         return true;
-    CSS::Overflow overflow_y = box.computed_values().overflow_y();
+    CSS::Overflow overflow_y = box.overflow_y();
     if ((overflow_y != CSS::Overflow::Visible) && (overflow_y != CSS::Overflow::Clip))
         return true;
 
@@ -397,7 +397,7 @@ CSSPixels FormattingContext::compute_auto_height_for_block_formatting_context_ro
                 return IterationDecision::Continue;
 
             // FIXME: This doesn't look right.
-            if ((root.computed_values().overflow_y() == CSS::Overflow::Visible) && child_box.is_floating())
+            if ((root.overflow_y() == CSS::Overflow::Visible) && child_box.is_floating())
                 return IterationDecision::Continue;
 
             auto const& child_box_state = m_state.get(child_box);
@@ -2084,8 +2084,8 @@ CSSPixels FormattingContext::box_baseline(Box const& box) const
     // NB: This overflow exception only applies to inline-block, not to inline-flex or inline-grid containers, which
     //     always derive their baselines from their content per CSS Align and the respective Flexbox/Grid specs.
     auto const& display = box.display();
-    auto const& overflow_x = box.computed_values().overflow_x();
-    auto const& overflow_y = box.computed_values().overflow_y();
+    auto overflow_x = box.overflow_x();
+    auto overflow_y = box.overflow_y();
     bool has_visible_overflow = overflow_x == CSS::Overflow::Visible && overflow_y == CSS::Overflow::Visible;
     bool always_derive_from_content = display.is_flex_inside() || display.is_grid_inside() || has_visible_overflow;
 

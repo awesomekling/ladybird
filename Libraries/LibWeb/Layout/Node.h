@@ -279,6 +279,14 @@ public:
     bool is_body() const;
     bool is_scroll_container() const;
 
+    // Used overflow values account for viewport overflow propagation.
+    // When an element's overflow is propagated to the viewport, its used
+    // overflow value becomes Visible per spec, even though its computed
+    // value remains unchanged.
+    CSS::Overflow overflow_x() const;
+    CSS::Overflow overflow_y() const;
+    void set_overflow_propagated_to_viewport() { m_overflow_propagated_to_viewport = true; }
+
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
     void set_owned_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
@@ -296,6 +304,7 @@ private:
 
     OwnPtr<CSS::ComputedValues> m_owned_computed_values;
     CSS::ComputedValues* m_computed_values_ptr { nullptr };
+    bool m_overflow_propagated_to_viewport { false };
     RefPtr<CSS::AbstractImageStyleValue const> m_list_style_image;
     GC::Ptr<CSS::CSSImageResource> m_list_style_image_resource;
 };

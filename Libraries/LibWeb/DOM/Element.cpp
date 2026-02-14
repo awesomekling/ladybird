@@ -1922,6 +1922,11 @@ bool Element::is_potentially_scrollable(TreatOverflowClipOnBodyParentAsOverflowH
 
 bool Element::is_scroll_container() const
 {
+    // Delegate to the layout node when available, as it accounts for
+    // overflow propagation to the viewport (used vs computed overflow).
+    if (layout_node())
+        return layout_node()->is_scroll_container();
+
     VERIFY(computed_values());
 
     if (is_document_element())
