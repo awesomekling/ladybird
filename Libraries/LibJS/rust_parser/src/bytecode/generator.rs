@@ -957,15 +957,109 @@ impl Generator {
             }
         }
 
-        // Phase 2: Compute block byte offsets using encoded_size()
-        let mut block_offsets: Vec<usize> = Vec::with_capacity(self.basic_blocks.len());
-        let mut offset: usize = 0;
-        for block in &self.basic_blocks {
-            block_offsets.push(offset);
-            for (inst, _) in &block.instructions {
-                offset += inst.encoded_size();
-            }
+        // Phase 2: Compute block byte offsets, applying assembly-time optimizations.
+        // These match the C++ Generator.cpp:compile() optimizations:
+        //   - Skip Jump-to-next-block
+        //   - Replace Jump-to-Return/End-only-block with inline Return/End
+        //   - Replace JumpIf-where-one-target-is-next-block with JumpTrue/JumpFalse
+        let num_blocks = self.basic_blocks.len();
+        let mut block_offsets: Vec<usize> = Vec::with_capacity(num_blocks);
+        // Per-instruction skip flags: skip_flags[block_idx][inst_idx] = replacement action
+        #[derive(Clone, Copy)]
+        enum InstAction {
+            Emit,
+            Skip,
+            JumpToReturn(Operand),
+            JumpToEnd(Operand),
+            EmitJumpTrue { condition: Operand, target: Label },
+            EmitJumpFalse { condition: Operand, target: Label },
         }
+        let mut actions: Vec<Vec<InstAction>> = Vec::with_capacity(num_blocks);
+        let mut offset: usize = 0;
+
+        for block_idx in 0..num_blocks {
+            block_offsets.push(offset);
+            let block = &self.basic_blocks[block_idx];
+            let mut block_actions = Vec::with_capacity(block.instructions.len());
+            for (inst_idx, (inst, _)) in block.instructions.iter().enumerate() {
+                match inst {
+                    Instruction::Jump { target } => {
+                        let target_block = target.0 as usize;
+                        // OPTIMIZATION: Don't emit jumps that just jump to the next block.
+                        if target_block == block_idx + 1 {
+                            // If this block would become empty, we handle it by
+                            // not advancing offset (matching C++ behavior of removing
+                            // the block_start_offset entry and reusing it).
+                            block_actions.push(InstAction::Skip);
+                            continue;
+                        }
+                        // OPTIMIZATION: For jumps to a return-or-end-only block, inline
+                        // the Return/End instead of emitting the Jump.
+                        let target_blk = &self.basic_blocks[target_block];
+                        if target_blk.terminated && target_blk.instructions.len() == 1 {
+                            match &target_blk.instructions[0].0 {
+                                Instruction::Return { value } => {
+                                    let replacement = Instruction::Return { value: *value };
+                                    block_actions.push(InstAction::JumpToReturn(*value));
+                                    offset += replacement.encoded_size();
+                                    continue;
+                                }
+                                Instruction::End { value } => {
+                                    let replacement = Instruction::End { value: *value };
+                                    block_actions.push(InstAction::JumpToEnd(*value));
+                                    offset += replacement.encoded_size();
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                        block_actions.push(InstAction::Emit);
+                        offset += inst.encoded_size();
+                    }
+                    Instruction::JumpIf { condition, true_target, false_target } => {
+                        let true_block = true_target.0 as usize;
+                        let false_block = false_target.0 as usize;
+                        // OPTIMIZATION: Replace JumpIf where one target is next block
+                        // with JumpTrue or JumpFalse.
+                        if true_block == block_idx + 1 {
+                            block_actions.push(InstAction::EmitJumpFalse {
+                                condition: *condition,
+                                target: *false_target,
+                            });
+                            // JumpFalse is: condition + target = 16 bytes
+                            offset += 16;
+                            continue;
+                        }
+                        if false_block == block_idx + 1 {
+                            block_actions.push(InstAction::EmitJumpTrue {
+                                condition: *condition,
+                                target: *true_target,
+                            });
+                            offset += 16;
+                            continue;
+                        }
+                        block_actions.push(InstAction::Emit);
+                        offset += inst.encoded_size();
+                    }
+                    _ => {
+                        block_actions.push(InstAction::Emit);
+                        offset += inst.encoded_size();
+                    }
+                }
+                let _ = inst_idx;
+            }
+            // Unterminated blocks get an implicit End(undefined) appended.
+            if !block.terminated {
+                let dummy_end = Instruction::End { value: Operand::constant(0) };
+                offset += dummy_end.encoded_size();
+            }
+            actions.push(block_actions);
+        }
+
+        // Check if any block became empty due to skip, and adjust its offset
+        // to match the next block's offset (C++ pops basic_block_start_offsets.last()).
+        // We handle this by keeping block_offsets as-is since labels referencing
+        // an empty block will resolve to the same byte offset as the next block.
 
         // Phase 3: Patch labels (block index → byte offset)
         for block in &mut self.basic_blocks {
@@ -977,27 +1071,95 @@ impl Generator {
             }
         }
 
-        // Phase 4: Encode to bytes
+        // Phase 4: Encode to bytes with optimizations applied
         let mut bytecode: Vec<u8> = Vec::with_capacity(offset);
         let mut source_map: Vec<SourceMapEntry> = Vec::new();
         let mut exception_handlers: Vec<ExceptionHandler> = Vec::new();
 
         for (block_idx, block) in self.basic_blocks.iter().enumerate() {
             let block_start = bytecode.len();
-
-            // Track exception handler range
             let handler = block.handler;
+            let block_actions = &actions[block_idx];
 
-            for (inst, sm) in &block.instructions {
+            for (inst_idx, (inst, sm)) in block.instructions.iter().enumerate() {
+                let action = block_actions[inst_idx];
+                match action {
+                    InstAction::Skip => {
+                        // If this skip makes the block empty, adjust block_offsets
+                        // so labels to this block point to the next instruction.
+                        // (The C++ code pops basic_block_start_offsets.take_last()
+                        //  when the block becomes empty.)
+                    }
+                    InstAction::Emit => {
+                        let inst_offset = bytecode.len();
+                        source_map.push(SourceMapEntry {
+                            bytecode_offset: inst_offset as u32,
+                            source_start: sm.source_start,
+                            source_end: sm.source_end,
+                        });
+                        inst.encode(self.strict, &mut bytecode);
+                    }
+                    InstAction::JumpToReturn(value) => {
+                        let inst_offset = bytecode.len();
+                        source_map.push(SourceMapEntry {
+                            bytecode_offset: inst_offset as u32,
+                            source_start: sm.source_start,
+                            source_end: sm.source_end,
+                        });
+                        let replacement = Instruction::Return { value };
+                        replacement.encode(self.strict, &mut bytecode);
+                    }
+                    InstAction::JumpToEnd(value) => {
+                        let inst_offset = bytecode.len();
+                        source_map.push(SourceMapEntry {
+                            bytecode_offset: inst_offset as u32,
+                            source_start: sm.source_start,
+                            source_end: sm.source_end,
+                        });
+                        let replacement = Instruction::End { value };
+                        replacement.encode(self.strict, &mut bytecode);
+                    }
+                    InstAction::EmitJumpFalse { condition, mut target } => {
+                        // Patch label for the target
+                        let target_block = target.0 as usize;
+                        target.0 = block_offsets[target_block] as u32;
+                        let inst_offset = bytecode.len();
+                        source_map.push(SourceMapEntry {
+                            bytecode_offset: inst_offset as u32,
+                            source_start: sm.source_start,
+                            source_end: sm.source_end,
+                        });
+                        let replacement = Instruction::JumpFalse { condition, target };
+                        replacement.encode(self.strict, &mut bytecode);
+                    }
+                    InstAction::EmitJumpTrue { condition, mut target } => {
+                        let target_block = target.0 as usize;
+                        target.0 = block_offsets[target_block] as u32;
+                        let inst_offset = bytecode.len();
+                        source_map.push(SourceMapEntry {
+                            bytecode_offset: inst_offset as u32,
+                            source_start: sm.source_start,
+                            source_end: sm.source_end,
+                        });
+                        let replacement = Instruction::JumpTrue { condition, target };
+                        replacement.encode(self.strict, &mut bytecode);
+                    }
+                }
+            }
+
+            // Unterminated blocks get an implicit End(undefined).
+            if !block.terminated {
+                let undef_operand = Operand::constant(number_of_constants - 1);
+                let mut undef_rewritten = undef_operand;
+                undef_rewritten.offset_index_by(number_of_registers + number_of_locals);
+                let end_inst = Instruction::End { value: undef_rewritten };
                 let inst_offset = bytecode.len();
-
                 source_map.push(SourceMapEntry {
                     bytecode_offset: inst_offset as u32,
-                    source_start: sm.source_start,
-                    source_end: sm.source_end,
+                    source_start: 0,
+                    source_end: 0,
                 });
-
-                inst.encode(self.strict, &mut bytecode);
+                end_inst.encode(self.strict, &mut bytecode);
             }
 
             // Close exception handler range
@@ -1008,14 +1170,28 @@ impl Generator {
                     handler_offset: block_offsets[handler_block] as u32,
                 });
             }
-
-            let _ = block_idx;
         }
+
+        // Merge adjacent exception handlers with the same handler offset
+        // (matching C++ Generator.cpp behavior).
+        let mut merged_handlers: Vec<ExceptionHandler> = Vec::new();
+        for handler in &exception_handlers {
+            if let Some(last) = merged_handlers.last_mut() {
+                if last.end_offset == handler.start_offset
+                    && last.handler_offset == handler.handler_offset
+                {
+                    last.end_offset = handler.end_offset;
+                    continue;
+                }
+            }
+            merged_handlers.push(handler.clone());
+        }
+        merged_handlers.sort_by_key(|h| h.start_offset);
 
         AssembledBytecode {
             bytecode,
             source_map,
-            exception_handlers,
+            exception_handlers: merged_handlers,
             basic_block_start_offsets: block_offsets,
             number_of_registers,
         }
