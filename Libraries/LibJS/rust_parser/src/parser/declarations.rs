@@ -95,6 +95,9 @@ impl<'a> Parser<'a> {
             TokenType::Class => self.parse_class_declaration(),
             TokenType::Let | TokenType::Const => self.parse_variable_declaration(false),
             TokenType::Identifier if self.token_value(&self.current_token) == utf16!("using") => {
+                if !self.scope_collector.can_have_using_declaration() {
+                    self.syntax_error("'using' not allowed outside of block, for loop or function");
+                }
                 self.parse_using_declaration(false)
             }
             _ => {
