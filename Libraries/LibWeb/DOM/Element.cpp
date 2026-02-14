@@ -977,11 +977,12 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
 
         RefPtr old_value = computed_properties->property(property_id);
 
-        if (computed_properties->is_animated_property_inherited(property_id) || !computed_properties->animated_property_values().contains(property_id)) {
+        auto& animated_data = computed_properties->mutable_animated_property_data();
+        if (animated_data.is_inherited(property_id) || !animated_data.values.contains(property_id)) {
             if (auto new_animated_value = CSS::StyleComputer::get_animated_inherit_value(property_id, { *this }); new_animated_value.has_value())
-                computed_properties->set_animated_property(property_id, new_animated_value->value, new_animated_value->is_result_of_transition, CSS::ComputedProperties::Inherited::Yes);
-            else if (computed_properties->animated_property_values().contains(property_id))
-                computed_properties->remove_animated_property(property_id);
+                animated_data.set(property_id, new_animated_value->value, new_animated_value->is_result_of_transition, true);
+            else if (animated_data.values.contains(property_id))
+                animated_data.remove(property_id);
         }
 
         RefPtr new_value = CSS::StyleComputer::get_non_animated_inherit_value(property_id, { *this });

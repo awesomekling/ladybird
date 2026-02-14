@@ -1271,10 +1271,11 @@ Optional<StyleComputer::AnimatedInheritValue> StyleComputer::get_animated_inheri
     if (!parent_element.has_value() || !parent_element->computed_properties())
         return {};
 
-    if (auto animated_value = parent_element->computed_properties()->animated_property_values().get(property_id); animated_value.has_value())
+    auto const& animated_data = parent_element->computed_properties()->animated_property_data();
+    if (auto animated_value = animated_data.values.get(property_id); animated_value.has_value())
         return AnimatedInheritValue {
             .value = *animated_value.value(),
-            .is_result_of_transition = parent_element->computed_properties()->is_animated_property_result_of_transition(property_id)
+            .is_result_of_transition = animated_data.is_result_of_transition(property_id)
                 ? AnimatedPropertyResultOfTransition::Yes
                 : AnimatedPropertyResultOfTransition::No
         };
@@ -2371,14 +2372,15 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
             requires_computation = property_requires_computation_with_inherited_value(property_id);
 
             // FIXME: Do we need to recompute animated inherited values?
-            if (auto animated_value = computed_properties_to_inherit_from->animated_property_values().get(property_id); animated_value.has_value())
-                computed_style->set_animated_property(
+            auto const& parent_animated_data = computed_properties_to_inherit_from->animated_property_data();
+            if (auto animated_value = parent_animated_data.values.get(property_id); animated_value.has_value())
+                computed_style->mutable_animated_property_data().set(
                     property_id,
                     *animated_value.value(),
-                    computed_properties_to_inherit_from->is_animated_property_result_of_transition(property_id)
+                    parent_animated_data.is_result_of_transition(property_id)
                         ? AnimatedPropertyResultOfTransition::Yes
                         : AnimatedPropertyResultOfTransition::No,
-                    ComputedProperties::Inherited::Yes);
+                    true);
         }
 
         if (!value || value->is_initial() || value->is_unset() || (should_inherit && !computed_properties_to_inherit_from)) {

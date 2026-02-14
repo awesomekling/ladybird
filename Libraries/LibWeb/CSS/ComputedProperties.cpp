@@ -136,16 +136,6 @@ bool ComputedProperties::is_property_inherited(PropertyID property_id) const
     return m_property_inherited[n / 8] & (1 << (n % 8));
 }
 
-bool ComputedProperties::is_animated_property_inherited(PropertyID property_id) const
-{
-    return animated_property_data().is_inherited(property_id);
-}
-
-bool ComputedProperties::is_animated_property_result_of_transition(PropertyID property_id) const
-{
-    return animated_property_data().is_result_of_transition(property_id);
-}
-
 void ComputedProperties::set_property_inherited(PropertyID property_id, Inherited inherited)
 {
     VERIFY(property_id >= first_longhand_property_id && property_id <= last_longhand_property_id);
@@ -155,18 +145,6 @@ void ComputedProperties::set_property_inherited(PropertyID property_id, Inherite
         m_property_inherited[n / 8] |= (1 << (n % 8));
     else
         m_property_inherited[n / 8] &= ~(1 << (n % 8));
-}
-
-void ComputedProperties::set_animated_property_inherited(PropertyID property_id, Inherited inherited)
-{
-    auto& data = m_external_animated_data ? *m_external_animated_data : m_animated_properties;
-    data.set_inherited(property_id, inherited == Inherited::Yes);
-}
-
-void ComputedProperties::set_animated_property_result_of_transition(PropertyID property_id, AnimatedPropertyResultOfTransition animated_value_result_of_transition)
-{
-    auto& data = m_external_animated_data ? *m_external_animated_data : m_animated_properties;
-    data.set_result_of_transition(property_id, animated_value_result_of_transition == AnimatedPropertyResultOfTransition::Yes);
 }
 
 void ComputedProperties::set_property(PropertyID id, NonnullRefPtr<StyleValue const> value, Inherited inherited, Important important)
@@ -210,29 +188,6 @@ Display ComputedProperties::display_before_box_type_transformation() const
 void ComputedProperties::set_display_before_box_type_transformation(Display value)
 {
     m_display_before_box_type_transformation = value;
-}
-
-void ComputedProperties::set_animated_property(PropertyID id, NonnullRefPtr<StyleValue const> value, AnimatedPropertyResultOfTransition animated_property_result_of_transition, Inherited inherited)
-{
-    auto& data = m_external_animated_data ? *m_external_animated_data : m_animated_properties;
-    data.values.set(id, move(value));
-    set_animated_property_inherited(id, inherited);
-    set_animated_property_result_of_transition(id, animated_property_result_of_transition);
-
-    if (property_affects_computed_font_list(id))
-        clear_computed_font_list_cache();
-}
-
-void ComputedProperties::remove_animated_property(PropertyID id)
-{
-    auto& data = m_external_animated_data ? *m_external_animated_data : m_animated_properties;
-    data.values.remove(id);
-}
-
-void ComputedProperties::reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>)
-{
-    auto& data = m_external_animated_data ? *m_external_animated_data : m_animated_properties;
-    data.reset_non_inherited_properties();
 }
 
 StyleValue const& ComputedProperties::property(PropertyID property_id, WithAnimationsApplied return_animated_value) const

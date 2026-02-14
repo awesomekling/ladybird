@@ -949,13 +949,14 @@ void KeyframeEffect::update_computed_properties(AnimationUpdateContext& context)
     if (!computed_properties)
         return;
     DOM::AbstractElement abstract_element { *target, pseudo_element_type() };
-    context.elements.ensure(abstract_element, [computed_properties] {
-        auto old_animated_properties = computed_properties->animated_property_values();
-        computed_properties->reset_non_inherited_animated_properties({});
+    auto& animated_data = computed_properties->mutable_animated_property_data();
+    context.elements.ensure(abstract_element, [&animated_data, computed_properties] {
+        auto old_animated_properties = animated_data.values;
+        animated_data.reset_non_inherited_properties();
         return make<AnimationUpdateContext::ElementData>(move(old_animated_properties), computed_properties);
     });
 
-    target->document().style_computer().collect_animation_into(abstract_element, *this, *computed_properties, computed_properties->mutable_animated_property_data());
+    target->document().style_computer().collect_animation_into(abstract_element, *this, *computed_properties, animated_data);
 }
 
 Bindings::CompositeOperation css_animation_composition_to_bindings_composite_operation(CSS::AnimationComposition composition)

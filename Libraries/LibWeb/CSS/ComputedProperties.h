@@ -85,21 +85,13 @@ public:
         m_cached_computed_font_list = nullptr;
         m_cached_first_available_computed_font = nullptr;
     }
-    void reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>);
-
     bool is_property_important(PropertyID property_id) const;
     bool is_property_inherited(PropertyID property_id) const;
-    bool is_animated_property_inherited(PropertyID property_id) const;
-    bool is_animated_property_result_of_transition(PropertyID property_id) const;
     void set_property_important(PropertyID, Important);
     void set_property_inherited(PropertyID, Inherited);
-    void set_animated_property_inherited(PropertyID, Inherited);
-    void set_animated_property_result_of_transition(PropertyID, AnimatedPropertyResultOfTransition);
 
     void set_property(PropertyID, NonnullRefPtr<StyleValue const> value, Inherited = Inherited::No, Important = Important::No);
     void set_property_without_modifying_flags(PropertyID, NonnullRefPtr<StyleValue const> value);
-    void set_animated_property(PropertyID, NonnullRefPtr<StyleValue const> value, AnimatedPropertyResultOfTransition, Inherited = Inherited::No);
-    void remove_animated_property(PropertyID);
     enum class WithAnimationsApplied {
         No,
         Yes,
