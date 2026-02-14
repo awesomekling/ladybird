@@ -38,6 +38,19 @@ enum class AnimatedPropertyResultOfTransition : u8 {
     Yes
 };
 
+struct AnimatedPropertyData {
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> values;
+    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> inherited {};
+    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> result_of_transition {};
+
+    bool is_inherited(PropertyID) const;
+    bool is_result_of_transition(PropertyID) const;
+    void set_inherited(PropertyID, bool);
+    void set_result_of_transition(PropertyID, bool);
+
+    void reset_non_inherited_properties();
+};
+
 class WEB_API ComputedProperties final : public RefCounted<ComputedProperties> {
 public:
     static constexpr double normal_line_height_scale = 1.15;
@@ -59,7 +72,7 @@ public:
         Yes
     };
 
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_animated_property_values; }
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_animated_properties.values; }
     void reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>);
 
     bool is_property_important(PropertyID property_id) const;
@@ -290,10 +303,7 @@ private:
     Array<RefPtr<StyleValue const>, number_of_longhand_properties> m_property_values;
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_important {};
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_inherited {};
-    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_animated_property_inherited {};
-    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_animated_property_result_of_transition {};
-
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_animated_property_values;
+    AnimatedPropertyData m_animated_properties;
 
     Display m_display_before_box_type_transformation { InitialValues::display() };
 
