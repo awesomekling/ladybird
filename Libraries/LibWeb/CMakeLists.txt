@@ -104,6 +104,7 @@ set(SOURCES
     CSS/Clip.cpp
     CSS/ComputedProperties.cpp
     CSS/ComputedValues.cpp
+    CSS/StyleValueFromComputedValues.cpp
     CSS/CustomPropertyData.cpp
     CSS/CountersSet.cpp
     CSS/CSS.cpp
