@@ -2415,6 +2415,7 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
                     collect_animation_into(abstract_element, keyframe_effect, computed_style, computed_style->mutable_animated_property_data());
             }
         }
+        computed_style->clear_computed_font_list_cache();
     }
 
     // Run automatic box type transformations
@@ -2433,6 +2434,7 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     compute_transitioned_properties(computed_style, abstract_element);
     if (auto previous_style = abstract_element.computed_properties()) {
         start_needed_transitions(*previous_style, computed_style, abstract_element);
+        computed_style->clear_computed_font_list_cache();
     }
 
     // Tables must not inherit -libweb-* values for text-align.
