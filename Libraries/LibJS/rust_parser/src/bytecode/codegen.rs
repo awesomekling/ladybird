@@ -6409,94 +6409,29 @@ fn generate_try_statement(
 /// Create a SharedFunctionInstanceData for a function expression/declaration
 /// and register it with the generator.
 ///
-/// Clones the FunctionData and stores it in the SFD for lazy compilation
-/// through the Rust pipeline. No C++ AST is created.
-///
 /// Returns the shared_function_data_index for use in NewFunction instructions.
 fn emit_new_function(
     gen: &mut Generator,
     data: &FunctionData,
     name_override: Option<&[u16]>,
 ) -> u32 {
-    let source_start = data.source_text_start as usize;
-    let source_end = data.source_text_end as usize;
-
     assert!(
-        source_end <= gen.source_len,
+        data.source_text_end as usize <= gen.source_len,
         "Function source range out of bounds: {}..{} (source len {})",
-        source_start,
-        source_end,
+        data.source_text_start,
+        data.source_text_end,
         gen.source_len
     );
 
-    let source_text_len = source_end - source_start;
-
-    // Get function name.
-    let (name_ptr, name_len) = if let Some(name) = name_override {
-        (name.as_ptr(), name.len())
-    } else if let Some(name_ident) = &data.name {
-        (name_ident.name.as_ptr(), name_ident.name.len())
-    } else {
-        (std::ptr::null(), 0)
-    };
-
-    // Compute has_simple_parameter_list (IsSimpleParameterList).
-    let has_simple_parameter_list = data.parameters.iter().all(|p| {
-        !p.is_rest
-            && p.default_value.is_none()
-            && matches!(p.binding, FunctionParameterBinding::Identifier(_))
-    });
-
-    // Extract parameter names for mapped arguments (only if simple params).
-    let param_name_slices: Vec<super::ffi::FFIUtf16Slice> = if has_simple_parameter_list {
-        data.parameters
-            .iter()
-            .map(|p| {
-                if let FunctionParameterBinding::Identifier(ref id) = p.binding {
-                    super::ffi::FFIUtf16Slice {
-                        data: id.name.as_ptr(),
-                        length: id.name.len(),
-                    }
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Clone the FunctionData into a Box for storage in the SFD.
-    let cloned = Box::new(data.clone());
-    let rust_ast_ptr = Box::into_raw(cloned) as *mut std::ffi::c_void;
-
-    let function_kind = data.kind as u8;
-    let strict = data.is_strict_mode || gen.strict;
-
-    // Create SFD via FFI with pre-computed metadata + Rust AST.
     let sfd_ptr = unsafe {
-        super::ffi::rust_create_sfd(
+        super::ffi::create_shared_function_data(
+            data,
             gen.vm_ptr,
             gen.source_code_ptr,
-            name_ptr,
-            name_len,
-            function_kind,
-            data.function_length,
-            data.parameters.len() as u32,
-            strict,
-            data.is_arrow_function,
-            has_simple_parameter_list,
-            param_name_slices.as_ptr(),
-            param_name_slices.len(),
-            source_start,
-            source_text_len,
-            rust_ast_ptr,
-            data.parsing_insights.uses_this,
-            data.parsing_insights.uses_this_from_environment,
+            gen.strict,
+            name_override,
         )
     };
-
-    assert!(!sfd_ptr.is_null(), "rust_create_sfd returned null");
 
     gen.register_shared_function_data(sfd_ptr)
 }

@@ -160,19 +160,23 @@ extern "C" {
     pub fn rust_free_error_string(str: *const std::os::raw::c_char);
 }
 
-/// Create a SharedFunctionInstanceData for a FunctionData, for GDI use.
+/// Create a SharedFunctionInstanceData from a FunctionData.
 ///
-/// This is the same logic as `emit_new_function` in codegen.rs but without
-/// a Generator context. Used to create SFDs for top-level function
-/// declarations that GDI needs to instantiate.
+/// Computes has_simple_parameter_list, builds parameter name slices,
+/// clones the AST into a Box, and calls rust_create_sfd.
+///
+/// Used by both `emit_new_function` in codegen.rs (for function
+/// expressions/declarations) and `create_sfd_for_gdi` below (for
+/// top-level GDI function initialization).
 ///
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
-pub unsafe fn create_sfd_for_gdi(
+pub unsafe fn create_shared_function_data(
     func_data: &crate::ast::FunctionData,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     is_strict: bool,
+    name_override: Option<&[u16]>,
 ) -> *mut c_void {
     use crate::ast::FunctionParameterBinding;
 
@@ -180,7 +184,9 @@ pub unsafe fn create_sfd_for_gdi(
     let source_end = func_data.source_text_end as usize;
     let source_text_len = source_end - source_start;
 
-    let (name_ptr, name_len) = if let Some(ref name_ident) = func_data.name {
+    let (name_ptr, name_len) = if let Some(name) = name_override {
+        (name.as_ptr(), name.len())
+    } else if let Some(ref name_ident) = func_data.name {
         (name_ident.name.as_ptr(), name_ident.name.len())
     } else {
         (std::ptr::null(), 0)
@@ -237,8 +243,21 @@ pub unsafe fn create_sfd_for_gdi(
         func_data.parsing_insights.uses_this_from_environment,
     );
 
-    assert!(!sfd_ptr.is_null(), "create_sfd_for_gdi: rust_create_sfd returned null");
+    assert!(!sfd_ptr.is_null(), "create_shared_function_data: rust_create_sfd returned null");
     sfd_ptr
+}
+
+/// Create a SharedFunctionInstanceData for GDI use (no name override).
+///
+/// # Safety
+/// `vm_ptr` and `source_code_ptr` must be valid pointers.
+pub unsafe fn create_sfd_for_gdi(
+    func_data: &crate::ast::FunctionData,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    is_strict: bool,
+) -> *mut c_void {
+    create_shared_function_data(func_data, vm_ptr, source_code_ptr, is_strict, None)
 }
 
 /// Encode constants into a tagged byte buffer for FFI.
