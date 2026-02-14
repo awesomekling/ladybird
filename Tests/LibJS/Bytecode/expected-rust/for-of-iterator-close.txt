@@ -1,0 +1,114 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg6, identifier:forOfBreak
+[  18]       Call dst:reg5, callee:reg6, this_value:Undefined, forOfBreak
+[  38]       GetGlobal dst:reg7, identifier:forOfReturn
+[  48]       Call dst:reg6, callee:reg7, this_value:Undefined, forOfReturn
+[  68]       GetGlobal dst:reg7, identifier:forAwaitOfBreak
+[  78]       NewPrimitiveArray dst:reg8, elements:[1, 2, 3]
+[  a0]       Call dst:reg5, callee:reg7, this_value:Undefined, forAwaitOfBreak, arguments:[reg8]
+[  c8]       End value:reg5
+
+JS bytecode executable "forOfBreak"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       NewPrimitiveArray dst:reg5, elements:[1, 2, 3]
+[  30]       GetIterator dst_iterator_object:reg6, dst_iterator_next:reg7, dst_iterator_done:reg8, iterable:reg5
+[  48]       Jump target:@98
+[  50]    1: End value:Undefined
+[  58]    2: Catch dst:reg10
+[  60]       SetLexicalEnvironment environment:reg4
+[  68]       Mov dst:reg9, src:Int32(1)
+[  78]       Jump target:@80
+[  80]    3: JumpStrictlyEquals lhs:reg9, rhs:Int32(1), true_target:@118, false_target:@138
+[  98]    4: IteratorNextUnpack dst_value:reg11, dst_done:reg12, iterator_object:reg6, iterator_next:reg7, iterator_done:reg8
+[  b0]       JumpIf condition:reg12, true_target:@50, false_target:@c0
+[  c0]    5: Jump target:@c8
+[  c8]    6: Mov dst:x~0, src:reg11
+[  d8]       StrictlyEquals dst:reg13, lhs:x~0, rhs:Int32(2)
+[  e8]       JumpIf condition:reg13, true_target:@f8, false_target:@110
+[  f8]    7: Mov dst:reg9, src:Int32(3)
+[ 108]       Jump target:@80
+[ 110]    8: Jump target:@98
+[ 118]    9: IteratorClose iterator_object:reg6, iterator_next:reg7, iterator_done:reg8, completion_value:reg10
+[ 130]       Throw src:reg10
+[ 138]   10: IteratorClose iterator_object:reg6, iterator_next:reg7, iterator_done:reg8, completion_value:Undefined
+[ 150]       JumpStrictlyEquals lhs:reg9, rhs:Int32(3), true_target:@50, false_target:@168
+[ 168]   11: JumpStrictlyEquals lhs:reg9, rhs:Int32(2), true_target:@180, false_target:@188
+[ 180]   12: Return value:reg10
+[ 188]   13: Throw src:reg10
+
+Exception handlers:
+    from   c8 to   f8 handler   58
+    from   f8 to  110 handler   58
+    from  110 to  118 handler   58
+
+JS bytecode executable "forOfReturn"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       NewPrimitiveArray dst:reg5, elements:[1, 2, 3]
+[  30]       GetIterator dst_iterator_object:reg6, dst_iterator_next:reg7, dst_iterator_done:reg8, iterable:reg5
+[  48]       Jump target:@98
+[  50]    1: End value:Undefined
+[  58]    2: Catch dst:reg10
+[  60]       SetLexicalEnvironment environment:reg4
+[  68]       Mov dst:reg9, src:Int32(1)
+[  78]       Jump target:@80
+[  80]    3: JumpStrictlyEquals lhs:reg9, rhs:Int32(1), true_target:@100, false_target:@120
+[  98]    4: IteratorNextUnpack dst_value:reg11, dst_done:reg12, iterator_object:reg6, iterator_next:reg7, iterator_done:reg8
+[  b0]       JumpIf condition:reg12, true_target:@50, false_target:@c0
+[  c0]    5: Jump target:@c8
+[  c8]    6: Mov dst:x~0, src:reg11
+[  d8]       Mov dst:reg10, src:x~0
+[  e8]       Mov dst:reg9, src:Int32(2)
+[  f8]       Jump target:@80
+[ 100]    7: IteratorClose iterator_object:reg6, iterator_next:reg7, iterator_done:reg8, completion_value:reg10
+[ 118]       Throw src:reg10
+[ 120]    8: IteratorClose iterator_object:reg6, iterator_next:reg7, iterator_done:reg8, completion_value:Undefined
+[ 138]       JumpStrictlyEquals lhs:reg9, rhs:Int32(2), true_target:@150, false_target:@158
+[ 150]    9: Return value:reg10
+[ 158]   10: Throw src:reg10
+
+Exception handlers:
+    from   c8 to  100 handler   58
+
+JS bytecode executable "forAwaitOfBreak"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Yield continuation_label:@18, value:Undefined
+[  18]    1: GetIterator dst_iterator_object:reg5, dst_iterator_next:reg6, dst_iterator_done:reg7, iterable:arg0
+[  30]       Jump target:@88
+[  38]    2: Yield value:Undefined
+[  48]    3: Catch dst:reg9
+[  50]       SetLexicalEnvironment environment:reg4
+[  58]       Mov dst:reg8, src:Int32(1)
+[  68]       Jump target:@70
+[  70]    4: JumpStrictlyEquals lhs:reg8, rhs:Int32(1), true_target:@1a8, false_target:@1c8
+[  88]    5: IteratorNext dst:reg12, iterator_object:reg5, iterator_next:reg6, iterator_done:reg7
+[  a0]       Await continuation_label:@b0, argument:reg12
+[  b0]    6: Mov dst:reg13, src:reg0
+[  c0]       GetCompletionFields type_dst:reg14, value_dst:reg15, completion:reg13
+[  d0]       StrictlyEquals dst:reg16, lhs:reg14, rhs:Int32(1)
+[  e0]       JumpIf condition:reg16, true_target:@f0, false_target:@130
+[  f0]    7: Mov dst:reg12, src:reg15
+[ 100]       ThrowIfNotObject src:reg12
+[ 108]       GetById dst:reg11, base:reg12, property:done
+[ 120]       JumpIf condition:reg11, true_target:@38, false_target:@138
+[ 130]    8: Throw src:reg15
+[ 138]    9: GetById dst:reg10, base:reg12, property:value
+[ 150]       Jump target:@158
+[ 158]   10: Mov dst:x~0, src:reg10
+[ 168]       StrictlyEquals dst:reg12, lhs:x~0, rhs:Int32(2)
+[ 178]       JumpIf condition:reg12, true_target:@188, false_target:@1a0
+[ 188]   11: Mov dst:reg8, src:Int32(3)
+[ 198]       Jump target:@70
+[ 1a0]   12: Jump target:@88
+[ 1a8]   13: IteratorClose iterator_object:reg5, iterator_next:reg6, iterator_done:reg7, completion_value:reg9
+[ 1c0]       Throw src:reg9
+[ 1c8]   14: IteratorClose iterator_object:reg5, iterator_next:reg6, iterator_done:reg7, completion_value:Undefined
+[ 1e0]       JumpStrictlyEquals lhs:reg8, rhs:Int32(3), true_target:@38, false_target:@1f8
+[ 1f8]   15: JumpStrictlyEquals lhs:reg8, rhs:Int32(2), true_target:@210, false_target:@220
+[ 210]   16: Yield value:reg9
+[ 220]   17: Throw src:reg9
+
+Exception handlers:
+    from  158 to  188 handler   48
+    from  188 to  1a0 handler   48
+    from  1a0 to  1a8 handler   48

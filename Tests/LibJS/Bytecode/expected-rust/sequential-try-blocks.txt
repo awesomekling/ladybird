@@ -1,0 +1,45 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg6, identifier:console
+[  18]       GetById dst:reg7, base:reg6, property:log, base_identifier:console
+[  30]       GetGlobal dst:reg9, identifier:sequentialTryCatch
+[  40]       Call dst:reg8, callee:reg9, this_value:Undefined, sequentialTryCatch
+[  60]       Call dst:reg5, callee:reg7, this_value:reg6, console.log, arguments:[reg8]
+[  88]       End value:reg5
+
+JS bytecode executable "sequentialTryCatch"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Mov dst:result~0, src:String("")
+[  18]       Jump target:@a0
+[  20]    1: Catch dst:reg5
+[  28]       SetLexicalEnvironment environment:reg4
+[  30]       CreateLexicalEnvironment dst:reg6, parent:reg4, capacity:1
+[  40]       CreateVariable identifier:e, is_immutable:false, is_global:false, is_strict:false
+[  50]       InitializeLexicalBinding identifier:e, src:reg5
+[  68]       Add dst:reg7, lhs:result~0, rhs:String("b")
+[  78]       Mov dst:result~0, src:reg7
+[  88]       SetLexicalEnvironment environment:reg4
+[  90]       Jump target:@98
+[  98]    2: Jump target:@148
+[  a0]    3: Add dst:reg5, lhs:result~0, rhs:String("a")
+[  b0]       Mov dst:result~0, src:reg5
+[  c0]       Throw src:Int32(1)
+[  c8]    4: Catch dst:reg5
+[  d0]       SetLexicalEnvironment environment:reg4
+[  d8]       CreateLexicalEnvironment dst:reg6, parent:reg4, capacity:1
+[  e8]       CreateVariable identifier:e, is_immutable:false, is_global:false, is_strict:false
+[  f8]       InitializeLexicalBinding identifier:e, src:reg5
+[ 110]       Add dst:reg7, lhs:result~0, rhs:String("d")
+[ 120]       Mov dst:result~0, src:reg7
+[ 130]       SetLexicalEnvironment environment:reg4
+[ 138]       Jump target:@140
+[ 140]    5: Return value:result~0
+[ 148]    6: Add dst:reg5, lhs:result~0, rhs:String("c")
+[ 158]       Mov dst:result~0, src:reg5
+[ 168]       Throw src:Int32(2)
+
+Exception handlers:
+    from   a0 to   c8 handler   20
+    from  148 to  170 handler   c8
+
+"abcd"

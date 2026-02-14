@@ -1,0 +1,69 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg6, identifier:array_destructuring_with_class_default
+[  18]       Call dst:reg5, callee:reg6, this_value:Undefined, array_destructuring_with_class_default
+[  38]       GetGlobal dst:reg7, identifier:object_destructuring_with_function_default
+[  48]       Call dst:reg6, callee:reg7, this_value:Undefined, object_destructuring_with_function_default
+[  68]       GetGlobal dst:reg7, identifier:setter_parameter_resolution
+[  78]       Call dst:reg5, callee:reg7, this_value:Undefined, setter_parameter_resolution
+[  98]       End value:reg5
+
+JS bytecode executable "array_destructuring_with_class_default"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Mov dst:x~0, src:Undefined
+[  18]       NewArray dst:reg5, elements:[Undefined]
+[  30]       Mov dst:reg6, src:Bool(false)
+[  40]       GetIterator dst_iterator_object:reg7, dst_iterator_next:reg8, dst_iterator_done:reg9, iterable:reg5
+[  58]       IteratorNextUnpack dst_value:reg11, dst_done:reg6, iterator_object:reg7, iterator_next:reg8, iterator_done:reg9
+[  70]       JumpFalse condition:reg6, target:@98
+[  80]    1: Mov dst:reg11, src:Undefined
+[  90]       Jump target:@98
+[  98]    2: JumpUndefined condition:reg11, true_target:@a8, false_target:@100
+[  a8]    3: CreateLexicalEnvironment dst:reg12, parent:reg4, capacity:0
+[  b8]       CreateVariable identifier:C, is_immutable:true, is_global:false, is_strict:false
+[  c8]       SetLexicalEnvironment environment:reg4
+[  d0]       NewClass dst:reg13, class_environment:reg12, class_blueprint_index:0
+[  f0]       Mov dst:reg11, src:reg13
+[ 100]    4: Mov dst:x~0, src:reg11
+[ 110]       JumpFalse condition:reg6, target:@128
+[ 120]    5: Return value:x~0
+[ 128]    6: IteratorClose iterator_object:reg7, iterator_next:reg8, iterator_done:reg9, completion_value:Undefined
+[ 140]       Return value:x~0
+
+JS bytecode executable "object_destructuring_with_function_default"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Mov dst:x~0, src:Undefined
+[  18]       NewObject dst:reg5
+[  28]       ThrowIfNullish src:reg5
+[  30]       GetById dst:reg6, base:reg5, property:x
+[  48]       JumpUndefined condition:reg6, true_target:@58, false_target:@80
+[  58]    1: NewFunction dst:reg7, shared_function_data_index:0, lhs_name:x
+[  70]       Mov dst:reg6, src:reg7
+[  80]    2: Mov dst:x~0, src:reg6
+[  90]       Return value:x~0
+
+JS bytecode executable "setter_parameter_resolution"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       CreateVariable identifier:setValue, is_immutable:false, is_global:false, is_strict:false
+[  18]       InitializeVariableBinding identifier:setValue, src:Undefined
+[  30]       NewPrimitiveArray dst:reg5, elements:[23]
+[  48]       Mov dst:reg6, src:Bool(false)
+[  58]       GetIterator dst_iterator_object:reg7, dst_iterator_next:reg8, dst_iterator_done:reg9, iterable:reg5
+[  70]       NewObject dst:reg11
+[  80]       NewFunction dst:reg12, shared_function_data_index:0, lhs_name:set y, home_object:reg11
+[  98]       PutSetterById base:reg11, property:y, src:reg12
+[  b0]       IteratorNextUnpack dst_value:reg12, dst_done:reg6, iterator_object:reg7, iterator_next:reg8, iterator_done:reg9
+[  c8]       JumpFalse condition:reg6, target:@f0
+[  d8]    1: Mov dst:reg12, src:Undefined
+[  e8]       Jump target:@f0
+[  f0]    2: PutNormalById base:reg11, property:y, src:reg12
+[ 108]       JumpFalse condition:reg6, target:@138
+[ 118]    3: GetInitializedBinding dst:reg5, identifier:setValue
+[ 130]       Return value:reg5
+[ 138]    4: IteratorClose iterator_object:reg7, iterator_next:reg8, iterator_done:reg9, completion_value:Undefined
+[ 150]       Jump target:@118
+
+JS bytecode executable "set y"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       SetLexicalBinding identifier:setValue, src:arg0
+[  20]       End value:Undefined

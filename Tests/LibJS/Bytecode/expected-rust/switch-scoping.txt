@@ -1,0 +1,50 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg6, identifier:console
+[  18]       GetById dst:reg7, base:reg6, property:log, base_identifier:console
+[  30]       GetGlobal dst:reg9, identifier:switchWithBlockDecl
+[  40]       Call dst:reg8, callee:reg9, this_value:Undefined, switchWithBlockDecl, arguments:[Int32(1)]
+[  68]       Call dst:reg5, callee:reg7, this_value:reg6, console.log, arguments:[reg8]
+[  90]       GetGlobal dst:reg6, identifier:console
+[  a0]       GetById dst:reg8, base:reg6, property:log, base_identifier:console
+[  b8]       GetGlobal dst:reg10, identifier:switchWithBlockDecl
+[  c8]       Call dst:reg9, callee:reg10, this_value:Undefined, switchWithBlockDecl, arguments:[Int32(2)]
+[  f0]       Call dst:reg7, callee:reg8, this_value:reg6, console.log, arguments:[reg9]
+[ 118]       End value:reg7
+
+JS bytecode executable "switchWithBlockDecl"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Mov dst:result~0, src:Undefined
+[  18]       CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
+[  28]       CreateVariable identifier:a, is_immutable:false, is_global:false, is_strict:false
+[  38]       CreateVariable identifier:b, is_immutable:false, is_global:false, is_strict:false
+[  48]       StrictlyEquals dst:reg6, lhs:arg0, rhs:Int32(1)
+[  58]       JumpIf condition:reg6, true_target:@a8, false_target:@138
+[  68]    1: SetLexicalEnvironment environment:reg4
+[  70]       Mov dst:reg6, src:result~0
+[  80]       Call dst:reg5, callee:reg6, this_value:Undefined, result
+[  a0]       Return value:reg5
+[  a8]    2: InitializeLexicalBinding identifier:a, src:String("one")
+[  c0]       NewFunction dst:reg6, shared_function_data_index:0, lhs_name:result
+[  d8]       Mov dst:result~0, src:reg6
+[  e8]       Jump target:@68
+[  f0]    3: InitializeLexicalBinding identifier:b, src:String("two")
+[ 108]       NewFunction dst:reg6, shared_function_data_index:1, lhs_name:result
+[ 120]       Mov dst:result~0, src:reg6
+[ 130]       Jump target:@68
+[ 138]    4: StrictlyEquals dst:reg6, lhs:arg0, rhs:Int32(2)
+[ 148]       JumpIf condition:reg6, true_target:@f0, false_target:@158
+[ 158]    5: Jump target:@68
+
+JS bytecode executable "result"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetBinding dst:reg5, identifier:a
+[  20]       Return value:reg5
+
+JS bytecode executable "result"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetBinding dst:reg5, identifier:b
+[  20]       Return value:reg5
+
+"one"
+"two"

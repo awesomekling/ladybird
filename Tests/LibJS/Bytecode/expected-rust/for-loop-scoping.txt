@@ -1,0 +1,57 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg6, identifier:console
+[  18]       GetById dst:reg7, base:reg6, property:log, base_identifier:console
+[  30]       GetGlobal dst:reg9, identifier:forLetClosure
+[  40]       Call dst:reg8, callee:reg9, this_value:Undefined, forLetClosure
+[  60]       Call dst:reg5, callee:reg7, this_value:reg6, console.log, arguments:[reg8]
+[  88]       End value:reg5
+
+JS bytecode executable "forLetClosure"
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       NewArray dst:reg5
+[  18]       Mov dst:fns~0, src:reg5
+[  28]       CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:1
+[  38]       CreateVariable identifier:i, is_immutable:false, is_global:false, is_strict:false
+[  48]       InitializeLexicalBinding identifier:i, src:Int32(0)
+[  60]       GetBinding dst:reg6, identifier:i
+[  78]       SetLexicalEnvironment environment:reg4
+[  80]       CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:1
+[  90]       CreateVariable identifier:i, is_immutable:false, is_global:false, is_strict:false
+[  a0]       InitializeLexicalBinding identifier:i, src:reg6
+[  b8]       Jump target:@c0
+[  c0]    1: GetBinding dst:reg6, identifier:i
+[  d8]       LessThan dst:reg7, lhs:reg6, rhs:Int32(3)
+[  e8]       JumpIf condition:reg7, true_target:@f8, false_target:@208
+[  f8]    2: GetById dst:reg6, base:fns~0, property:push, base_identifier:fns
+[ 110]       Mov dst:reg8, src:fns~0
+[ 120]       NewFunction dst:reg9, shared_function_data_index:0
+[ 138]       Call dst:reg7, callee:reg6, this_value:reg8, fns.push, arguments:[reg9]
+[ 160]       GetBinding dst:reg6, identifier:i
+[ 178]       SetLexicalEnvironment environment:reg4
+[ 180]       CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:1
+[ 190]       CreateVariable identifier:i, is_immutable:false, is_global:false, is_strict:false
+[ 1a0]       InitializeLexicalBinding identifier:i, src:reg6
+[ 1b8]       Jump target:@1c0
+[ 1c0]    3: GetBinding dst:reg6, identifier:i
+[ 1d8]       PostfixIncrement dst:reg8, src:reg6
+[ 1e8]       SetLexicalBinding identifier:i, src:reg6
+[ 200]       Jump target:@c0
+[ 208]    4: SetLexicalEnvironment environment:reg4
+[ 210]       GetById dst:reg5, base:fns~0, property:map, base_identifier:fns
+[ 228]       Mov dst:reg8, src:fns~0
+[ 238]       NewFunction dst:reg6, shared_function_data_index:1
+[ 250]       Call dst:reg7, callee:reg5, this_value:reg8, fns.map, arguments:[reg6]
+[ 278]       Return value:reg7
+
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       Call dst:reg5, callee:arg0, this_value:Undefined, f
+[  28]       Return value:reg5
+
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetBinding dst:reg5, identifier:i
+[  20]       Return value:reg5
+
+[ 0, 1, 2 ]
