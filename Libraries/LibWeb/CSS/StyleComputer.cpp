@@ -2102,9 +2102,12 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_writing_mode(computed_style.writing_mode());
     computed_values.set_color_interpolation(computed_style.color_interpolation());
 
-    // Copy all longhand StyleValues to ComputedValues for use by inheritance and getComputedStyle().
+    // Copy all longhand StyleValues, importance, and inherited flags to ComputedValues
+    // for use by inheritance, getComputedStyle(), and animations.
     computed_style.for_each_property([&](auto property_id, auto& value) {
         computed_values.set_property_value(property_id, value);
+        computed_values.set_property_important(property_id, computed_style.is_property_important(property_id));
+        computed_values.set_property_inherited(property_id, computed_style.is_property_inherited(property_id));
     });
 }
 

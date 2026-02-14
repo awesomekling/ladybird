@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <AK/Array.h>
 #include <AK/FlyString.h>
 #include <AK/HashMap.h>
+#include <AK/Math.h>
 #include <AK/Optional.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibGfx/ScalingMode.h>
@@ -24,6 +26,7 @@
 #include <LibWeb/CSS/LengthBox.h>
 #include <LibWeb/CSS/PercentageOr.h>
 #include <LibWeb/CSS/PreferredColorScheme.h>
+#include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/Size.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
@@ -503,6 +506,11 @@ public:
     void set_property_value(PropertyID, NonnullRefPtr<StyleValue const>);
     RefPtr<StyleValue const> property_value(PropertyID) const;
 
+    bool is_property_important(PropertyID) const;
+    void set_property_important(PropertyID, bool);
+    bool is_property_inherited(PropertyID) const;
+    void set_property_inherited(PropertyID, bool);
+
     template<typename Callback>
     void for_each_property_value(Callback callback) const
     {
@@ -912,6 +920,8 @@ protected:
     NonInheritedValues m_noninherited;
 
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_property_values;
+    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_important {};
+    Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_inherited {};
 };
 
 class ImmutableComputedValues final : public ComputedValues {
