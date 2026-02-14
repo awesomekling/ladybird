@@ -269,6 +269,10 @@ impl ScopeCollector {
         std::mem::take(&mut self.errors)
     }
 
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
     pub fn has_current_scope(&self) -> bool {
         self.current.is_some()
     }

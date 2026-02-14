@@ -143,6 +143,13 @@ pub unsafe extern "C" fn rust_compile_program(
     // Run scope analysis
     parser.scope_collector.analyze(initiated_by_eval);
 
+    if parser.scope_collector.has_errors() {
+        for err in parser.scope_collector.drain_errors() {
+            eprintln!("[rust_compile_program] scope error: {}", err.message);
+        }
+        return std::ptr::null_mut();
+    }
+
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = starts_in_strict_mode;
@@ -230,6 +237,10 @@ pub unsafe extern "C" fn rust_compile_script(
 
     // Run scope analysis
     parser.scope_collector.analyze(false);
+
+    if parser.scope_collector.has_errors() {
+        return std::ptr::null_mut();
+    }
 
     // Extract program data before codegen consumes the generator
     let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
@@ -345,6 +356,10 @@ pub unsafe extern "C" fn rust_compile_eval(
 
     // Run scope analysis
     parser.scope_collector.analyze(true);
+
+    if parser.scope_collector.has_errors() {
+        return std::ptr::null_mut();
+    }
 
     // Extract program data before codegen
     let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
@@ -484,6 +499,10 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
 
     // Run scope analysis.
     parser.scope_collector.analyze(false);
+
+    if parser.scope_collector.has_errors() {
+        return std::ptr::null_mut();
+    }
 
     // Extract the FunctionExpression from the program.
     // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
