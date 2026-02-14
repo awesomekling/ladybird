@@ -2123,9 +2123,12 @@ fn generate_for_statement(
     // CreatePerIterationEnvironment after init (first iteration setup).
     emit_per_iteration_bindings(gen, &per_iteration_binding_names);
 
-    let test_block = gen.make_block();
+    // Block creation order matches C++: body → update (if exists) → test (if exists) → end.
+    // If 'test' is missing, fuse 'test' and 'body' blocks.
+    // If 'update' is missing, fuse 'body' and 'update' blocks.
     let body_block = gen.make_block();
-    let update_block = gen.make_block();
+    let update_block = if update.is_some() { gen.make_block() } else { body_block };
+    let test_block = if test.is_some() { gen.make_block() } else { body_block };
     let end_block = gen.make_block();
 
     let completion = if gen.must_propagate_completion {
@@ -2142,24 +2145,30 @@ fn generate_for_statement(
     });
 
     // Test
-    gen.switch_to_basic_block(test_block);
-    if let Some(test) = test {
-        let test_val = generate_expr_or_undefined(test, gen, None);
+    if test.is_some() {
+        gen.switch_to_basic_block(test_block);
+        let test_val = generate_expr_or_undefined(test.unwrap(), gen, None);
         gen.emit(Instruction::JumpIf {
             condition: test_val.operand(),
             true_target: Label(body_block as u32),
             false_target: Label(end_block as u32),
         });
-    } else {
+    }
+
+    // Update
+    if update.is_some() {
+        gen.switch_to_basic_block(update_block);
+        generate_expr(update.unwrap(), gen, None);
         gen.emit(Instruction::Jump {
-            target: Label(body_block as u32),
+            target: Label(test_block as u32),
         });
     }
 
     // Body
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(update_block as u32), labels.clone(), completion.clone());
+    let continue_target = if update.is_some() { update_block } else { test_block };
+    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone(), completion.clone());
     gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
 
     let saved_completion = gen.current_completion_register.clone();
@@ -2179,20 +2188,15 @@ fn generate_for_statement(
     if !gen.is_current_block_terminated() {
         // CreatePerIterationEnvironment at end of each iteration.
         emit_per_iteration_bindings(gen, &per_iteration_binding_names);
-        gen.emit(Instruction::Jump {
-            target: Label(update_block as u32),
-        });
-    }
-
-    // Update
-    gen.switch_to_basic_block(update_block);
-    if let Some(update) = update {
-        generate_expr(update, gen, None);
-    }
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(test_block as u32),
-        });
+        if update.is_some() {
+            gen.emit(Instruction::Jump {
+                target: Label(update_block as u32),
+            });
+        } else {
+            gen.emit(Instruction::Jump {
+                target: Label(test_block as u32),
+            });
+        }
     }
 
     gen.switch_to_basic_block(end_block);
