@@ -161,6 +161,18 @@ impl<'a> Parser<'a> {
                     self.check_identifier_name_for_assignment_validity(name, false);
                 }
 
+                // Check for duplicate binding names in lexical declarations.
+                if kind != DeclarationKind::Var {
+                    let mut seen: Vec<&[u16]> = Vec::new();
+                    for (name, _) in &bound_names {
+                        if seen.contains(&name.as_slice()) {
+                            self.syntax_error("Duplicate parameter names in bindings");
+                        } else {
+                            seen.push(name);
+                        }
+                    }
+                }
+
                 // Register bound names with scope collector.
                 if kind == DeclarationKind::Var {
                     let entries: Vec<(&[u16], Option<Rc<Identifier>>)> = bound_names.iter()
