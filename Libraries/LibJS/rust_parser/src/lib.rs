@@ -146,6 +146,7 @@ pub unsafe extern "C" fn rust_compile_program(
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = starts_in_strict_mode;
+    gen.must_propagate_completion = true;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
@@ -240,6 +241,7 @@ pub unsafe extern "C" fn rust_compile_script(
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = is_strict;
+    gen.must_propagate_completion = true;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
@@ -354,6 +356,7 @@ pub unsafe extern "C" fn rust_compile_eval(
     // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = is_strict;
+    gen.must_propagate_completion = true;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;

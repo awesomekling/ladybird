@@ -1835,6 +1835,15 @@ fn generate_if_statement(
 ) -> Option<ScopedOperand> {
     let pred = generate_expr_or_undefined(predicate, gen, None);
 
+    let completion = if gen.must_propagate_completion {
+        let reg = choose_dst(gen, preferred_dst);
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     let true_block = gen.make_block();
     let false_block = gen.make_block();
     let has_alternate = alternate.is_some();
@@ -1846,26 +1855,43 @@ fn generate_if_statement(
         false_target: Label(false_block as u32),
     });
 
+    // Consequent
     gen.switch_to_basic_block(true_block);
-    let _cons_result = generate_stmt(consequent, gen, preferred_dst);
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let cons_result = generate_stmt(consequent, gen, preferred_dst);
     if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref val)) = (&completion, &cons_result) {
+            gen.emit_mov(c, val);
+        }
         gen.emit(Instruction::Jump {
             target: Label(end_block as u32),
         });
     }
+    gen.current_completion_register = saved_completion.clone();
 
+    // Alternate
     if let Some(alt) = alternate {
         gen.switch_to_basic_block(false_block);
-        let _alt_result = generate_stmt(alt, gen, preferred_dst);
+        if let Some(ref c) = completion {
+            gen.current_completion_register = Some(c.clone());
+        }
+        let alt_result = generate_stmt(alt, gen, preferred_dst);
         if !gen.is_current_block_terminated() {
+            if let (Some(ref c), Some(ref val)) = (&completion, &alt_result) {
+                gen.emit_mov(c, val);
+            }
             gen.emit(Instruction::Jump {
                 target: Label(end_block as u32),
             });
         }
+        gen.current_completion_register = saved_completion;
     }
 
     gen.switch_to_basic_block(end_block);
-    None
+    completion
 }
 
 // =============================================================================
@@ -1882,6 +1908,15 @@ fn generate_while_statement(
     let body_block = gen.make_block();
     let end_block = gen.make_block();
 
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     gen.emit(Instruction::Jump {
         target: Label(test_block as u32),
     });
@@ -1896,9 +1931,21 @@ fn generate_while_statement(
 
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(test_block as u32), labels.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels);
-    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let body_result = generate_stmt(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
+            gen.emit_mov(c, body_val);
+        }
+    }
+    gen.current_completion_register = saved_completion;
+
     gen.end_breakable_scope();
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
@@ -1908,7 +1955,7 @@ fn generate_while_statement(
     }
 
     gen.switch_to_basic_block(end_block);
-    None
+    completion
 }
 
 // =============================================================================
@@ -1925,15 +1972,36 @@ fn generate_do_while_statement(
     let test_block = gen.make_block();
     let end_block = gen.make_block();
 
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     gen.emit(Instruction::Jump {
         target: Label(body_block as u32),
     });
 
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(test_block as u32), labels.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels);
-    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let body_result = generate_stmt(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
+            gen.emit_mov(c, body_val);
+        }
+    }
+    gen.current_completion_register = saved_completion;
+
     gen.end_breakable_scope();
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
@@ -1951,7 +2019,7 @@ fn generate_do_while_statement(
     });
 
     gen.switch_to_basic_block(end_block);
-    None
+    completion
 }
 
 // =============================================================================
@@ -2024,6 +2092,15 @@ fn generate_for_statement(
     let update_block = gen.make_block();
     let end_block = gen.make_block();
 
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     gen.emit(Instruction::Jump {
         target: Label(test_block as u32),
     });
@@ -2046,9 +2123,21 @@ fn generate_for_statement(
     // Body
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(update_block as u32), labels.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels);
-    let _body_result = generate_stmt(body, gen, preferred_dst);
+    gen.begin_continuable_scope(Label(update_block as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let body_result = generate_stmt(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
+            gen.emit_mov(c, body_val);
+        }
+    }
+    gen.current_completion_register = saved_completion;
+
     gen.end_breakable_scope();
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
@@ -2081,7 +2170,7 @@ fn generate_for_statement(
         }
     }
 
-    None
+    completion
 }
 
 /// Emit CreatePerIterationEnvironment: save current binding values, pop env,
@@ -2148,7 +2237,16 @@ fn generate_scope_children(
     let mut last_result = None;
     for child in &scope.children {
         let result = generate_stmt(child, gen, None);
-        if result.is_some() {
+        if gen.must_propagate_completion {
+            if let Some(ref val) = result {
+                last_result = result.clone();
+                if !gen.is_current_block_terminated() {
+                    if let Some(ref completion_reg) = gen.current_completion_register.clone() {
+                        gen.emit_mov(completion_reg, val);
+                    }
+                }
+            }
+        } else if result.is_some() {
             last_result = result;
         }
         if gen.is_current_block_terminated() {
@@ -3424,7 +3522,17 @@ fn generate_switch_statement(
     let discriminant = generate_expr(&data.discriminant, gen, None)?;
     let end_block = gen.make_block();
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_breakable_scope(Label(end_block as u32), labels);
+
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
 
     // Block declaration instantiation: create lexical environment for
     // function declarations and let/const across all switch cases.
@@ -3469,6 +3577,12 @@ fn generate_switch_statement(
     // Emit case bodies (fall-through by default)
     for (i, case) in data.cases.iter().enumerate() {
         gen.switch_to_basic_block(case_blocks[i]);
+
+        let saved_completion = gen.current_completion_register.clone();
+        if let Some(ref c) = completion {
+            gen.current_completion_register = Some(c.clone());
+        }
+
         let case_scope = case.scope.borrow();
         for child in &case_scope.children {
             // For function declarations in switch cases: emit AnnexB hoisting
@@ -3493,11 +3607,24 @@ fn generate_switch_statement(
                     }
                 }
             }
-            generate_stmt(child, gen, None);
+            let result = generate_stmt(child, gen, None);
             if gen.is_current_block_terminated() {
                 break;
             }
+            if gen.must_propagate_completion {
+                if let Some(ref c) = completion {
+                    if let Some(ref val) = result {
+                        gen.emit_mov(c, val);
+                    } else {
+                        let undef = gen.add_constant_undefined();
+                        gen.emit_mov(c, &undef);
+                    }
+                }
+            }
         }
+
+        gen.current_completion_register = saved_completion;
+
         // Fall through to next case
         if !gen.is_current_block_terminated() && i + 1 < case_blocks.len() {
             gen.emit(Instruction::Jump {
@@ -3520,7 +3647,7 @@ fn generate_switch_statement(
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
     }
-    None
+    completion
 }
 
 /// Create block declaration instantiation for switch statements.
@@ -4621,6 +4748,15 @@ fn generate_for_in_statement(
     let end_block = gen.make_block();
     let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
 
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     // Check for null/undefined
     let nullish_block = gen.make_block();
     let continue_block = gen.make_block();
@@ -4697,9 +4833,21 @@ fn generate_for_in_statement(
         (end_block, update_block)
     };
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone());
-    gen.begin_breakable_scope(Label(break_target as u32), labels);
-    generate_stmt(body, gen, preferred_dst);
+    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(Label(break_target as u32), labels, completion.clone());
+
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let body_result = generate_stmt(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
+            gen.emit_mov(c, body_val);
+        }
+    }
+    gen.current_completion_register = saved_completion;
+
     gen.end_breakable_scope();
     gen.end_continuable_scope();
 
@@ -4727,7 +4875,7 @@ fn generate_for_in_statement(
     }
 
     gen.switch_to_basic_block(end_block);
-    None
+    completion
 }
 
 // =============================================================================
@@ -4782,7 +4930,7 @@ fn generate_labelled_statement(
     } else {
         // Non-iteration: wrap in a breakable scope so `break label;` works.
         let end_block = gen.make_block();
-        gen.begin_breakable_scope(Label(end_block as u32), labels);
+        gen.begin_breakable_scope(Label(end_block as u32), labels, None);
         let result = generate_stmt(inner, gen, preferred_dst);
         gen.end_breakable_scope();
         if !gen.is_current_block_terminated() {
@@ -4859,9 +5007,18 @@ fn generate_for_of_statement_inner(
         lexical_environment_at_entry: lexical_env_at_entry.clone(),
     });
 
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     // Break scope wraps the ReturnToFinally so break hits ReturnToFinally first.
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_breakable_scope(Label(end_block as u32), labels.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels.clone(), completion.clone());
     gen.start_boundary(BlockBoundaryType::ReturnToFinally);
 
     let update_block = gen.make_block();
@@ -4942,8 +5099,19 @@ fn generate_for_of_statement_inner(
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
     // Body
-    gen.begin_continuable_scope(Label(update_block as u32), labels);
-    generate_stmt(body, gen, preferred_dst);
+    gen.begin_continuable_scope(Label(update_block as u32), labels, completion.clone());
+
+    let saved_completion = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let body_result = generate_stmt(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
+            gen.emit_mov(c, body_val);
+        }
+    }
+    gen.current_completion_register = saved_completion;
 
     // Restore lexical env before continuing
     if needs_lexical_env {
@@ -5076,7 +5244,7 @@ fn generate_for_of_statement_inner(
     }
 
     gen.switch_to_basic_block(end_block);
-    None
+    completion
 }
 
 fn generate_for_await_of_statement(
@@ -5513,6 +5681,7 @@ fn generate_try_statement(
     let saved_env = gen.current_lexical_environment();
 
     let mut next_block: Option<usize> = None;
+    let mut completion: Option<ScopedOperand> = None;
 
     // --- Set up FinallyContext if we have a finalizer ---
     let has_finally = data.finalizer.is_some();
@@ -5645,13 +5814,37 @@ fn generate_try_statement(
             CatchParameter::None => {}
         }
 
-        generate_stmt(&catch.body, gen, None);
+        // Catch body gets its own completion register to prevent
+        // break/continue inside catch from leaking values.
+        let mut catch_completion: Option<ScopedOperand> = None;
+        {
+            let saved_completion = gen.current_completion_register.clone();
+            if gen.must_propagate_completion {
+                let reg = gen.allocate_register();
+                let undef = gen.add_constant_undefined();
+                gen.emit_mov(&reg, &undef);
+                gen.current_completion_register = Some(reg.clone());
+                catch_completion = Some(reg);
+            }
+            generate_stmt(&catch.body, gen, None);
+            gen.current_completion_register = saved_completion;
+        }
 
         if created_catch_scope {
             gen.lexical_environment_register_stack.pop();
             if !gen.is_current_block_terminated() {
                 let parent = gen.current_lexical_environment();
                 gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
+            }
+        }
+
+        if gen.must_propagate_completion {
+            if let Some(ref cc) = catch_completion {
+                if !gen.is_current_block_terminated() {
+                    let reg = gen.allocate_register();
+                    gen.emit_mov(&reg, cc);
+                    completion = Some(reg);
+                }
             }
         }
 
@@ -5709,7 +5902,31 @@ fn generate_try_statement(
 
     gen.switch_to_basic_block(try_body_block);
 
-    generate_stmt(&data.block, gen, None);
+    // Try body gets its own completion register to prevent
+    // break/continue inside try from leaking values.
+    {
+        let saved_completion = gen.current_completion_register.clone();
+        let mut try_completion: Option<ScopedOperand> = None;
+        if gen.must_propagate_completion {
+            let reg = gen.allocate_register();
+            let undef = gen.add_constant_undefined();
+            gen.emit_mov(&reg, &undef);
+            gen.current_completion_register = Some(reg.clone());
+            try_completion = Some(reg);
+        }
+        generate_stmt(&data.block, gen, None);
+        gen.current_completion_register = saved_completion;
+
+        if !gen.is_current_block_terminated() {
+            if gen.must_propagate_completion {
+                if let Some(ref tc) = try_completion {
+                    let reg = gen.allocate_register();
+                    gen.emit_mov(&reg, tc);
+                    completion = Some(reg);
+                }
+            }
+        }
+    }
 
     if !gen.is_current_block_terminated() {
         if has_finally {
@@ -5751,9 +5968,19 @@ fn generate_try_statement(
         gen.switch_to_basic_block(fb_block);
         gen.start_boundary(BlockBoundaryType::LeaveFinally);
 
-        // Generate the finally body.
+        // Generate the finally body with a throwaway completion register
+        // to prevent break/continue in finally from leaking the try/catch
+        // completion value.
         if let Some(finalizer) = &data.finalizer {
+            let saved_completion = gen.current_completion_register.clone();
+            if gen.must_propagate_completion {
+                let finally_completion = gen.allocate_register();
+                let undef = gen.add_constant_undefined();
+                gen.emit_mov(&finally_completion, &undef);
+                gen.current_completion_register = Some(finally_completion);
+            }
             generate_stmt(finalizer, gen, None);
+            gen.current_completion_register = saved_completion;
         }
 
         gen.end_boundary(BlockBoundaryType::LeaveFinally);
@@ -5842,7 +6069,12 @@ fn generate_try_statement(
         gen.switch_to_basic_block(dead);
     }
 
-    None
+    if gen.must_propagate_completion {
+        if completion.is_none() {
+            return Some(gen.add_constant_undefined());
+        }
+    }
+    completion
 }
 
 /// Create a SharedFunctionInstanceData for a function expression/declaration

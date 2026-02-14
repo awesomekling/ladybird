@@ -193,6 +193,7 @@ pub struct Generator {
 
     // --- Completion register ---
     pub current_completion_register: Option<ScopedOperand>,
+    pub must_propagate_completion: bool,
 
     // --- Accumulator and this ---
     accumulator: ScopedOperand,
@@ -280,6 +281,7 @@ impl Generator {
             current_source_start: 0,
             current_source_end: 0,
             current_completion_register: None,
+            must_propagate_completion: false,
             accumulator: ScopedOperand {
                 inner: Rc::new(ScopedOperandInner {
                     operand: Operand::register(Register::ACCUMULATOR),
@@ -605,11 +607,11 @@ impl Generator {
 
     // --- Break/continue scope management ---
 
-    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>, completion: Option<ScopedOperand>) {
         self.breakable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
-            completion_register: None,
+            completion_register: completion,
         });
         self.start_boundary(BlockBoundaryType::Break);
     }
@@ -619,11 +621,11 @@ impl Generator {
         self.breakable_scopes.pop();
     }
 
-    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>) {
+    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>, completion: Option<ScopedOperand>) {
         self.continuable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
-            completion_register: None,
+            completion_register: completion,
         });
         self.start_boundary(BlockBoundaryType::Continue);
     }
@@ -631,6 +633,10 @@ impl Generator {
     pub fn end_continuable_scope(&mut self) {
         self.end_boundary(BlockBoundaryType::Continue);
         self.continuable_scopes.pop();
+    }
+
+    pub fn set_current_breakable_scope_completion_register(&mut self, completion: ScopedOperand) {
+        self.breakable_scopes.last_mut().unwrap().completion_register = Some(completion);
     }
 
     pub fn find_breakable_scope(&self, label: Option<&[u16]>) -> Option<&LabelableScope> {
@@ -743,13 +749,27 @@ impl Generator {
             let boundary = self.boundaries[i];
             match boundary {
                 BlockBoundaryType::Break if is_break => {
-                    let target = self.breakable_scopes.last().unwrap().bytecode_target;
+                    let target_scope = self.breakable_scopes.last().unwrap();
+                    let target = target_scope.bytecode_target;
+                    let completion = target_scope.completion_register.clone();
+                    if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion) {
+                        if cur != tgt {
+                            self.emit_mov(&tgt, &cur);
+                        }
+                    }
                     self.emit(Instruction::Jump { target });
                     self.current_finally_context = saved_ctx;
                     return;
                 }
                 BlockBoundaryType::Continue if !is_break => {
-                    let target = self.continuable_scopes.last().unwrap().bytecode_target;
+                    let target_scope = self.continuable_scopes.last().unwrap();
+                    let target = target_scope.bytecode_target;
+                    let completion = target_scope.completion_register.clone();
+                    if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion) {
+                        if cur != tgt {
+                            self.emit_mov(&tgt, &cur);
+                        }
+                    }
                     self.emit(Instruction::Jump { target });
                     self.current_finally_context = saved_ctx;
                     return;
@@ -763,11 +783,18 @@ impl Generator {
                 }
                 BlockBoundaryType::ReturnToFinally => {
                     if !self.has_outer_finally_before_target(is_break, i + 1) {
-                        let target = if is_break {
-                            self.breakable_scopes.last().unwrap().bytecode_target
+                        let target_scope = if is_break {
+                            self.breakable_scopes.last().unwrap()
                         } else {
-                            self.continuable_scopes.last().unwrap().bytecode_target
+                            self.continuable_scopes.last().unwrap()
                         };
+                        let target = target_scope.bytecode_target;
+                        let completion = target_scope.completion_register.clone();
+                        if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion) {
+                            if cur != tgt {
+                                self.emit_mov(&tgt, &cur);
+                            }
+                        }
                         self.register_jump_in_finally_context(target);
                         self.current_finally_context = saved_ctx;
                         return;
@@ -786,23 +813,23 @@ impl Generator {
         let env_stack_len = self.lexical_environment_register_stack.len();
         let mut env_offset = env_stack_len;
 
-        let jumpable_scopes: Vec<(Label, Vec<Vec<u16>>)> = if is_break {
+        let jumpable_scopes: Vec<(Label, Vec<Vec<u16>>, Option<ScopedOperand>)> = if is_break {
             self.breakable_scopes
                 .iter()
                 .rev()
-                .map(|s| (s.bytecode_target, s.language_label_set.clone()))
+                .map(|s| (s.bytecode_target, s.language_label_set.clone(), s.completion_register.clone()))
                 .collect()
         } else {
             self.continuable_scopes
                 .iter()
                 .rev()
-                .map(|s| (s.bytecode_target, s.language_label_set.clone()))
+                .map(|s| (s.bytecode_target, s.language_label_set.clone(), s.completion_register.clone()))
                 .collect()
         };
 
         let mut current_boundary = self.boundaries.len();
 
-        for (target, label_set) in &jumpable_scopes {
+        for (target, label_set, completion) in &jumpable_scopes {
             while current_boundary > 0 {
                 current_boundary -= 1;
                 let boundary = self.boundaries[current_boundary];
@@ -818,6 +845,11 @@ impl Generator {
                         if !self.has_outer_finally_before_target(is_break, current_boundary + 1)
                             && label_set.iter().any(|l| l == label)
                         {
+                            if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion.clone()) {
+                                if cur != tgt {
+                                    self.emit_mov(&tgt, &cur);
+                                }
+                            }
                             self.register_jump_in_finally_context(*target);
                             self.current_finally_context = saved_ctx;
                             return;
@@ -834,6 +866,11 @@ impl Generator {
             }
 
             if label_set.iter().any(|l| l == label) {
+                if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion.clone()) {
+                    if cur != tgt {
+                        self.emit_mov(&tgt, &cur);
+                    }
+                }
                 self.emit(Instruction::Jump {
                     target: *target,
                 });
