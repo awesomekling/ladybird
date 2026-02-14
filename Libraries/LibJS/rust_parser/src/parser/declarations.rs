@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, Parser, Position, ProgramType};
+use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType};
 use crate::token::TokenType;
 
 /// Extract an Identifier from an Expression::Identifier node.
@@ -358,15 +358,15 @@ impl<'a> Parser<'a> {
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
+        let parsed = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
-        self.register_function_params_with_scope(&params, &param_info);
+        self.register_function_params_with_scope(&parsed.params, &parsed.param_info);
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
+        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         // Close function scope.
         self.scope_collector.close_scope();
@@ -375,7 +375,7 @@ impl<'a> Parser<'a> {
             self.check_identifier_name_for_assignment_validity(&fn_name, has_use_strict);
         }
         if has_use_strict || kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&param_info, has_use_strict, kind);
+            self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
         }
 
         let might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -386,8 +386,8 @@ impl<'a> Parser<'a> {
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
-            parameters: params,
-            function_length,
+            parameters: parsed.params,
+            function_length: parsed.function_length,
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
@@ -432,15 +432,15 @@ impl<'a> Parser<'a> {
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
+        let parsed = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
-        self.register_function_params_with_scope(&params, &param_info);
+        self.register_function_params_with_scope(&parsed.params, &parsed.param_info);
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
+        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         // Close function scope.
         self.scope_collector.close_scope();
@@ -449,7 +449,7 @@ impl<'a> Parser<'a> {
             self.check_identifier_name_for_assignment_validity(&fn_name_value, has_use_strict);
         }
         if has_use_strict || kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&param_info, has_use_strict, kind);
+            self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
         }
 
         let might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -460,8 +460,8 @@ impl<'a> Parser<'a> {
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
-            parameters: params,
-            function_length,
+            parameters: parsed.params,
+            function_length: parsed.function_length,
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
@@ -879,27 +879,32 @@ impl<'a> Parser<'a> {
 
     // === Formal parameters ===
 
-    pub(crate) fn parse_formal_parameters(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)>, bool) {
+    pub(crate) fn parse_formal_parameters(&mut self) -> ParsedParameters {
         self.consume_token(TokenType::ParenOpen);
         let result = self.parse_formal_parameters_without_parens();
         self.consume_token(TokenType::ParenClose);
         result
     }
 
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)>, bool) {
+    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> ParsedParameters {
         let saved_formal_param_ctx = self.flags.in_formal_parameter_context;
         self.flags.in_formal_parameter_context = true;
 
         if self.match_token(TokenType::ParenClose) {
             self.flags.in_formal_parameter_context = saved_formal_param_ctx;
-            return (Vec::new(), 0, Vec::new(), true);
+            return ParsedParameters {
+                params: Vec::new(),
+                function_length: 0,
+                param_info: Vec::new(),
+                is_simple: true,
+            };
         }
 
         let mut params: Vec<FunctionParameter> = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
         let mut has_seen_rest = false;
-        let mut param_info: Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)> = Vec::new();
+        let mut param_info: Vec<ParamInfo> = Vec::new();
 
         loop {
             let param_start = self.position();
@@ -910,8 +915,8 @@ impl<'a> Parser<'a> {
                 let value = self.token_value(&tok).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
                 // Check for duplicate parameter names.
-                for (prev_name, _, _, _) in &param_info {
-                    if *prev_name == value {
+                for prev in &param_info {
+                    if prev.name == value {
                         if self.flags.strict_mode {
                             let name_str = String::from_utf16_lossy(&value);
                             self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
@@ -926,12 +931,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
-                param_info.push((value, rest, false, Some(id.clone())));
+                param_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
                 for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
-                    param_info.push((n, rest, true, Some(id)));
+                    param_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)
             } else {
@@ -976,7 +981,7 @@ impl<'a> Parser<'a> {
         self.flags.in_formal_parameter_context = saved_formal_param_ctx;
 
         let is_simple = !has_seen_default && !has_seen_rest && !params.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
-        (params, function_length, param_info, is_simple)
+        ParsedParameters { params, function_length, param_info, is_simple }
     }
 
     // === Binding pattern ===

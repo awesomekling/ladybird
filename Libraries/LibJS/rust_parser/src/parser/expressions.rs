@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, Parser, Position};
+use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, ParamInfo, ParsedParameters, Parser, Position};
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
@@ -1647,15 +1647,11 @@ impl<'a> Parser<'a> {
             self.flags.await_expression_is_valid = true;
         }
 
-        let (params, function_length, param_info, is_simple);
+        let parsed;
 
         if expect_parens {
             let previous_errors = self.errors.len();
-            let result = self.parse_formal_parameters_without_parens();
-            params = result.0;
-            function_length = result.1;
-            param_info = result.2;
-            is_simple = result.3;
+            parsed = self.parse_formal_parameters_without_parens();
             if self.errors.len() > previous_errors {
                 self.load_state();
                 return None;
@@ -1674,14 +1670,16 @@ impl<'a> Parser<'a> {
                     self.syntax_error("'await' is a reserved identifier in async functions");
                 }
                 let binding = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
-                params = vec![FunctionParameter {
-                    binding: FunctionParameterBinding::Identifier(binding.clone()),
-                    default_value: None,
-                    is_rest: false,
-                }];
-                function_length = 1;
-                param_info = vec![(value, false, false, Some(binding))];
-                is_simple = true;
+                parsed = ParsedParameters {
+                    params: vec![FunctionParameter {
+                        binding: FunctionParameterBinding::Identifier(binding.clone()),
+                        default_value: None,
+                        is_rest: false,
+                    }],
+                    function_length: 1,
+                    param_info: vec![ParamInfo { name: value, is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
+                    is_simple: true,
+                };
             } else {
                 self.flags.await_expression_is_valid = saved_await;
                 self.load_state();
@@ -1698,6 +1696,8 @@ impl<'a> Parser<'a> {
         self.consume(); // consume =>
 
         self.discard_saved_state();
+
+        let ParsedParameters { params, function_length, param_info, is_simple } = parsed;
 
         // Register parameters with scope collector (scope was opened before
         // parameter parsing so default value expressions resolve correctly).
@@ -1778,18 +1778,18 @@ impl<'a> Parser<'a> {
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
 
-        let (params, function_length, param_info, is_simple) = self.parse_formal_parameters();
+        let parsed = self.parse_formal_parameters();
 
         // Register parameters with scope collector.
-        self.register_function_params_with_scope(&params, &param_info);
+        self.register_function_params_with_scope(&parsed.params, &parsed.param_info);
 
-        if is_getter && !params.is_empty() {
+        if is_getter && !parsed.params.is_empty() {
             self.syntax_error("Getter function must have no arguments");
         }
         if is_setter {
-            if params.is_empty() || params.len() > 1 {
+            if parsed.params.is_empty() || parsed.params.len() > 1 {
                 self.syntax_error("Setter function must have one argument");
-            } else if params[0].is_rest {
+            } else if parsed.params[0].is_rest {
                 self.syntax_error("Setter function must have one argument");
             }
         }
@@ -1804,14 +1804,14 @@ impl<'a> Parser<'a> {
             self.flags.allow_super_constructor_call = false;
         }
 
-        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, is_simple);
+        let (body, has_use_strict, _insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;
 
         // Close function scope.
         self.scope_collector.close_scope();
 
         if has_use_strict || fn_kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
+            self.check_parameters_post_body(&parsed.param_info, has_use_strict, fn_kind);
         }
 
         let might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -1822,8 +1822,8 @@ impl<'a> Parser<'a> {
             source_text_start: source_text_start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
-            parameters: params,
-            function_length,
+            parameters: parsed.params,
+            function_length: parsed.function_length,
             kind: fn_kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,

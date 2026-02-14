@@ -37,7 +37,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{
-    BindingPattern, Expr, Expression, Identifier,
+    BindingPattern, Expr, Expression, FunctionParameter, Identifier,
     SourceRange, Stmt, Statement, ScopeData, ProgramData,
 };
 use crate::lexer::Lexer;
@@ -54,6 +54,22 @@ pub use crate::ast::DeclarationKind;
 pub use crate::ast::FunctionKind;
 pub use crate::ast::ProgramType;
 pub use crate::ast::FunctionParsingInsights;
+
+/// Result of parsing a function's formal parameter list.
+pub struct ParsedParameters {
+    pub params: Vec<FunctionParameter>,
+    pub function_length: i32,
+    pub param_info: Vec<ParamInfo>,
+    pub is_simple: bool,
+}
+
+/// Information about a single parameter name binding.
+pub struct ParamInfo {
+    pub name: Vec<u16>,
+    pub is_rest: bool,
+    pub is_from_pattern: bool,
+    pub identifier: Option<Rc<Identifier>>,
+}
 
 /// Associativity for operator precedence.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -294,8 +310,8 @@ impl<'a> Parser<'a> {
     /// Register function parameters with the scope collector.
     pub(crate) fn register_function_params_with_scope(
         &mut self,
-        params: &[crate::ast::FunctionParameter],
-        param_info: &[(Vec<u16>, bool, bool, Option<Rc<Identifier>>)],
+        params: &[FunctionParameter],
+        param_info: &[ParamInfo],
     ) {
         use crate::ast::FunctionParameterBinding;
         let mut entries: Vec<(Vec<u16>, Option<Rc<Identifier>>, bool, bool)> = Vec::new();
@@ -306,7 +322,7 @@ impl<'a> Parser<'a> {
                     let (name, is_rest, is_from_pattern) = if info_idx < param_info.len() {
                         let pi = &param_info[info_idx];
                         info_idx += 1;
-                        (pi.0.clone(), pi.1, pi.2)
+                        (pi.name.clone(), pi.is_rest, pi.is_from_pattern)
                     } else {
                         (id.name.clone(), param.is_rest, false)
                     };
@@ -314,9 +330,9 @@ impl<'a> Parser<'a> {
                 }
                 FunctionParameterBinding::BindingPattern(_pat) => {
                     // Pattern parameters have multiple bound names in param_info.
-                    while info_idx < param_info.len() && param_info[info_idx].2 {
+                    while info_idx < param_info.len() && param_info[info_idx].is_from_pattern {
                         let pi = &param_info[info_idx];
-                        entries.push((pi.0.clone(), pi.3.clone(), pi.1, true));
+                        entries.push((pi.name.clone(), pi.identifier.clone(), pi.is_rest, true));
                         info_idx += 1;
                     }
                 }
@@ -652,12 +668,13 @@ impl<'a> Parser<'a> {
     /// body or the function is a generator/async.
     pub(crate) fn check_parameters_post_body(
         &mut self,
-        param_info: &[(Vec<u16>, bool, bool, Option<Rc<Identifier>>)],
+        param_info: &[ParamInfo],
         force_strict: bool,
         _kind: FunctionKind,
     ) {
         let mut seen_names: Vec<&[u16]> = Vec::new();
-        for (name, _, _, _) in param_info {
+        for pi in param_info {
+            let name = &pi.name;
             if name.is_empty() {
                 continue;
             }
