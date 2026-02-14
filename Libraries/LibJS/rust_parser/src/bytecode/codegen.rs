@@ -4480,7 +4480,7 @@ fn generate_optional_chain(
                     let mut arg_holders = Vec::new();
                     for arg in arguments {
                         let val = generate_expr_or_undefined(&arg.value, gen, None);
-                        arg_holders.push(val);
+                        arg_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
                     }
                     let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
                     gen.emit(Instruction::Call {
