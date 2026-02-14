@@ -315,6 +315,23 @@ if (ENABLE_RUST_PARSER)
     target_sources(LibJS PRIVATE BytecodeFactory.cpp)
     target_link_libraries(LibJS PRIVATE libjs_rust_parser)
     target_compile_definitions(LibJS PRIVATE ENABLE_RUST_PARSER)
+    install(TARGETS libjs_rust_parser EXPORT LagomTargets
+        ARCHIVE COMPONENT Lagom_Development
+    )
+    # The Rust library and LibJS have a circular dependency (C++ calls Rust
+    # entry points, Rust calls C++ callbacks). For static builds, merge the
+    # Rust archive into the LibJS archive so all symbols are in one place.
+    if(NOT BUILD_SHARED_LIBS)
+        add_custom_command(TARGET LibJS POST_BUILD
+            COMMAND ${CMAKE_AR} -x $<TARGET_FILE:libjs_rust_parser-static>
+            COMMAND ${CMAKE_AR} -qS $<TARGET_FILE:LibJS> *.o
+            COMMAND ${CMAKE_RANLIB} $<TARGET_FILE:LibJS>
+            COMMAND ${CMAKE_COMMAND} -E remove -f *.o
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/rust_merge_tmp
+            COMMENT "Merging Rust parser archive into LibJS"
+        )
+        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/rust_merge_tmp)
+    endif()
 endif()
 
 if (WIN32 AND ENABLE_ADDRESS_SANITIZER)
