@@ -1014,6 +1014,7 @@ impl ScopeCollector {
         let mut has_function_named_arguments = false;
         let mut has_lexically_declared_arguments = false;
         let mut non_local_var_count: usize = 0;
+        let mut non_local_var_count_for_parameter_expressions: usize = 0;
 
         // Build functions_to_initialize by scanning children for FunctionDeclarations.
         // Walk in reverse order, deduplicating by name.
@@ -1057,7 +1058,10 @@ impl ScopeCollector {
             };
 
             if local_info.is_none() {
-                non_local_var_count += 1;
+                non_local_var_count_for_parameter_expressions += 1;
+                if !is_parameter {
+                    non_local_var_count += 1;
+                }
             }
 
             vars_to_initialize.push(VarToInit {
@@ -1089,7 +1093,7 @@ impl ScopeCollector {
             has_argument_parameter,
             has_lexically_declared_arguments,
             non_local_var_count,
-            non_local_var_count_for_parameter_expressions: 0,
+            non_local_var_count_for_parameter_expressions,
         };
 
         {
