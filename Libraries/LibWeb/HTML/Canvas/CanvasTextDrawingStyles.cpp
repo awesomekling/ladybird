@@ -117,9 +117,9 @@ void CanvasTextDrawingStyles<IncludingClass, CanvasType>::set_font(StringView fo
 
             if constexpr (SameAs<CanvasType, HTML::HTMLCanvasElement>) {
                 // NOTE: The canvas itself is considered the inheritance parent
-                if (canvas_element.computed_properties()) {
+                if (canvas_element.computed_values()) {
                     // NOTE: Since we can't set a math depth directly here we always use the inherited value for the computed value
-                    computed_math_depth = canvas_element.computed_properties()->math_depth();
+                    computed_math_depth = canvas_element.computed_values()->math_depth();
                     abstract_element = DOM::AbstractElement { canvas_element };
                     length_resolution_context = CSS::Length::ResolutionContext::for_element(abstract_element.value());
                 }

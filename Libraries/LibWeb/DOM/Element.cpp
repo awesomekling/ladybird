@@ -1900,15 +1900,21 @@ bool Element::is_potentially_scrollable(TreatOverflowClipOnBodyParentAsOverflowH
     if (!layout_node())
         return false;
 
-    // - body’s parent element’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
-    if (parent_element()->computed_properties()->overflow_x() == CSS::Overflow::Visible || parent_element()->computed_properties()->overflow_y() == CSS::Overflow::Visible)
+    // - body's parent element's computed value of the overflow-x or overflow-y properties is neither visible nor clip.
+    auto const* parent_values = parent_element()->computed_values();
+    if (!parent_values)
+        return false;
+    if (parent_values->overflow_x() == CSS::Overflow::Visible || parent_values->overflow_y() == CSS::Overflow::Visible)
         return false;
     // NOTE: When treating 'overflow:clip' as 'overflow:hidden', we can never fail this condition
-    if (treat_overflow_clip_on_body_parent_as_overflow_hidden == TreatOverflowClipOnBodyParentAsOverflowHidden::No && (parent_element()->computed_properties()->overflow_x() == CSS::Overflow::Clip || parent_element()->computed_properties()->overflow_y() == CSS::Overflow::Clip))
+    if (treat_overflow_clip_on_body_parent_as_overflow_hidden == TreatOverflowClipOnBodyParentAsOverflowHidden::No && (parent_values->overflow_x() == CSS::Overflow::Clip || parent_values->overflow_y() == CSS::Overflow::Clip))
         return false;
 
-    // - body’s computed value of the overflow-x or overflow-y properties is neither visible nor clip.
-    if (first_is_one_of(computed_properties()->overflow_x(), CSS::Overflow::Visible, CSS::Overflow::Clip) || first_is_one_of(computed_properties()->overflow_y(), CSS::Overflow::Visible, CSS::Overflow::Clip))
+    // - body's computed value of the overflow-x or overflow-y properties is neither visible nor clip.
+    auto const* self_values = computed_values();
+    if (!self_values)
+        return false;
+    if (first_is_one_of(self_values->overflow_x(), CSS::Overflow::Visible, CSS::Overflow::Clip) || first_is_one_of(self_values->overflow_y(), CSS::Overflow::Visible, CSS::Overflow::Clip))
         return false;
 
     return true;
@@ -1916,14 +1922,13 @@ bool Element::is_potentially_scrollable(TreatOverflowClipOnBodyParentAsOverflowH
 
 bool Element::is_scroll_container() const
 {
-    // NB: We should only call this if we know that computed_properties has already been computed
-    VERIFY(computed_properties());
+    VERIFY(computed_values());
 
     if (is_document_element())
         return true;
 
-    return Layout::overflow_value_makes_box_a_scroll_container(computed_properties()->overflow_x())
-        || Layout::overflow_value_makes_box_a_scroll_container(computed_properties()->overflow_y());
+    return Layout::overflow_value_makes_box_a_scroll_container(computed_values()->overflow_x())
+        || Layout::overflow_value_makes_box_a_scroll_container(computed_values()->overflow_y());
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrolltop
@@ -3446,7 +3451,7 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
 
     // 2. If an ancestor of this in the flat tree has content-visibility: hidden, return false.
     for (auto* element = flat_tree_parent_element(); element; element = element->flat_tree_parent_element()) {
-        if (element->computed_properties()->content_visibility() == CSS::ContentVisibility::Hidden)
+        if (element->computed_values() && element->computed_values()->content_visibility() == CSS::ContentVisibility::Hidden)
             return false;
     }
 
@@ -3458,7 +3463,7 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
     //    ancestor of this in the flat tree, has a computed opacity value of 0, return false.
     if (options->opacity_property || options->check_opacity) {
         for (auto* element = this; element; element = element->flat_tree_parent_element()) {
-            if (element->computed_properties()->opacity() == 0.0f)
+            if (element->computed_values() && element->computed_values()->opacity() == 0.0f)
                 return false;
         }
     }
@@ -3466,7 +3471,7 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
     // 4. If either the visibilityProperty or the checkVisibilityCSS dictionary members of options are true, and this
     //    is invisible, return false.
     if (options->visibility_property || options->check_visibility_css) {
-        if (computed_properties()->visibility() == CSS::Visibility::Hidden)
+        if (computed_values() && computed_values()->visibility() == CSS::Visibility::Hidden)
             return false;
     }
 
@@ -3476,7 +3481,7 @@ bool Element::check_visibility(Optional<CheckVisibilityOptions> options)
     auto const skipped_contents_due_to_content_visibility_auto = false;
     if (options->content_visibility_auto && skipped_contents_due_to_content_visibility_auto) {
         for (auto* element = flat_tree_parent_element(); element; element = element->flat_tree_parent_element()) {
-            if (element->computed_properties()->content_visibility() == CSS::ContentVisibility::Auto)
+            if (element->computed_values() && element->computed_values()->content_visibility() == CSS::ContentVisibility::Auto)
                 return false;
         }
     }
@@ -3562,12 +3567,15 @@ bool Element::skips_its_contents()
 {
     // https://drafts.csswg.org/css-contain-2/#valdef-content-visibility-hidden
     // The element skips its contents.
-    if (computed_properties()->content_visibility() == CSS::ContentVisibility::Hidden)
+    auto const* values = computed_values();
+    if (!values)
+        return false;
+    if (values->content_visibility() == CSS::ContentVisibility::Hidden)
         return true;
 
     // https://drafts.csswg.org/css-contain-2/#valdef-content-visibility-auto
     // If the element is not relevant to the user, it also skips its contents.
-    if (computed_properties()->content_visibility() == CSS::ContentVisibility::Auto && !this->is_relevant_to_the_user()) {
+    if (values->content_visibility() == CSS::ContentVisibility::Auto && !this->is_relevant_to_the_user()) {
         return true;
     }
 
@@ -3589,7 +3597,7 @@ i32 Element::number_of_owned_list_items() const
 GC::Ptr<Element> Element::list_owner() const
 {
     // Any element whose computed value of 'display' is 'list-item' has a list owner, which is determined as follows:
-    if (!m_is_contained_in_list_subtree && (!computed_properties() || !computed_properties()->display().is_list_item()))
+    if (!m_is_contained_in_list_subtree && (!computed_values() || !computed_values()->display().is_list_item()))
         return nullptr;
 
     // 1. If the element is not being rendered, return null; the element has no list owner.
@@ -4291,7 +4299,7 @@ void Element::for_each_numbered_item_owned_by_list_owner(Callback callback)
         if (!node->layout_node())
             continue; // Skip nodes that do not participate in the layout.
 
-        if (!element->computed_properties()->display().is_list_item())
+        if (!element->computed_values() || !element->computed_values()->display().is_list_item())
             continue; // Skip nodes that are not list items.
 
         if (callback(element) == IterationDecision::Break)

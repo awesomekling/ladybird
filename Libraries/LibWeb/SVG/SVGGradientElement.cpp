@@ -70,7 +70,8 @@ SpreadMethod SVGGradientElement::spread_method_impl(HashTable<SVGGradientElement
 
 Gfx::InterpolationColorSpace SVGGradientElement::color_space() const
 {
-    switch (computed_properties()->color_interpolation()) {
+    VERIFY(computed_values());
+    switch (computed_values()->color_interpolation()) {
     case CSS::ColorInterpolation::Linearrgb:
         return Gfx::InterpolationColorSpace::LinearRGB;
     case CSS::ColorInterpolation::Auto:

@@ -698,7 +698,7 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     auto element_has_content_visibility_hidden = [&dom_node]() {
         if (is<DOM::Element>(dom_node)) {
             auto& element = static_cast<DOM::Element&>(dom_node);
-            return element.computed_properties()->content_visibility() == CSS::ContentVisibility::Hidden;
+            return element.computed_values() && element.computed_values()->content_visibility() == CSS::ContentVisibility::Hidden;
         }
         return false;
     }();
@@ -746,7 +746,7 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     if (is<HTML::HTMLSlotElement>(dom_node)) {
         auto& slot_element = static_cast<HTML::HTMLSlotElement&>(dom_node);
 
-        if (slot_element.computed_properties()->content_visibility() != CSS::ContentVisibility::Hidden) {
+        if (!slot_element.computed_values() || slot_element.computed_values()->content_visibility() != CSS::ContentVisibility::Hidden) {
             auto slottables = slot_element.assigned_nodes_internal();
             push_parent(as<NodeWithStyle>(*layout_node));
 

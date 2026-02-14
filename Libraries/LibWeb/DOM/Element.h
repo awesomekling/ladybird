@@ -238,6 +238,7 @@ public:
     CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
     CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
 
+    CSS::ComputedValues const* computed_values() const { return m_computed_values.ptr(); }
     CSS::ComputedValues& ensure_computed_values();
 
     Optional<PseudoElement&> get_pseudo_element(CSS::PseudoElement) const;

@@ -1414,11 +1414,11 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
     // properties from the <body> element to the initial containing block, the viewport, or the canvas background, is
     // disabled. Notably, this affects:
     // - 'overflow' and its longhands (see CSS Overflow 3 § 3.3 Overflow Viewport Propagation)
-    if (root_element.is_html_html_element() && !root_element.computed_properties()->contain().is_empty())
+    if (root_element.is_html_html_element() && root_element.computed_values() && !root_element.computed_values()->contain().is_empty())
         return;
 
     auto* body_element = root_element.first_child_of_type<HTML::HTMLBodyElement>();
-    if (body_element && !body_element->computed_properties()->contain().is_empty())
+    if (body_element && body_element->computed_values() && !body_element->computed_values()->contain().is_empty())
         return;
 
     // UAs must apply the overflow-* values set on the root element to the viewport
@@ -1637,7 +1637,7 @@ void Document::update_layout(UpdateLayoutReason reason)
         } else if (needs_inherited_style_update) {
             node_invalidation = element.recompute_inherited_style();
         }
-        is_display_none = static_cast<Element&>(node).computed_properties()->display().is_none();
+        is_display_none = static_cast<Element&>(node).computed_values() && static_cast<Element&>(node).computed_values()->display().is_none();
 
         // If this is a slot element and its style changed, mark its assigned
         // (slotted) nodes as needing a style update. Slotted elements inherit

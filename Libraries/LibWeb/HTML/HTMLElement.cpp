@@ -539,7 +539,7 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
         //    null.
         bool ancestor_is_closed_shadow_hidden = ancestor->is_closed_shadow_hidden_from(*this);
         if (ancestor_is_closed_shadow_hidden
-            && ancestor->computed_properties()->position() == CSS::Positioning::Fixed
+            && ancestor->computed_values() && ancestor->computed_values()->position() == CSS::Positioning::Fixed
             && no_ancestor_establishes_a_fixed_position_containing_block)
             return nullptr;
 
@@ -563,7 +563,7 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
                     return const_cast<Element*>(ancestor);
                 // - The computed value of the position property of the element is static and the ancestor is one of
                 //   the following HTML elements: td, th, or table.
-                if (computed_properties()->position() == CSS::Positioning::Static && ancestor->local_name().is_one_of(HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::table))
+                if (computed_values() && computed_values()->position() == CSS::Positioning::Static && ancestor->local_name().is_one_of(HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::table))
                     return const_cast<Element*>(ancestor);
             }
             // - FIXME: The element has a different effective zoom than ancestor.
