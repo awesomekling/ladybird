@@ -8,65 +8,58 @@ JS bytecode executable ""
 
 JS bytecode executable "tryCatchWithBlocks"
 [   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Mov dst:x~2, src:Int32(1)
-[  18]       Jump target:@118
+[   8]       Mov dst:x~3, src:Int32(1)
+[  18]       Jump target:@d0
 [  20]    1: Catch dst:reg5
 [  28]       SetLexicalEnvironment environment:reg4
-[  30]       CreateLexicalEnvironment dst:reg6, parent:reg4, capacity:1
-[  40]       CreateVariable identifier:e, is_immutable:false, is_global:false, is_strict:false
-[  50]       InitializeLexicalBinding identifier:e, src:reg5
-[  68]       Mov dst:z~1, src:Int32(3)
-[  78]       GetGlobal dst:reg8, identifier:console
-[  88]       GetById dst:reg9, base:reg8, property:log, base_identifier:console
-[  a0]       GetBinding dst:reg10, identifier:e
-[  b8]       Add dst:reg11, lhs:x~2, rhs:reg10
-[  c8]       Add dst:reg10, lhs:reg11, rhs:z~1
-[  d8]       Call dst:reg7, callee:reg9, this_value:reg8, console.log, arguments:[reg10]
-[ 100]       SetLexicalEnvironment environment:reg4
-[ 108]       Jump target:@110
-[ 110]    2: End value:Undefined
-[ 118]    3: Mov dst:y~0, src:Int32(2)
-[ 128]       Throw src:y~0
+[  30]       Mov dst:e~2, src:reg5
+[  40]       Mov dst:z~1, src:Int32(3)
+[  50]       GetGlobal dst:reg7, identifier:console
+[  60]       GetById dst:reg8, base:reg7, property:log, base_identifier:console
+[  78]       Add dst:reg9, lhs:x~3, rhs:e~2
+[  88]       Add dst:reg10, lhs:reg9, rhs:z~1
+[  98]       Call dst:reg6, callee:reg8, this_value:reg7, console.log, arguments:[reg10]
+[  c0]       Jump target:@c8
+[  c8]    2: End value:Undefined
+[  d0]    3: Mov dst:y~0, src:Int32(2)
+[  e0]       Throw src:y~0
 
 Exception handlers:
-    from  118 to  130 handler   20
+    from   d0 to   e8 handler   20
 
 JS bytecode executable "tryCatchFinallyWithBlocks"
 [   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Mov dst:x~2, src:Int32(1)
-[  18]       Jump target:@1a0
+[   8]       Mov dst:x~3, src:Int32(1)
+[  18]       Jump target:@168
 [  20]    1: Catch dst:reg6
 [  28]       SetLexicalEnvironment environment:reg4
 [  30]       Mov dst:reg5, src:Int32(1)
 [  40]       Jump target:@48
-[  48]    2: Mov dst:z~1, src:Int32(3)
+[  48]    2: Mov dst:z~2, src:Int32(3)
 [  58]       GetGlobal dst:reg8, identifier:console
-[  68]       GetById dst:reg9, base:reg8, property:log, base_identifier:console
-[  80]       Mov dst:reg11, src:z~1
-[  90]       Call dst:reg7, callee:reg9, this_value:reg8, console.log, arguments:[reg11]
-[  b8]       JumpStrictlyEquals lhs:reg5, rhs:Int32(0), true_target:@1b8, false_target:@1c0
+[  68]       GetById dst:reg10, base:reg8, property:log, base_identifier:console
+[  80]       Mov dst:reg9, src:z~2
+[  90]       Call dst:reg7, callee:reg10, this_value:reg8, console.log, arguments:[reg9]
+[  b8]       JumpStrictlyEquals lhs:reg5, rhs:Int32(0), true_target:@180, false_target:@188
 [  d0]    3: Catch dst:reg7
 [  d8]       SetLexicalEnvironment environment:reg4
-[  e0]       CreateLexicalEnvironment dst:reg8, parent:reg4, capacity:1
-[  f0]       CreateVariable identifier:e, is_immutable:false, is_global:false, is_strict:false
-[ 100]       InitializeLexicalBinding identifier:e, src:reg7
-[ 118]       GetGlobal dst:reg10, identifier:console
-[ 128]       GetById dst:reg11, base:reg10, property:log, base_identifier:console
-[ 140]       GetBinding dst:reg12, identifier:e
-[ 158]       Call dst:reg9, callee:reg11, this_value:reg10, console.log, arguments:[reg12]
-[ 180]       SetLexicalEnvironment environment:reg4
-[ 188]       Mov dst:reg5, src:Int32(0)
-[ 198]       Jump target:@48
-[ 1a0]    4: Mov dst:y~0, src:Int32(2)
-[ 1b0]       Throw src:y~0
-[ 1b8]    5: End value:Undefined
-[ 1c0]    6: JumpStrictlyEquals lhs:reg5, rhs:Int32(2), true_target:@1d8, false_target:@1e0
-[ 1d8]    7: Return value:reg6
-[ 1e0]    8: Throw src:reg6
+[  e0]       Mov dst:e~1, src:reg7
+[  f0]       GetGlobal dst:reg9, identifier:console
+[ 100]       GetById dst:reg10, base:reg9, property:log, base_identifier:console
+[ 118]       Mov dst:reg11, src:e~1
+[ 128]       Call dst:reg8, callee:reg10, this_value:reg9, console.log, arguments:[reg11]
+[ 150]       Mov dst:reg5, src:Int32(0)
+[ 160]       Jump target:@48
+[ 168]    4: Mov dst:y~0, src:Int32(2)
+[ 178]       Throw src:y~0
+[ 180]    5: End value:Undefined
+[ 188]    6: JumpStrictlyEquals lhs:reg5, rhs:Int32(2), true_target:@1a0, false_target:@1a8
+[ 1a0]    7: Return value:reg6
+[ 1a8]    8: Throw src:reg6
 
 Exception handlers:
-    from   d0 to  1a0 handler   20
-    from  1a0 to  1b8 handler   d0
+    from   d0 to  168 handler   20
+    from  168 to  180 handler   d0
 
 6
 2
