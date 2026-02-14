@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGC/DeferGC.h>
 #include <LibJS/Bytecode/Executable.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/SourceCode.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/ModuleNamespaceObject.h>
@@ -122,34 +125,83 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
 
     // 2. Perform the following substeps in an implementation-defined order, possibly interleaving parsing and error detection:
 
-    // a. Let script be ParseText(StringToCodePoints(sourceText), Script).
-    auto parser = Parser(Lexer(SourceCode::create({}, source_text->utf16_string())), Program::Type::Script, Parser::EvalInitialState {});
-    auto program = parser.parse_program();
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
-    // b. If script is a List of errors, throw a SyntaxError exception.
-    if (parser.has_errors()) {
-        auto& error = parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+    GC::Ptr<Bytecode::Executable> executable;
+    bool strict_eval = false;
+    EvalDeclarationData eval_declaration_data;
+
+    if (use_rust_codegen) {
+        auto source_code = SourceCode::create({}, source_text->utf16_string());
+        auto const& code_view = source_code->code_view();
+        auto length = code_view.length_in_code_units();
+
+        GC::DeferGC defer_gc(vm.heap());
+        EvalGdiBuilder builder;
+
+        void* exec_ptr;
+        if (code_view.has_ascii_storage()) {
+            auto ascii = code_view.ascii_span();
+            Vector<u16> utf16_buf;
+            utf16_buf.ensure_capacity(length);
+            for (size_t i = 0; i < length; ++i)
+                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+            exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
+                false, false, false, false, false);
+        } else {
+            auto utf16 = code_view.utf16_span();
+            exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
+                false, false, false, false, false);
+        }
+
+        if (exec_ptr) {
+            executable = static_cast<Bytecode::Executable*>(exec_ptr);
+            executable->name = "ShadowRealmEval"_utf16_fly_string;
+            strict_eval = builder.is_strict_mode;
+
+            eval_declaration_data.var_names = move(builder.var_names);
+            eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
+            eval_declaration_data.declared_function_names = move(builder.declared_function_names);
+            eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
+            eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
+            eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
+        }
+
+        // Fall through to C++ parser on Rust failure.
     }
 
-    // c. If script Contains ScriptBody is false, return undefined.
-    if (program->children().is_empty())
-        return js_undefined();
+    if (!executable) {
+        // a. Let script be ParseText(StringToCodePoints(sourceText), Script).
+        auto parser = Parser(Lexer(SourceCode::create({}, source_text->utf16_string())), Program::Type::Script, Parser::EvalInitialState {});
+        auto program = parser.parse_program();
 
-    // d. Let body be the ScriptBody of script.
-    // e. If body Contains NewTarget is true, throw a SyntaxError exception.
-    // f. If body Contains SuperProperty is true, throw a SyntaxError exception.
-    // g. If body Contains SuperCall is true, throw a SyntaxError exception.
-    // FIXME: Implement these, we probably need a generic way of scanning the AST for certain nodes.
+        // b. If script is a List of errors, throw a SyntaxError exception.
+        if (parser.has_errors()) {
+            auto& error = parser.errors()[0];
+            return vm.throw_completion<SyntaxError>(error.to_string());
+        }
 
-    // 3. Let strictEval be IsStrict of script.
-    auto strict_eval = program->is_strict_mode();
+        // c. If script Contains ScriptBody is false, return undefined.
+        if (program->children().is_empty())
+            return js_undefined();
+
+        // d. Let body be the ScriptBody of script.
+        // e. If body Contains NewTarget is true, throw a SyntaxError exception.
+        // f. If body Contains SuperProperty is true, throw a SyntaxError exception.
+        // g. If body Contains SuperCall is true, throw a SyntaxError exception.
+        // FIXME: Implement these, we probably need a generic way of scanning the AST for certain nodes.
+
+        // 3. Let strictEval be IsStrict of script.
+        strict_eval = program->is_strict_mode();
+
+        eval_declaration_data = EvalDeclarationData::create(vm, program, strict_eval);
+
+        executable = Bytecode::compile(vm, program, FunctionKind::Normal, "ShadowRealmEval"_utf16_fly_string);
+    }
 
     // 4. Let runningContext be the running execution context.
     // 5. If runningContext is not already suspended, suspend runningContext.
     // NOTE: This would be unused due to step 9 and is omitted for that reason.
-
-    auto executable = Bytecode::compile(vm, program, FunctionKind::Normal, "ShadowRealmEval"_utf16_fly_string);
 
     // 6. Let evalContext be GetShadowRealmContext(evalRealm, strictEval).
     auto eval_context = get_shadow_realm_context(eval_realm, strict_eval, executable->registers_and_locals_count, executable->constants.size());
@@ -164,7 +216,6 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
     TRY(vm.push_execution_context(*eval_context, {}));
 
     // 10. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, null, strictEval)).
-    auto eval_declaration_data = EvalDeclarationData::create(vm, program, strict_eval);
     auto eval_result = eval_declaration_instantiation(vm, eval_declaration_data, variable_environment, lexical_environment, nullptr, strict_eval);
 
     Completion result;

@@ -296,6 +296,371 @@ pub unsafe extern "C" fn rust_compile_script(
     exec_ptr
 }
 
+/// Compile an eval script and extract EDI (EvalDeclarationInstantiation) metadata.
+///
+/// This is the Rust-only path for eval(). It:
+/// 1. Parses the program with eval flags
+/// 2. Runs scope analysis with initiated_by_eval=true
+/// 3. Generates bytecode → creates Executable
+/// 4. Extracts EDI metadata from the program AST
+/// 5. Populates the C++ EvalGdiBuilder via callbacks
+///
+/// Returns the `Executable*` as `void*`, or nullptr on failure.
+///
+/// # Safety
+/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `gdi_context` must be a valid pointer to a C++ EvalGdiBuilder.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_eval(
+    source: *const u16,
+    source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    gdi_context: *mut c_void,
+    starts_in_strict_mode: bool,
+    in_eval_function_context: bool,
+    allow_super_property_lookup: bool,
+    allow_super_constructor_call: bool,
+    in_class_field_initializer: bool,
+) -> *mut c_void {
+    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let mut parser = Parser::new(source_slice, ProgramType::Script);
+    parser.initiated_by_eval = true;
+    parser.in_eval_function_context = in_eval_function_context;
+    parser.flags.allow_super_property_lookup = allow_super_property_lookup;
+    parser.flags.allow_super_constructor_call = allow_super_constructor_call;
+    parser.flags.in_class_field_initializer = in_class_field_initializer;
+
+    // Parse
+    let program = parser.parse_program(starts_in_strict_mode);
+
+    // Check for parse errors
+    if parser.has_errors() {
+        return std::ptr::null_mut();
+    }
+
+    // Run scope analysis
+    parser.scope_collector.analyze(true);
+
+    // Extract program data before codegen
+    let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
+        (data.scope.clone(), data.is_strict_mode)
+    } else {
+        return std::ptr::null_mut();
+    };
+
+    // Generate bytecode
+    let mut gen = bytecode::generator::Generator::new();
+    gen.strict = is_strict;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
+
+    // Copy program's local variables from scope analysis into the generator.
+    {
+        let scope = scope_ref.borrow();
+        gen.local_variables = scope
+            .local_variables
+            .iter()
+            .map(|lv| bytecode::generator::LocalVariable {
+                name: lv.name.clone(),
+                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+                is_initialized_during_declaration_instantiation: false,
+            })
+            .collect();
+    }
+
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Initialize the lexical environment register.
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
+    }
+
+    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
+
+    if !gen.is_current_block_terminated() {
+        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(bytecode::instruction::Instruction::End {
+            value: value.operand(),
+        });
+    }
+
+    // Assemble
+    let assembled = gen.assemble();
+
+    // Create C++ Executable via FFI
+    let exec_ptr = bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr);
+    if exec_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    // Extract EDI metadata and populate via callbacks.
+    extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+
+    exec_ptr
+}
+
+/// Compile a dynamically-created function (new Function()).
+///
+/// Validates parameters and body separately per spec, then parses
+/// the full synthetic source to create a SharedFunctionInstanceData.
+///
+/// Returns a `SharedFunctionInstanceData*` as `void*`, or nullptr on
+/// parse failure.
+///
+/// # Safety
+/// - All source pointers must be valid UTF-16 buffers.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_dynamic_function(
+    full_source: *const u16,
+    full_source_len: usize,
+    params_source: *const u16,
+    params_source_len: usize,
+    body_source: *const u16,
+    body_source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    function_kind: u8,
+) -> *mut c_void {
+    // Validate parameters: wrap in "function test(PARAMS) {}" and parse.
+    {
+        let mut validate_src: Vec<u16> = Vec::new();
+        match function_kind {
+            2 => validate_src.extend_from_slice(utf16!("async function test(")),
+            _ => validate_src.extend_from_slice(utf16!("function test(")),
+        }
+        let params_slice = std::slice::from_raw_parts(params_source, params_source_len);
+        validate_src.extend_from_slice(params_slice);
+        validate_src.extend_from_slice(utf16!(") {}"));
+        let mut parser = Parser::new(&validate_src, ProgramType::Script);
+        parser.parse_program(false);
+        if parser.has_errors() {
+            return std::ptr::null_mut();
+        }
+    }
+
+    // Validate body: wrap in "function test() { BODY }" and parse.
+    {
+        let mut validate_src: Vec<u16> = Vec::new();
+        match function_kind {
+            1 => validate_src.extend_from_slice(utf16!("function* test() {")),
+            2 => validate_src.extend_from_slice(utf16!("async function test() {")),
+            3 => validate_src.extend_from_slice(utf16!("async function* test() {")),
+            _ => validate_src.extend_from_slice(utf16!("function test() {")),
+        }
+        let body_slice = std::slice::from_raw_parts(body_source, body_source_len);
+        validate_src.extend_from_slice(body_slice);
+        validate_src.extend_from_slice(utf16!("}"));
+        let mut parser = Parser::new(&validate_src, ProgramType::Script);
+        parser.parse_program(false);
+        if parser.has_errors() {
+            return std::ptr::null_mut();
+        }
+    }
+
+    // Parse the full source.
+    let full_slice = std::slice::from_raw_parts(full_source, full_source_len);
+    let mut parser = Parser::new(full_slice, ProgramType::Script);
+    let program = parser.parse_program(false);
+
+    if parser.has_errors() {
+        return std::ptr::null_mut();
+    }
+
+    // Run scope analysis.
+    parser.scope_collector.analyze(false);
+
+    // Extract the FunctionExpression from the program.
+    // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
+    let func_data = if let Statement::Program(ref data) = program.inner {
+        let scope = data.scope.borrow();
+        let mut found: Option<ast::FunctionData> = None;
+        for child in &scope.children {
+            match &child.inner {
+                Statement::FunctionDeclaration(fd) => {
+                    found = Some(fd.as_ref().clone());
+                    break;
+                }
+                Statement::Expression(expr) => {
+                    if let ast::Expression::Function(fd) = &expr.inner {
+                        found = Some(fd.as_ref().clone());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        found
+    } else {
+        None
+    };
+
+    let func_data = match func_data {
+        Some(fd) => fd,
+        None => return std::ptr::null_mut(),
+    };
+
+    // Determine strictness: the function itself may be strict.
+    let is_strict = func_data.is_strict_mode;
+
+    // Create SFD via FFI.
+    bytecode::ffi::create_sfd_for_gdi(&func_data, vm_ptr, source_code_ptr, is_strict)
+}
+
+/// Extract EDI metadata from a program-level ScopeData and populate
+/// the C++ EvalGdiBuilder via callbacks.
+unsafe fn extract_eval_gdi(
+    scope: &ast::ScopeData,
+    is_strict: bool,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    ctx: *mut c_void,
+) {
+    use ast::{DeclarationKind, Statement};
+    use bytecode::ffi::{
+        eval_gdi_push_annex_b_name, eval_gdi_push_function, eval_gdi_push_lexical_binding,
+        eval_gdi_push_var_name, eval_gdi_set_strict,
+    };
+
+    // Set strict mode flag.
+    eval_gdi_set_strict(ctx, is_strict);
+
+    // 1. Var names (var declarations at any nesting level + top-level function declarations)
+    for child in &scope.children {
+        collect_var_names_recursive_eval(&child.inner, ctx);
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name) = func_data.name {
+                eval_gdi_push_var_name(ctx, name.name.as_ptr(), name.name.len());
+            }
+        }
+    }
+
+    // 2. Functions to initialize (reverse order, deduplicated by name).
+    let mut seen_names: Vec<Vec<u16>> = Vec::new();
+    let mut funcs_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
+    for child in scope.children.iter().rev() {
+        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+            if let Some(ref name_ident) = func_data.name {
+                if !seen_names.iter().any(|n| *n == name_ident.name) {
+                    seen_names.push(name_ident.name.clone());
+                    funcs_to_init.push((func_data, name_ident.name.clone()));
+                }
+            }
+        }
+    }
+    for (func_data, name) in &funcs_to_init {
+        let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(func_data, vm_ptr, source_code_ptr, is_strict);
+        eval_gdi_push_function(ctx, sfd_ptr, name.as_ptr(), name.len());
+    }
+
+    // 3. Var scoped names (var VariableDeclaration names at any nesting level, excluding function declarations)
+    for child in &scope.children {
+        collect_var_scoped_names_recursive_eval(&child.inner, ctx);
+    }
+
+    // 4. Annex B candidate names
+    for name in &scope.annexb_function_names {
+        eval_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len());
+    }
+
+    // 5. Lexical bindings (name + is_constant)
+    for child in &scope.children {
+        match &child.inner {
+            Statement::VariableDeclaration { kind, declarations }
+                if *kind != DeclarationKind::Var =>
+            {
+                let is_constant = *kind == DeclarationKind::Const;
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        eval_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_constant);
+                    }
+                }
+            }
+            Statement::UsingDeclaration { declarations } => {
+                for decl in declarations {
+                    let mut names = Vec::new();
+                    collect_bound_names_from_target(&decl.target, &mut names);
+                    for name in &names {
+                        eval_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), false);
+                    }
+                }
+            }
+            Statement::ClassDeclaration(class_data) => {
+                if let Some(ref name) = class_data.name {
+                    eval_gdi_push_lexical_binding(ctx, name.name.as_ptr(), name.name.len(), false);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Recursively collect var-declared names for eval.
+unsafe fn collect_var_names_recursive_eval(stmt: &ast::Statement, ctx: *mut c_void) {
+    use ast::Statement;
+    use bytecode::ffi::eval_gdi_push_var_name;
+
+    match stmt {
+        Statement::VariableDeclaration {
+            kind: ast::DeclarationKind::Var,
+            declarations,
+        } => {
+            for decl in declarations {
+                let mut names = Vec::new();
+                collect_bound_names_from_target(&decl.target, &mut names);
+                for name in &names {
+                    eval_gdi_push_var_name(ctx, name.as_ptr(), name.len());
+                }
+            }
+        }
+        _ => {
+            for_each_child_statement(stmt, &mut |child| {
+                collect_var_names_recursive_eval(child, ctx);
+            });
+        }
+    }
+}
+
+/// Recursively collect var-scoped variable declaration names for eval.
+unsafe fn collect_var_scoped_names_recursive_eval(stmt: &ast::Statement, ctx: *mut c_void) {
+    use ast::Statement;
+    use bytecode::ffi::eval_gdi_push_var_scoped_name;
+
+    match stmt {
+        Statement::VariableDeclaration {
+            kind: ast::DeclarationKind::Var,
+            declarations,
+        } => {
+            for decl in declarations {
+                let mut names = Vec::new();
+                collect_bound_names_from_target(&decl.target, &mut names);
+                for name in &names {
+                    eval_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len());
+                }
+            }
+        }
+        _ => {
+            for_each_child_statement(stmt, &mut |child| {
+                collect_var_scoped_names_recursive_eval(child, ctx);
+            });
+        }
+    }
+}
+
 /// Extract GDI metadata from a program-level ScopeData and populate
 /// the C++ ScriptGdiBuilder via callbacks.
 unsafe fn extract_script_gdi(

@@ -39,6 +39,50 @@
 #include <LibJS/Runtime/SuppressedError.h>
 #include <LibJS/Runtime/Temporal/AbstractOperations.h>
 #include <LibJS/Runtime/ValueInlines.h>
+#include <LibJS/BytecodeFactory.h>
+#include <LibJS/SourceCode.h>
+#include <LibGC/DeferGC.h>
+
+namespace JS { }
+
+static Utf16FlyString utf16_fly_from(uint16_t const* data, size_t len)
+{
+    return Utf16FlyString::from_utf16(Utf16View { reinterpret_cast<char16_t const*>(data), len });
+}
+
+extern "C" void eval_gdi_set_strict(void* ctx, bool is_strict)
+{
+    static_cast<JS::EvalGdiBuilder*>(ctx)->is_strict_mode = is_strict;
+}
+
+extern "C" void eval_gdi_push_var_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::EvalGdiBuilder*>(ctx)->var_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void eval_gdi_push_function(void* ctx, void* sfd_ptr, uint16_t const* name, size_t len)
+{
+    auto& builder = *static_cast<JS::EvalGdiBuilder*>(ctx);
+    auto fn_name = utf16_fly_from(name, len);
+    builder.declared_function_names.set(fn_name);
+    auto& sfd = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    builder.functions_to_initialize.append({ sfd, move(fn_name) });
+}
+
+extern "C" void eval_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::EvalGdiBuilder*>(ctx)->var_scoped_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void eval_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len)
+{
+    static_cast<JS::EvalGdiBuilder*>(ctx)->annex_b_candidate_names.append(utf16_fly_from(name, len));
+}
+
+extern "C" void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant)
+{
+    static_cast<JS::EvalGdiBuilder*>(ctx)->lexical_bindings.append({ utf16_fly_from(name, len), is_constant });
+}
 
 namespace JS {
 
@@ -651,30 +695,92 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     //     f. If inMethod is false, and body Contains SuperProperty, throw a SyntaxError exception.
     //     g. If inDerivedConstructor is false, and body Contains SuperCall, throw a SyntaxError exception.
     //     h. If inClassFieldInitializer is true, and ContainsArguments of body is true, throw a SyntaxError exception.
-    Parser::EvalInitialState initial_state {
-        .in_eval_function_context = in_function,
-        .allow_super_property_lookup = in_method,
-        .allow_super_constructor_call = in_derived_constructor,
-        .in_class_field_initializer = in_class_field_initializer,
-    };
 
-    Parser parser(Lexer(SourceCode::create({}, code_string->utf16_string())), Program::Type::Script, move(initial_state));
-    auto program = parser.parse_program(strict_caller == CallerMode::Strict);
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
-    //     b. If script is a List of errors, throw a SyntaxError exception.
-    if (parser.has_errors()) {
-        auto& error = parser.errors()[0];
-        return vm.throw_completion<SyntaxError>(error.to_string());
+    GC::Ptr<Bytecode::Executable> executable;
+    bool strict_eval = false;
+    EvalDeclarationData eval_declaration_data;
+
+    if (use_rust_codegen) {
+        auto source_code = SourceCode::create({}, code_string->utf16_string());
+        auto const& code_view = source_code->code_view();
+        auto length = code_view.length_in_code_units();
+
+        GC::DeferGC defer_gc(vm.heap());
+        EvalGdiBuilder builder;
+
+        void* exec_ptr;
+        if (code_view.has_ascii_storage()) {
+            auto ascii = code_view.ascii_span();
+            Vector<u16> utf16_buf;
+            utf16_buf.ensure_capacity(length);
+            for (size_t i = 0; i < length; ++i)
+                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+            exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
+                strict_caller == CallerMode::Strict,
+                in_function, in_method, in_derived_constructor, in_class_field_initializer);
+        } else {
+            auto utf16 = code_view.utf16_span();
+            exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
+                strict_caller == CallerMode::Strict,
+                in_function, in_method, in_derived_constructor, in_class_field_initializer);
+        }
+
+        if (exec_ptr) {
+            executable = static_cast<Bytecode::Executable*>(exec_ptr);
+            executable->name = "eval"_utf16_fly_string;
+
+            // 14. If strictCaller is true, let strictEval be true.
+            if (strict_caller == CallerMode::Strict)
+                strict_eval = true;
+            // 15. Else, let strictEval be IsStrict of script.
+            else
+                strict_eval = builder.is_strict_mode;
+
+            eval_declaration_data.var_names = move(builder.var_names);
+            eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
+            eval_declaration_data.declared_function_names = move(builder.declared_function_names);
+            eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
+            eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
+            eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
+        }
+
+        // Fall through to C++ parser on Rust failure.
     }
 
-    bool strict_eval = false;
+    if (!executable) {
+        Parser::EvalInitialState initial_state {
+            .in_eval_function_context = in_function,
+            .allow_super_property_lookup = in_method,
+            .allow_super_constructor_call = in_derived_constructor,
+            .in_class_field_initializer = in_class_field_initializer,
+        };
 
-    // 14. If strictCaller is true, let strictEval be true.
-    if (strict_caller == CallerMode::Strict)
-        strict_eval = true;
-    // 15. Else, let strictEval be IsStrict of script.
-    else
-        strict_eval = program->is_strict_mode();
+        Parser parser(Lexer(SourceCode::create({}, code_string->utf16_string())), Program::Type::Script, move(initial_state));
+        auto program = parser.parse_program(strict_caller == CallerMode::Strict);
+
+        //     b. If script is a List of errors, throw a SyntaxError exception.
+        if (parser.has_errors()) {
+            auto& error = parser.errors()[0];
+            return vm.throw_completion<SyntaxError>(error.to_string());
+        }
+
+        // 14. If strictCaller is true, let strictEval be true.
+        if (strict_caller == CallerMode::Strict)
+            strict_eval = true;
+        // 15. Else, let strictEval be IsStrict of script.
+        else
+            strict_eval = program->is_strict_mode();
+
+        eval_declaration_data = EvalDeclarationData::create(vm, program, strict_eval);
+
+        executable = Bytecode::Generator::generate_from_ast_node(vm, program, {});
+        executable->name = "eval"_utf16_fly_string;
+    }
+
+    if (Bytecode::g_dump_bytecode)
+        executable->dump();
 
     // 16. Let runningContext be the running execution context.
     // 17. NOTE: If direct is true, runningContext will be the execution context that performed the direct eval. If direct is false, runningContext will be the execution context for the invocation of the eval function.
@@ -724,15 +830,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     // NOTE: Spec steps are rearranged in order to compute number of registers+constants+locals before construction of the execution context.
 
     // 30. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
-    auto eval_declaration_data = EvalDeclarationData::create(vm, program, strict_eval);
     TRY(eval_declaration_instantiation(vm, eval_declaration_data, variable_environment, lexical_environment, private_environment, strict_eval));
-
-    // 31. If result.[[Type]] is normal, then
-    //     a. Set result to the result of evaluating body.
-    auto executable = Bytecode::Generator::generate_from_ast_node(vm, program, {});
-    executable->name = "eval"_utf16_fly_string;
-    if (Bytecode::g_dump_bytecode)
-        executable->dump();
 
     // 22. Let evalContext be a new ECMAScript code execution context.
     ExecutionContext* eval_context = nullptr;
@@ -808,7 +906,8 @@ EvalDeclarationData EvalDeclarationData::create(VM& vm, Program const& program, 
     // Pre-compute AnnexB candidates.
     if (!strict) {
         MUST(program.for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) -> ThrowCompletionOr<void> {
-            data.annex_b_candidates.append(function_declaration);
+            data.annex_b_candidate_names.append(function_declaration.name());
+            data.annex_b_function_declarations.append(function_declaration);
             return {};
         }));
     }
@@ -909,9 +1008,9 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, EvalDeclarationDa
         HashTable<Utf16FlyString> hoisted_functions;
 
         // b. For each FunctionDeclaration f that is directly contained in the StatementList of a Block, CaseClause, or DefaultClause Contained within body, do
-        for (auto& function_declaration : data.annex_b_candidates) {
+        for (size_t i = 0; i < data.annex_b_candidate_names.size(); ++i) {
             // i. Let F be StringValue of the BindingIdentifier of f.
-            auto function_name = function_declaration->name();
+            auto& function_name = data.annex_b_candidate_names[i];
 
             // ii. If replacing the FunctionDeclaration f with a VariableStatement that has F as a BindingIdentifier would not produce any Early Errors for body, then
             // Note: This is checked during parsing and for_each_function_hoistable_with_annexB_extension so it always passes here.
@@ -993,7 +1092,8 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, EvalDeclarationDa
             //     iii. Let fobj be ! benv.GetBindingValue(F, false).
             //     iv. Perform ? genv.SetMutableBinding(F, fobj, false).
             //     v. Return unused.
-            function_declaration->set_should_do_additional_annexB_steps();
+            if (i < data.annex_b_function_declarations.size())
+                data.annex_b_function_declarations[i]->set_should_do_additional_annexB_steps();
         }
     }
 

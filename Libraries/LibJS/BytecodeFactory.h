@@ -255,6 +255,48 @@ void script_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len
 void script_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
 void script_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
 
+// Parse, compile, and extract EDI metadata for eval using the Rust
+// parser. Populates gdi_context (an EvalGdiBuilder*) via callbacks.
+// Returns a Bytecode::Executable* cast to void*, or nullptr on failure.
+void* rust_compile_eval(
+    uint16_t const* source,
+    size_t source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    void* gdi_context,
+    bool starts_in_strict_mode,
+    bool in_eval_function_context,
+    bool allow_super_property_lookup,
+    bool allow_super_constructor_call,
+    bool in_class_field_initializer);
+
+// Parse and compile a dynamically-created function (new Function()).
+// Validates parameters and body separately per spec, then parses the
+// full synthetic source to create a SharedFunctionInstanceData.
+//
+// Returns a SharedFunctionInstanceData* cast to void*, or nullptr on
+// parse failure (caller should throw SyntaxError).
+//
+// function_kind: 0=Normal, 1=Generator, 2=Async, 3=AsyncGenerator
+void* rust_compile_dynamic_function(
+    uint16_t const* full_source,
+    size_t full_source_len,
+    uint16_t const* params_source,
+    size_t params_source_len,
+    uint16_t const* body_source,
+    size_t body_source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    uint8_t function_kind);
+
+// Callbacks used by rust_compile_eval to populate EDI metadata.
+void eval_gdi_set_strict(void* ctx, bool is_strict);
+void eval_gdi_push_var_name(void* ctx, uint16_t const* name, size_t len);
+void eval_gdi_push_function(void* ctx, void* sfd, uint16_t const* name, size_t len);
+void eval_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
+void eval_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
+void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
+
 #ifdef __cplusplus
 }
 #endif

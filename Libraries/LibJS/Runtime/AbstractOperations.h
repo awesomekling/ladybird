@@ -105,7 +105,8 @@ struct EvalDeclarationData {
 
     Vector<Utf16FlyString> var_scoped_names;
 
-    Vector<NonnullRefPtr<FunctionDeclaration>> annex_b_candidates;
+    Vector<Utf16FlyString> annex_b_candidate_names;
+    Vector<NonnullRefPtr<FunctionDeclaration>> annex_b_function_declarations;
 
     struct LexicalBinding {
         Utf16FlyString name;
@@ -114,6 +115,18 @@ struct EvalDeclarationData {
     Vector<LexicalBinding> lexical_bindings;
 
     static EvalDeclarationData create(VM&, Program const&, bool strict);
+};
+
+// Builder populated by Rust via callbacks during rust_compile_eval.
+struct EvalGdiBuilder {
+    GC::Ptr<Bytecode::Executable> executable;
+    bool is_strict_mode { false };
+    Vector<Utf16FlyString> var_names;
+    Vector<EvalDeclarationData::FunctionToInitialize> functions_to_initialize;
+    HashTable<Utf16FlyString> declared_function_names;
+    Vector<Utf16FlyString> var_scoped_names;
+    Vector<Utf16FlyString> annex_b_candidate_names;
+    Vector<EvalDeclarationData::LexicalBinding> lexical_bindings;
 };
 
 ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, EvalDeclarationData&, Environment* variable_environment, Environment* lexical_environment, PrivateEnvironment* private_environment, bool strict);

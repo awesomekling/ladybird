@@ -141,6 +141,14 @@ extern "C" {
     pub fn script_gdi_push_var_scoped_name(ctx: *mut c_void, name: *const u16, len: usize);
     pub fn script_gdi_push_annex_b_name(ctx: *mut c_void, name: *const u16, len: usize);
     pub fn script_gdi_push_lexical_binding(ctx: *mut c_void, name: *const u16, len: usize, is_constant: bool);
+
+    // Callbacks for populating eval EDI data from Rust.
+    pub fn eval_gdi_set_strict(ctx: *mut c_void, is_strict: bool);
+    pub fn eval_gdi_push_var_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn eval_gdi_push_function(ctx: *mut c_void, sfd: *mut c_void, name: *const u16, len: usize);
+    pub fn eval_gdi_push_var_scoped_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn eval_gdi_push_annex_b_name(ctx: *mut c_void, name: *const u16, len: usize);
+    pub fn eval_gdi_push_lexical_binding(ctx: *mut c_void, name: *const u16, len: usize, is_constant: bool);
 }
 
 /// Create a SharedFunctionInstanceData for a FunctionData, for GDI use.
