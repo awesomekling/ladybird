@@ -2081,7 +2081,7 @@ fn generate_for_statement(
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
                         parent: parent.operand(),
-                        capacity: non_local_names.len() as u32,
+                        capacity: 0,
                     });
                     gen.lexical_environment_register_stack.push(new_env);
 
@@ -2247,7 +2247,7 @@ fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Vec<u16>]) {
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: new_env.operand(),
         parent: parent.operand(),
-        capacity: bindings.len() as u32,
+        capacity: 0,
     });
     gen.lexical_environment_register_stack.push(new_env);
 
@@ -4964,7 +4964,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: new_env.operand(),
         parent: parent.operand(),
-        capacity: binding_names.len().max(1) as u32,
+        capacity: 0.max(1) as u32,
     });
     gen.lexical_environment_register_stack.push(new_env);
 
@@ -5004,7 +5004,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
                         parent: parent.operand(),
-                        capacity: names.len() as u32,
+                        capacity: 0,
                     });
                     gen.lexical_environment_register_stack.push(new_env);
                     for (name, _) in &names {
@@ -6073,7 +6073,7 @@ fn generate_try_statement(
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
                         parent: parent.operand(),
-                        capacity: 1,
+                        capacity: 0,
                     });
                     gen.lexical_environment_register_stack.push(new_env);
                     created_catch_scope = true;
@@ -6103,7 +6103,7 @@ fn generate_try_statement(
                     gen.emit(Instruction::CreateLexicalEnvironment {
                         dst: new_env.operand(),
                         parent: parent.operand(),
-                        capacity: names.len() as u32,
+                        capacity: 0,
                     });
                     gen.lexical_environment_register_stack.push(new_env);
                     created_catch_scope = true;
