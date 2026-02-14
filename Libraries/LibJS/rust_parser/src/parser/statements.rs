@@ -685,6 +685,7 @@ impl<'a> Parser<'a> {
                 let param_start = self.position();
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                self.check_identifier_name_for_assignment_validity(&value, false);
                 let id = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
                 self.scope_collector.add_catch_parameter_identifier(&value, id.clone());
                 CatchParameter::Identifier(id)

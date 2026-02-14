@@ -539,6 +539,9 @@ impl<'a> Parser<'a> {
                 if !Self::is_simple_assignment_target(&lhs, allow_call) {
                     self.syntax_error("Invalid left-hand side in assignment");
                 }
+                if let Expression::Identifier(ref id) = lhs.inner {
+                    self.check_identifier_name_for_assignment_validity(&id.name, false);
+                }
                 self.consume();
                 let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                 (self.expr(start, Expression::Assignment {
@@ -628,6 +631,9 @@ impl<'a> Parser<'a> {
                 if !Self::is_simple_assignment_target(&lhs, true) {
                     self.syntax_error("Invalid left-hand side in postfix operation");
                 }
+                if let Expression::Identifier(ref id) = lhs.inner {
+                    self.check_identifier_name_for_assignment_validity(&id.name, false);
+                }
                 self.consume();
                 (self.expr(start, Expression::Update {
                     op: UpdateOp::Increment,
@@ -638,6 +644,9 @@ impl<'a> Parser<'a> {
             TokenType::MinusMinus => {
                 if !Self::is_simple_assignment_target(&lhs, true) {
                     self.syntax_error("Invalid left-hand side in postfix operation");
+                }
+                if let Expression::Identifier(ref id) = lhs.inner {
+                    self.check_identifier_name_for_assignment_validity(&id.name, false);
                 }
                 self.consume();
                 (self.expr(start, Expression::Update {
@@ -676,6 +685,9 @@ impl<'a> Parser<'a> {
                 if !Self::is_simple_assignment_target(&expr, true) {
                     self.syntax_error("Invalid left-hand side in prefix operation");
                 }
+                if let Expression::Identifier(ref id) = expr.inner {
+                    self.check_identifier_name_for_assignment_validity(&id.name, false);
+                }
                 self.expr(start, Expression::Update {
                     op: UpdateOp::Increment,
                     argument: Box::new(expr),
@@ -687,6 +699,9 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
                 if !Self::is_simple_assignment_target(&expr, true) {
                     self.syntax_error("Invalid left-hand side in prefix operation");
+                }
+                if let Expression::Identifier(ref id) = expr.inner {
+                    self.check_identifier_name_for_assignment_validity(&id.name, false);
                 }
                 self.expr(start, Expression::Update {
                     op: UpdateOp::Decrement,
