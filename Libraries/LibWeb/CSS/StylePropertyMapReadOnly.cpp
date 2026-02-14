@@ -7,9 +7,10 @@
 #include "StylePropertyMapReadOnly.h"
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/StylePropertyMapReadOnlyPrototype.h>
+#include <LibWeb/CSS/AnimatedPropertyData.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/DOM/Document.h>
@@ -183,9 +184,16 @@ RefPtr<StyleValue const> StylePropertyMapReadOnly::get_style_value(Source& sourc
             }
 
             if (property.id() >= first_longhand_property_id && property.id() <= last_longhand_property_id) {
-                // FIXME: This will only ever be null for pseudo-elements. What should we do in that case?
-                if (auto computed_properties = element.computed_properties())
-                    return computed_properties->property(property.id());
+                if (auto const* values = element.computed_values()) {
+                    if (auto const* animated_data = element.animated_property_data()) {
+                        if (!values->is_property_important(property.id()) || animated_data->is_result_of_transition(property.id())) {
+                            if (auto it = animated_data->values.find(property.id()); it != animated_data->values.end())
+                                return it->value;
+                        }
+                    }
+                    if (auto value = values->property_value(property.id()))
+                        return value;
+                }
             }
 
             return nullptr;

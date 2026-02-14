@@ -853,8 +853,10 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
     auto const* li_box = as_if<ListItemBox>(box);
     auto is_list_item_box_without_css_content = li_box != nullptr;
     if (auto const* dom_node = as_if<DOM::Element>(box.dom_node()); li_box && dom_node) {
-        if (auto const computed_properties = dom_node->computed_properties(CSS::PseudoElement::Marker))
-            is_list_item_box_without_css_content = !computed_properties->property(CSS::PropertyID::Content).is_content();
+        if (auto marker_node = dom_node->get_pseudo_element_node(CSS::PseudoElement::Marker)) {
+            if (auto content_value = marker_node->computed_values().property_value(CSS::PropertyID::Content))
+                is_list_item_box_without_css_content = !content_value->is_content();
+        }
     }
 
     // Before we insert the children of a list item we need to know the location of the marker.
