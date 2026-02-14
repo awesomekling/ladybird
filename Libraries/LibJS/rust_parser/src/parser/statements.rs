@@ -54,6 +54,9 @@ impl<'a> Parser<'a> {
                 self.parse_expression_statement()
             }
             _ => {
+                if self.match_invalid_escaped_keyword() {
+                    self.syntax_error("Keyword must not contain escaped characters");
+                }
                 if self.match_identifier_name() {
                     if let Some(labelled) = self.try_parse_labelled_statement(allow_labelled_function) {
                         return labelled;

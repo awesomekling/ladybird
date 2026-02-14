@@ -579,7 +579,7 @@ impl<'a> Parser<'a> {
             || self.match_identifier()
     }
 
-    fn match_invalid_escaped_keyword(&self) -> bool {
+    pub(crate) fn match_invalid_escaped_keyword(&self) -> bool {
         if self.current_token.token_type != TokenType::EscapedKeyword {
             return false;
         }
@@ -596,10 +596,10 @@ impl<'a> Parser<'a> {
         if self.flags.strict_mode {
             return true;
         }
-        ![
-            utf16!("implements"), utf16!("interface"), utf16!("package"),
-            utf16!("private"), utf16!("protected"), utf16!("public"),
-        ].contains(&value)
+        // In non-strict mode, "let" and "static" are context-sensitive
+        // keywords that are valid as escaped identifiers. All other
+        // escaped keywords (break, for, etc.) are always invalid.
+        value != utf16!("let") && value != utf16!("static")
     }
 
     #[allow(dead_code)]
