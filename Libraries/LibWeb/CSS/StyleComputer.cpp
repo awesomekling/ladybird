@@ -2438,8 +2438,13 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     compute_text_align(computed_style, abstract_element);
 
     // Let the element adjust computed style
-    if (!abstract_element.pseudo_element().has_value())
+    if (!abstract_element.pseudo_element().has_value()) {
+        // https://drafts.csswg.org/css-display-3/#unbox
+        // Certain elements are not rendered purely by CSS, so display: contents computes to display: none.
+        if (abstract_element.element().disallows_display_contents() && computed_style->display().is_contents())
+            computed_style->set_property(PropertyID::Display, DisplayStyleValue::create(Display::from_short(Display::Short::None)));
         abstract_element.element().adjust_computed_style(computed_style);
+    }
 
     // Transition declarations [css-transitions-1]
     // Theoretically this should be part of the cascade, but it works with computed values, which we don't have until now.

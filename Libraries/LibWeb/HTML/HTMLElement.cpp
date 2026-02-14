@@ -11,7 +11,6 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/HTMLElementPrototype.h>
 #include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/EditingHostManager.h>
 #include <LibWeb/DOM/ElementFactory.h>
@@ -1126,13 +1125,10 @@ void HTMLElement::set_popover(Optional<String> value)
         remove_attribute(HTML::AttributeNames::popover);
 }
 
-void HTMLElement::adjust_computed_style(CSS::ComputedProperties& style)
+bool HTMLElement::disallows_display_contents() const
 {
     // https://drafts.csswg.org/css-display-3/#unbox
-    if (local_name() == HTML::TagNames::wbr) {
-        if (style.display().is_contents())
-            style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
-    }
+    return local_name() == HTML::TagNames::wbr;
 }
 
 // https://html.spec.whatwg.org/multipage/popover.html#check-popover-validity

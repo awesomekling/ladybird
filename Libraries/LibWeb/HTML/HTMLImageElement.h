@@ -138,7 +138,7 @@ private:
     virtual bool supports_dimension_attributes() const override { return true; }
 
     virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
-    virtual void adjust_computed_style(CSS::ComputedProperties&) override;
+    virtual bool disallows_display_contents() const override { return true; }
 
     virtual void did_set_viewport_rect(CSSPixelRect const&) override;
 

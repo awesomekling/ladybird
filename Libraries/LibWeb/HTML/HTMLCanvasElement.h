@@ -58,7 +58,7 @@ private:
     virtual void apply_presentational_hints(CSS::CascadedProperties&) const override;
 
     virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
-    virtual void adjust_computed_style(CSS::ComputedProperties&) override;
+    virtual bool disallows_display_contents() const override { return true; }
 
     template<typename ContextType>
     JS::ThrowCompletionOr<HasOrCreatedContext> create_webgl_context(JS::Value options);

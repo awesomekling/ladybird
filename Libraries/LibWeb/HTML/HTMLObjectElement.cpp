@@ -8,7 +8,6 @@
 #include <LibWeb/Bindings/HTMLObjectElementPrototype.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/DOM/Document.h>
@@ -204,13 +203,6 @@ GC::Ptr<Layout::Node> HTMLObjectElement::create_layout_node(NonnullRefPtr<CSS::C
     }
 
     return nullptr;
-}
-
-void HTMLObjectElement::adjust_computed_style(CSS::ComputedProperties& style)
-{
-    // https://drafts.csswg.org/css-display-3/#unbox
-    if (style.display().is_contents())
-        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
 }
 
 bool HTMLObjectElement::has_ancestor_media_element_or_object_element_not_showing_fallback_content() const

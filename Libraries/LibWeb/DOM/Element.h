@@ -315,6 +315,7 @@ public:
 
     virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>);
     virtual void adjust_computed_style(CSS::ComputedProperties&) { }
+    virtual bool disallows_display_contents() const { return false; }
 
     virtual void did_receive_focus() { }
     virtual void did_lose_focus() { }

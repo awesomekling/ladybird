@@ -12,7 +12,6 @@
 #include <LibWeb/Bindings/HTMLCanvasElementPrototype.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -199,13 +198,6 @@ void HTMLCanvasElement::attribute_changed(FlyString const& local_name, Optional<
 GC::Ptr<Layout::Node> HTMLCanvasElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
 {
     return heap().allocate<Layout::CanvasBox>(document(), *this, move(style));
-}
-
-void HTMLCanvasElement::adjust_computed_style(CSS::ComputedProperties& style)
-{
-    // https://drafts.csswg.org/css-display-3/#unbox
-    if (style.display().is_contents())
-        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
 }
 
 JS::ThrowCompletionOr<HTMLCanvasElement::HasOrCreatedContext> HTMLCanvasElement::create_2d_context(JS::Value options)

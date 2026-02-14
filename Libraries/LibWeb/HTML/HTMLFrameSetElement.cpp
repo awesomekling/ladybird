@@ -5,8 +5,6 @@
  */
 
 #include <LibWeb/Bindings/HTMLFrameSetElementPrototype.h>
-#include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Gamepad/EventNames.h>
 #include <LibWeb/HTML/HTMLFrameSetElement.h>
@@ -22,13 +20,6 @@ HTMLFrameSetElement::HTMLFrameSetElement(DOM::Document& document, DOM::Qualified
 }
 
 HTMLFrameSetElement::~HTMLFrameSetElement() = default;
-
-void HTMLFrameSetElement::adjust_computed_style(CSS::ComputedProperties& style)
-{
-    // https://drafts.csswg.org/css-display-3/#unbox
-    if (style.display().is_contents())
-        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
-}
 
 void HTMLFrameSetElement::initialize(JS::Realm& realm)
 {

@@ -6,7 +6,6 @@
 
 #include <LibWeb/Bindings/HTMLBRElementPrototype.h>
 #include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
@@ -56,13 +55,6 @@ void HTMLBRElement::apply_presentational_hints(CSS::CascadedProperties& cascaded
                 cascaded_properties.set_property_from_presentational_hint(CSS::PropertyID::Clear, CSS::KeywordStyleValue::create(CSS::Keyword::Both));
         }
     });
-}
-
-void HTMLBRElement::adjust_computed_style(CSS::ComputedProperties& style)
-{
-    // https://drafts.csswg.org/css-display-3/#unbox
-    if (style.display().is_contents())
-        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
 }
 
 }

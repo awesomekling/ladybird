@@ -6,8 +6,6 @@
 
 #include <LibWeb/Bindings/HTMLEmbedElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
-#include <LibWeb/CSS/ComputedProperties.h>
-#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/HTML/HTMLEmbedElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -72,13 +70,6 @@ void HTMLEmbedElement::apply_presentational_hints(CSS::CascadedProperties& casca
             }
         }
     });
-}
-
-void HTMLEmbedElement::adjust_computed_style(CSS::ComputedProperties& style)
-{
-    // https://drafts.csswg.org/css-display-3/#unbox
-    if (style.display().is_contents())
-        style.set_property(CSS::PropertyID::Display, CSS::DisplayStyleValue::create(CSS::Display::from_short(CSS::Display::Short::None)));
 }
 
 }

@@ -24,7 +24,7 @@ public:
     virtual ~HTMLIFrameElement() override;
 
     virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
-    virtual void adjust_computed_style(CSS::ComputedProperties&) override;
+    virtual bool disallows_display_contents() const override { return true; }
 
     // ^EventTarget
     virtual bool is_focusable() const override { return true; }
