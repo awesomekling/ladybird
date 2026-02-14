@@ -36,6 +36,8 @@
 
 namespace Web::CSS {
 
+class ComputedProperties;
+
 using ClipRule = FillRule;
 
 struct FlexBasisContent { };
@@ -491,7 +493,7 @@ class ComputedValues {
 
 public:
     ComputedValues() = default;
-    ~ComputedValues() = default;
+    ~ComputedValues();
 
     void visit_edges(GC::Cell::Visitor& visitor)
     {
@@ -690,14 +692,12 @@ public:
     Resize resize() const { return m_noninherited.resize; }
     WillChange const& will_change() const { return m_noninherited.will_change; }
 
-    NonnullOwnPtr<ComputedValues> clone_inherited_values() const
-    {
-        auto clone = make<ComputedValues>();
-        clone->m_inherited = m_inherited;
-        return clone;
-    }
+    ComputedProperties const* source_computed_properties() const { return m_source_computed_properties; }
+
+    NonnullOwnPtr<ComputedValues> clone_inherited_values() const;
 
 protected:
+    RefPtr<ComputedProperties const> m_source_computed_properties;
     struct InheritedValues {
         Color caret_color { InitialValues::caret_color() };
         CSSPixels font_size { InitialValues::font_size() };
@@ -1116,6 +1116,8 @@ public:
     void set_counter_set(Vector<CounterData> value) { m_noninherited.counter_set = move(value); }
 
     void set_will_change(WillChange value) { m_noninherited.will_change = move(value); }
+
+    void set_source_computed_properties(ComputedProperties const&);
 };
 
 }

@@ -638,9 +638,6 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         return {};
     };
 
-    auto& element = owner_node()->element();
-    auto pseudo_element = owner_node()->pseudo_element();
-
     auto used_value_for_inset = [&layout_node, used_value_for_property](LengthPercentageOrAuto const& start_side, LengthPercentageOrAuto const& end_side, Function<CSSPixels(Painting::PaintableBox const&)>&& used_value_getter) -> Optional<CSSPixels> {
         if (!layout_node.is_positioned())
             return {};
@@ -655,15 +652,27 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         return used_value_for_property(move(used_value_getter));
     };
 
-    auto get_computed_value = [&element, pseudo_element](PropertyID property_id) -> auto const& {
-        return element.computed_properties(pseudo_element)->property(property_id);
+    auto const& computed_values = layout_node.computed_values();
+
+    // Prefer reading StyleValues from source_computed_properties stored on ComputedValues.
+    // Fall back to Element::computed_properties() for layout nodes that don't have it
+    // (e.g. anonymous wrappers, certain pseudo-element boxes).
+    auto const* source = computed_values.source_computed_properties();
+    if (!source) {
+        auto& element = owner_node()->element();
+        auto pseudo_element = owner_node()->pseudo_element();
+        source = element.computed_properties(pseudo_element);
+    }
+    VERIFY(source);
+
+    auto get_computed_value = [source](PropertyID property_id) -> auto const& {
+        return source->property(property_id);
     };
 
     if (property_is_logical_alias(property_id)) {
-        auto computed_properties = element.computed_properties(pseudo_element);
         return style_value_for_computed_property(
             layout_node,
-            map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { computed_properties->writing_mode(), computed_properties->direction() }));
+            map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { computed_values.writing_mode(), computed_values.direction() }));
     }
 
     // A limited number of properties have special rules for producing their "resolved value".

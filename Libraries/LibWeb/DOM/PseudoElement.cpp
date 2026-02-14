@@ -24,6 +24,11 @@ void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> valu
     } else {
         m_animated_property_data = nullptr;
     }
+
+    // Update source_computed_properties on the layout node's ComputedValues
+    // to prevent stale references to the old ComputedProperties.
+    if (m_layout_node && m_computed_properties)
+        m_layout_node->mutable_computed_values().set_source_computed_properties(*m_computed_properties);
 }
 
 void PseudoElement::visit_edges(JS::Cell::Visitor& visitor)

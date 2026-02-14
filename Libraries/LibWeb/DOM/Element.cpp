@@ -3246,6 +3246,12 @@ void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_elemen
     } else {
         m_animated_property_data = nullptr;
     }
+
+    // Update source_computed_properties on ComputedValues
+    // to prevent stale references to the old ComputedProperties.
+    if (m_computed_values && m_computed_properties)
+        static_cast<CSS::MutableComputedValues&>(*m_computed_values).set_source_computed_properties(*m_computed_properties);
+
     computed_properties_changed();
 }
 
