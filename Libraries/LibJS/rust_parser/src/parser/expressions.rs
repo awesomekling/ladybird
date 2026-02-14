@@ -1811,6 +1811,18 @@ impl<'a> Parser<'a> {
         let might_need_arguments = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
+        // Class constructors always need a function environment for `this` binding
+        // management (super() binds this in derived constructors, and base constructors
+        // need it for OrdinaryCallBindThis).
+        let mut insights = FunctionParsingInsights {
+            might_need_arguments_object: might_need_arguments,
+            ..FunctionParsingInsights::default()
+        };
+        if is_constructor {
+            insights.uses_this = true;
+            insights.uses_this_from_environment = true;
+        }
+
         self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
             name: None,
             source_text_start: source_text_start.offset,
@@ -1821,10 +1833,7 @@ impl<'a> Parser<'a> {
             kind: fn_kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
-            parsing_insights: FunctionParsingInsights {
-                might_need_arguments_object: might_need_arguments,
-                ..FunctionParsingInsights::default()
-            },
+            parsing_insights: insights,
             is_hoisted: false,
         })))
     }

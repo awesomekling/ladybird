@@ -64,7 +64,11 @@ pub fn generate_expr(
 
         // === This ===
         ExpressionKind::This => {
-            gen.emit(Instruction::ResolveThisBinding);
+            // OPTIMIZATION: When function_environment_needed is false, the `this`
+            // value is inherited from the outer function and already in the register.
+            if gen.function_environment_needed {
+                gen.emit(Instruction::ResolveThisBinding);
+            }
             Some(gen.this_value())
         }
 

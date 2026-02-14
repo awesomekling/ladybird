@@ -170,6 +170,7 @@ pub struct Generator {
 
     // --- Codegen state ---
     pub strict: bool,
+    pub function_environment_needed: bool,
     pub enclosing_function_kind: FunctionKind,
     pub local_variables: Vec<LocalVariable>,
     pub initialized_locals: Vec<bool>,
@@ -265,6 +266,7 @@ impl Generator {
             next_template_object_cache: 0,
             next_object_shape_cache: 0,
             strict: false,
+            function_environment_needed: true,
             enclosing_function_kind: FunctionKind::Normal,
             local_variables: Vec::new(),
             initialized_locals: Vec::new(),

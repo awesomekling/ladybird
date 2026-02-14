@@ -814,8 +814,13 @@ pub unsafe extern "C" fn rust_compile_function(
         _ => None,
     };
 
+    // Compute SFD metadata before codegen so the generator can use
+    // function_environment_needed to optimize `this` access.
+    let sfd_metadata = compute_sfd_metadata(&func_data);
+
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = func_data.is_strict_mode;
+    gen.function_environment_needed = sfd_metadata.function_environment_needed;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
@@ -914,47 +919,308 @@ pub unsafe extern "C" fn rust_compile_function(
     // Assemble
     let assembled = gen.assemble();
 
-    // Write FDI runtime metadata (parameter names, function hoisting info, etc.)
-    // to the SFD so the VM can perform function declaration instantiation.
-    write_sfd_metadata(sfd_ptr, &func_data);
+    // Write precomputed FDI runtime metadata to the SFD.
+    write_sfd_metadata(sfd_ptr, &sfd_metadata);
 
     // Create C++ Executable via FFI
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
 }
 
-/// Write FDI runtime metadata to a C++ SharedFunctionInstanceData.
-///
-/// This sets fields that `prepare_for_ordinary_call()` and `internal_call()`
-/// read at runtime. Reads scope analysis insights from the function body's
-/// ScopeData (populated by the scope collector after analyze()).
-unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData) {
+/// Metadata computed from scope analysis for a SharedFunctionInstanceData.
+struct SfdMetadata {
+    uses_this: bool,
+    function_environment_needed: bool,
+    function_environment_bindings_count: usize,
+    might_need_arguments: bool,
+    contains_eval: bool,
+}
+
+/// Compute FDI runtime metadata matching the C++ SharedFunctionInstanceData
+/// constructor (ECMA-262 §10.2.11).
+fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     let body_scope = match &func_data.body.inner {
         ast::StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         _ => None,
     };
 
-    let (uses_this, contains_eval, might_need_arguments) = if let Some(scope) = body_scope {
+    let strict = func_data.is_strict_mode;
+    let is_arrow = func_data.is_arrow_function;
+
+    // Extract all scope analysis data in one borrow.
+    let (uses_this, contains_eval, uses_this_from_env, might_need_arguments,
+         fsd_has_function_named_arguments, fsd_has_lexically_declared_arguments,
+         fsd_non_local_var_count, fsd_non_local_var_count_for_param_exprs,
+         fsd_var_names, annexb_function_names,
+         has_arguments_object_local) = if let Some(scope) = &body_scope {
         let sd = scope.borrow();
+        let fsd = sd.function_scope_data.as_ref();
         (
-            // Respect both scope analysis AND explicit parsing insights
-            // (e.g. for class field initializers / static initializers).
             sd.uses_this || func_data.parsing_insights.uses_this,
             sd.contains_direct_call_to_eval,
+            sd.uses_this_from_environment
+                || func_data.parsing_insights.uses_this_from_environment,
             sd.contains_access_to_arguments_object,
+            fsd.map_or(false, |f| f.has_function_named_arguments),
+            fsd.map_or(false, |f| f.has_lexically_declared_arguments),
+            fsd.map_or(0, |f| f.non_local_var_count),
+            fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
+            fsd.map(|f| &f.var_names).cloned().unwrap_or_default(),
+            sd.annexb_function_names.clone(),
+            sd.local_variables.iter().any(|lv| lv.kind == ast::LocalVarKind::ArgumentsObject),
         )
     } else {
-        // Conservative defaults if no scope data.
-        (true, false, true)
+        // No scope body (e.g. synthetic class field initializer functions).
+        // Fall back to parsing insights for the values we have.
+        (func_data.parsing_insights.uses_this,
+         func_data.parsing_insights.contains_direct_call_to_eval,
+         func_data.parsing_insights.uses_this_from_environment,
+         func_data.parsing_insights.might_need_arguments_object,
+         false, false, 0, 0, Vec::new(), Vec::new(), false)
     };
-    rust_sfd_set_metadata(
-        sfd_ptr,
+
+    // §10.2.11 step 4: check for parameter expressions.
+    let has_parameter_expressions = func_data.parameters.iter().any(|p| {
+        p.default_value.is_some()
+            || matches!(p.binding, ast::FunctionParameterBinding::BindingPattern(_))
+    });
+
+    // §10.2.11 steps 5-8: count non-local unique parameter names.
+    let mut parameter_names: Vec<Vec<u16>> = Vec::new();
+    let mut parameters_in_environment: usize = 0;
+    for param in &func_data.parameters {
+        match &param.binding {
+            ast::FunctionParameterBinding::Identifier(ident) => {
+                if !parameter_names.contains(&ident.name) {
+                    parameter_names.push(ident.name.clone());
+                    if !ident.is_local() {
+                        parameters_in_environment += 1;
+                    }
+                }
+            }
+            ast::FunctionParameterBinding::BindingPattern(pattern) => {
+                for_each_binding_pattern_identifier(pattern, &mut |ident| {
+                    if !parameter_names.contains(&ident.name) {
+                        parameter_names.push(ident.name.clone());
+                        if !ident.is_local() {
+                            parameters_in_environment += 1;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    // §10.2.11 steps 15-18: determine if arguments object is needed.
+    let mut arguments_object_needed = might_need_arguments;
+    if is_arrow {
+        arguments_object_needed = false;
+    } else if parameter_names.iter().any(|n| n == utf16!("arguments")) {
+        arguments_object_needed = false;
+    }
+    if body_scope.is_none() {
+        arguments_object_needed = false;
+    } else {
+        if !has_parameter_expressions && fsd_has_function_named_arguments {
+            arguments_object_needed = false;
+        }
+        if !has_parameter_expressions && arguments_object_needed
+            && fsd_has_lexically_declared_arguments
+        {
+            arguments_object_needed = false;
+        }
+    }
+
+    // Arguments object needs an environment binding if it's not a local variable.
+    let arguments_object_needs_binding =
+        arguments_object_needed && !has_arguments_object_local;
+
+    // --- Compute environment binding counts ---
+    let mut function_environment_bindings_count: usize = 0;
+    let mut var_environment_bindings_count: usize = 0;
+    let mut lex_environment_bindings_count: usize = 0;
+
+    // §10.2.11 step 19: route parameter bindings.
+    let env_is_function_env = strict || !has_parameter_expressions;
+    if env_is_function_env {
+        function_environment_bindings_count += parameters_in_environment;
+    }
+
+    // §10.2.11 step 22: arguments binding.
+    if arguments_object_needs_binding && env_is_function_env {
+        function_environment_bindings_count += 1;
+    }
+
+    if body_scope.is_some() {
+        if !has_parameter_expressions {
+            // §10.2.11 step 27: var env shares function env.
+            function_environment_bindings_count += fsd_non_local_var_count;
+
+            // Annex B: function names hoisted from blocks that aren't already vars.
+            if !strict {
+                for name in &annexb_function_names {
+                    if !fsd_var_names.contains(name) {
+                        function_environment_bindings_count += 1;
+                    }
+                }
+            }
+
+            // §10.2.11 step 30: lexical environment.
+            let non_local_lex_count =
+                count_non_local_lex_declarations(body_scope.unwrap());
+            if strict {
+                // Lex env == var env == function env.
+                function_environment_bindings_count += non_local_lex_count;
+            } else {
+                let can_elide = !contains_eval && non_local_lex_count == 0;
+                if !can_elide {
+                    lex_environment_bindings_count += non_local_lex_count;
+                }
+            }
+        } else {
+            // §10.2.11 step 28: separate var environment.
+            var_environment_bindings_count += fsd_non_local_var_count_for_param_exprs;
+
+            if !strict {
+                for name in &annexb_function_names {
+                    if !fsd_var_names.contains(name) {
+                        var_environment_bindings_count += 1;
+                    }
+                }
+            }
+
+            let non_local_lex_count =
+                count_non_local_lex_declarations(body_scope.unwrap());
+            if strict {
+                // Lex env == var env.
+                var_environment_bindings_count += non_local_lex_count;
+            } else {
+                let can_elide = !contains_eval && non_local_lex_count == 0;
+                if !can_elide {
+                    lex_environment_bindings_count += non_local_lex_count;
+                }
+            }
+        }
+    }
+
+    let function_environment_needed = arguments_object_needs_binding
+        || function_environment_bindings_count > 0
+        || var_environment_bindings_count > 0
+        || lex_environment_bindings_count > 0
+        || uses_this_from_env
+        || contains_eval;
+
+    SfdMetadata {
         uses_this,
-        // Conservative: always create function environment.
-        true,
-        0,
+        function_environment_needed,
+        function_environment_bindings_count,
         might_need_arguments,
         contains_eval,
+    }
+}
+
+/// Write precomputed SFD metadata to a C++ SharedFunctionInstanceData via FFI.
+///
+/// # Safety
+/// `sfd_ptr` must be a valid `JS::SharedFunctionInstanceData*`.
+unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, metadata: &SfdMetadata) {
+    rust_sfd_set_metadata(
+        sfd_ptr,
+        metadata.uses_this,
+        metadata.function_environment_needed,
+        metadata.function_environment_bindings_count,
+        metadata.might_need_arguments,
+        metadata.contains_eval,
     );
+}
+
+/// Count non-local lexically-declared identifiers in a function body scope.
+/// Matches C++ `ScopeNode::has_non_local_lexical_declarations()` but returns
+/// the count (used for environment sizing in the function_environment_needed
+/// computation).
+fn count_non_local_lex_declarations(scope: &Rc<RefCell<ast::ScopeData>>) -> usize {
+    let sd = scope.borrow();
+    let mut count = 0;
+    for child in &sd.children {
+        match &child.inner {
+            ast::StatementKind::VariableDeclaration { kind, declarations } => {
+                use parser::DeclarationKind;
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    for decl in declarations {
+                        count_non_local_names_in_target(&decl.target, &mut count);
+                    }
+                }
+            }
+            ast::StatementKind::ClassDeclaration(class_data) => {
+                if let Some(ref name_ident) = class_data.name {
+                    if !name_ident.is_local() {
+                        count += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    count
+}
+
+fn count_non_local_names_in_target(target: &ast::VariableDeclaratorTarget, count: &mut usize) {
+    match target {
+        ast::VariableDeclaratorTarget::Identifier(ident) => {
+            if !ident.is_local() {
+                *count += 1;
+            }
+        }
+        ast::VariableDeclaratorTarget::BindingPattern(pattern) => {
+            count_non_local_names_in_binding_pattern(pattern, count);
+        }
+    }
+}
+
+fn count_non_local_names_in_binding_pattern(
+    pattern: &ast::BindingPattern,
+    count: &mut usize,
+) {
+    for entry in &pattern.entries {
+        match &entry.alias {
+            ast::BindingEntryAlias::Identifier(ident) => {
+                if !ident.is_local() {
+                    *count += 1;
+                }
+            }
+            ast::BindingEntryAlias::BindingPattern(sub) => {
+                count_non_local_names_in_binding_pattern(sub, count);
+            }
+            ast::BindingEntryAlias::Empty => {
+                if let ast::BindingEntryName::Identifier(ident) = &entry.name {
+                    if !ident.is_local() {
+                        *count += 1;
+                    }
+                }
+            }
+            ast::BindingEntryAlias::MemberExpression(_) => {}
+        }
+    }
+}
+
+/// Iterate all identifiers bound by a binding pattern.
+fn for_each_binding_pattern_identifier(
+    pattern: &ast::BindingPattern,
+    callback: &mut dyn FnMut(&Rc<ast::Identifier>),
+) {
+    for entry in &pattern.entries {
+        match &entry.alias {
+            ast::BindingEntryAlias::Identifier(ident) => callback(ident),
+            ast::BindingEntryAlias::BindingPattern(sub) => {
+                for_each_binding_pattern_identifier(sub, callback);
+            }
+            ast::BindingEntryAlias::Empty => {
+                if let ast::BindingEntryName::Identifier(ident) = &entry.name {
+                    callback(ident);
+                }
+            }
+            ast::BindingEntryAlias::MemberExpression(_) => {}
+        }
+    }
 }
 
 extern "C" {
