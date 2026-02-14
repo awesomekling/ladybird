@@ -6,7 +6,6 @@
 
 #include <LibWeb/Bindings/HTMLParagraphElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/HTML/HTMLParagraphElement.h>
 

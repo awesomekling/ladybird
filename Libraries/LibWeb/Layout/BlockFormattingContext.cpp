@@ -7,7 +7,6 @@
 
 #include <AK/TemporaryChange.h>
 #include <LibWeb/CSS/CSSImageResource.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/DOM/Document.h>
