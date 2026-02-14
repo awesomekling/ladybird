@@ -460,21 +460,21 @@ impl Generator {
 
     // --- Table interning ---
 
-    pub fn intern_string(&mut self, s: Vec<u16>) -> StringTableIndex {
+    pub fn intern_string(&mut self, s: &[u16]) -> StringTableIndex {
         let index = self.string_table.len() as u32;
-        self.string_table.push(s);
+        self.string_table.push(s.to_vec());
         StringTableIndex(index)
     }
 
-    pub fn intern_identifier(&mut self, s: Vec<u16>) -> IdentifierTableIndex {
+    pub fn intern_identifier(&mut self, s: &[u16]) -> IdentifierTableIndex {
         let index = self.identifier_table.len() as u32;
-        self.identifier_table.push(s);
+        self.identifier_table.push(s.to_vec());
         IdentifierTableIndex(index)
     }
 
-    pub fn intern_property_key(&mut self, s: Vec<u16>) -> PropertyKeyTableIndex {
+    pub fn intern_property_key(&mut self, s: &[u16]) -> PropertyKeyTableIndex {
         let index = self.property_key_table.len() as u32;
-        self.property_key_table.push(s);
+        self.property_key_table.push(s.to_vec());
         PropertyKeyTableIndex(index)
     }
 
