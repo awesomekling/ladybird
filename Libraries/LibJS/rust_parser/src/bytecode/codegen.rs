@@ -348,10 +348,14 @@ pub fn generate_expr(
             property,
             computed,
         } => {
+            let is_super = matches!(object.inner, Expression::Super);
             let obj = generate_expr(object, gen, None)?;
             let base_id = intern_base_identifier(gen, object);
             let dst = choose_dst(gen, preferred_dst);
-            if *computed {
+            if is_super {
+                let this_value = emit_resolve_this_binding(gen);
+                emit_super_get(gen, &dst, &obj, property, *computed, &this_value);
+            } else if *computed {
                 let prop = generate_expr(property, gen, None)?;
                 gen.emit(Instruction::GetByValue {
                     dst: dst.operand(),
@@ -2528,6 +2532,7 @@ fn generate_call_expression(
                 property,
                 computed,
             } => {
+                let is_super = matches!(object.inner, Expression::Super);
                 let obj = generate_expr_or_undefined(object, gen, None);
                 let base_id = intern_base_identifier(gen, object);
                 let method = gen.allocate_register();
@@ -2549,7 +2554,15 @@ fn generate_call_expression(
                         property: id,
                     });
                 }
-                (method, Some(obj))
+                // For super.method(), the this value should be the
+                // current this binding, not the super base.
+                let this_val = if is_super {
+                    gen.emit(Instruction::ResolveThisBinding);
+                    gen.this_value()
+                } else {
+                    obj
+                };
+                (method, Some(this_val))
             }
             Expression::Identifier(ident) if !ident.is_local() && !ident.is_global.get() => {
                 // Non-local, non-global identifier: use GetCalleeAndThisFromEnvironment
@@ -2725,11 +2738,39 @@ fn generate_update_expression(
             }
         }
         Expression::Member { object, property, computed } => {
+            let is_super = matches!(object.inner, Expression::Super);
             let base = generate_expr(object, gen, None)?;
             let base_id = intern_base_identifier(gen, object);
             let value = gen.allocate_register();
-            // Load the member value
-            if *computed {
+
+            if is_super {
+                // For super property references, use WithThis variants
+                // with this_value = ResolveThisBinding.
+                let this_value = emit_resolve_this_binding(gen);
+                let computed_key = emit_super_get(gen, &value, &base, property, *computed, &this_value);
+                if prefixed {
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                    }
+                    emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
+                    Some(value)
+                } else {
+                    let dst = choose_dst(gen, preferred_dst);
+                    match op {
+                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                            dst: dst.operand(),
+                            src: value.operand(),
+                        }),
+                    }
+                    emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
+                    Some(dst)
+                }
+            } else if *computed {
                 let prop = generate_expr(property, gen, None)?;
                 gen.emit(Instruction::GetByValue {
                     dst: value.operand(),
@@ -2914,11 +2955,34 @@ fn generate_assignment_expression(
             }
             // Member expression LHS (e.g., obj.foo = x, obj[key] = x)
             if let Expression::Member { object, property, computed } = &lhs_expr.inner {
+                let is_super = matches!(object.inner, Expression::Super);
                 let base_raw = generate_expr(object, gen, None)?;
                 // Copy base into a fresh register so the RHS can't mutate it.
                 let base = gen.allocate_register();
                 gen.emit_mov(&base, &base_raw);
+
+                // For super property references, resolve this binding once.
+                let super_this = if is_super {
+                    Some(emit_resolve_this_binding(gen))
+                } else {
+                    None
+                };
+
                 if op == AssignmentOp::Assignment {
+                    if is_super {
+                        // For computed super, evaluate the key before the RHS.
+                        let computed_key = if *computed {
+                            let key_val = generate_expr_or_undefined(property, gen, None);
+                            let saved = gen.allocate_register();
+                            gen.emit_mov(&saved, &key_val);
+                            Some(saved)
+                        } else {
+                            None
+                        };
+                        let rhs_val = generate_expr(rhs, gen, preferred_dst)?;
+                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &rhs_val, computed_key.as_ref());
+                        return Some(rhs_val);
+                    }
                     // For computed properties, evaluate the key BEFORE the RHS
                     // (spec: LHS is fully evaluated before RHS).
                     let precomputed_key = if *computed {
@@ -2944,10 +3008,38 @@ fn generate_assignment_expression(
                     }
                     return Some(rhs_val);
                 }
+
                 // Compound member assignment: load old value, then apply op.
                 let old_val = gen.allocate_register();
                 let base_id = intern_base_identifier(gen, object);
                 let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
+
+                if is_super {
+                    let computed_key = emit_super_get(gen, &old_val, &base, property, *computed, super_this.as_ref().unwrap());
+                    if is_logical {
+                        let rhs_block = gen.make_block();
+                        let lhs_block = gen.make_block();
+                        let end_block = gen.make_block();
+                        let dst = choose_dst(gen, preferred_dst);
+                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                        gen.switch_to_basic_block(rhs_block);
+                        let rhs_val = generate_expr(rhs, gen, None)?;
+                        gen.emit_mov(&dst, &rhs_val);
+                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &dst, computed_key.as_ref());
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(lhs_block);
+                        gen.emit_mov(&dst, &old_val);
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(end_block);
+                        return Some(dst);
+                    }
+                    let rhs_val = generate_expr(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                    emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &dst, computed_key.as_ref());
+                    return Some(dst);
+                }
+
                 if *computed {
                     let prop_raw = generate_expr(property, gen, None)?;
                     // Copy key into a fresh register so the RHS can't mutate it.
@@ -3095,6 +3187,86 @@ fn generate_assignment_expression(
             generate_binding_pattern_bytecode(gen, pattern, BindingMode::Set, &rhs_val);
             Some(rhs_val)
         }
+    }
+}
+
+/// Emit ResolveThisBinding and return the this value register.
+fn emit_resolve_this_binding(gen: &mut Generator) -> ScopedOperand {
+    gen.emit(Instruction::ResolveThisBinding);
+    gen.this_value()
+}
+
+/// Emit a super property get (uses WithThis variants).
+/// For computed access, evaluates the property expression.
+/// Returns the evaluated property operand for computed access (so callers
+/// can reuse it for a subsequent put).
+fn emit_super_get(
+    gen: &mut Generator,
+    dst: &ScopedOperand,
+    base: &ScopedOperand,
+    property: &Expr,
+    computed: bool,
+    this_value: &ScopedOperand,
+) -> Option<ScopedOperand> {
+    if computed {
+        let prop = generate_expr_or_undefined(property, gen, None);
+        gen.emit(Instruction::GetByValueWithThis {
+            dst: dst.operand(),
+            base: base.operand(),
+            property: prop.operand(),
+            this_value: this_value.operand(),
+        });
+        Some(prop)
+    } else if let Expression::Identifier(ident) = &property.inner {
+        let key = gen.intern_property_key(ident.name.clone());
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::GetByIdWithThis {
+            dst: dst.operand(),
+            base: base.operand(),
+            property: key,
+            this_value: this_value.operand(),
+            cache_index: cache,
+        });
+        None
+    } else {
+        None
+    }
+}
+
+/// Emit a super property put (uses WithThis variants).
+/// For computed access, `computed_key` should be the operand returned by
+/// `emit_super_get` so the property is not re-evaluated. If `None` for
+/// computed access, the property expression will be evaluated.
+fn emit_super_put(
+    gen: &mut Generator,
+    base: &ScopedOperand,
+    property: &Expr,
+    computed: bool,
+    this_value: &ScopedOperand,
+    value: &ScopedOperand,
+    computed_key: Option<&ScopedOperand>,
+) {
+    if computed {
+        let prop = match computed_key {
+            Some(k) => k.clone(),
+            None => generate_expr_or_undefined(property, gen, None),
+        };
+        gen.emit(Instruction::PutNormalByValueWithThis {
+            base: base.operand(),
+            property: prop.operand(),
+            this_value: this_value.operand(),
+            src: value.operand(),
+        });
+    } else if let Expression::Identifier(ident) = &property.inner {
+        let key = gen.intern_property_key(ident.name.clone());
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::PutNormalByIdWithThis {
+            base: base.operand(),
+            this_value: this_value.operand(),
+            property: key,
+            src: value.operand(),
+            cache_index: cache,
+        });
     }
 }
 
@@ -3265,8 +3437,14 @@ fn emit_store_to_reference(
             emit_set_variable(gen, ident, value);
         }
         Expression::Member { object, property, computed } => {
+            let is_super = matches!(object.inner, Expression::Super);
             let base = generate_expr_or_undefined(object, gen, None);
-            emit_put_to_member(gen, &base, property, *computed, value, Some(object));
+            if is_super {
+                let this_value = emit_resolve_this_binding(gen);
+                emit_super_put(gen, &base, property, *computed, &this_value, value, None);
+            } else {
+                emit_put_to_member(gen, &base, property, *computed, value, Some(object));
+            }
         }
         _ => {
             // Evaluate the expression for side effects, then throw ReferenceError.
