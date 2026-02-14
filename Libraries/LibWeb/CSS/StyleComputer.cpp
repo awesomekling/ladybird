@@ -1880,9 +1880,18 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_box_sizing(computed_style.box_sizing());
     computed_values.set_flex_direction(computed_style.flex_direction());
     computed_values.set_flex_wrap(computed_style.flex_wrap());
-    computed_values.set_flex_grow(computed_style.flex_grow());
-    computed_values.set_flex_shrink(computed_style.flex_shrink());
-    computed_values.set_order(computed_style.order());
+    if (auto const& flex_grow = computed_style.property(PropertyID::FlexGrow); flex_grow.is_number())
+        computed_values.set_flex_grow(flex_grow.as_number().number());
+    else if (flex_grow.is_calculated())
+        computed_values.set_flex_grow(static_cast<float>(flex_grow.as_calculated().resolve_number(calculation_context).value_or(0)));
+    if (auto const& flex_shrink = computed_style.property(PropertyID::FlexShrink); flex_shrink.is_number())
+        computed_values.set_flex_shrink(flex_shrink.as_number().number());
+    else if (flex_shrink.is_calculated())
+        computed_values.set_flex_shrink(static_cast<float>(flex_shrink.as_calculated().resolve_number(calculation_context).value_or(1)));
+    if (auto const& order = computed_style.property(PropertyID::Order); order.is_integer())
+        computed_values.set_order(order.as_integer().integer());
+    else if (order.is_calculated())
+        computed_values.set_order(static_cast<int>(order.as_calculated().resolve_integer(calculation_context).value_or(0)));
     computed_values.set_align_content(computed_style.align_content());
     computed_values.set_align_items(computed_style.align_items());
     computed_values.set_align_self(computed_style.align_self());
@@ -1994,6 +2003,10 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
 
     if (auto const& outline_offset = computed_style.property(PropertyID::OutlineOffset); outline_offset.is_length())
         computed_values.set_outline_offset(outline_offset.as_length().length());
+    else if (outline_offset.is_calculated()) {
+        if (auto resolved = outline_offset.as_calculated().resolve_length(calculation_context); resolved.has_value())
+            computed_values.set_outline_offset(resolved.release_value());
+    }
     computed_values.set_outline_width(max(CSSPixels { 0 }, computed_style.length(PropertyID::OutlineWidth).absolute_length_to_px()));
 
     computed_values.set_cx(LengthPercentage::from_style_value(computed_style.property(PropertyID::Cx)));
@@ -2035,11 +2048,15 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
         computed_values.set_stroke_width(stroke_width.as_length().length());
     else if (stroke_width.is_percentage())
         computed_values.set_stroke_width(LengthPercentage { stroke_width.as_percentage().percentage() });
+    else if (stroke_width.is_calculated())
+        computed_values.set_stroke_width(LengthPercentage { stroke_width.as_calculated() });
     computed_values.set_shape_rendering(computed_style.shape_rendering());
     computed_values.set_paint_order(computed_style.paint_order());
 
     if (auto const& column_count = computed_style.property(PropertyID::ColumnCount); column_count.is_integer())
         computed_values.set_column_count(ColumnCount::make_integer(column_count.as_integer().integer()));
+    else if (column_count.is_calculated())
+        computed_values.set_column_count(ColumnCount::make_integer(static_cast<int>(column_count.as_calculated().resolve_integer(calculation_context).value_or(1))));
     computed_values.set_border_collapse(computed_style.border_collapse());
     computed_values.set_empty_cells(computed_style.empty_cells());
 

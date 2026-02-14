@@ -277,8 +277,10 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Float/number properties ==========
     case PropertyID::FillOpacity:
         return NumberStyleValue::create(computed_values.fill_opacity());
-    // NB: FlexGrow and FlexShrink are not handled here because
-    //     populate_computed_values() doesn't handle calc() values correctly.
+    case PropertyID::FlexGrow:
+        return NumberStyleValue::create(computed_values.flex_grow());
+    case PropertyID::FlexShrink:
+        return NumberStyleValue::create(computed_values.flex_shrink());
     case PropertyID::FloodOpacity:
         return NumberStyleValue::create(computed_values.flood_opacity());
     case PropertyID::Opacity:
@@ -295,8 +297,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Integer properties ==========
     case PropertyID::MathDepth:
         return IntegerStyleValue::create(computed_values.math_depth());
-    // NB: Order is not handled here because populate_computed_values()
-    //     doesn't handle calc() values correctly.
+    case PropertyID::Order:
+        return IntegerStyleValue::create(computed_values.order());
 
     // ========== CSSPixels → Length properties ==========
     case PropertyID::FontSize:
@@ -320,8 +322,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         auto vertical = LengthStyleValue::create(computed_values.border_spacing_vertical());
         return StyleValueList::create(StyleValueVector { move(horizontal), move(vertical) }, StyleValueList::Separator::Space);
     }
-    // NB: OutlineOffset is not handled here because populate_computed_values()
-    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
+    case PropertyID::OutlineOffset:
+        return LengthStyleValue::create(computed_values.outline_offset());
 
     // ========== Size properties ==========
     case PropertyID::ColumnHeight:
@@ -350,8 +352,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return style_value_for_length_percentage(computed_values.r());
     case PropertyID::StrokeDashoffset:
         return style_value_for_length_percentage(computed_values.stroke_dashoffset());
-    // NB: StrokeWidth is not handled here because populate_computed_values()
-    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
+    case PropertyID::StrokeWidth:
+        return style_value_for_length_percentage(computed_values.stroke_width());
     case PropertyID::X:
         return style_value_for_length_percentage(computed_values.x());
     case PropertyID::Y:
@@ -538,8 +540,10 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
             return IntegerStyleValue::create(z_index.value());
         return KeywordStyleValue::create(Keyword::Auto);
 
-    // NB: ColumnCount is not handled here because populate_computed_values()
-    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
+    case PropertyID::ColumnCount:
+        if (computed_values.column_count().is_auto())
+            return KeywordStyleValue::create(Keyword::Auto);
+        return IntegerStyleValue::create(computed_values.column_count().value());
 
     // ========== Tab size ==========
     case PropertyID::TabSize:
