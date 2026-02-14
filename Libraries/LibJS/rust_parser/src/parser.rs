@@ -220,6 +220,8 @@ pub struct Parser<'a> {
 
     /// True while parsing a class body that has an `extends` clause.
     pub(crate) class_has_super_class: bool,
+    /// Depth counter for class bodies — used to reject `#name` outside classes.
+    pub(crate) class_scope_depth: u32,
     pub(crate) has_default_export_name: bool,
 
     /// Set by parse_variable_declaration when is_for_loop is true.
@@ -258,6 +260,7 @@ impl<'a> Parser<'a> {
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
             class_has_super_class: false,
+            class_scope_depth: 0,
             has_default_export_name: false,
             for_loop_declaration_count: 0,
             for_loop_declaration_has_init: false,

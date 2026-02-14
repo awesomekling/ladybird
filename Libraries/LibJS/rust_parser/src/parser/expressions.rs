@@ -370,6 +370,10 @@ impl<'a> Parser<'a> {
             }
 
             TokenType::PrivateIdentifier => {
+                if self.class_scope_depth == 0 {
+                    let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                    self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
+                }
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
                 (self.expr(start, Expression::PrivateIdentifier(PrivateIdentifier {
@@ -559,6 +563,10 @@ impl<'a> Parser<'a> {
             TokenType::Period => {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
+                    if self.class_scope_depth == 0 {
+                        let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                        self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
+                    }
                     let prop_start = self.position();
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();
@@ -825,6 +833,10 @@ impl<'a> Parser<'a> {
                         });
                     }
                     TokenType::PrivateIdentifier => {
+                        if self.class_scope_depth == 0 {
+                            let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                            self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
+                        }
                         let prop_start = self.position();
                         let tok = self.consume();
                         let value = self.token_value(&tok).to_vec();
@@ -864,6 +876,10 @@ impl<'a> Parser<'a> {
             } else if self.match_token(TokenType::Period) {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
+                    if self.class_scope_depth == 0 {
+                        let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                        self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
+                    }
                     let prop_start = self.position();
                     let tok = self.consume();
                     let value = self.token_value(&tok).to_vec();

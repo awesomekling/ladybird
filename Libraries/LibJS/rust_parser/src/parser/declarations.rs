@@ -507,6 +507,7 @@ impl<'a> Parser<'a> {
 
         let saved_class_has_super = self.class_has_super_class;
         self.class_has_super_class = super_class.is_some();
+        self.class_scope_depth += 1;
 
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::Semicolon) {
@@ -526,6 +527,7 @@ impl<'a> Parser<'a> {
         }
 
         self.consume_token(TokenType::CurlyClose);
+        self.class_scope_depth -= 1;
         self.class_has_super_class = saved_class_has_super;
         self.flags.strict_mode = strict_before;
 
