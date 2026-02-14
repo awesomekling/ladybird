@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2026, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2026, the Ladybird developers.
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
