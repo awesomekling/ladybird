@@ -87,7 +87,59 @@ pub mod token;
 
 use ast::Statement;
 use parser::{Parser, ProgramType};
+use std::cell::RefCell;
 use std::ffi::c_void;
+use std::rc::Rc;
+
+/// Shared compilation pipeline: local variable setup → codegen → assemble → create Executable.
+///
+/// Called by all three program-level entry points after parsing and scope analysis.
+unsafe fn compile_program_body(
+    gen: &mut bytecode::generator::Generator,
+    program: &ast::Stmt,
+    scope_ref: &Rc<RefCell<ast::ScopeData>>,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+) -> *mut c_void {
+    // Copy local variables from scope analysis into the generator.
+    {
+        let scope = scope_ref.borrow();
+        gen.local_variables = scope
+            .local_variables
+            .iter()
+            .map(|lv| bytecode::generator::LocalVariable {
+                name: lv.name.clone(),
+                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+                is_initialized_during_declaration_instantiation: false,
+            })
+            .collect();
+    }
+
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Initialize the lexical environment register.
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
+    }
+
+    let result = bytecode::codegen::generate_stmt(program, gen, None);
+
+    if !gen.is_current_block_terminated() {
+        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
+        gen.emit(bytecode::instruction::Instruction::End {
+            value: value.operand(),
+        });
+    }
+
+    let assembled = gen.assemble();
+    bytecode::ffi::create_executable(gen, &assembled, vm_ptr, source_code_ptr)
+}
 
 /// Compile a JavaScript program using the Rust parser and bytecode generator.
 ///
@@ -150,7 +202,12 @@ pub unsafe extern "C" fn rust_compile_program(
         return std::ptr::null_mut();
     }
 
-    // Generate bytecode
+    let scope_ref = if let Statement::Program(ref data) = program.inner {
+        data.scope.clone()
+    } else {
+        return std::ptr::null_mut();
+    };
+
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = starts_in_strict_mode;
     gen.must_propagate_completion = true;
@@ -159,45 +216,7 @@ pub unsafe extern "C" fn rust_compile_program(
     gen.source = source;
     gen.source_len = source_len;
 
-    // Copy program's local variables from scope analysis into the generator.
-    if let Statement::Program(ref data) = program.inner {
-        let scope = data.scope.borrow();
-        gen.local_variables = scope.local_variables.iter().map(|lv| {
-            bytecode::generator::LocalVariable {
-                name: lv.name.clone(),
-                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-                is_initialized_during_declaration_instantiation: false,
-            }
-        }).collect();
-    }
-
-    let entry_block = gen.make_block();
-    gen.switch_to_basic_block(entry_block);
-
-    // Initialize the lexical environment register.
-    {
-        use bytecode::operand::{Operand, Register};
-        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
-        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
-            dst: env_reg.operand(),
-        });
-        gen.lexical_environment_register_stack.push(env_reg);
-    }
-
-    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
-
-    if !gen.is_current_block_terminated() {
-        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(bytecode::instruction::Instruction::End {
-            value: value.operand(),
-        });
-    }
-
-    // Assemble
-    let assembled = gen.assemble();
-
-    // Create C++ Executable via FFI
-    bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
+    compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
 }
 
 /// Compile a script and extract GDI (GlobalDeclarationInstantiation) metadata.
@@ -242,14 +261,12 @@ pub unsafe extern "C" fn rust_compile_script(
         return std::ptr::null_mut();
     }
 
-    // Extract program data before codegen consumes the generator
     let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
         (data.scope.clone(), data.is_strict_mode)
     } else {
         return std::ptr::null_mut();
     };
 
-    // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = is_strict;
     gen.must_propagate_completion = true;
@@ -258,47 +275,7 @@ pub unsafe extern "C" fn rust_compile_script(
     gen.source = source;
     gen.source_len = source_len;
 
-    // Copy program's local variables from scope analysis into the generator.
-    {
-        let scope = scope_ref.borrow();
-        gen.local_variables = scope
-            .local_variables
-            .iter()
-            .map(|lv| bytecode::generator::LocalVariable {
-                name: lv.name.clone(),
-                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-                is_initialized_during_declaration_instantiation: false,
-            })
-            .collect();
-    }
-
-    let entry_block = gen.make_block();
-    gen.switch_to_basic_block(entry_block);
-
-    // Initialize the lexical environment register.
-    {
-        use bytecode::operand::{Operand, Register};
-        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
-        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
-            dst: env_reg.operand(),
-        });
-        gen.lexical_environment_register_stack.push(env_reg);
-    }
-
-    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
-
-    if !gen.is_current_block_terminated() {
-        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(bytecode::instruction::Instruction::End {
-            value: value.operand(),
-        });
-    }
-
-    // Assemble
-    let assembled = gen.assemble();
-
-    // Create C++ Executable via FFI
-    let exec_ptr = bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr);
+    let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
     if exec_ptr.is_null() {
         return std::ptr::null_mut();
     }
@@ -361,14 +338,12 @@ pub unsafe extern "C" fn rust_compile_eval(
         return std::ptr::null_mut();
     }
 
-    // Extract program data before codegen
     let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
         (data.scope.clone(), data.is_strict_mode)
     } else {
         return std::ptr::null_mut();
     };
 
-    // Generate bytecode
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = is_strict;
     gen.must_propagate_completion = true;
@@ -377,47 +352,7 @@ pub unsafe extern "C" fn rust_compile_eval(
     gen.source = source;
     gen.source_len = source_len;
 
-    // Copy program's local variables from scope analysis into the generator.
-    {
-        let scope = scope_ref.borrow();
-        gen.local_variables = scope
-            .local_variables
-            .iter()
-            .map(|lv| bytecode::generator::LocalVariable {
-                name: lv.name.clone(),
-                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-                is_initialized_during_declaration_instantiation: false,
-            })
-            .collect();
-    }
-
-    let entry_block = gen.make_block();
-    gen.switch_to_basic_block(entry_block);
-
-    // Initialize the lexical environment register.
-    {
-        use bytecode::operand::{Operand, Register};
-        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
-        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
-            dst: env_reg.operand(),
-        });
-        gen.lexical_environment_register_stack.push(env_reg);
-    }
-
-    let result = bytecode::codegen::generate_stmt(&program, &mut gen, None);
-
-    if !gen.is_current_block_terminated() {
-        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(bytecode::instruction::Instruction::End {
-            value: value.operand(),
-        });
-    }
-
-    // Assemble
-    let assembled = gen.assemble();
-
-    // Create C++ Executable via FFI
-    let exec_ptr = bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr);
+    let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
     if exec_ptr.is_null() {
         return std::ptr::null_mut();
     }
