@@ -25,6 +25,8 @@
 
 namespace Web::CSS {
 
+class MutableComputedValues;
+
 // A counting bloom filter with 2 hash functions.
 // NOTE: If a counter overflows, it's kept maxed-out until the whole filter is cleared.
 template<typename CounterType, size_t key_bits>
@@ -86,6 +88,8 @@ public:
         AnimatedPropertyResultOfTransition is_result_of_transition;
     };
     static Optional<AnimatedInheritValue> get_animated_inherit_value(PropertyID, DOM::AbstractElement);
+
+    static void populate_computed_values(MutableComputedValues&, ComputedProperties const&);
 
     static Optional<String> user_agent_style_sheet_source(StringView name);
 

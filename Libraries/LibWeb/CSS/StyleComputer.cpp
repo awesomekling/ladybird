@@ -1712,7 +1712,7 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
     return style;
 }
 
-static void populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style)
+void StyleComputer::populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style)
 {
     // NB: float, clear, position, inset, margin, and z_index are NOT set here because
     //     transfer_table_box_computed_values_to_wrapper_computed_values() modifies these
@@ -1745,6 +1745,66 @@ static void populate_computed_values(MutableComputedValues& computed_values, Com
     computed_values.set_user_select(computed_style.user_select());
     computed_values.set_unicode_bidi(computed_style.unicode_bidi());
     computed_values.set_table_layout(computed_style.table_layout());
+
+    computed_values.set_vertical_align(computed_style.vertical_align());
+    computed_values.set_flex_basis(computed_style.flex_basis());
+    computed_values.set_clip(computed_style.clip());
+    computed_values.set_backdrop_filter(computed_style.backdrop_filter());
+    computed_values.set_filter(computed_style.filter());
+    computed_values.set_flood_opacity(computed_style.flood_opacity());
+    computed_values.set_content_visibility(computed_style.content_visibility());
+    computed_values.set_text_decoration_thickness(computed_style.text_decoration_thickness());
+    computed_values.set_outline_style(computed_style.outline_style());
+    computed_values.set_mask_type(computed_style.mask_type());
+    computed_values.set_stop_opacity(computed_style.stop_opacity());
+    computed_values.set_column_span(computed_style.column_span());
+    computed_values.set_column_width(computed_style.size_value(CSS::PropertyID::ColumnWidth));
+    computed_values.set_column_height(computed_style.size_value(CSS::PropertyID::ColumnHeight));
+    computed_values.set_column_gap(computed_style.gap_value(CSS::PropertyID::ColumnGap));
+    computed_values.set_row_gap(computed_style.gap_value(CSS::PropertyID::RowGap));
+    computed_values.set_touch_action(computed_style.touch_action());
+    computed_values.set_view_transition_name(computed_style.view_transition_name());
+    computed_values.set_contain(computed_style.contain());
+    computed_values.set_container_type(computed_style.container_type());
+    computed_values.set_will_change(computed_style.will_change());
+    computed_values.set_resize(computed_style.resize());
+    computed_values.set_scrollbar_width(computed_style.scrollbar_width());
+    computed_values.set_object_position(computed_style.object_position());
+    computed_values.set_background_color_clip(computed_style.background_color_clip());
+
+    computed_values.set_transformations(computed_style.transformations());
+    computed_values.set_transform_box(computed_style.transform_box());
+    computed_values.set_transform_origin(computed_style.transform_origin());
+    computed_values.set_transform_style(computed_style.transform_style());
+    computed_values.set_perspective(computed_style.perspective());
+    computed_values.set_perspective_origin(computed_style.perspective_origin());
+
+    if (auto value = computed_style.rotate())
+        computed_values.set_rotate(value.release_nonnull());
+    if (auto value = computed_style.translate())
+        computed_values.set_translate(value.release_nonnull());
+    if (auto value = computed_style.scale())
+        computed_values.set_scale(value.release_nonnull());
+
+    computed_values.set_width(computed_style.size_value(CSS::PropertyID::Width));
+    computed_values.set_min_width(computed_style.size_value(CSS::PropertyID::MinWidth));
+    computed_values.set_max_width(computed_style.size_value(CSS::PropertyID::MaxWidth));
+    computed_values.set_height(computed_style.size_value(CSS::PropertyID::Height));
+    computed_values.set_min_height(computed_style.size_value(CSS::PropertyID::MinHeight));
+    computed_values.set_max_height(computed_style.size_value(CSS::PropertyID::MaxHeight));
+
+    computed_values.set_padding(computed_style.length_box(CSS::PropertyID::PaddingLeft, CSS::PropertyID::PaddingTop, CSS::PropertyID::PaddingRight, CSS::PropertyID::PaddingBottom, CSS::Length::make_px(0)));
+
+    computed_values.set_grid_auto_columns(computed_style.grid_auto_columns());
+    computed_values.set_grid_auto_rows(computed_style.grid_auto_rows());
+    computed_values.set_grid_template_columns(computed_style.grid_template_columns());
+    computed_values.set_grid_template_rows(computed_style.grid_template_rows());
+    computed_values.set_grid_column_end(computed_style.grid_column_end());
+    computed_values.set_grid_column_start(computed_style.grid_column_start());
+    computed_values.set_grid_row_end(computed_style.grid_row_end());
+    computed_values.set_grid_row_start(computed_style.grid_row_start());
+    computed_values.set_grid_template_areas(computed_style.grid_template_areas());
+    computed_values.set_grid_auto_flow(computed_style.grid_auto_flow());
 }
 
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const

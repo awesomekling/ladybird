@@ -12,6 +12,7 @@
 #include <LibWeb/Bindings/AnimationEffectPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -830,6 +831,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
         });
 
         if (!element.pseudo_element().has_value()) {
+            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *style);
             if (target->layout_node())
                 target->layout_node()->apply_style(*style);
         } else {

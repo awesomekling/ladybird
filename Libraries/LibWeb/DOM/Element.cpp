@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CountersSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -1021,6 +1022,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
     if (invalidation.is_none())
         return invalidation;
 
+    CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(ensure_computed_values()), *computed_properties);
     layout_node()->apply_style(*computed_properties);
     return invalidation;
 }
