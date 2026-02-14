@@ -158,6 +158,8 @@ extern "C" {
     ) -> *mut c_void;
 
     pub fn rust_free_error_string(str: *const std::os::raw::c_char);
+
+    pub fn rust_number_to_utf16(value: f64, buffer: *mut u16, buffer_len: usize) -> usize;
 }
 
 /// Create a SharedFunctionInstanceData from a FunctionData.
@@ -413,6 +415,14 @@ pub unsafe fn create_executable(
         gen.compiled_regexes.as_ptr(),
         gen.compiled_regexes.len(),
     )
+}
+
+/// Convert a JS number to its UTF-16 string representation using the
+/// ECMA-262 Number::toString algorithm (via C++ runtime).
+pub fn js_number_to_utf16(value: f64) -> Vec<u16> {
+    let mut buffer = [0u16; 64];
+    let len = unsafe { rust_number_to_utf16(value, buffer.as_mut_ptr(), buffer.len()) };
+    buffer[..len].to_vec()
 }
 
 /// Compile a regex pattern+flags using the C++ regex engine.

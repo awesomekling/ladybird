@@ -4118,7 +4118,7 @@ fn generate_object_expression(
             let base_name = match &prop.key.inner {
                 ExpressionKind::StringLiteral(s) => Some(s.clone()),
                 ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
-                ExpressionKind::NumericLiteral(n) => Some(number_to_utf16(*n)),
+                ExpressionKind::NumericLiteral(n) => Some(super::ffi::js_number_to_utf16(*n)),
                 _ => None,
             };
             if let Some(name) = base_name {
@@ -6993,11 +6993,11 @@ fn try_constant_fold_binary(
                 // String + Number or Number + String coercion
                 (ConstantValue::String(a), ConstantValue::Number(b)) => {
                     let mut result = a.clone();
-                    result.extend(number_to_utf16(*b));
+                    result.extend(super::ffi::js_number_to_utf16(*b));
                     Some(gen.add_constant_string(result))
                 }
                 (ConstantValue::Number(a), ConstantValue::String(b)) => {
-                    let mut result = number_to_utf16(*a);
+                    let mut result = super::ffi::js_number_to_utf16(*a);
                     result.extend_from_slice(b);
                     Some(gen.add_constant_string(result))
                 }
@@ -7056,19 +7056,6 @@ fn try_constant_fold_binary(
         }
         _ => None,
     }
-}
-
-fn number_to_utf16(n: f64) -> Vec<u16> {
-    // Simple number-to-string for constant folding purposes.
-    if n == 0.0 && n.is_sign_positive() {
-        return vec![b'0' as u16];
-    }
-    let s = if n == (n as i64 as f64) && n.abs() < 1e15 {
-        format!("{}", n as i64)
-    } else {
-        format!("{}", n)
-    };
-    s.encode_utf16().collect()
 }
 
 // NanBoxed Value encoding helpers (ABI-compatible with GC::NanBoxedValue).

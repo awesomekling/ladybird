@@ -23,6 +23,12 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/SourceCode.h>
 
+struct RustCompiledRegex {
+    regex::Parser::Result parsed_regex;
+    String parsed_pattern;
+    regex::RegexOptions<ECMAScriptFlags> flags;
+};
+
 static Utf16View view_from_ffi(FFIUtf16Slice slice)
 {
     return Utf16View { reinterpret_cast<char16_t const*>(slice.data), slice.length };
@@ -130,8 +136,7 @@ extern "C" void* rust_create_executable(
     size_t shared_function_data_count,
     void* const* class_blueprints,
     size_t class_blueprint_count,
-    FFIUtf16Slice const* regex_patterns,
-    FFIUtf16Slice const* regex_flags,
+    void* const* compiled_regexes,
     size_t regex_count)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
@@ -159,17 +164,12 @@ extern "C" void* rust_create_executable(
         str_table->insert(utf16_from_ffi(string_table_entries[i]));
     }
 
-    // Build regex table
+    // Build regex table from pre-compiled regex objects
     auto regex_tbl = make<JS::Bytecode::RegexTable>();
     for (size_t i = 0; i < regex_count; ++i) {
-        auto pattern = Utf16View(reinterpret_cast<char16_t const*>(regex_patterns[i].data), regex_patterns[i].length);
-        auto flags_view = Utf16View(reinterpret_cast<char16_t const*>(regex_flags[i].data), regex_flags[i].length);
-        auto parsed_flags = JS::regex_flags_from_string(flags_view);
-        auto ecma_flags = parsed_flags.is_error() ? regex::RegexOptions<ECMAScriptFlags> {} : parsed_flags.release_value();
-        auto parsed_pattern = JS::parse_regex_pattern(pattern, ecma_flags.has_flag_set(ECMAScriptFlags::Unicode), ecma_flags.has_flag_set(ECMAScriptFlags::UnicodeSets));
-        auto pattern_str = parsed_pattern.is_error() ? String {} : parsed_pattern.release_value();
-        auto parsed_regex = Regex<ECMA262>::parse_pattern(pattern_str, ecma_flags);
-        regex_tbl->insert(JS::Bytecode::ParsedRegex { move(parsed_regex), move(pattern_str), ecma_flags });
+        auto* cr = static_cast<RustCompiledRegex*>(compiled_regexes[i]);
+        regex_tbl->insert(JS::Bytecode::ParsedRegex { move(cr->parsed_regex), move(cr->parsed_pattern), cr->flags });
+        delete cr;
     }
 
     // Decode constants
@@ -524,12 +524,16 @@ extern "C" void* rust_create_class_blueprint(
     return blueprint;
 }
 
-// Validate a regex pattern. Returns nullptr if valid, or a heap-allocated
+// Compile a regex pattern+flags. On success, returns a heap-allocated
+// RustCompiledRegex* (cast to void*) and sets *error_out to nullptr.
+// On failure, returns nullptr and sets *error_out to a heap-allocated
 // error string (caller must free with rust_free_error_string).
-extern "C" char const* rust_validate_regex(
+extern "C" void* rust_compile_regex(
     uint16_t const* pattern_data, size_t pattern_len,
-    uint16_t const* flags_data, size_t flags_len)
+    uint16_t const* flags_data, size_t flags_len,
+    char const** error_out)
 {
+    *error_out = nullptr;
     auto pattern = Utf16View { reinterpret_cast<char16_t const*>(pattern_data), pattern_len };
     auto flags_view = Utf16View { reinterpret_cast<char16_t const*>(flags_data), flags_len };
     auto parsed_flags = JS::regex_flags_from_string(flags_view);
@@ -540,21 +544,39 @@ extern "C" char const* rust_validate_regex(
         auto* buf = static_cast<char*>(malloc(msg.byte_count() + 1));
         memcpy(buf, msg.bytes().data(), msg.byte_count());
         buf[msg.byte_count()] = '\0';
-        return buf;
+        *error_out = buf;
+        return nullptr;
     }
-    auto parsed_regex = Regex<ECMA262>::parse_pattern(parsed_pattern.release_value(), ecma_flags);
+    auto pattern_str = parsed_pattern.release_value();
+    auto parsed_regex = Regex<ECMA262>::parse_pattern(pattern_str, ecma_flags);
     if (parsed_regex.error != regex::Error::NoError) {
         auto error_string = Regex<ECMA262>(parsed_regex, ""sv, ecma_flags).error_string();
         auto msg = MUST(String::formatted("RegExp compile error: {}", error_string));
         auto* buf = static_cast<char*>(malloc(msg.byte_count() + 1));
         memcpy(buf, msg.bytes().data(), msg.byte_count());
         buf[msg.byte_count()] = '\0';
-        return buf;
+        *error_out = buf;
+        return nullptr;
     }
-    return nullptr;
+    return new RustCompiledRegex { move(parsed_regex), move(pattern_str), ecma_flags };
+}
+
+extern "C" void rust_free_compiled_regex(void* ptr)
+{
+    delete static_cast<RustCompiledRegex*>(ptr);
 }
 
 extern "C" void rust_free_error_string(char const* str)
 {
     free(const_cast<char*>(str));
+}
+
+extern "C" size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len)
+{
+    auto str = JS::number_to_utf16_string(value);
+    auto view = str.utf16_view();
+    auto len = min(view.length_in_code_units(), buffer_len);
+    for (size_t i = 0; i < len; ++i)
+        buffer[i] = view.code_unit_at(i);
+    return len;
 }

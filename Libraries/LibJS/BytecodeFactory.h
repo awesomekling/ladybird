@@ -140,9 +140,8 @@ void* rust_create_executable(
     // Class blueprints (heap-allocated ClassBlueprint*, ownership transfers)
     void* const* class_blueprints,
     size_t class_blueprint_count,
-    // Regex table: parallel arrays of pattern and flags strings
-    FFIUtf16Slice const* regex_patterns,
-    FFIUtf16Slice const* regex_flags,
+    // Regex table: array of pre-compiled RustCompiledRegex* (ownership transfers)
+    void* const* compiled_regexes,
     size_t regex_count);
 
 // Create a SharedFunctionInstanceData by re-parsing a function's source text
@@ -297,13 +296,23 @@ void eval_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
 
-// Validate a regex pattern+flags. Returns nullptr if valid, or a
-// heap-allocated C string with the error message. Caller must free
-// non-null results with rust_free_error_string.
-char const* rust_validate_regex(
+// Compile a regex pattern+flags. On success, returns a heap-allocated
+// opaque object (RustCompiledRegex*) and sets *error_out to nullptr.
+// On failure, returns nullptr and sets *error_out to a heap-allocated
+// error string (caller must free with rust_free_error_string).
+// Successful results must be freed with rust_free_compiled_regex or
+// passed to rust_create_executable (which takes ownership).
+void* rust_compile_regex(
     uint16_t const* pattern_data, size_t pattern_len,
-    uint16_t const* flags_data, size_t flags_len);
+    uint16_t const* flags_data, size_t flags_len,
+    char const** error_out);
+void rust_free_compiled_regex(void* ptr);
 void rust_free_error_string(char const* str);
+
+// Convert a JS number to its UTF-16 string representation using the
+// ECMA-262 Number::toString algorithm. Writes up to buffer_len code
+// units into buffer and returns the actual length.
+size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len);
 
 #ifdef __cplusplus
 }
