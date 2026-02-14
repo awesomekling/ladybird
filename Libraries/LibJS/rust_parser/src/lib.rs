@@ -452,11 +452,13 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     source_code_ptr: *const c_void,
     function_kind: u8,
 ) -> *mut c_void {
-    // Validate parameters: wrap in "function test(PARAMS) {}" and parse.
+    // Validate parameters: wrap in the appropriate function kind and parse.
     {
         let mut validate_src: Vec<u16> = Vec::new();
         match function_kind {
+            1 => validate_src.extend_from_slice(utf16!("function* test(")),
             2 => validate_src.extend_from_slice(utf16!("async function test(")),
+            3 => validate_src.extend_from_slice(utf16!("async function* test(")),
             _ => validate_src.extend_from_slice(utf16!("function test(")),
         }
         let params_slice = std::slice::from_raw_parts(params_source, params_source_len);

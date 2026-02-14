@@ -956,6 +956,11 @@ impl<'a> Parser<'a> {
 
     fn parse_yield_expression(&mut self) -> Expr {
         let start = self.position();
+
+        if self.flags.in_formal_parameter_context {
+            self.syntax_error("'Yield' expression is not allowed in formal parameters of generator function");
+        }
+
         self.consume_token(TokenType::Yield);
 
         if self.current_token.trivia_has_line_terminator
@@ -989,6 +994,11 @@ impl<'a> Parser<'a> {
 
     fn parse_await_expression(&mut self) -> Expr {
         let start = self.position();
+
+        if self.flags.in_formal_parameter_context {
+            self.syntax_error("'Await' expression is not allowed in formal parameters of an async function");
+        }
+
         self.consume_token(TokenType::Await);
         let argument = self.parse_expression(17, Associativity::Right, ForbiddenTokens::none());
         self.scope_collector.set_contains_await_expression();
@@ -1606,6 +1616,12 @@ impl<'a> Parser<'a> {
 
         self.save_state();
 
+        // Reset in_formal_parameter_context so that yield/await inside
+        // arrow function bodies nested in parameter defaults are not
+        // rejected.  (load_state restores flags on error paths.)
+        let saved_formal_param_ctx = self.flags.in_formal_parameter_context;
+        self.flags.in_formal_parameter_context = false;
+
         if is_async {
             self.consume(); // consume 'async'
             if self.current_token.trivia_has_line_terminator {
@@ -1700,6 +1716,7 @@ impl<'a> Parser<'a> {
                 self.check_parameters_post_body(&param_info, has_use_strict, fn_kind);
             }
 
+            self.flags.in_formal_parameter_context = saved_formal_param_ctx;
             Some(self.expr(start, Expression::Function(Box::new(FunctionData {
                 name: None,
                 source_text_start: src_start,
@@ -1727,6 +1744,7 @@ impl<'a> Parser<'a> {
             // Close function scope.
             self.scope_collector.close_scope();
 
+            self.flags.in_formal_parameter_context = saved_formal_param_ctx;
             Some(self.expr(start, Expression::Function(Box::new(FunctionData {
                 name: None,
                 source_text_start: src_start,

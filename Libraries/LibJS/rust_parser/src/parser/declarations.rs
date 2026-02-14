@@ -835,10 +835,12 @@ impl<'a> Parser<'a> {
         let in_function_before = self.flags.in_function_context;
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
+        let formal_param_before = self.flags.in_formal_parameter_context;
         let old_labels = std::mem::take(&mut self.labels_in_scope);
         self.flags.in_function_context = true;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
+        self.flags.in_formal_parameter_context = false;
 
         let (has_use_strict, mut children) = self.parse_directive();
         let body_is_strict = has_use_strict || self.flags.strict_mode;
@@ -857,6 +859,7 @@ impl<'a> Parser<'a> {
         self.flags.in_function_context = in_function_before;
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
+        self.flags.in_formal_parameter_context = formal_param_before;
         self.labels_in_scope = old_labels;
 
         let insights = FunctionParsingInsights::default();
@@ -884,7 +887,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> (Vec<FunctionParameter>, i32, Vec<(Vec<u16>, bool, bool, Option<Rc<Identifier>>)>, bool) {
+        let saved_formal_param_ctx = self.flags.in_formal_parameter_context;
+        self.flags.in_formal_parameter_context = true;
+
         if self.match_token(TokenType::ParenClose) {
+            self.flags.in_formal_parameter_context = saved_formal_param_ctx;
             return (Vec::new(), 0, Vec::new(), true);
         }
 
@@ -965,6 +972,8 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+
+        self.flags.in_formal_parameter_context = saved_formal_param_ctx;
 
         let is_simple = !has_seen_default && !has_seen_rest && !params.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
         (params, function_length, param_info, is_simple)
