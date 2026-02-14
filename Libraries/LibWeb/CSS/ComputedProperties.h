@@ -212,6 +212,9 @@ public:
     Display display_before_box_type_transformation() const;
     void set_display_before_box_type_transformation(Display value);
 
+    RefPtr<StyleValue const> cascaded_font_size() const { return m_cascaded_font_size; }
+    void set_cascaded_font_size(RefPtr<StyleValue const> value) { m_cascaded_font_size = move(value); }
+
     static Vector<NonnullRefPtr<TransformationStyleValue const>> transformations_for_style_value(StyleValue const& value);
     Vector<NonnullRefPtr<TransformationStyleValue const>> transformations() const;
     TransformBox transform_box() const;
@@ -300,6 +303,10 @@ private:
     }
 
     Optional<CSSPixels> m_line_height;
+
+    // Stored for recascade_font_size_if_needed() which needs to walk ancestors
+    // and read their pre-resolution font-size values.
+    RefPtr<StyleValue const> m_cascaded_font_size;
 
     PseudoClassBitmap m_attempted_pseudo_class_matches;
 };

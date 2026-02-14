@@ -2257,8 +2257,10 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
     CSSPixels current_size_in_px = default_monospace_font_size_in_px;
 
     for (auto& ancestor : ancestors.in_reverse()) {
-        auto& ancestor_cascaded_properties = *ancestor.cascaded_properties();
-        auto font_size_value = ancestor_cascaded_properties.property(CSS::PropertyID::FontSize);
+        auto ancestor_computed = ancestor.computed_properties();
+        if (!ancestor_computed)
+            continue;
+        auto font_size_value = ancestor_computed->cascaded_font_size();
 
         if (!font_size_value)
             continue;
@@ -2313,6 +2315,9 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     auto new_font_size = recascade_font_size_if_needed(abstract_element, cascaded_properties);
     if (new_font_size)
         computed_style->set_property(PropertyID::FontSize, *new_font_size, ComputedProperties::Inherited::No, Important::No);
+
+    // Store the cascaded font-size for recascade_font_size_if_needed() on descendant elements.
+    computed_style->set_cascaded_font_size(cascaded_properties.property(PropertyID::FontSize));
 
     auto const& computed_properties_to_inherit_from = abstract_element.element_to_inherit_style_from().map([](auto const& element) { return element.computed_properties(); }).value_or(nullptr);
 
