@@ -72,6 +72,7 @@ public:
         Yes
     };
 
+    AnimatedPropertyData const& animated_property_data() const { return m_animated_properties; }
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return m_animated_properties.values; }
     void reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>);
 

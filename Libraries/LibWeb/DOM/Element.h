@@ -235,6 +235,9 @@ public:
     RefPtr<CSS::ComputedProperties const> computed_properties(Optional<CSS::PseudoElement> = {}) const;
     void set_computed_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::ComputedProperties>);
 
+    CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
+    CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
+
     CSS::ComputedValues& ensure_computed_values();
 
     Optional<PseudoElement&> get_pseudo_element(CSS::PseudoElement) const;
@@ -599,6 +602,7 @@ private:
     GC::Ptr<DOMTokenList> m_part_list;
 
     RefPtr<CSS::ComputedProperties> m_computed_properties;
+    OwnPtr<CSS::AnimatedPropertyData> m_animated_property_data;
     OwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
 

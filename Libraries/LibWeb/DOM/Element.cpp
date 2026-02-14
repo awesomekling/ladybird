@@ -3227,6 +3227,10 @@ void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_elemen
         return;
     }
     m_computed_properties = style;
+    if (m_computed_properties && !m_computed_properties->animated_property_data().values.is_empty())
+        m_animated_property_data = make<CSS::AnimatedPropertyData>(m_computed_properties->animated_property_data());
+    else
+        m_animated_property_data = nullptr;
     computed_properties_changed();
 }
 

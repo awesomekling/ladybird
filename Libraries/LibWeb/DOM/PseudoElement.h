@@ -27,6 +27,9 @@ class WEB_API PseudoElement : public JS::Cell {
     RefPtr<CSS::ComputedProperties> computed_properties() const;
     void set_computed_properties(RefPtr<CSS::ComputedProperties> value);
 
+    CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
+    CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
+
     RefPtr<CSS::CustomPropertyData const> custom_property_data() const { return m_custom_property_data; }
     void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) { m_custom_property_data = move(value); }
 
@@ -43,6 +46,7 @@ class WEB_API PseudoElement : public JS::Cell {
 private:
     GC::Ptr<Layout::NodeWithStyle> m_layout_node;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
+    OwnPtr<CSS::AnimatedPropertyData> m_animated_property_data;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     OwnPtr<CSS::CountersSet> m_counters_set;
     CSSPixelPoint m_scroll_offset {};

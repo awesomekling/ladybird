@@ -15,7 +15,14 @@ GC_DEFINE_ALLOCATOR(PseudoElement);
 GC_DEFINE_ALLOCATOR(PseudoElementTreeNode);
 
 RefPtr<CSS::ComputedProperties> PseudoElement::computed_properties() const { return m_computed_properties; }
-void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> value) { m_computed_properties = move(value); }
+void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> value)
+{
+    m_computed_properties = move(value);
+    if (m_computed_properties && !m_computed_properties->animated_property_data().values.is_empty())
+        m_animated_property_data = make<CSS::AnimatedPropertyData>(m_computed_properties->animated_property_data());
+    else
+        m_animated_property_data = nullptr;
+}
 
 void PseudoElement::visit_edges(JS::Cell::Visitor& visitor)
 {

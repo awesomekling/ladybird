@@ -43,6 +43,8 @@ public:
 
     RefPtr<CSS::ComputedProperties const> computed_properties() const;
 
+    CSS::AnimatedPropertyData* animated_property_data() const;
+
     void set_custom_property_data(RefPtr<CSS::CustomPropertyData const>);
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_data() const;
     RefPtr<CSS::StyleValue const> get_custom_property(FlyString const& name) const;

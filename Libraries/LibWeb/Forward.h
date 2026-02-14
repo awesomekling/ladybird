@@ -223,6 +223,7 @@ class ColorMixStyleValue;
 class ColorSchemeStyleValue;
 class ColorFunctionStyleValue;
 class ColorStyleValue;
+struct AnimatedPropertyData;
 class ComputedProperties;
 class ComputedValues;
 class ConicGradientStyleValue;
