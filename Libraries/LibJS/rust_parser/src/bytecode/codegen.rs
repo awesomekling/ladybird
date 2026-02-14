@@ -3946,13 +3946,8 @@ fn generate_switch_statement(
                 break;
             }
             if gen.must_propagate_completion {
-                if let Some(ref c) = completion {
-                    if let Some(ref val) = result {
-                        gen.emit_mov(c, val);
-                    } else {
-                        let undef = gen.add_constant_undefined();
-                        gen.emit_mov(c, &undef);
-                    }
+                if let (Some(ref c), Some(ref val)) = (&completion, &result) {
+                    gen.emit_mov(c, val);
                 }
             }
         }
