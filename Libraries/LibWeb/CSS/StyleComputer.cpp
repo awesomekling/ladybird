@@ -1559,10 +1559,9 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
     if (text_align_keyword == Keyword::LibwebInheritOrCenter && abstract_element.element().local_name() == HTML::TagNames::th) {
         for (auto parent_element = abstract_element.element_to_inherit_style_from(); parent_element.has_value(); parent_element = parent_element->element_to_inherit_style_from()) {
             auto parent_computed = parent_element->computed_properties();
-            auto parent_cascaded = parent_element->cascaded_properties();
-            if (!parent_computed || !parent_cascaded)
+            if (!parent_computed)
                 break;
-            if (parent_cascaded->property(PropertyID::TextAlign)) {
+            if (!parent_computed->is_property_inherited(PropertyID::TextAlign) && parent_element->element_to_inherit_style_from().has_value()) {
                 auto const& style_value = parent_computed->property(PropertyID::TextAlign);
                 style.set_property(PropertyID::TextAlign, style_value, ComputedProperties::Inherited::Yes);
                 break;
