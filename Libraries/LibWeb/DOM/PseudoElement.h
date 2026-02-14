@@ -9,7 +9,6 @@
 #include <AK/OwnPtr.h>
 #include <LibGC/CellAllocator.h>
 #include <LibJS/Heap/Cell.h>
-#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -24,9 +23,6 @@ class WEB_API PseudoElement : public JS::Cell {
 
     GC::Ptr<Layout::NodeWithStyle> layout_node() const { return m_layout_node; }
     void set_layout_node(GC::Ptr<Layout::NodeWithStyle> value) { m_layout_node = value; }
-
-    RefPtr<CSS::CascadedProperties> cascaded_properties() const { return m_cascaded_properties; }
-    void set_cascaded_properties(RefPtr<CSS::CascadedProperties> value) { m_cascaded_properties = move(value); }
 
     RefPtr<CSS::ComputedProperties> computed_properties() const;
     void set_computed_properties(RefPtr<CSS::ComputedProperties> value);
@@ -46,7 +42,6 @@ class WEB_API PseudoElement : public JS::Cell {
 
 private:
     GC::Ptr<Layout::NodeWithStyle> m_layout_node;
-    RefPtr<CSS::CascadedProperties> m_cascaded_properties;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     OwnPtr<CSS::CountersSet> m_counters_set;

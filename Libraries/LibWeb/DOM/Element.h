@@ -12,6 +12,7 @@
 #include <LibWeb/Bindings/ElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
+#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/DOM/ChildNode.h>
@@ -235,9 +236,6 @@ public:
     void set_computed_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::ComputedProperties>);
 
     CSS::ComputedValues& ensure_computed_values();
-
-    [[nodiscard]] RefPtr<CSS::CascadedProperties> cascaded_properties(Optional<CSS::PseudoElement>) const;
-    void set_cascaded_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::CascadedProperties>);
 
     Optional<PseudoElement&> get_pseudo_element(CSS::PseudoElement) const;
 
@@ -600,7 +598,6 @@ private:
     GC::Ptr<ShadowRoot> m_shadow_root;
     GC::Ptr<DOMTokenList> m_part_list;
 
-    RefPtr<CSS::CascadedProperties> m_cascaded_properties;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
     OwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;

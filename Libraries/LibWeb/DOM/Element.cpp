@@ -3198,28 +3198,6 @@ size_t Element::attribute_list_size() const
     return m_attributes ? m_attributes->length() : 0;
 }
 
-RefPtr<CSS::CascadedProperties> Element::cascaded_properties(Optional<CSS::PseudoElement> pseudo_element) const
-{
-    if (pseudo_element.has_value()) {
-        auto pseudo_element_data = get_pseudo_element(pseudo_element.value());
-        if (pseudo_element_data.has_value())
-            return pseudo_element_data->cascaded_properties();
-        return nullptr;
-    }
-    return m_cascaded_properties;
-}
-
-void Element::set_cascaded_properties(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CascadedProperties> cascaded_properties)
-{
-    if (pseudo_element.has_value()) {
-        if (pseudo_element.value() >= CSS::PseudoElement::KnownPseudoElementCount)
-            return;
-        ensure_pseudo_element(pseudo_element.value()).set_cascaded_properties(cascaded_properties);
-    } else {
-        m_cascaded_properties = cascaded_properties;
-    }
-}
-
 RefPtr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type)
 {
     if (pseudo_element_type.has_value()) {

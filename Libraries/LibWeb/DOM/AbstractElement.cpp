@@ -150,16 +150,6 @@ RefPtr<CSS::StyleValue const> AbstractElement::get_custom_property(FlyString con
     return nullptr;
 }
 
-RefPtr<CSS::CascadedProperties> AbstractElement::cascaded_properties() const
-{
-    return m_element->cascaded_properties(m_pseudo_element);
-}
-
-void AbstractElement::set_cascaded_properties(RefPtr<CSS::CascadedProperties> cascaded_properties)
-{
-    m_element->set_cascaded_properties(m_pseudo_element, move(cascaded_properties));
-}
-
 bool AbstractElement::has_non_empty_counters_set() const
 {
     if (m_pseudo_element.has_value())
