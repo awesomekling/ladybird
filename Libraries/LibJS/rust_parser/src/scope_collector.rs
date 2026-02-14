@@ -839,8 +839,12 @@ impl ScopeCollector {
     /// - The scope chain is NOT poisoned by `eval()`
     fn resolve_identifiers(records: &mut [ScopeRecord], index: usize, initiated_by_eval: bool) {
         let groups = std::mem::take(&mut records[index].identifier_groups);
+        // Sort groups by name for deterministic local variable indices
+        // (HashMap iteration order is arbitrary).
+        let mut sorted_groups: Vec<_> = groups.into_iter().collect();
+        sorted_groups.sort_by(|a, b| a.0.cmp(&b.0));
         let mut propagate_to_parent: Vec<(Vec<u16>, IdentifierGroup)> = Vec::new();
-        for (name, mut group) in groups {
+        for (name, mut group) in sorted_groups {
             // Annotate each Identifier AST node with its declaration kind,
             // so the bytecode generator knows how to handle TDZ checks, etc.
             if let Some(dk) = group.declaration_kind {
