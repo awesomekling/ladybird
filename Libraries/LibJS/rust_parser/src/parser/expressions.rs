@@ -1127,7 +1127,7 @@ impl<'a> Parser<'a> {
         // Parse the initializer to advance the lexer, but roll back scope records
         // since this expression is discarded. synthesize_binding_pattern will
         // re-parse from source and create the real scope records.
-        if self.match_token(TokenType::Equals) {
+        if self.match_token(TokenType::Equals) && matches!(key.inner, Expression::Identifier(_)) {
             if let Some(kv) = &key_value {
                 let id = self.make_identifier(start, kv.clone());
                 self.scope_collector.register_identifier(id.clone(), &id.name, None);
@@ -1148,7 +1148,8 @@ impl<'a> Parser<'a> {
         }
 
         // Shorthand property: { x }
-        if let Some(kv) = key_value {
+        // Only identifiers can be shorthand properties, not string/numeric literals.
+        if let Some(kv) = key_value.filter(|_| matches!(key.inner, Expression::Identifier(_))) {
             let id = self.make_identifier(start, kv);
             self.scope_collector.register_identifier(id.clone(), &id.name, None);
             let value = self.expr(start, Expression::Identifier(id));
@@ -1206,7 +1207,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expr(start, Expression::StringLiteral(value)), None, is_proto, false)
+                (self.expr(start, Expression::StringLiteral(value.clone())), Some(value), is_proto, false)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
