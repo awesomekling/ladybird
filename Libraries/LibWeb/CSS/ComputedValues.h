@@ -692,6 +692,10 @@ public:
     Resize resize() const { return m_noninherited.resize; }
     WillChange const& will_change() const { return m_noninherited.will_change; }
 
+    Vector<CounterData, 0> const& counter_increment() const { return m_noninherited.counter_increment; }
+    Vector<CounterData, 0> const& counter_reset() const { return m_noninherited.counter_reset; }
+    Vector<CounterData, 0> const& counter_set() const { return m_noninherited.counter_set; }
+
     ComputedProperties const* source_computed_properties() const { return m_source_computed_properties; }
 
     NonnullOwnPtr<ComputedValues> clone_inherited_values() const;

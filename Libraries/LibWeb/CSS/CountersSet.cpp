@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CountersSet.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Element.h>
@@ -109,7 +109,9 @@ void CountersSet::append_copy(Counter const& counter)
 void resolve_counters(DOM::AbstractElement& element_reference)
 {
     // Resolving counter values on a given element is a multi-step process:
-    auto const& style = *element_reference.computed_properties();
+    auto const* computed_values = element_reference.computed_values();
+    if (!computed_values)
+        return;
 
     // 1. Existing counters are inherited from previous elements.
     inherit_counters(element_reference);
@@ -118,28 +120,25 @@ void resolve_counters(DOM::AbstractElement& element_reference)
     // An element that does not generate a box (for example, an element with display set to none,
     // or a pseudo-element with content set to none) cannot set, reset, or increment a counter.
     // The counter properties are still valid on such an element, but they must have no effect.
-    if (style.display().is_none())
+    if (computed_values->display().is_none())
         return;
 
     // 2. New counters are instantiated (counter-reset).
-    auto counter_reset = style.counter_data(PropertyID::CounterReset);
-    for (auto const& counter : counter_reset)
+    for (auto const& counter : computed_values->counter_reset())
         element_reference.ensure_counters_set().instantiate_a_counter(counter.name, element_reference, counter.is_reversed, counter.value);
 
     // FIXME: Take style containment into account
     // https://drafts.csswg.org/css-contain-2/#containment-style
     // Giving an element style containment has the following effects:
-    // 1. The 'counter-increment' and 'counter-set' properties must be scoped to the element’s sub-tree and create a
+    // 1. The 'counter-increment' and 'counter-set' properties must be scoped to the element's sub-tree and create a
     //    new counter.
 
     // 3. Counter values are incremented (counter-increment).
-    auto counter_increment = style.counter_data(PropertyID::CounterIncrement);
-    for (auto const& counter : counter_increment)
+    for (auto const& counter : computed_values->counter_increment())
         element_reference.ensure_counters_set().increment_a_counter(counter.name, element_reference, *counter.value);
 
     // 4. Counter values are explicitly set (counter-set).
-    auto counter_set = style.counter_data(PropertyID::CounterSet);
-    for (auto const& counter : counter_set)
+    for (auto const& counter : computed_values->counter_set())
         element_reference.ensure_counters_set().set_a_counter(counter.name, element_reference, *counter.value);
 
     // 5. Counter values are used (counter()/counters()).
