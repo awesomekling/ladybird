@@ -224,6 +224,7 @@ class ColorSchemeStyleValue;
 class ColorFunctionStyleValue;
 class ColorStyleValue;
 class ComputedProperties;
+class ComputedValues;
 class ConicGradientStyleValue;
 class ContentStyleValue;
 class CounterDefinitionsStyleValue;

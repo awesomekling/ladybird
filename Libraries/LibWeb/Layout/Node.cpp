@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
 #include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
@@ -554,15 +555,21 @@ bool Node::is_sticky_position() const
 
 NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, NonnullRefPtr<CSS::ComputedProperties> computed_style)
     : Node(document, node)
-    , m_computed_values(make<CSS::ComputedValues>())
 {
     m_has_style = true;
+    if (auto* element = as_if<DOM::Element>(node)) {
+        m_computed_values_ptr = &element->ensure_computed_values();
+    } else {
+        m_owned_computed_values = make<CSS::ComputedValues>();
+        m_computed_values_ptr = m_owned_computed_values.ptr();
+    }
     apply_style(computed_style);
 }
 
 NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, NonnullOwnPtr<CSS::ComputedValues> computed_values)
     : Node(document, node)
-    , m_computed_values(move(computed_values))
+    , m_owned_computed_values(move(computed_values))
+    , m_computed_values_ptr(m_owned_computed_values.ptr())
 {
     m_has_style = true;
 }
@@ -571,7 +578,8 @@ void NodeWithStyle::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_list_style_image_resource);
-    m_computed_values->visit_edges(visitor);
+    if (m_owned_computed_values)
+        m_owned_computed_values->visit_edges(visitor);
 }
 
 void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
@@ -1079,9 +1087,10 @@ GC::Ref<NodeWithStyle> NodeWithStyle::create_anonymous_wrapper() const
     return *wrapper;
 }
 
-void NodeWithStyle::set_computed_values(NonnullOwnPtr<CSS::ComputedValues> computed_values)
+void NodeWithStyle::set_owned_computed_values(NonnullOwnPtr<CSS::ComputedValues> computed_values)
 {
-    m_computed_values = move(computed_values);
+    m_owned_computed_values = move(computed_values);
+    m_computed_values_ptr = m_owned_computed_values.ptr();
 }
 
 void NodeWithStyle::reset_table_box_computed_values_used_by_wrapper_to_init_values()

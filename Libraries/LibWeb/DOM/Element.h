@@ -234,6 +234,8 @@ public:
     RefPtr<CSS::ComputedProperties const> computed_properties(Optional<CSS::PseudoElement> = {}) const;
     void set_computed_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::ComputedProperties>);
 
+    CSS::ComputedValues& ensure_computed_values();
+
     [[nodiscard]] RefPtr<CSS::CascadedProperties> cascaded_properties(Optional<CSS::PseudoElement>) const;
     void set_cascaded_properties(Optional<CSS::PseudoElement>, RefPtr<CSS::CascadedProperties>);
 
@@ -600,6 +602,7 @@ private:
 
     RefPtr<CSS::CascadedProperties> m_cascaded_properties;
     RefPtr<CSS::ComputedProperties> m_computed_properties;
+    OwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
 
     using PseudoElementData = HashMap<CSS::PseudoElement, GC::Ref<PseudoElement>>;

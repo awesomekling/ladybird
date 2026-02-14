@@ -262,8 +262,8 @@ class WEB_API NodeWithStyle : public Node {
 public:
     virtual ~NodeWithStyle() override = default;
 
-    CSS::ImmutableComputedValues const& computed_values() const { return static_cast<CSS::ImmutableComputedValues const&>(*m_computed_values); }
-    CSS::MutableComputedValues& mutable_computed_values() { return static_cast<CSS::MutableComputedValues&>(*m_computed_values); }
+    CSS::ImmutableComputedValues const& computed_values() const { return static_cast<CSS::ImmutableComputedValues const&>(*m_computed_values_ptr); }
+    CSS::MutableComputedValues& mutable_computed_values() { return static_cast<CSS::MutableComputedValues&>(*m_computed_values_ptr); }
 
     void apply_style(CSS::ComputedProperties const&);
 
@@ -281,7 +281,7 @@ public:
 
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
-    void set_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
+    void set_owned_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
 
 protected:
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
@@ -294,7 +294,8 @@ private:
     void propagate_non_inherit_values(NodeWithStyle& target_node) const;
     void propagate_style_to_anonymous_wrappers();
 
-    NonnullOwnPtr<CSS::ComputedValues> m_computed_values;
+    OwnPtr<CSS::ComputedValues> m_owned_computed_values;
+    CSS::ComputedValues* m_computed_values_ptr { nullptr };
     RefPtr<CSS::AbstractImageStyleValue const> m_list_style_image;
     GC::Ptr<CSS::CSSImageResource> m_list_style_image_resource;
 };

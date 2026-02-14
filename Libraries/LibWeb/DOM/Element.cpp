@@ -154,6 +154,8 @@ void Element::visit_edges(Cell::Visitor& visitor)
     }
     if (m_counters_set)
         m_counters_set->visit_edges(visitor);
+    if (m_computed_values)
+        m_computed_values->visit_edges(visitor);
 }
 
 // https://dom.spec.whatwg.org/#dom-element-getattribute
@@ -3264,6 +3266,13 @@ void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_elemen
     }
     m_computed_properties = style;
     computed_properties_changed();
+}
+
+CSS::ComputedValues& Element::ensure_computed_values()
+{
+    if (!m_computed_values)
+        m_computed_values = make<CSS::ComputedValues>();
+    return *m_computed_values;
 }
 
 Optional<PseudoElement&> Element::get_pseudo_element(CSS::PseudoElement type) const

@@ -1185,7 +1185,7 @@ Vector<GC::Root<Box>> TreeBuilder::generate_missing_parents(NodeWithStyle& root)
 
         if (parent.is_table_wrapper()) {
             auto& existing_wrapper = static_cast<TableWrapper&>(parent);
-            existing_wrapper.set_computed_values(move(wrapper_computed_values));
+            existing_wrapper.set_owned_computed_values(move(wrapper_computed_values));
             continue;
         }
 
