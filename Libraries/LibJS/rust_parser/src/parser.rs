@@ -526,25 +526,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn validate_regex_pattern(&mut self, pattern: &[u16], flags: &[u16]) {
-        extern "C" {
-            fn rust_validate_regex(
-                pattern_data: *const u16,
-                pattern_len: usize,
-                flags_data: *const u16,
-                flags_len: usize,
-            ) -> *const std::os::raw::c_char;
-            fn rust_free_error_string(str: *const std::os::raw::c_char);
-        }
-        let error = unsafe {
-            rust_validate_regex(
-                pattern.as_ptr(), pattern.len(),
-                flags.as_ptr(), flags.len(),
-            )
-        };
-        if !error.is_null() {
-            let msg = unsafe { std::ffi::CStr::from_ptr(error).to_string_lossy().into_owned() };
+        if let Some(msg) = crate::bytecode::ffi::validate_regex_pattern(pattern, flags) {
             self.syntax_error(&msg);
-            unsafe { rust_free_error_string(error); }
         }
     }
 

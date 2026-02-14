@@ -433,3 +433,23 @@ pub unsafe fn create_executable(
         regex_pattern_slices.len(),
     )
 }
+
+/// Validate a regex pattern using the C++ regex engine.
+///
+/// Returns `Some(error_message)` if the pattern is invalid, `None` if valid.
+/// This is a safe wrapper around the FFI call to `rust_validate_regex`.
+pub fn validate_regex_pattern(pattern: &[u16], flags: &[u16]) -> Option<String> {
+    unsafe {
+        let error = rust_validate_regex(
+            pattern.as_ptr(), pattern.len(),
+            flags.as_ptr(), flags.len(),
+        );
+        if error.is_null() {
+            None
+        } else {
+            let msg = std::ffi::CStr::from_ptr(error).to_string_lossy().into_owned();
+            rust_free_error_string(error);
+            Some(msg)
+        }
+    }
+}
