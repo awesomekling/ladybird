@@ -7,8 +7,7 @@
 //! Bytecode generator.
 //!
 //! This module contains the `Generator` struct which manages all state
-//! needed for bytecode generation from the Rust AST. It mirrors the
-//! C++ `Bytecode::Generator` class.
+//! needed for bytecode generation from the AST.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -118,8 +117,7 @@ pub struct LocalVariable {
 
 /// The bytecode generator.
 ///
-/// Manages all state needed for compiling a Rust AST into bytecode.
-/// Mirrors the C++ `Bytecode::Generator` class.
+/// Manages all state needed for compiling an AST into bytecode.
 pub struct Generator {
     // --- Basic block management ---
     pub basic_blocks: Vec<BasicBlock>,
@@ -144,7 +142,7 @@ pub struct Generator {
 
     // --- String/identifier/property tables ---
     // These are Vec<Vec<u16>> (UTF-16 strings) that will be passed to
-    // C++ via FFI when creating the Executable.
+    // FFI when creating the Executable.
     pub string_table: Vec<Vec<u16>>,
     pub identifier_table: Vec<Vec<u16>>,
     pub property_key_table: Vec<Vec<u16>>,
@@ -193,11 +191,11 @@ pub struct Generator {
     this_value: ScopedOperand,
 
     // --- Shared function data ---
-    // Opaque pointers to C++ SharedFunctionInstanceData objects.
+    // Opaque pointers to SharedFunctionInstanceData objects.
     pub shared_function_data: Vec<*mut std::ffi::c_void>,
 
     // --- Class blueprints ---
-    // Opaque pointers to heap-allocated C++ ClassBlueprint objects.
+    // Opaque pointers to heap-allocated ClassBlueprint objects.
     // Ownership transfers to the Executable during creation.
     pub class_blueprints: Vec<*mut std::ffi::c_void>,
 
@@ -478,14 +476,14 @@ impl Generator {
         PropertyKeyTableIndex(index)
     }
 
-    /// Register a SharedFunctionInstanceData (opaque C++ pointer) and return its index.
+    /// Register a SharedFunctionInstanceData (opaque pointer) and return its index.
     pub fn register_shared_function_data(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
         let index = self.shared_function_data.len() as u32;
         self.shared_function_data.push(ptr);
         index
     }
 
-    /// Register a ClassBlueprint (opaque C++ pointer) and return its index.
+    /// Register a ClassBlueprint (opaque pointer) and return its index.
     pub fn register_class_blueprint(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
         let index = self.class_blueprints.len() as u32;
         self.class_blueprints.push(ptr);
@@ -1038,7 +1036,7 @@ pub struct ExceptionHandler {
 /// A typed constant value stored in the constant pool.
 ///
 /// The actual NaN-boxed encoding happens at the FFI boundary when
-/// creating the C++ `Bytecode::Executable`.
+/// creating the `Bytecode::Executable`.
 #[derive(Debug, Clone)]
 pub enum ConstantValue {
     Number(f64),

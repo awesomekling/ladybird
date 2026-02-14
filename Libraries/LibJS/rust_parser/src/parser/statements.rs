@@ -495,7 +495,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Close the for-loop scope and wrap the for-loop statement in a Block
-    /// with scope data, matching C++ parser behavior.
+    /// with scope data.
     fn close_for_loop_scope(&mut self, start: Position, inner: Stmt) -> Stmt {
         let scope = ScopeData::shared_with_children(vec![inner]);
         self.scope_collector.set_scope_node(scope.clone());

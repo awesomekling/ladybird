@@ -6,13 +6,11 @@
 
 //! Token types and Token struct for the lexer.
 //!
-//! The `TokenType` enum must match the C++ `JS::TokenType` exactly
-//! (same variants in the same order) because scope analysis passes
-//! token type values across the FFI boundary. The order follows
-//! `ENUMERATE_JS_TOKENS` in Token.h (alphabetical).
+//! The `TokenType` enum must have the same variants in the same order
+//! as `ENUMERATE_JS_TOKENS` in Token.h (alphabetical) because token
+//! type values are passed across the FFI boundary.
 
-/// Token types matching the C++ `JS::TokenType` enum exactly.
-/// The order must match `ENUMERATE_JS_TOKENS` in Token.h (alphabetical).
+/// Token types. Order must match `ENUMERATE_JS_TOKENS` in Token.h.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TokenType {

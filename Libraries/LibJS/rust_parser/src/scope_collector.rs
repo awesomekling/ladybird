@@ -6,7 +6,7 @@
 
 //! Scope analysis for the Rust parser.
 //!
-//! Mirrors the C++ `ScopeCollector` class. This is a two-phase system:
+//! This is a two-phase system:
 //!
 //! ## Phase 1: Build scope tree (during parsing)
 //!
@@ -1016,7 +1016,7 @@ impl ScopeCollector {
         let mut non_local_var_count: usize = 0;
 
         // Build functions_to_initialize by scanning children for FunctionDeclarations.
-        // Walk in reverse order, deduplicating by name (like C++ ensure_function_scope_data).
+        // Walk in reverse order, deduplicating by name.
         let mut functions_to_initialize: Vec<crate::ast::FunctionToInit> = Vec::new();
         let mut seen_function_names: Vec<Vec<u16>> = Vec::new();
         {

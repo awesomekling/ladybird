@@ -6,7 +6,7 @@
 
 /// A bytecode register index.
 ///
-/// Reserved registers (matching C++ `Register`):
+/// Reserved registers:
 /// - 0: accumulator
 /// - 1: exception
 /// - 2: this_value
@@ -32,7 +32,7 @@ impl Register {
 ///
 ///   `raw = (type << 29) | index`
 ///
-/// This matches the C++ `Bytecode::Operand` encoding exactly.
+/// This encoding is ABI-compatible with the VM's operand format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Operand(u32);
 
@@ -98,7 +98,7 @@ impl Operand {
     /// Offset the index by the given amount (used during operand rewriting).
     /// Strips the type tag, leaving a flat index into the combined
     /// [registers | locals | constants | arguments] array.
-    /// This matches C++ `Operand::offset_index_by`.
+    /// Used during operand rewriting in the assembler.
     pub fn offset_index_by(&mut self, offset: u32) {
         self.0 &= Self::INDEX_MASK;
         self.0 += offset;
@@ -117,7 +117,7 @@ pub enum OperandType {
 ///
 /// During compilation, holds a basic block index. After linking,
 /// holds the final byte offset in the flat bytecode stream.
-/// Stored as a single `u32` matching C++ `Bytecode::Label`.
+/// Stored as a single `u32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Label(pub u32);
 
@@ -152,7 +152,7 @@ pub struct PropertyKeyTableIndex(pub u32);
 pub struct RegexTableIndex(pub u32);
 
 /// Environment coordinate used as a mutable cache in some instructions.
-/// Matches C++ `EnvironmentCoordinate` layout: two `u32` fields.
+/// Layout: two `u32` fields (hops + index).
 #[derive(Debug, Clone, Copy)]
 pub struct EnvironmentCoordinate {
     pub hops: u32,

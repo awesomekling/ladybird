@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! FFI bridge for creating a C++ Executable from assembled Rust bytecode.
+//! FFI bridge for creating a `Bytecode::Executable` from assembled bytecode.
 
 use std::ffi::c_void;
 

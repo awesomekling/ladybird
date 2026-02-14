@@ -6,9 +6,8 @@
 
 //! Rust AST types for JavaScript.
 //!
-//! This module defines the Abstract Syntax Tree using idiomatic Rust enums
-//! instead of the C++ class hierarchy. Every node carries a `SourceRange`
-//! for error messages and source maps.
+//! This module defines the Abstract Syntax Tree using idiomatic Rust enums.
+//! Every node carries a `SourceRange` for error messages and source maps.
 //!
 //! ## Design
 //!
@@ -17,19 +16,20 @@
 //! - `Node<T>` wraps every AST node with source location info.
 //! - `Identifier` uses `Cell` fields for scope analysis results that are
 //!   written after parsing (by the scope collector).
-//! - Operator enums use `#[repr(u8)]` with values matching the C++ enums
-//!   for trivial FFI conversion.
-//! - `ScopeData` replaces the C++ `ScopeNode` base class, carried by
-//!   block-like constructs (Program, BlockStatement, FunctionBody, etc.).
+//! - Operator enums use `#[repr(u8)]` with ABI-compatible values for
+//!   trivial FFI conversion.
+//! - `ScopeData` is carried by block-like constructs (Program,
+//!   BlockStatement, FunctionBody, etc.) and holds scope analysis results.
 
 use std::cell::{Cell, RefCell};
+use std::ffi::c_void;
 use std::rc::Rc;
 
 // =============================================================================
 // Source location
 // =============================================================================
 
-/// UTF-16 encoded string (matches C++ Utf16String / Utf16FlyString).
+/// UTF-16 encoded string.
 pub type Utf16String = Vec<u16>;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -69,7 +69,7 @@ impl<T> Node<T> {
 }
 
 // =============================================================================
-// Operator enums — values match C++ AST.h enums
+// Operator enums — values are ABI-compatible for FFI
 // =============================================================================
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,7 +204,6 @@ pub enum LocalType {
 }
 
 /// Declaration kind as seen from an identifier reference.
-/// Values match C++ `DeclarationKind` (with None=0).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IdentDeclarationKind {
@@ -630,7 +629,7 @@ pub enum AssignmentLhs {
 }
 
 // =============================================================================
-// Scope data (replaces C++ ScopeNode base class)
+// Scope data
 // =============================================================================
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -831,7 +830,7 @@ pub enum Statement {
     Expression(Box<Expr>),
     Debugger,
 
-    // Blocks (carry ScopeData like C++ ScopeNode)
+    // Blocks (carry ScopeData for scope analysis)
     Block(Rc<RefCell<ScopeData>>),
     FunctionBody {
         scope: Rc<RefCell<ScopeData>>,

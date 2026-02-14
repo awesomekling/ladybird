@@ -35,14 +35,14 @@
 //!                        ▼
 //! ┌─────────────────────────────────────────────────────┐
 //! │  FFI (bytecode/ffi.rs → BytecodeFactory.cpp)        │
-//! │  Creates C++ Executable from assembled data         │
+//! │  Creates Executable from assembled data              │
 //! └─────────────────────────────────────────────────────┘
 //! ```
 //!
 //! ## Module overview
 //!
-//! - `lib.rs` — Entry point, called from C++
-//! - `token.rs` — Token types matching the C++ `TokenType` enum
+//! - `lib.rs` — Entry point (FFI exports)
+//! - `token.rs` — Token types (must match Token.h order)
 //! - `lexer.rs` — Tokenizer: UTF-16 input → Token stream
 //! - `parser.rs` — Parser state, helpers, token consumption
 //! - `parser/expressions.rs` — Expression parsing (precedence climbing)
@@ -836,7 +836,7 @@ pub unsafe extern "C" fn rust_compile_function(
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
-    // Initialize the lexical environment register (like C++ ensure_lexical_environment_register_initialized).
+    // Initialize the lexical environment register.
     {
         use bytecode::operand::{Operand, Register};
         let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));

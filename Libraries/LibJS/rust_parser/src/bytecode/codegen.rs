@@ -7,7 +7,7 @@
 //! Bytecode generation from Rust AST.
 //!
 //! This module walks the Rust AST and emits bytecode instructions via
-//! the `Generator`, sharing the same instruction set as C++ codegen.
+//! the `Generator`.
 //!
 //! Each AST node's codegen returns `Option<ScopedOperand>`:
 //! - `Some(op)` if the node produces a value (expressions)
@@ -751,7 +751,7 @@ pub fn generate_stmt(
         // === UsingDeclaration ===
         Statement::UsingDeclaration { .. } => {
             // Disposal semantics are not yet implemented in the Rust codegen.
-            // Emit the same TODO error as the C++ codegen to match behavior.
+            // Disposal semantics are not yet implemented.
             let error = gen.allocate_register();
             let msg = gen.intern_string(utf16!("TODO: UsingDeclaration"));
             gen.emit(Instruction::NewTypeError {
@@ -832,7 +832,7 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
     )
 }
 
-/// Completion::Type values matching C++ enum.
+/// Completion::Type values (ABI-compatible).
 #[repr(u32)]
 enum CompletionType {
     Normal = 1,
@@ -846,7 +846,7 @@ impl CompletionType {
     }
 }
 
-/// Environment binding mode matching C++ EnvironmentMode.
+/// Environment binding mode.
 #[repr(u32)]
 enum EnvironmentMode {
     Lexical = 0,
@@ -2622,8 +2622,7 @@ fn generate_call_expression(
     let this_value = this_value.map(|tv| gen.copy_if_needed_to_preserve_evaluation_order(&tv));
     let callee = gen.copy_if_needed_to_preserve_evaluation_order(&callee);
 
-    // Unwrap this_value at function scope so its register lifetime matches C++
-    // (where original_this_value is a function-scope local that outlives argument temporaries).
+    // Unwrap this_value at function scope so its register lifetime outlives argument temporaries.
     let this_value = this_value.unwrap_or_else(|| gen.add_constant_undefined());
 
     let has_spread = data.arguments.iter().any(|a| a.is_spread);
@@ -3682,7 +3681,7 @@ fn generate_template_literal(
     // The parser stores ALL parts (string segments AND interpolated expressions)
     // in data.expressions. raw_strings is only populated for tagged templates.
 
-    // OPTIMIZATION: Filter out empty string segments (matching C++ behavior).
+    // OPTIMIZATION: Filter out empty string segments.
     let segments: Vec<&Expr> = data.expressions.iter().filter(|e| {
         !matches!(&e.inner, Expression::StringLiteral(s) if s.is_empty())
     }).collect();
@@ -4671,8 +4670,7 @@ fn generate_class_expression(
             } => {
                 // For fields with initializers, wrap the initializer in a
                 // synthetic function so the runtime can call it to get the
-                // initial value. This mirrors how C++ wraps initializers in
-                // ClassFieldInitializerStatement.
+                // initial value (a ClassFieldInitializerStatement).
                 let sfd_index = if let Some(init_expr) = initializer {
                     // Determine field name for anonymous function naming.
                     let field_name = match &key.inner {
@@ -6467,9 +6465,8 @@ fn emit_new_function(
 
 /// Emit FDI bytecode for a function body.
 ///
-/// This is a port of `Generator::emit_function_declaration_instantiation`
-/// from C++. It creates environment bindings, initializes parameters,
-/// creates arguments objects, and hoists function declarations.
+/// Creates environment bindings, initializes parameters, creates arguments
+/// objects, and hoists function declarations.
 pub fn emit_function_declaration_instantiation(
     gen: &mut Generator,
     func_data: &FunctionData,
@@ -7073,7 +7070,7 @@ fn number_to_utf16(n: f64) -> Vec<u16> {
     s.encode_utf16().collect()
 }
 
-// NanBoxed Value encoding helpers matching C++ GC::NanBoxedValue.
+// NanBoxed Value encoding helpers (ABI-compatible with GC::NanBoxedValue).
 // Used by NewPrimitiveArray to encode constant primitive values inline.
 const NANBOX_TAG_SHIFT: u64 = 48;
 const NANBOX_BASE_TAG: u64 = 0x7FF8;
