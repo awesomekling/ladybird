@@ -722,7 +722,9 @@ pub fn generate_stmt(
                     environment: parent.operand(),
                 });
             }
-            result
+            // Per spec 13.11.7 step 10: if body completion value is empty,
+            // return NormalCompletion(undefined).
+            Some(result.unwrap_or_else(|| gen.add_constant_undefined()))
         }
 
         // === ForIn ===
