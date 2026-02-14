@@ -376,8 +376,12 @@ impl Generator {
     }
 
     pub fn add_constant_number(&mut self, value: f64) -> ScopedOperand {
-        // Deduplicate i32 values
-        if value.fract() == 0.0 && value >= i32::MIN as f64 && value <= i32::MAX as f64 {
+        // Deduplicate i32 values (but not -0.0, which has distinct semantics from +0.0)
+        if value.fract() == 0.0
+            && value >= i32::MIN as f64
+            && value <= i32::MAX as f64
+            && value.to_bits() != (-0.0_f64).to_bits()
+        {
             let as_i32 = value as i32;
             if let Some(op) = self.int32_constants.get(&as_i32) {
                 return op.clone();
