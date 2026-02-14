@@ -7,7 +7,7 @@
 
 #include <LibWeb/Bindings/HTMLTableCellElementPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
@@ -116,15 +116,19 @@ void HTMLTableCellElement::apply_presentational_hints(CSS::CascadedProperties& c
 
     if (!border)
         return;
-    auto apply_border_style = [&](CSS::PropertyID style_property, CSS::PropertyID width_property, CSS::PropertyID color_property) {
+    auto const* table_values = table_element->computed_values();
+    if (!table_values)
+        return;
+
+    auto apply_border_style = [&](CSS::PropertyID style_property, CSS::PropertyID width_property, CSS::PropertyID color_property, Color border_color) {
         cascaded_properties.set_property_from_presentational_hint(style_property, CSS::KeywordStyleValue::create(CSS::Keyword::Inset));
         cascaded_properties.set_property_from_presentational_hint(width_property, CSS::LengthStyleValue::create(CSS::Length::make_px(1)));
-        cascaded_properties.set_property_from_presentational_hint(color_property, table_element->computed_properties()->property(color_property));
+        cascaded_properties.set_property_from_presentational_hint(color_property, CSS::ColorStyleValue::create_from_color(border_color, CSS::ColorSyntax::Legacy));
     };
-    apply_border_style(CSS::PropertyID::BorderLeftStyle, CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor);
-    apply_border_style(CSS::PropertyID::BorderTopStyle, CSS::PropertyID::BorderTopWidth, CSS::PropertyID::BorderTopColor);
-    apply_border_style(CSS::PropertyID::BorderRightStyle, CSS::PropertyID::BorderRightWidth, CSS::PropertyID::BorderRightColor);
-    apply_border_style(CSS::PropertyID::BorderBottomStyle, CSS::PropertyID::BorderBottomWidth, CSS::PropertyID::BorderBottomColor);
+    apply_border_style(CSS::PropertyID::BorderLeftStyle, CSS::PropertyID::BorderLeftWidth, CSS::PropertyID::BorderLeftColor, table_values->border_left().color);
+    apply_border_style(CSS::PropertyID::BorderTopStyle, CSS::PropertyID::BorderTopWidth, CSS::PropertyID::BorderTopColor, table_values->border_top().color);
+    apply_border_style(CSS::PropertyID::BorderRightStyle, CSS::PropertyID::BorderRightWidth, CSS::PropertyID::BorderRightColor, table_values->border_right().color);
+    apply_border_style(CSS::PropertyID::BorderBottomStyle, CSS::PropertyID::BorderBottomWidth, CSS::PropertyID::BorderBottomColor, table_values->border_bottom().color);
 }
 
 // This implements step 8 in the spec here:
