@@ -60,14 +60,7 @@ impl PartialEq for ScopedOperand {
     }
 }
 
-/// Function kind, matching C++ `FunctionKind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FunctionKind {
-    Normal,
-    Generator,
-    Async,
-    AsyncGenerator,
-}
+pub use crate::ast::FunctionKind;
 
 /// Block boundary types for unwind tracking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

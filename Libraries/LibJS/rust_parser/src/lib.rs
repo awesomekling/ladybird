@@ -820,12 +820,7 @@ pub unsafe extern "C" fn rust_compile_function(
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
     gen.source_len = source_len;
-    gen.enclosing_function_kind = match func_data.kind {
-        ast::FunctionKind::Normal => bytecode::generator::FunctionKind::Normal,
-        ast::FunctionKind::Generator => bytecode::generator::FunctionKind::Generator,
-        ast::FunctionKind::Async => bytecode::generator::FunctionKind::Async,
-        ast::FunctionKind::AsyncGenerator => bytecode::generator::FunctionKind::AsyncGenerator,
-    };
+    gen.enclosing_function_kind = func_data.kind;
 
     if let Some(scope) = body_scope {
         let sd = scope.borrow();
