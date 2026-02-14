@@ -50,18 +50,10 @@ pub struct SourceRange {
 // =============================================================================
 
 /// Every AST node wraps its payload with source location.
+#[derive(Clone)]
 pub struct Node<T> {
     pub range: SourceRange,
     pub inner: T,
-}
-
-impl<T: Clone> Clone for Node<T> {
-    fn clone(&self) -> Self {
-        Self {
-            range: self.range,
-            inner: self.inner.clone(),
-        }
-    }
 }
 
 /// Expression node: `Node<Expression>`.
