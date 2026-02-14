@@ -149,6 +149,15 @@ extern "C" {
     pub fn eval_gdi_push_var_scoped_name(ctx: *mut c_void, name: *const u16, len: usize);
     pub fn eval_gdi_push_annex_b_name(ctx: *mut c_void, name: *const u16, len: usize);
     pub fn eval_gdi_push_lexical_binding(ctx: *mut c_void, name: *const u16, len: usize, is_constant: bool);
+
+    pub fn rust_validate_regex(
+        pattern_data: *const u16,
+        pattern_len: usize,
+        flags_data: *const u16,
+        flags_len: usize,
+    ) -> *const std::os::raw::c_char;
+
+    pub fn rust_free_error_string(str: *const std::os::raw::c_char);
 }
 
 /// Create a SharedFunctionInstanceData for a FunctionData, for GDI use.

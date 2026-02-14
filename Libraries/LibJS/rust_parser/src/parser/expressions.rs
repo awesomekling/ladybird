@@ -397,6 +397,7 @@ impl<'a> Parser<'a> {
                     Vec::new()
                 };
                 self.validate_regex_flags(&flags);
+                self.validate_regex_pattern(&pattern, &flags);
                 (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData { pattern, flags })), true)
             }
 
@@ -417,6 +418,7 @@ impl<'a> Parser<'a> {
                     Vec::new()
                 };
                 self.validate_regex_flags(&flags);
+                self.validate_regex_pattern(&pattern, &flags);
                 (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData { pattern, flags })), true)
             }
 

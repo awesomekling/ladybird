@@ -297,6 +297,14 @@ void eval_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
 
+// Validate a regex pattern+flags. Returns nullptr if valid, or a
+// heap-allocated C string with the error message. Caller must free
+// non-null results with rust_free_error_string.
+char const* rust_validate_regex(
+    uint16_t const* pattern_data, size_t pattern_len,
+    uint16_t const* flags_data, size_t flags_len);
+void rust_free_error_string(char const* str);
+
 #ifdef __cplusplus
 }
 #endif

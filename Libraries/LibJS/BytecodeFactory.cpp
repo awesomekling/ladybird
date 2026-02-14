@@ -523,3 +523,38 @@ extern "C" void* rust_create_class_blueprint(
 
     return blueprint;
 }
+
+// Validate a regex pattern. Returns nullptr if valid, or a heap-allocated
+// error string (caller must free with rust_free_error_string).
+extern "C" char const* rust_validate_regex(
+    uint16_t const* pattern_data, size_t pattern_len,
+    uint16_t const* flags_data, size_t flags_len)
+{
+    auto pattern = Utf16View { reinterpret_cast<char16_t const*>(pattern_data), pattern_len };
+    auto flags_view = Utf16View { reinterpret_cast<char16_t const*>(flags_data), flags_len };
+    auto parsed_flags = JS::regex_flags_from_string(flags_view);
+    auto ecma_flags = parsed_flags.is_error() ? regex::RegexOptions<ECMAScriptFlags> {} : parsed_flags.release_value();
+    auto parsed_pattern = JS::parse_regex_pattern(pattern, ecma_flags.has_flag_set(ECMAScriptFlags::Unicode), ecma_flags.has_flag_set(ECMAScriptFlags::UnicodeSets));
+    if (parsed_pattern.is_error()) {
+        auto msg = MUST(String::formatted("RegExp compile error: {}", parsed_pattern.release_error().error));
+        auto* buf = static_cast<char*>(malloc(msg.byte_count() + 1));
+        memcpy(buf, msg.bytes().data(), msg.byte_count());
+        buf[msg.byte_count()] = '\0';
+        return buf;
+    }
+    auto parsed_regex = Regex<ECMA262>::parse_pattern(parsed_pattern.release_value(), ecma_flags);
+    if (parsed_regex.error != regex::Error::NoError) {
+        auto error_string = Regex<ECMA262>(parsed_regex, ""sv, ecma_flags).error_string();
+        auto msg = MUST(String::formatted("RegExp compile error: {}", error_string));
+        auto* buf = static_cast<char*>(malloc(msg.byte_count() + 1));
+        memcpy(buf, msg.bytes().data(), msg.byte_count());
+        buf[msg.byte_count()] = '\0';
+        return buf;
+    }
+    return nullptr;
+}
+
+extern "C" void rust_free_error_string(char const* str)
+{
+    free(const_cast<char*>(str));
+}
