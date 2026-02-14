@@ -2453,11 +2453,30 @@ fn generate_variable_declaration(
     declarations: &[VariableDeclarator],
 ) {
     for decl in declarations {
+        // OPTIMIZATION: For let/const declarations where the target is a local identifier,
+        // pass the local as preferred_dst to the initializer. This allows NewArray, NewFunction,
+        // Add, etc. to write directly to the local instead of temp+Mov.
+        // NB: Not safe for `var` since var declarations can have duplicates, meaning the
+        // preferred_dst could be used as input in the initializer.
+        let init_dst = if kind != DeclarationKind::Var {
+            if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
+                if ident.is_local() && ident.local_type.get() == LocalType::Variable {
+                    Some(gen.local(ident.local_index.get()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Set pending LHS name for function name inference.
         if let VariableDeclaratorTarget::Identifier(ident) = &decl.target {
             gen.pending_lhs_name = Some(gen.intern_identifier(&ident.name));
         }
-        let init_value = decl.init.as_ref().and_then(|init| generate_expr(init, gen, None));
+        let init_value = decl.init.as_ref().and_then(|init| generate_expr(init, gen, init_dst.as_ref()));
         gen.pending_lhs_name = None;
 
         match &decl.target {
