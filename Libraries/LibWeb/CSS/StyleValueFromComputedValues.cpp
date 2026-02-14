@@ -839,7 +839,7 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(Keyword::Normal);
 
     default:
-        return computed_values.property_value(property_id);
+        return nullptr;
     }
 }
 

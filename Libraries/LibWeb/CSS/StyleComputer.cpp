@@ -43,6 +43,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/CSS/StyleSheet.h>
+#include <LibWeb/CSS/StyleValueFromComputedValues.h>
 #include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
@@ -1257,11 +1258,16 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
 NonnullRefPtr<StyleValue const> StyleComputer::get_non_animated_inherit_value(PropertyID property_id, DOM::AbstractElement abstract_element)
 {
     auto parent_element = abstract_element.element_to_inherit_style_from();
-
-    if (!parent_element.has_value() || !parent_element->computed_properties())
+    if (!parent_element.has_value())
         return property_initial_value(property_id);
 
-    return parent_element->computed_properties()->property(property_id, ComputedProperties::WithAnimationsApplied::No);
+    auto const* parent_values = parent_element->computed_values();
+    if (!parent_values)
+        return property_initial_value(property_id);
+
+    if (auto value = parent_values->property_value(property_id))
+        return value.release_nonnull();
+    return property_initial_value(property_id);
 }
 
 Optional<StyleComputer::AnimatedInheritValue> StyleComputer::get_animated_inherit_value(PropertyID property_id, DOM::AbstractElement abstract_element)
@@ -2093,106 +2099,10 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_writing_mode(computed_style.writing_mode());
     computed_values.set_color_interpolation(computed_style.color_interpolation());
 
-    // Copy properties that don't have concrete storage in ComputedValues.
-    // These are stored as StyleValues in an overflow map for getComputedStyle().
-    static constexpr PropertyID supplementary_properties[] = {
-        PropertyID::AnchorName,
-        PropertyID::AnchorScope,
-        PropertyID::AnimationComposition,
-        PropertyID::AnimationDelay,
-        PropertyID::AnimationDirection,
-        PropertyID::AnimationDuration,
-        PropertyID::AnimationFillMode,
-        PropertyID::AnimationIterationCount,
-        PropertyID::AnimationName,
-        PropertyID::AnimationPlayState,
-        PropertyID::AnimationTimeline,
-        PropertyID::AnimationTimingFunction,
-        PropertyID::BackgroundAttachment,
-        PropertyID::BackgroundBlendMode,
-        PropertyID::BackgroundImage,
-        PropertyID::BackgroundOrigin,
-        PropertyID::BackgroundPositionX,
-        PropertyID::BackgroundPositionY,
-        PropertyID::BackgroundRepeat,
-        PropertyID::BackgroundSize,
-        PropertyID::BorderImageOutset,
-        PropertyID::BorderImageRepeat,
-        PropertyID::BorderImageSlice,
-        PropertyID::BorderImageSource,
-        PropertyID::BorderImageWidth,
-        PropertyID::ColorScheme,
-        PropertyID::Content,
-        PropertyID::CornerBottomLeftShape,
-        PropertyID::CornerBottomRightShape,
-        PropertyID::CornerTopLeftShape,
-        PropertyID::CornerTopRightShape,
-        PropertyID::CounterIncrement,
-        PropertyID::CounterReset,
-        PropertyID::CounterSet,
-        PropertyID::FontFamily,
-        PropertyID::FontFeatureSettings,
-        PropertyID::FontKerning,
-        PropertyID::FontOpticalSizing,
-        PropertyID::FontStyle,
-        PropertyID::FontVariantAlternates,
-        PropertyID::FontVariantCaps,
-        PropertyID::FontVariantEastAsian,
-        PropertyID::FontVariantEmoji,
-        PropertyID::FontVariantLigatures,
-        PropertyID::FontVariantNumeric,
-        PropertyID::FontVariantPosition,
-        PropertyID::FontVariationSettings,
-        PropertyID::FontWidth,
-        PropertyID::GridAutoColumns,
-        PropertyID::GridAutoFlow,
-        PropertyID::GridAutoRows,
-        PropertyID::GridTemplateAreas,
-        PropertyID::GridTemplateColumns,
-        PropertyID::GridTemplateRows,
-        PropertyID::ImageRendering,
-        PropertyID::LetterSpacing,
-        PropertyID::ListStyleImage,
-        PropertyID::MaskClip,
-        PropertyID::MaskComposite,
-        PropertyID::MaskImage,
-        PropertyID::MaskMode,
-        PropertyID::MaskOrigin,
-        PropertyID::MaskPosition,
-        PropertyID::MaskRepeat,
-        PropertyID::MaskSize,
-        PropertyID::Orphans,
-        PropertyID::OverflowWrap,
-        PropertyID::PaintOrder,
-        PropertyID::PositionAnchor,
-        PropertyID::PositionArea,
-        PropertyID::PositionTryFallbacks,
-        PropertyID::PositionTryOrder,
-        PropertyID::PositionVisibility,
-        PropertyID::Rx,
-        PropertyID::ScrollTimelineAxis,
-        PropertyID::ScrollTimelineName,
-        PropertyID::ScrollbarGutter,
-        PropertyID::ShapeImageThreshold,
-        PropertyID::ShapeMargin,
-        PropertyID::ShapeOutside,
-        PropertyID::TextRendering,
-        PropertyID::TextWrapStyle,
-        PropertyID::TimelineScope,
-        PropertyID::TransitionBehavior,
-        PropertyID::TransitionDelay,
-        PropertyID::TransitionDuration,
-        PropertyID::TransitionProperty,
-        PropertyID::TransitionTimingFunction,
-        PropertyID::ViewTimelineAxis,
-        PropertyID::ViewTimelineInset,
-        PropertyID::ViewTimelineName,
-        PropertyID::WhiteSpaceTrim,
-        PropertyID::Widows,
-        PropertyID::WillChange,
-    };
-    for (auto property_id : supplementary_properties)
-        computed_values.set_property_value(property_id, computed_style.property(property_id));
+    // Copy all longhand StyleValues to ComputedValues for use by inheritance and getComputedStyle().
+    computed_style.for_each_property([&](auto property_id, auto& value) {
+        computed_values.set_property_value(property_id, value);
+    });
 }
 
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
@@ -2446,7 +2356,8 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
         abstract_element.element().clear_pre_absolutized_values();
     }
 
-    auto const& computed_properties_to_inherit_from = abstract_element.element_to_inherit_style_from().map([](auto const& element) { return element.computed_properties(); }).value_or(nullptr);
+    auto const parent_to_inherit_from = abstract_element.element_to_inherit_style_from();
+    auto const* computed_values_to_inherit_from = parent_to_inherit_from.map([](auto const& element) { return element.computed_values(); }).value_or(nullptr);
 
     Function<NonnullRefPtr<StyleValue const>(PropertyID)> const get_property_specified_value = [&](auto property_id) -> NonnullRefPtr<StyleValue const> {
         return computed_style->property(property_id);
@@ -2497,24 +2408,27 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
         should_inherit |= property_id == PropertyID::Color && value && value->to_keyword() == Keyword::Currentcolor;
 
         // FIXME: Logical properties should inherit from their parent's equivalent unmapped logical property.
-        if (should_inherit && computed_properties_to_inherit_from) {
+        if (should_inherit && computed_values_to_inherit_from) {
             computed_style->set_property_inherited(property_id, ComputedProperties::Inherited::Yes);
-            value = computed_properties_to_inherit_from->property(property_id, ComputedProperties::WithAnimationsApplied::No);
+            value = computed_values_to_inherit_from->property_value(property_id);
+            if (!value)
+                value = property_initial_value(property_id);
             requires_computation = property_requires_computation_with_inherited_value(property_id);
 
             // FIXME: Do we need to recompute animated inherited values?
-            auto const& parent_animated_data = computed_properties_to_inherit_from->animated_property_data();
-            if (auto animated_value = parent_animated_data.values.get(property_id); animated_value.has_value())
-                computed_style->mutable_animated_property_data().set(
-                    property_id,
-                    *animated_value.value(),
-                    parent_animated_data.is_result_of_transition(property_id)
-                        ? AnimatedPropertyResultOfTransition::Yes
-                        : AnimatedPropertyResultOfTransition::No,
-                    true);
+            if (auto const* parent_animated_data = parent_to_inherit_from->animated_property_data()) {
+                if (auto animated_value = parent_animated_data->values.get(property_id); animated_value.has_value())
+                    computed_style->mutable_animated_property_data().set(
+                        property_id,
+                        *animated_value.value(),
+                        parent_animated_data->is_result_of_transition(property_id)
+                            ? AnimatedPropertyResultOfTransition::Yes
+                            : AnimatedPropertyResultOfTransition::No,
+                        true);
+            }
         }
 
-        if (!value || value->is_initial() || value->is_unset() || (should_inherit && !computed_properties_to_inherit_from)) {
+        if (!value || value->is_initial() || value->is_unset() || (should_inherit && !computed_values_to_inherit_from)) {
             value = property_initial_value(property_id);
             requires_computation = property_requires_computation_with_initial_value(property_id);
         }
