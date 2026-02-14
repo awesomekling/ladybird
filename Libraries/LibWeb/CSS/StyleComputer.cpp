@@ -1268,14 +1268,17 @@ Optional<StyleComputer::AnimatedInheritValue> StyleComputer::get_animated_inheri
 {
     auto parent_element = abstract_element.element_to_inherit_style_from();
 
-    if (!parent_element.has_value() || !parent_element->computed_properties())
+    if (!parent_element.has_value())
         return {};
 
-    auto const& animated_data = parent_element->computed_properties()->animated_property_data();
-    if (auto animated_value = animated_data.values.get(property_id); animated_value.has_value())
+    auto const* animated_data = parent_element->animated_property_data();
+    if (!animated_data)
+        return {};
+
+    if (auto animated_value = animated_data->values.get(property_id); animated_value.has_value())
         return AnimatedInheritValue {
             .value = *animated_value.value(),
-            .is_result_of_transition = animated_data.is_result_of_transition(property_id)
+            .is_result_of_transition = animated_data->is_result_of_transition(property_id)
                 ? AnimatedPropertyResultOfTransition::Yes
                 : AnimatedPropertyResultOfTransition::No
         };
@@ -1458,7 +1461,7 @@ ComputationContext const& StyleComputer::get_computation_context_for_property(Pr
             auto line_height_font_metrics = Length::FontMetrics {
                 style.font_size(),
                 style.first_available_computed_font(document().font_computer())->pixel_metrics(),
-                inheritance_parent.has_value() ? inheritance_parent->computed_properties()->line_height() : InitialValues::line_height()
+                inheritance_parent.has_value() && inheritance_parent->computed_values() ? inheritance_parent->computed_values()->line_height() : InitialValues::line_height()
             };
 
             const_cast<StyleComputer*>(this)->m_cached_line_height_computation_context = {
@@ -1595,12 +1598,12 @@ static BoxTypeTransformation required_box_type_transformation(ComputedProperties
     auto parent = abstract_element.element_to_inherit_style_from();
 
     // Climb out of `display: contents` context.
-    while (parent.has_value() && parent->computed_properties() && parent->computed_properties()->display().is_contents())
+    while (parent.has_value() && parent->computed_values() && parent->computed_values()->display().is_contents())
         parent = parent->element_to_inherit_style_from();
 
-    // A parent with a grid or flex display value blockifies the box’s display type. [CSS-GRID-1] [CSS-FLEXBOX-1]
-    if (parent.has_value() && parent->computed_properties()) {
-        auto const& parent_display = parent->computed_properties()->display();
+    // A parent with a grid or flex display value blockifies the box's display type. [CSS-GRID-1] [CSS-FLEXBOX-1]
+    if (parent.has_value() && parent->computed_values()) {
+        auto const& parent_display = parent->computed_values()->display();
         if (parent_display.is_grid_inside() || parent_display.is_flex_inside())
             return BoxTypeTransformation::Blockify;
     }
@@ -1742,11 +1745,11 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
         computed_style.line_height()
     };
     auto const* root_element = document.document_element();
-    auto root_font_metrics = root_element && root_element->computed_properties()
+    auto root_font_metrics = root_element && root_element->computed_values()
         ? Length::FontMetrics {
-              root_element->computed_properties()->font_size(),
-              root_element->computed_properties()->first_available_computed_font(document.font_computer())->pixel_metrics(),
-              root_element->computed_properties()->line_height()
+              root_element->computed_values()->font_size(),
+              root_element->computed_values()->font_list().font_for_code_point(' ').pixel_metrics(),
+              root_element->computed_values()->line_height()
           }
         : font_metrics;
     auto length_context = Length::ResolutionContext {
@@ -2298,7 +2301,10 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
 
         VERIFY(font_size_value->is_length());
 
-        auto inherited_line_height = ancestor.element_to_inherit_style_from().map([](auto&& parent_element) { return parent_element.computed_properties()->line_height(); }).value_or(InitialValues::line_height());
+        auto parent = ancestor.element_to_inherit_style_from();
+        auto inherited_line_height = (parent.has_value() && parent->computed_values())
+            ? parent->computed_values()->line_height()
+            : InitialValues::line_height();
 
         current_size_in_px = font_size_value->as_length().length().to_px(viewport_rect(), Length::FontMetrics { current_size_in_px, monospace_font->with_size(current_size_in_px * 0.75f)->pixel_metrics(), inherited_line_height }, m_root_element_font_metrics);
     };
@@ -2833,12 +2839,12 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_font_size(NonnullRefPtr<S
     // https://drafts.csswg.org/css-fonts/#font-size-prop
     // an absolute length
 
-    auto inherited_font_size = inheritance_parent.has_value()
-        ? inheritance_parent->computed_properties()->font_size()
+    auto inherited_font_size = inheritance_parent.has_value() && inheritance_parent->computed_values()
+        ? inheritance_parent->computed_values()->font_size()
         : InitialValues::font_size();
 
-    auto inherited_math_depth = inheritance_parent.has_value()
-        ? inheritance_parent->computed_properties()->math_depth()
+    auto inherited_math_depth = inheritance_parent.has_value() && inheritance_parent->computed_values()
+        ? inheritance_parent->computed_values()->math_depth()
         : InitialValues::math_depth();
 
     // <absolute-size>
@@ -2922,8 +2928,8 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_font_weight(NonnullRefPtr
     // https://drafts.csswg.org/css-fonts-4/#font-weight-prop
     // a number, see below
 
-    auto inherited_font_weight = inheritance_parent.has_value()
-        ? inheritance_parent->computed_properties()->font_weight()
+    auto inherited_font_weight = inheritance_parent.has_value() && inheritance_parent->computed_values()
+        ? inheritance_parent->computed_values()->font_weight()
         : InitialValues::font_weight();
 
     // <number [1,1000]>
@@ -3185,12 +3191,12 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_position_area(NonnullRefP
 // https://w3c.github.io/mathml-core/#propdef-math-depth
 NonnullRefPtr<StyleValue const> StyleComputer::compute_math_depth(NonnullRefPtr<StyleValue const> const& absolutized_value, Optional<DOM::AbstractElement> const& inheritance_parent)
 {
-    auto inherited_math_depth = inheritance_parent.has_value()
-        ? inheritance_parent->computed_properties()->math_depth()
+    auto inherited_math_depth = inheritance_parent.has_value() && inheritance_parent->computed_values()
+        ? inheritance_parent->computed_values()->math_depth()
         : InitialValues::math_depth();
 
-    auto inherited_math_style = inheritance_parent.has_value()
-        ? inheritance_parent->computed_properties()->math_style()
+    auto inherited_math_style = inheritance_parent.has_value() && inheritance_parent->computed_values()
+        ? inheritance_parent->computed_values()->math_style()
         : InitialValues::math_style();
 
     auto resolve_integer = [&](StyleValue const& integer_value) {

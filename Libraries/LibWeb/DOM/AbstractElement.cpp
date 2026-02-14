@@ -130,6 +130,16 @@ RefPtr<CSS::ComputedProperties const> AbstractElement::computed_properties() con
     return m_element->computed_properties(m_pseudo_element);
 }
 
+CSS::ComputedValues const* AbstractElement::computed_values() const
+{
+    if (m_pseudo_element.has_value()) {
+        if (auto node = layout_node())
+            return &node->computed_values();
+        return nullptr;
+    }
+    return m_element->computed_values();
+}
+
 CSS::AnimatedPropertyData* AbstractElement::animated_property_data() const
 {
     if (m_pseudo_element.has_value())

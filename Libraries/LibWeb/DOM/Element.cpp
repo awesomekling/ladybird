@@ -859,20 +859,19 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     m_affected_by_nth_child_pseudo_class = false;
     m_sibling_invalidation_distance = 0;
 
+    // NB: Save old display before compute_style(), since it overwrites ComputedValues.
+    bool had_list_marker = m_computed_values && m_computed_values->display().is_list_item();
+    auto old_display_is_none = !m_computed_values || m_computed_values->display().is_none();
+
     auto& style_computer = document().style_computer();
     auto new_computed_properties = style_computer.compute_style({ *this }, did_change_custom_properties);
-
-    bool had_list_marker = false;
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
     if (m_computed_properties) {
         invalidation = compute_required_invalidation(*m_computed_properties, new_computed_properties, document().font_computer());
-        had_list_marker = m_computed_properties->display().is_list_item();
     } else {
         invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
     }
-
-    auto old_display_is_none = m_computed_properties ? m_computed_properties->display().is_none() : true;
     auto new_display_is_none = new_computed_properties->display().is_none();
 
     set_computed_properties({}, move(new_computed_properties));
@@ -910,7 +909,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     recompute_pseudo_element_style(CSS::PseudoElement::Selection);
     if (m_rendered_in_top_layer)
         recompute_pseudo_element_style(CSS::PseudoElement::Backdrop);
-    if (had_list_marker || m_computed_properties->display().is_list_item())
+    if (had_list_marker || m_computed_values->display().is_list_item())
         recompute_pseudo_element_style(CSS::PseudoElement::Marker);
 
     if (invalidation.is_none())

@@ -10,7 +10,7 @@
 #include <AK/Variant.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Rect.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/Percentage.h>
@@ -126,14 +126,17 @@ Length::ResolutionContext Length::ResolutionContext::for_element(DOM::AbstractEl
 {
     auto const* root_element = element.element().document().document_element();
 
-    VERIFY(element.computed_properties());
+    VERIFY(element.computed_values());
     VERIFY(root_element);
-    VERIFY(root_element->computed_properties());
+    VERIFY(root_element->computed_values());
+
+    auto const& element_values = *element.computed_values();
+    auto const& root_values = *root_element->computed_values();
 
     return Length::ResolutionContext {
         .viewport_rect = element.element().navigable()->viewport_rect(),
-        .font_metrics = { element.computed_properties()->font_size(), element.computed_properties()->first_available_computed_font(element.document().font_computer())->pixel_metrics(), element.computed_properties()->line_height() },
-        .root_font_metrics = { root_element->computed_properties()->font_size(), root_element->computed_properties()->first_available_computed_font(element.document().font_computer())->pixel_metrics(), element.computed_properties()->line_height() }
+        .font_metrics = { element_values.font_size(), element_values.font_list().font_for_code_point(' ').pixel_metrics(), element_values.line_height() },
+        .root_font_metrics = { root_values.font_size(), root_values.font_list().font_for_code_point(' ').pixel_metrics(), element_values.line_height() }
     };
 }
 

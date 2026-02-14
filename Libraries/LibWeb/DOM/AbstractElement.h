@@ -42,6 +42,7 @@ public:
     void set_inheritance_override(GC::Ref<Element> element) { m_inheritance_override = element; }
 
     RefPtr<CSS::ComputedProperties const> computed_properties() const;
+    CSS::ComputedValues const* computed_values() const;
 
     CSS::AnimatedPropertyData* animated_property_data() const;
 
