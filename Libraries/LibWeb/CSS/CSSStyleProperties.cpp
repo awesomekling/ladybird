@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleValueFromComputedValues.h>
 #include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
@@ -1001,8 +1002,13 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
             }
         }
 
-        if (!property_is_shorthand(property_id))
+        if (!property_is_shorthand(property_id)) {
+            if (!pseudo_element.has_value()) {
+                if (auto value = style_value_for_property(property_id, computed_values))
+                    return value;
+            }
             return get_computed_value(property_id);
+        }
 
         // Handle shorthands in a generic way
         auto longhand_ids = longhands_for_shorthand(property_id);

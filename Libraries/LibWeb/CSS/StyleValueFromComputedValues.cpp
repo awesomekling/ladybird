@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
@@ -167,10 +168,11 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.flex_direction()));
     case PropertyID::FlexWrap:
         return KeywordStyleValue::create(to_keyword(computed_values.flex_wrap()));
-    case PropertyID::Float:
-        return KeywordStyleValue::create(to_keyword(computed_values.float_()));
-    case PropertyID::ImageRendering:
-        return KeywordStyleValue::create(to_keyword(computed_values.image_rendering()));
+    // NB: Float is not handled here because it's not set in populate_computed_values()
+    //     due to table-transferred property handling. Fall through to ComputedProperties.
+    // NB: ImageRendering is not handled here because the legacy keyword aliases
+    //     (optimizequality -> smooth, optimizespeed -> pixelated) cause a different
+    //     serialization when round-tripping through the enum.
     case PropertyID::Isolation:
         return KeywordStyleValue::create(to_keyword(computed_values.isolation()));
     case PropertyID::JustifyContent:
@@ -199,8 +201,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.overflow_y()));
     case PropertyID::PointerEvents:
         return KeywordStyleValue::create(to_keyword(computed_values.pointer_events()));
-    case PropertyID::Position:
-        return KeywordStyleValue::create(to_keyword(computed_values.position()));
+    // NB: Position is not handled here because it's not set in populate_computed_values()
+    //     due to table-transferred property handling. Fall through to ComputedProperties.
     case PropertyID::Resize:
         return KeywordStyleValue::create(to_keyword(computed_values.resize()));
     case PropertyID::ScrollbarWidth:
@@ -245,10 +247,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.writing_mode()));
 
     // ========== Color properties ==========
-    case PropertyID::AccentColor:
-        if (auto color = computed_values.accent_color(); color.has_value())
-            return style_value_for_color(color.value());
-        return KeywordStyleValue::create(Keyword::Auto);
+    // NB: AccentColor is not handled here because the "auto" keyword is lost
+    //     when resolved to a Color. Fall through to ComputedProperties.
     case PropertyID::BackgroundColor:
         return style_value_for_color(computed_values.background_color());
     case PropertyID::BorderBottomColor:
@@ -277,10 +277,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Float/number properties ==========
     case PropertyID::FillOpacity:
         return NumberStyleValue::create(computed_values.fill_opacity());
-    case PropertyID::FlexGrow:
-        return NumberStyleValue::create(computed_values.flex_grow());
-    case PropertyID::FlexShrink:
-        return NumberStyleValue::create(computed_values.flex_shrink());
+    // NB: FlexGrow and FlexShrink are not handled here because
+    //     populate_computed_values() doesn't handle calc() values correctly.
     case PropertyID::FloodOpacity:
         return NumberStyleValue::create(computed_values.flood_opacity());
     case PropertyID::Opacity:
@@ -297,27 +295,23 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Integer properties ==========
     case PropertyID::MathDepth:
         return IntegerStyleValue::create(computed_values.math_depth());
-    case PropertyID::Order:
-        return IntegerStyleValue::create(computed_values.order());
+    // NB: Order is not handled here because populate_computed_values()
+    //     doesn't handle calc() values correctly.
 
     // ========== CSSPixels → Length properties ==========
     case PropertyID::FontSize:
         return LengthStyleValue::create(Length::make_px(computed_values.font_size()));
-    case PropertyID::LetterSpacing:
-        if (computed_values.letter_spacing() == 0)
-            return KeywordStyleValue::create(Keyword::Normal);
-        return LengthStyleValue::create(Length::make_px(computed_values.letter_spacing()));
+    // NB: LetterSpacing is not handled here because percentage values are lost
+    //     when resolved to CSSPixels. Fall through to ComputedProperties.
     case PropertyID::LineHeight:
         if (computed_values.line_height() == 0)
             return KeywordStyleValue::create(Keyword::Normal);
         return LengthStyleValue::create(Length::make_px(computed_values.line_height()));
     case PropertyID::OutlineWidth:
         return LengthStyleValue::create(Length::make_px(computed_values.outline_width()));
-    case PropertyID::TextUnderlineOffset:
-        return LengthStyleValue::create(Length::make_px(computed_values.text_underline_offset()));
+    // NB: TextUnderlineOffset is not handled here because the "auto" keyword
+    //     is lost when resolved to CSSPixels. Fall through to ComputedProperties.
     case PropertyID::WordSpacing:
-        if (computed_values.word_spacing() == 0)
-            return KeywordStyleValue::create(Keyword::Normal);
         return LengthStyleValue::create(Length::make_px(computed_values.word_spacing()));
 
     // ========== Length properties ==========
@@ -326,8 +320,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         auto vertical = LengthStyleValue::create(computed_values.border_spacing_vertical());
         return StyleValueList::create(StyleValueVector { move(horizontal), move(vertical) }, StyleValueList::Separator::Space);
     }
-    case PropertyID::OutlineOffset:
-        return LengthStyleValue::create(computed_values.outline_offset());
+    // NB: OutlineOffset is not handled here because populate_computed_values()
+    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
 
     // ========== Size properties ==========
     case PropertyID::ColumnHeight:
@@ -356,16 +350,16 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return style_value_for_length_percentage(computed_values.r());
     case PropertyID::StrokeDashoffset:
         return style_value_for_length_percentage(computed_values.stroke_dashoffset());
-    case PropertyID::StrokeWidth:
-        return style_value_for_length_percentage(computed_values.stroke_width());
+    // NB: StrokeWidth is not handled here because populate_computed_values()
+    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
     case PropertyID::X:
         return style_value_for_length_percentage(computed_values.x());
     case PropertyID::Y:
         return style_value_for_length_percentage(computed_values.y());
 
     // ========== LengthPercentageOrAuto properties ==========
-    case PropertyID::Rx:
-        return style_value_for_length_percentage_or_auto(computed_values.rx());
+    // FIXME: Rx causes test regression in all-prop-revert-layer; needs investigation.
+    //        Fall through to ComputedProperties for now.
     case PropertyID::Ry:
         return style_value_for_length_percentage_or_auto(computed_values.ry());
 
@@ -456,10 +450,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return FilterValueListStyleValue::create(Vector<FilterValue>(computed_values.filter().filters()));
 
     // ========== Grid properties ==========
-    case PropertyID::GridAutoColumns:
-        return GridTrackSizeListStyleValue::create(computed_values.grid_auto_columns());
-    case PropertyID::GridAutoRows:
-        return GridTrackSizeListStyleValue::create(computed_values.grid_auto_rows());
+    // NB: GridAutoColumns and GridAutoRows are not handled here because the
+    //     created values don't match their initial values via equals(),
+    //     breaking grid shorthand serialization. Fall through to ComputedProperties.
     case PropertyID::GridColumnEnd:
         return GridTrackPlacementStyleValue::create(computed_values.grid_column_end());
     case PropertyID::GridColumnStart:
@@ -468,23 +461,11 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return GridTrackPlacementStyleValue::create(computed_values.grid_row_end());
     case PropertyID::GridRowStart:
         return GridTrackPlacementStyleValue::create(computed_values.grid_row_start());
-    case PropertyID::GridTemplateColumns:
-        return GridTrackSizeListStyleValue::create(computed_values.grid_template_columns());
-    case PropertyID::GridTemplateRows:
-        return GridTrackSizeListStyleValue::create(computed_values.grid_template_rows());
-    case PropertyID::GridAutoFlow: {
-        auto const& flow = computed_values.grid_auto_flow();
-        return GridAutoFlowStyleValue::create(
-            flow.row ? GridAutoFlowStyleValue::Row : GridAutoFlowStyleValue::Column,
-            flow.dense ? GridAutoFlowStyleValue::Yes : GridAutoFlowStyleValue::No);
-    }
-    case PropertyID::GridTemplateAreas: {
-        auto const& areas = computed_values.grid_template_areas();
-        if (areas.is_empty())
-            return KeywordStyleValue::create(Keyword::None);
-        // FIXME: Serialize grid template areas properly
-        return property_initial_value(property_id);
-    }
+    // NB: GridTemplateColumns, GridTemplateRows, GridTemplateAreas,
+    //     GridAutoFlow, GridAutoColumns, and GridAutoRows are not handled here
+    //     because the created values don't match their initial values via
+    //     equals(), breaking grid shorthand serialization.
+    //     Fall through to ComputedProperties.
 
     // ========== Transform properties ==========
     case PropertyID::Transform: {
@@ -509,15 +490,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         if (auto const& translate = computed_values.translate())
             return *translate;
         return KeywordStyleValue::create(Keyword::None);
-    case PropertyID::TransformOrigin: {
-        auto const& origin = computed_values.transform_origin();
-        StyleValueVector values;
-        values.append(style_value_for_length_percentage(origin.x));
-        values.append(style_value_for_length_percentage(origin.y));
-        if (!origin.z.is_length() || origin.z.length().raw_value() != 0)
-            values.append(style_value_for_length_percentage(origin.z));
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-    }
+    // NB: TransformOrigin is not handled here because the Z component default
+    //     type differs between ComputedValues (Percentage) and the CSS initial
+    //     value (Length). Fall through to ComputedProperties.
     case PropertyID::Perspective:
         if (auto const& perspective = computed_values.perspective(); perspective.has_value())
             return LengthStyleValue::create(Length::make_px(perspective.value()));
@@ -563,11 +538,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
             return IntegerStyleValue::create(z_index.value());
         return KeywordStyleValue::create(Keyword::Auto);
 
-    // ========== Column count ==========
-    case PropertyID::ColumnCount:
-        if (computed_values.column_count().is_auto())
-            return KeywordStyleValue::create(Keyword::Auto);
-        return IntegerStyleValue::create(computed_values.column_count().value());
+    // NB: ColumnCount is not handled here because populate_computed_values()
+    //     doesn't handle calc() values correctly. Fall through to ComputedProperties.
 
     // ========== Tab size ==========
     case PropertyID::TabSize:
@@ -579,9 +551,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
                 return NumberStyleValue::create(number);
             });
 
-    // ========== Transition delay ==========
-    case PropertyID::TransitionDelay:
-        return TimeStyleValue::create(computed_values.transition_delay());
+    // NB: TransitionDelay is not handled here because populate_computed_values()
+    //     doesn't correctly handle the StyleValueList case for coordinating-list
+    //     properties. Fall through to ComputedProperties.
 
     // ========== Aspect ratio ==========
     case PropertyID::AspectRatio: {
@@ -637,16 +609,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
     }
 
-    // ========== Paint order ==========
-    case PropertyID::PaintOrder: {
-        auto paint_order = computed_values.paint_order();
-        if (paint_order[0] == PaintOrder::Fill && paint_order[1] == PaintOrder::Stroke && paint_order[2] == PaintOrder::Markers)
-            return KeywordStyleValue::create(Keyword::Normal);
-        StyleValueVector values;
-        for (auto order : paint_order)
-            values.append(KeywordStyleValue::create(to_keyword(order)));
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-    }
+    // NB: PaintOrder is not handled here because the conversion from
+    //     [Fill, Stroke, Markers] to "normal" is lossy (paint-order: fill
+    //     also resolves to the same array). Fall through to ComputedProperties.
 
     // ========== Text decoration line ==========
     case PropertyID::TextDecorationLine: {
@@ -707,8 +672,7 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         auto const& clip = computed_values.clip();
         if (clip.is_auto())
             return KeywordStyleValue::create(Keyword::Auto);
-        // FIXME: Serialize rect() properly from Clip data
-        return property_initial_value(property_id);
+        return RectStyleValue::create(clip.to_rect());
     }
 
     // ========== Contain ==========
@@ -767,10 +731,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
             });
 
     // ========== Mask/clip path ==========
-    case PropertyID::MaskImage:
-        if (auto mask_image = computed_values.mask_image())
-            return *mask_image;
-        return KeywordStyleValue::create(Keyword::None);
+    // FIXME: MaskImage causes test regression in all-prop-revert-layer; needs investigation.
+    //        Fall through to ComputedProperties for now.
     case PropertyID::ClipPath:
         if (auto const& clip_path = computed_values.clip_path(); clip_path.has_value()) {
             if (clip_path->is_url())
@@ -807,14 +769,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
 
-    // ========== Scrollbar color ==========
-    case PropertyID::ScrollbarColor: {
-        auto const& scrollbar = computed_values.scrollbar_color();
-        StyleValueVector values;
-        values.append(style_value_for_color(scrollbar.thumb_color));
-        values.append(style_value_for_color(scrollbar.track_color));
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-    }
+    // NB: ScrollbarColor is not handled here because the "auto" keyword is lost
+    //     when resolved to Colors. Fall through to ComputedProperties.
 
     // ========== Cursor ==========
     case PropertyID::Cursor: {
@@ -842,15 +798,6 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return StyleValueList::create(move(values), StyleValueList::Separator::Comma);
     }
 
-    // ========== Will change ==========
-    case PropertyID::WillChange: {
-        auto const& will_change = computed_values.will_change();
-        if (will_change.is_auto())
-            return KeywordStyleValue::create(Keyword::Auto);
-        // FIXME: Serialize will-change entries properly
-        return property_initial_value(property_id);
-    }
-
     // ========== Quotes ==========
     case PropertyID::Quotes: {
         auto const& quotes = computed_values.quotes();
@@ -859,25 +806,16 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         if (quotes.type == QuotesData::Type::Auto)
             return KeywordStyleValue::create(Keyword::Auto);
         // FIXME: Serialize specified quote strings properly
-        return property_initial_value(property_id);
+        return nullptr;
     }
 
-    // ========== Counter properties ==========
+    // FIXME: Serialize these properly from ComputedValues.
     case PropertyID::CounterIncrement:
     case PropertyID::CounterReset:
     case PropertyID::CounterSet:
-        // FIXME: Serialize counter data properly
-        return property_initial_value(property_id);
-
-    // ========== White space trim ==========
     case PropertyID::WhiteSpaceTrim:
-        // FIXME: Serialize white-space-trim properly
-        return property_initial_value(property_id);
-
-    // ========== Color scheme ==========
     case PropertyID::ColorScheme:
-        // FIXME: Serialize color-scheme properly
-        return property_initial_value(property_id);
+        return nullptr;
 
     // ========== Font properties (partially in ComputedValues) ==========
     case PropertyID::FontLanguageOverride:
