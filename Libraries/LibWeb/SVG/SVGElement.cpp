@@ -9,8 +9,9 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/SVGElementPrototype.h>
-#include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/Size.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/SVG/SVGDescElement.h>
@@ -325,11 +326,37 @@ GC::Ref<SVGAnimatedLength> SVGElement::svg_animated_length_for_property(CSS::Pro
 {
     // FIXME: Create a proper animated value when animations are supported.
     auto make_length = [&](SVGLength::ReadOnly read_only) {
-        if (auto const computed_properties = this->computed_properties()) {
-            auto const& style_value = computed_properties->property(property);
-
-            if (!style_value.has_auto())
-                return SVGLength::from_length_percentage(realm(), CSS::LengthPercentage::from_style_value(style_value), read_only);
+        if (auto const* values = this->computed_values()) {
+            CSS::LengthPercentage const* length_percentage = nullptr;
+            switch (property) {
+            case CSS::PropertyID::X:
+                length_percentage = &values->x();
+                break;
+            case CSS::PropertyID::Y:
+                length_percentage = &values->y();
+                break;
+            case CSS::PropertyID::Cx:
+                length_percentage = &values->cx();
+                break;
+            case CSS::PropertyID::Cy:
+                length_percentage = &values->cy();
+                break;
+            case CSS::PropertyID::R:
+                length_percentage = &values->r();
+                break;
+            case CSS::PropertyID::Width:
+                if (values->width().is_length_percentage())
+                    length_percentage = &values->width().length_percentage();
+                break;
+            case CSS::PropertyID::Height:
+                if (values->height().is_length_percentage())
+                    length_percentage = &values->height().length_percentage();
+                break;
+            default:
+                break;
+            }
+            if (length_percentage)
+                return SVGLength::from_length_percentage(realm(), *length_percentage, read_only);
         }
         return SVGLength::create(realm(), 0, 0, read_only);
     };
