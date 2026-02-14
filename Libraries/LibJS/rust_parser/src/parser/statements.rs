@@ -73,13 +73,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Block statement ===
-
+    /// Parse a block statement `{ ... }`.
     pub(crate) fn parse_block_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
 
-        // Open block scope (scope_data set after children are collected).
         self.scope_collector.open_block_scope(None);
 
         let mut children = Vec::new();
@@ -99,8 +97,6 @@ impl<'a> Parser<'a> {
         self.stmt(start, Statement::Block(scope))
     }
 
-    // === Expression statement ===
-
     fn parse_expression_statement(&mut self) -> Stmt {
         let start = self.position();
 
@@ -113,8 +109,6 @@ impl<'a> Parser<'a> {
         self.consume_or_insert_semicolon();
         self.stmt(start, Statement::Expression(Box::new(expr)))
     }
-
-    // === Return statement ===
 
     fn parse_return_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -137,8 +131,6 @@ impl<'a> Parser<'a> {
         self.stmt(start, Statement::Return(Some(Box::new(argument))))
     }
 
-    // === Throw statement ===
-
     fn parse_throw_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::Throw);
@@ -151,8 +143,6 @@ impl<'a> Parser<'a> {
         self.consume_or_insert_semicolon();
         self.stmt(start, Statement::Throw(Box::new(argument)))
     }
-
-    // === Break statement ===
 
     fn parse_break_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -186,8 +176,6 @@ impl<'a> Parser<'a> {
 
         self.stmt(start, Statement::Break { target_label: label })
     }
-
-    // === Continue statement ===
 
     fn parse_continue_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -224,16 +212,12 @@ impl<'a> Parser<'a> {
         self.stmt(start, Statement::Continue { target_label: label })
     }
 
-    // === Debugger statement ===
-
     fn parse_debugger_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::Debugger);
         self.consume_or_insert_semicolon();
         self.stmt(start, Statement::Debugger)
     }
-
-    // === If statement ===
 
     fn parse_if_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -278,8 +262,6 @@ impl<'a> Parser<'a> {
         self.stmt(start, Statement::Block(scope))
     }
 
-    // === While statement ===
-
     fn parse_while_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::While);
@@ -302,8 +284,6 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
         })
     }
-
-    // === Do-while statement ===
 
     fn parse_do_while_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -330,8 +310,6 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
         })
     }
-
-    // === For statement ===
 
     fn parse_for_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -558,8 +536,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // === With statement ===
-
     fn parse_with_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::With);
@@ -574,8 +550,6 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
         })
     }
-
-    // === Switch statement ===
 
     fn parse_switch_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -646,8 +620,6 @@ impl<'a> Parser<'a> {
             test,
         }
     }
-
-    // === Try statement ===
 
     fn parse_try_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -725,8 +697,6 @@ impl<'a> Parser<'a> {
             body: Box::new(body),
         }
     }
-
-    // === Labelled statement ===
 
     fn try_parse_labelled_statement(&mut self, allow_labelled_function: bool) -> Option<Stmt> {
         let start = self.position();

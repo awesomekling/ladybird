@@ -14,8 +14,7 @@ use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, ParamInfo, Par
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
-    // === Expression matching ===
-
+    /// Check whether the current token can start an expression.
     pub(crate) fn match_expression(&mut self) -> bool {
         match self.current_token_type() {
             TokenType::BoolLiteral
@@ -101,8 +100,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Main expression parser ===
-
+    /// Parse an expression using precedence climbing.
     pub(crate) fn parse_expression(&mut self, min_precedence: i32, associativity: Associativity, forbidden: ForbiddenTokens) -> Expr {
         if self.match_unary_prefixed_expression() {
             let start = self.position();
@@ -171,8 +169,9 @@ impl<'a> Parser<'a> {
         expr
     }
 
-    // === Primary expression ===
-
+    /// Parse a primary expression (literal, identifier, `this`, etc.).
+    /// Returns `(expr, should_continue)` — `false` means the caller
+    /// should not attempt to parse a secondary expression (e.g. arrow).
     fn parse_primary_expression(&mut self) -> (Expr, bool) {
         self.last_parsed_identifier_is_eval = false;
         let start = self.position();
@@ -397,8 +396,11 @@ impl<'a> Parser<'a> {
                     Vec::new()
                 };
                 self.validate_regex_flags(&flags);
-                self.validate_regex_pattern(&pattern, &flags);
-                (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData { pattern, flags })), true)
+                let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
+                (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData {
+                    pattern, flags,
+                    compiled_regex: std::cell::Cell::new(compiled_regex),
+                })), true)
             }
 
             TokenType::Slash | TokenType::SlashEquals => {
@@ -418,8 +420,11 @@ impl<'a> Parser<'a> {
                     Vec::new()
                 };
                 self.validate_regex_flags(&flags);
-                self.validate_regex_pattern(&pattern, &flags);
-                (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData { pattern, flags })), true)
+                let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
+                (self.expr(start, Expression::RegExpLiteral(RegExpLiteralData {
+                    pattern, flags,
+                    compiled_regex: std::cell::Cell::new(compiled_regex),
+                })), true)
             }
 
             _ => {
@@ -451,8 +456,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Secondary expression ===
-
+    /// Parse a secondary (binary, postfix, member access, call, etc.) expression.
     fn parse_secondary_expression(&mut self, lhs_start: Position, lhs: Expr, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expr, ForbiddenTokens) {
         let callee_is_eval = self.last_parsed_identifier_is_eval;
         self.last_parsed_identifier_is_eval = false;
@@ -675,8 +679,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Unary prefix expression ===
-
+    /// Parse a unary prefix expression (`!`, `~`, `typeof`, `delete`, `++`, `--`, etc.).
     fn parse_unary_prefixed_expression(&mut self) -> Expr {
         let start = self.position();
         let tt = self.current_token_type();
@@ -749,8 +752,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === new expression ===
-
+    /// Parse a `new` expression, handling `new.target` and nested `new` calls.
     fn parse_new_expression(&mut self) -> Expr {
         let start = self.position();
         self.consume_token(TokenType::New);
@@ -796,8 +798,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Call expression ===
-
+    /// Parse a call expression `callee(args...)`.
     pub(crate) fn parse_call_expression(&mut self, callee: Expr, callee_is_eval: bool) -> Expr {
         let start = self.position();
         let arguments = self.parse_arguments();
@@ -831,8 +832,7 @@ impl<'a> Parser<'a> {
         args
     }
 
-    // === Optional chaining ===
-
+    /// Parse an optional chaining expression (`a?.b`, `a?.[x]`, `a?.()`).
     fn parse_optional_chain(&mut self, start: Position, base: Expr) -> Expr {
         let mut references = Vec::new();
 
@@ -952,8 +952,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // === Yield expression ===
-
+    /// Parse a `yield` or `yield*` expression.
     fn parse_yield_expression(&mut self) -> Expr {
         let start = self.position();
 
@@ -990,8 +989,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // === Await expression ===
-
+    /// Parse an `await` expression.
     fn parse_await_expression(&mut self) -> Expr {
         let start = self.position();
 
@@ -1005,8 +1003,7 @@ impl<'a> Parser<'a> {
         self.expr(start, Expression::Await(Box::new(argument)))
     }
 
-    // === Object expression ===
-
+    /// Parse an object literal expression `{ key: value, ... }`.
     fn parse_object_expression(&mut self) -> Expr {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
@@ -1254,8 +1251,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // === Array expression ===
-
+    /// Parse an array literal expression `[a, b, ...]`.
     fn parse_array_expression(&mut self) -> Expr {
         let start = self.position();
         self.consume_token(TokenType::BracketOpen);
@@ -1285,8 +1281,7 @@ impl<'a> Parser<'a> {
         self.expr(start, Expression::Array(elements))
     }
 
-    // === Template literal ===
-
+    /// Parse a template literal (`` `...${expr}...` ``).
     pub(crate) fn parse_template_literal(&mut self, is_tagged: bool) -> Expr {
         let start = self.position();
         self.consume_token(TokenType::TemplateLiteralStart);
@@ -1459,8 +1454,8 @@ impl<'a> Parser<'a> {
         Some(result)
     }
 
-    // === String value parsing ===
-
+    /// Parse a string literal token's value, processing escape sequences.
+    /// Returns `(value, has_legacy_octal)`.
     pub(crate) fn parse_string_value(&mut self, token: &Token) -> (Vec<u16>, bool) {
         let raw = self.token_value(token).to_vec();
         if raw.len() < 2 {
@@ -1595,8 +1590,7 @@ impl<'a> Parser<'a> {
         (result, has_legacy_octal)
     }
 
-    // === Arrow function ===
-
+    /// Try to parse an arrow function expression. Returns `None` on failure.
     pub(crate) fn try_parse_arrow_function_expression(&mut self, expect_parens: bool, is_async: bool) -> Option<Expr> {
         self.try_parse_arrow_function_expression_impl(expect_parens, is_async, None)
     }
@@ -1835,8 +1829,6 @@ impl<'a> Parser<'a> {
         })))
     }
 }
-
-// === Helpers ===
 
 fn hex_digit(c: u16) -> Option<u16> {
     match c {

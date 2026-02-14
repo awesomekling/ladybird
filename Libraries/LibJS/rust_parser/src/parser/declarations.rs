@@ -80,8 +80,6 @@ fn collect_pattern_names(pat: &BindingPattern, names: &mut Vec<Vec<u16>>) {
 }
 
 impl<'a> Parser<'a> {
-    // === Declarations ===
-
     pub(crate) fn parse_declaration(&mut self) -> Stmt {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
@@ -108,8 +106,6 @@ impl<'a> Parser<'a> {
             }
         }
     }
-
-    // === Variable declaration ===
 
     pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Stmt {
         let start = self.position();
@@ -241,8 +237,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // === Using declaration ===
-
     pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Stmt {
         let start = self.position();
         let decl_line = self.current_token().line_number;
@@ -309,8 +303,6 @@ impl<'a> Parser<'a> {
             declarations: declarators,
         })
     }
-
-    // === Function declaration ===
 
     pub(crate) fn parse_function_declaration(&mut self) -> Stmt {
         let start = self.position();
@@ -399,8 +391,6 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    // === Function expression ===
-
     pub(crate) fn parse_function_expression(&mut self) -> Expr {
         let start = self.position();
 
@@ -472,8 +462,6 @@ impl<'a> Parser<'a> {
             is_hoisted: false,
         })))
     }
-
-    // === Class ===
 
     pub(crate) fn parse_class_expression(&mut self, expect_name: bool) -> Expr {
         let start = self.position();
@@ -578,8 +566,8 @@ impl<'a> Parser<'a> {
             Expression::Class(data) => {
                 // Register class name as lexical declaration in the outer scope.
                 // The inner class scope (opened/closed inside parse_class_expression)
-                // only has the name as IsBound. The outer scope needs IsLexical so
-                // FDI creates the binding.
+                // binds the name for self-reference. The outer scope needs the name
+                // registered as a lexical declaration so it's visible to sibling code.
                 if let Some(ref name_ident) = data.name {
                     self.scope_collector.add_lexical_declaration(
                         &[&name_ident.name as &[u16]],
@@ -604,8 +592,8 @@ impl<'a> Parser<'a> {
             None
         };
 
-        // Note: No scope collector calls here. The synthesized constructor is
-        // compiled lazily via C++ re-parsing, so Rust scope analysis is irrelevant.
+        // Note: No scope collector calls here. The synthesized constructor AST
+        // is stored in the SFD and compiled lazily — scope analysis runs at that point.
 
         if has_super {
             // Derived class: constructor(...args) { return super(...args); }
@@ -826,8 +814,6 @@ impl<'a> Parser<'a> {
         })), None)
     }
 
-    // === Function body ===
-
     pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, is_simple: bool) -> (Stmt, bool, FunctionParsingInsights) {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
@@ -876,8 +862,6 @@ impl<'a> Parser<'a> {
 
         (body, has_use_strict, insights)
     }
-
-    // === Formal parameters ===
 
     pub(crate) fn parse_formal_parameters(&mut self) -> ParsedParameters {
         self.consume_token(TokenType::ParenOpen);
@@ -983,8 +967,6 @@ impl<'a> Parser<'a> {
         let is_simple = !has_seen_default && !has_seen_rest && !params.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
         ParsedParameters { params, function_length, param_info, is_simple }
     }
-
-    // === Binding pattern ===
 
     pub(crate) fn parse_binding_pattern(&mut self) -> BindingPattern {
         let is_object = self.match_token(TokenType::CurlyOpen);
@@ -1187,8 +1169,6 @@ impl<'a> Parser<'a> {
         BindingPattern { kind, entries }
     }
 
-    // === Import statement ===
-
     pub(crate) fn parse_import_statement(&mut self) -> Stmt {
         let start = self.position();
         self.consume_token(TokenType::Import);
@@ -1322,8 +1302,6 @@ impl<'a> Parser<'a> {
             entries,
         }))
     }
-
-    // === Export statement ===
 
     pub(crate) fn parse_export_statement(&mut self) -> Stmt {
         let start = self.position();
@@ -1517,8 +1495,6 @@ impl<'a> Parser<'a> {
             module_request,
         }))
     }
-
-    // === Import/Export helpers ===
 
     fn match_imported_binding(&self) -> bool {
         self.match_identifier() || self.match_token(TokenType::Yield) || self.match_token(TokenType::Await)
