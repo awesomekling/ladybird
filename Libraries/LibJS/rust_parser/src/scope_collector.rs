@@ -108,7 +108,7 @@ impl VarFlags {
     const BOUND: Self = Self(1 << 6);
     const PARAMETER_CANDIDATE: Self = Self(1 << 7);
 
-    const fn contains(self, other: Self) -> bool {
+    const fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
 }
@@ -230,7 +230,7 @@ impl ScopeRecord {
     }
 
     fn has_flag(&self, name: &[u16], flags: VarFlags) -> bool {
-        self.variables.get(name).is_some_and(|v| v.flags.contains(flags))
+        self.variables.get(name).is_some_and(|v| v.flags.intersects(flags))
     }
 
     fn get_parameter_index(&self, name: &[u16]) -> Option<u32> {
@@ -435,7 +435,7 @@ impl ScopeCollector {
 
         for name in bound_names {
             let var = self.records[index].variable(name);
-            if var.flags.contains(VarFlags::VAR | VarFlags::FORBIDDEN_LEXICAL | VarFlags::FUNCTION | VarFlags::LEXICAL) {
+            if var.flags.intersects(VarFlags::VAR | VarFlags::FORBIDDEN_LEXICAL | VarFlags::FUNCTION | VarFlags::LEXICAL) {
                 self.errors.push(ScopeError {
                     message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
                     line: decl_line,
@@ -463,7 +463,7 @@ impl ScopeCollector {
             let mut scope_idx = index;
             loop {
                 let var = self.records[scope_idx].variable(name);
-                if var.flags.contains(VarFlags::LEXICAL | VarFlags::FUNCTION | VarFlags::FORBIDDEN_VAR) {
+                if var.flags.intersects(VarFlags::LEXICAL | VarFlags::FUNCTION | VarFlags::FORBIDDEN_VAR) {
                     self.errors.push(ScopeError {
                         message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
                         line: decl_line,
@@ -506,7 +506,7 @@ impl ScopeCollector {
             // since we need to access both variables and functions_to_hoist.
             let existing_flags = self.records[index].variables.get(name).map_or(VarFlags::EMPTY, |v| v.flags);
 
-            if existing_flags.contains(VarFlags::VAR | VarFlags::LEXICAL) {
+            if existing_flags.intersects(VarFlags::VAR | VarFlags::LEXICAL) {
                 self.errors.push(ScopeError {
                     message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
                     line: decl_line,
@@ -515,7 +515,7 @@ impl ScopeCollector {
             }
 
             if function_kind != FunctionKind::Normal || strict_mode {
-                if existing_flags.contains(VarFlags::FUNCTION) {
+                if existing_flags.intersects(VarFlags::FUNCTION) {
                     self.errors.push(ScopeError {
                         message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
                         line: decl_line,
@@ -526,7 +526,7 @@ impl ScopeCollector {
                 return;
             }
 
-            if !existing_flags.contains(VarFlags::LEXICAL) {
+            if !existing_flags.intersects(VarFlags::LEXICAL) {
                 let block_scope = self.records[index].scope_data.clone();
                 self.records[index].functions_to_hoist.push(HoistableFunction {
                     name: name.to_vec(),
@@ -828,11 +828,11 @@ impl ScopeCollector {
             // Determine what kind of local variable this is (if any).
             // Priority: var (at top-level) > let/const > function declaration.
             let mut local_var_kind: Option<LocalVarKind> = None;
-            if records[index].is_top_level() && var_flags.contains(VarFlags::VAR) {
+            if records[index].is_top_level() && var_flags.intersects(VarFlags::VAR) {
                 local_var_kind = Some(LocalVarKind::Var);
-            } else if var_flags.contains(VarFlags::LEXICAL) {
+            } else if var_flags.intersects(VarFlags::LEXICAL) {
                 local_var_kind = Some(LocalVarKind::LetOrConst);
-            } else if var_flags.contains(VarFlags::FUNCTION) {
+            } else if var_flags.intersects(VarFlags::FUNCTION) {
                 local_var_kind = Some(LocalVarKind::Function);
             }
 
@@ -846,7 +846,7 @@ impl ScopeCollector {
             }
 
             if records[index].scope_type == ScopeType::Catch
-                && var_flags.contains(VarFlags::CATCH_PARAMETER)
+                && var_flags.intersects(VarFlags::CATCH_PARAMETER)
             {
                 // Catch parameters are handled by the catch codegen, not as
                 // local variables. Skip this group entirely so it doesn't
@@ -858,7 +858,7 @@ impl ScopeCollector {
 
             // ClassDeclaration with IsBound: skip entirely.
             if records[index].scope_type == ScopeType::ClassDeclaration
-                && var_flags.contains(VarFlags::BOUND)
+                && var_flags.intersects(VarFlags::BOUND)
             {
                 continue;
             }
@@ -866,7 +866,7 @@ impl ScopeCollector {
             // Function expression name binding.
             if records[index].scope_type == ScopeType::Function
                 && !records[index].is_function_declaration
-                && var_flags.contains(VarFlags::BOUND)
+                && var_flags.intersects(VarFlags::BOUND)
             {
                 for id in &group.identifiers {
                     id.is_inside_scope_with_eval.set(true);
@@ -880,12 +880,12 @@ impl ScopeCollector {
             // Function parameter handling.
             let mut is_function_parameter = false;
             if records[index].scope_type == ScopeType::Function {
-                if var_flags.contains(VarFlags::PARAMETER_CANDIDATE)
+                if var_flags.intersects(VarFlags::PARAMETER_CANDIDATE)
                     && (!records[index].contains_access_to_arguments_object_in_non_strict_mode
                         || records[index].has_rest_parameter_with_name(&name))
                 {
                     is_function_parameter = true;
-                } else if var_flags.contains(VarFlags::FORBIDDEN_LEXICAL) {
+                } else if var_flags.intersects(VarFlags::FORBIDDEN_LEXICAL) {
                     continue;
                 }
             }
@@ -1006,7 +1006,7 @@ impl ScopeCollector {
         };
 
         let has_argument_parameter = record.variables.get(utf16!("arguments") as &[u16])
-            .is_some_and(|v| v.flags.contains(VarFlags::FORBIDDEN_LEXICAL));
+            .is_some_and(|v| v.flags.intersects(VarFlags::FORBIDDEN_LEXICAL));
 
         // Collect IS_VAR variables for FunctionScopeData.
         let mut vars_to_initialize = Vec::new();
@@ -1037,14 +1037,14 @@ impl ScopeCollector {
         }
 
         for (name, var) in &record.variables {
-            if !var.flags.contains(VarFlags::VAR) {
+            if !var.flags.intersects(VarFlags::VAR) {
                 continue;
             }
 
             var_names.push(name.clone());
 
-            let is_parameter = var.flags.contains(VarFlags::FORBIDDEN_LEXICAL);
-            let is_function_name = var.flags.contains(VarFlags::BOUND);
+            let is_parameter = var.flags.intersects(VarFlags::FORBIDDEN_LEXICAL);
+            let is_function_name = var.flags.intersects(VarFlags::BOUND);
 
             // Check if this var has been optimized to a local
             let local_info = if let Some(ref ident) = var.var_identifier {
@@ -1080,7 +1080,7 @@ impl ScopeCollector {
 
         // Check for lexically declared arguments
         if record.variables.get(utf16!("arguments") as &[u16])
-            .is_some_and(|v| v.flags.contains(VarFlags::LEXICAL))
+            .is_some_and(|v| v.flags.intersects(VarFlags::LEXICAL))
         {
             has_lexically_declared_arguments = true;
         }
