@@ -1293,16 +1293,16 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenType::TemplateLiteralString) {
                 let tok = self.consume();
-                let raw = self.token_value(&tok);
+                let raw = self.token_value(&tok).to_vec();
                 if is_tagged {
-                    let raw_value = raw_template_value(raw);
+                    let raw_value = raw_template_value(&raw);
                     raw_strings.push(raw_value);
-                    match self.process_template_escape_sequences(raw) {
+                    match self.process_template_escape_sequences(&raw) {
                         Some(cooked) => expressions.push(self.expr(start, Expression::StringLiteral(cooked))),
                         None => expressions.push(self.expr(start, Expression::NullLiteral)),
                     }
                 } else {
-                    let (value, has_octal) = self.process_escape_sequences(raw);
+                    let (value, has_octal) = self.process_escape_sequences(&raw);
                     if has_octal {
                         self.syntax_error("Octal escape sequence not allowed in template literal");
                     }
@@ -1438,16 +1438,16 @@ impl<'a> Parser<'a> {
 
     // === String value parsing ===
 
-    pub(crate) fn parse_string_value(&self, token: &Token) -> (Vec<u16>, bool) {
-        let raw = self.token_value(token);
+    pub(crate) fn parse_string_value(&mut self, token: &Token) -> (Vec<u16>, bool) {
+        let raw = self.token_value(token).to_vec();
         if raw.len() < 2 {
             return (Vec::new(), false);
         }
-        let inner = &raw[1..raw.len() - 1];
-        self.process_escape_sequences(inner)
+        let inner = raw[1..raw.len() - 1].to_vec();
+        self.process_escape_sequences(&inner)
     }
 
-    pub(crate) fn process_escape_sequences(&self, inner: &[u16]) -> (Vec<u16>, bool) {
+    pub(crate) fn process_escape_sequences(&mut self, inner: &[u16]) -> (Vec<u16>, bool) {
         let mut result = Vec::with_capacity(inner.len());
         let mut has_legacy_octal = false;
         let mut i = 0;
@@ -1489,9 +1489,11 @@ impl<'a> Parser<'a> {
                                 result.push(h * 16 + l);
                                 i += 2;
                             } else {
+                                self.syntax_error("Malformed hexadecimal escape sequence");
                                 result.push(inner[i]);
                             }
                         } else {
+                            self.syntax_error("Malformed hexadecimal escape sequence");
                             result.push(inner[i]);
                         }
                     }
@@ -1499,29 +1501,53 @@ impl<'a> Parser<'a> {
                         if i + 1 < inner.len() && inner[i + 1] == b'{' as u16 {
                             i += 2;
                             let mut code_point: u32 = 0;
-                            while i < inner.len() && inner[i] != b'}' as u16 {
+                            let mut found_close = false;
+                            let mut has_digits = false;
+                            while i < inner.len() {
+                                if inner[i] == b'}' as u16 {
+                                    found_close = true;
+                                    break;
+                                }
                                 if let Some(d) = hex_digit(inner[i]) {
                                     code_point = code_point * 16 + d as u32;
+                                    has_digits = true;
+                                } else {
+                                    self.syntax_error("Malformed unicode escape sequence");
+                                    break;
                                 }
                                 i += 1;
                             }
-                            if code_point <= 0xFFFF {
+                            if !found_close || !has_digits {
+                                self.syntax_error("Malformed unicode escape sequence");
+                            } else if code_point > 0x10FFFF {
+                                self.syntax_error("Unicode code_point must not be greater than 0x10ffff in escape sequence");
+                            } else if code_point <= 0xFFFF {
                                 result.push(code_point as u16);
                             } else {
-                                let code_point = code_point - 0x10000;
-                                result.push((0xD800 + (code_point >> 10)) as u16);
-                                result.push((0xDC00 + (code_point & 0x3FF)) as u16);
+                                let cp = code_point - 0x10000;
+                                result.push((0xD800 + (cp >> 10)) as u16);
+                                result.push((0xDC00 + (cp & 0x3FF)) as u16);
                             }
                         } else if i + 4 < inner.len() {
                             let mut code_point: u16 = 0;
+                            let mut valid = true;
                             for j in 1..=4 {
                                 if let Some(d) = hex_digit(inner[i + j]) {
                                     code_point = code_point * 16 + d;
+                                } else {
+                                    valid = false;
+                                    break;
                                 }
                             }
-                            result.push(code_point);
-                            i += 4;
+                            if valid {
+                                result.push(code_point);
+                                i += 4;
+                            } else {
+                                self.syntax_error("Malformed unicode escape sequence");
+                                result.push(inner[i]);
+                            }
                         } else {
+                            self.syntax_error("Malformed unicode escape sequence");
                             result.push(inner[i]);
                         }
                     }
