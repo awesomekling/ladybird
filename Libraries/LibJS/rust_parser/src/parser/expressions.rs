@@ -1384,7 +1384,7 @@ impl<'a> Parser<'a> {
                                     break;
                                 }
                                 if let Some(d) = hex_digit(raw[i]) {
-                                    code_point = code_point * 16 + d as u32;
+                                    code_point = code_point.saturating_mul(16).saturating_add(d as u32);
                                 } else {
                                     return None;
                                 }
@@ -1510,7 +1510,7 @@ impl<'a> Parser<'a> {
                                     break;
                                 }
                                 if let Some(d) = hex_digit(inner[i]) {
-                                    code_point = code_point * 16 + d as u32;
+                                    code_point = code_point.saturating_mul(16).saturating_add(d as u32);
                                     has_digits = true;
                                 } else {
                                     self.syntax_error("Malformed unicode escape sequence");
