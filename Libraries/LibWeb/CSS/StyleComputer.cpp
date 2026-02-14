@@ -1572,12 +1572,12 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
     //         inherited. This is used to support the ad-hoc default <th> text-align behavior.
     if (text_align_keyword == Keyword::LibwebInheritOrCenter && abstract_element.element().local_name() == HTML::TagNames::th) {
         for (auto parent_element = abstract_element.element_to_inherit_style_from(); parent_element.has_value(); parent_element = parent_element->element_to_inherit_style_from()) {
-            auto parent_computed = parent_element->computed_properties();
-            if (!parent_computed)
+            auto const* parent_values = parent_element->computed_values();
+            if (!parent_values)
                 break;
-            if (!parent_computed->is_property_inherited(PropertyID::TextAlign) && parent_element->element_to_inherit_style_from().has_value()) {
-                auto const& style_value = parent_computed->property(PropertyID::TextAlign);
-                style.set_property(PropertyID::TextAlign, style_value, ComputedProperties::Inherited::Yes);
+            if (!parent_values->is_text_align_inherited() && parent_element->element_to_inherit_style_from().has_value()) {
+                if (auto text_align_value = parent_values->property_value(PropertyID::TextAlign))
+                    style.set_property(PropertyID::TextAlign, text_align_value.release_nonnull(), ComputedProperties::Inherited::Yes);
                 break;
             }
         }
@@ -1731,12 +1731,15 @@ NonnullRefPtr<ComputedProperties> StyleComputer::create_document_style() const
 
 void StyleComputer::populate_computed_values(MutableComputedValues& computed_values, ComputedProperties const& computed_style, DOM::Document& document)
 {
-    // Table-transferred properties (except margin, see below).
+    // Table-transferred properties.
+    // NB: transfer_table_box_computed_values_to_wrapper_computed_values() later overwrites these
+    //     on table boxes, transferring them to the wrapper box.
     computed_values.set_float(computed_style.float_());
     computed_values.set_clear(computed_style.clear());
     computed_values.set_position(computed_style.position());
     computed_values.set_z_index(computed_style.z_index());
     computed_values.set_inset(computed_style.length_box(PropertyID::Left, PropertyID::Top, PropertyID::Right, PropertyID::Bottom, LengthPercentageOrAuto::make_auto()));
+    computed_values.set_margin(computed_style.length_box(PropertyID::MarginLeft, PropertyID::MarginTop, PropertyID::MarginRight, PropertyID::MarginBottom, Length::make_px(0)));
 
     // Resolve color-scheme first (needed for system colors and color resolution).
     auto color_scheme = computed_style.color_scheme(document.page().preferred_color_scheme(), document.supported_color_schemes());
@@ -1985,6 +1988,7 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_border_top_right_radius(border_radius_data_from_style_value(computed_style.property(PropertyID::BorderTopRightRadius)));
 
     computed_values.set_text_align(computed_style.text_align());
+    computed_values.set_text_align_inherited(computed_style.is_property_inherited(PropertyID::TextAlign));
     computed_values.set_text_justify(computed_style.text_justify());
     if (computed_style.property(PropertyID::TextUnderlineOffset).to_keyword() == Keyword::Auto)
         computed_values.set_text_underline_offset({});

@@ -522,6 +522,7 @@ public:
     Optional<int> const& z_index() const { return m_noninherited.z_index; }
     Variant<Length, double> tab_size() const { return m_inherited.tab_size; }
     TextAlign text_align() const { return m_inherited.text_align; }
+    bool is_text_align_inherited() const { return m_inherited.text_align_inherited; }
     TextJustify text_justify() const { return m_inherited.text_justify; }
     TextIndentData const& text_indent() const { return m_inherited.text_indent; }
     TextWrapMode text_wrap_mode() const { return m_inherited.text_wrap_mode; }
@@ -727,6 +728,7 @@ protected:
         ImageRendering image_rendering { InitialValues::image_rendering() };
         PointerEvents pointer_events { InitialValues::pointer_events() };
         TextAlign text_align { InitialValues::text_align() };
+        bool text_align_inherited { false };
         TextJustify text_justify { InitialValues::text_justify() };
         TextTransform text_transform { InitialValues::text_transform() };
         TextWrapMode text_wrap_mode { InitialValues::text_wrap_mode() };
@@ -943,6 +945,7 @@ public:
     void set_z_index(Optional<int> value) { m_noninherited.z_index = move(value); }
     void set_tab_size(Variant<Length, double> value) { m_inherited.tab_size = move(value); }
     void set_text_align(TextAlign text_align) { m_inherited.text_align = text_align; }
+    void set_text_align_inherited(bool inherited) { m_inherited.text_align_inherited = inherited; }
     void set_text_justify(TextJustify text_justify) { m_inherited.text_justify = text_justify; }
     void set_text_decoration_line(Vector<TextDecorationLine> value) { m_noninherited.text_decoration_line = move(value); }
     void set_text_decoration_thickness(TextDecorationThickness value) { m_noninherited.text_decoration_thickness = move(value); }
