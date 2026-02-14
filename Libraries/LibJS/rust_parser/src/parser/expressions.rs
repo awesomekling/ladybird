@@ -1612,6 +1612,13 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(None);
         self.scope_collector.set_is_arrow_function();
 
+        // Set await_expression_is_valid during parameter parsing so that
+        // 'await' is rejected as an identifier in async arrow parameters.
+        let saved_await = self.flags.await_expression_is_valid;
+        if is_async {
+            self.flags.await_expression_is_valid = true;
+        }
+
         let (params, function_length, param_info, is_simple);
 
         if expect_parens {
@@ -1631,10 +1638,13 @@ impl<'a> Parser<'a> {
             }
             self.consume(); // consume ')'
         } else {
-            if self.match_identifier() {
+            if self.match_identifier() || self.match_token(TokenType::Await) {
                 let param_start = self.position();
                 let tok = self.consume();
                 let value = self.token_value(&tok).to_vec();
+                if is_async && value == utf16!("await") {
+                    self.syntax_error("'await' is a reserved identifier in async functions");
+                }
                 let binding = Rc::new(Identifier::new(self.range_from(param_start), value.clone()));
                 params = vec![FunctionParameter {
                     binding: FunctionParameterBinding::Identifier(binding.clone()),
@@ -1645,10 +1655,13 @@ impl<'a> Parser<'a> {
                 param_info = vec![(value, false, false, Some(binding))];
                 is_simple = true;
             } else {
+                self.flags.await_expression_is_valid = saved_await;
                 self.load_state();
                 return None;
             }
         }
+
+        self.flags.await_expression_is_valid = saved_await;
 
         if !self.match_token(TokenType::Arrow) || self.current_token.trivia_has_line_terminator {
             self.load_state();
