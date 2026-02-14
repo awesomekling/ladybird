@@ -1774,14 +1774,9 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     auto color = computed_style.color_or_fallback(PropertyID::Color, bootstrap_color_context, InitialValues::color());
     computed_values.set_color(color);
 
-    auto accent_color = computed_style.color_or_fallback(
-        PropertyID::AccentColor,
-        ColorResolutionContext { .color_scheme = color_scheme, .current_color = color, .accent_color = SystemColor::accent_color(color_scheme), .document = document, .calculation_resolution_context = calculation_context },
-        SystemColor::accent_color(color_scheme));
-    // If accent-color has an explicit color value, use that instead of the system default.
-    if (auto explicit_accent = computed_style.accent_color(bootstrap_color_context); explicit_accent.has_value())
-        accent_color = explicit_accent.value();
-    computed_values.set_accent_color(accent_color);
+    auto explicit_accent_color = computed_style.accent_color(bootstrap_color_context);
+    auto accent_color = explicit_accent_color.value_or(SystemColor::accent_color(color_scheme));
+    computed_values.set_accent_color(explicit_accent_color);
 
     auto color_resolution_context = ColorResolutionContext {
         .color_scheme = color_scheme,
@@ -1846,7 +1841,10 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     }
 
     // Color context-dependent properties.
-    computed_values.set_scrollbar_color(computed_style.scrollbar_color(color_resolution_context));
+    if (computed_style.property(PropertyID::ScrollbarColor).to_keyword() == Keyword::Auto)
+        computed_values.set_scrollbar_color({});
+    else
+        computed_values.set_scrollbar_color(computed_style.scrollbar_color(color_resolution_context));
     computed_values.set_caret_color(computed_style.caret_color(color_resolution_context, color));
 
     // Background layers (need document for CSS image resources).
@@ -1982,7 +1980,10 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
 
     computed_values.set_text_align(computed_style.text_align());
     computed_values.set_text_justify(computed_style.text_justify());
-    computed_values.set_text_underline_offset(computed_style.text_underline_offset());
+    if (computed_style.property(PropertyID::TextUnderlineOffset).to_keyword() == Keyword::Auto)
+        computed_values.set_text_underline_offset({});
+    else
+        computed_values.set_text_underline_offset(computed_style.text_underline_offset());
     computed_values.set_text_underline_position(computed_style.text_underline_position());
     computed_values.set_text_indent(computed_style.text_indent());
     computed_values.set_text_wrap_mode(computed_style.text_wrap_mode());

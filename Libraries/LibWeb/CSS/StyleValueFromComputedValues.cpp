@@ -247,8 +247,10 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.writing_mode()));
 
     // ========== Color properties ==========
-    // NB: AccentColor is not handled here because the "auto" keyword is lost
-    //     when resolved to a Color. Fall through to ComputedProperties.
+    case PropertyID::AccentColor:
+        if (auto accent = computed_values.accent_color(); accent.has_value())
+            return style_value_for_color(accent.value());
+        return KeywordStyleValue::create(Keyword::Auto);
     case PropertyID::BackgroundColor:
         return style_value_for_color(computed_values.background_color());
     case PropertyID::BorderBottomColor:
@@ -311,8 +313,10 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return LengthStyleValue::create(Length::make_px(computed_values.line_height()));
     case PropertyID::OutlineWidth:
         return LengthStyleValue::create(Length::make_px(computed_values.outline_width()));
-    // NB: TextUnderlineOffset is not handled here because the "auto" keyword
-    //     is lost when resolved to CSSPixels. Fall through to ComputedProperties.
+    case PropertyID::TextUnderlineOffset:
+        if (auto offset = computed_values.text_underline_offset(); offset.has_value())
+            return LengthStyleValue::create(Length::make_px(offset.value()));
+        return KeywordStyleValue::create(Keyword::Auto);
     case PropertyID::WordSpacing:
         return LengthStyleValue::create(Length::make_px(computed_values.word_spacing()));
 
@@ -492,9 +496,14 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         if (auto const& translate = computed_values.translate())
             return *translate;
         return KeywordStyleValue::create(Keyword::None);
-    // NB: TransformOrigin is not handled here because the Z component default
-    //     type differs between ComputedValues (Percentage) and the CSS initial
-    //     value (Length). Fall through to ComputedProperties.
+    case PropertyID::TransformOrigin: {
+        auto const& origin = computed_values.transform_origin();
+        StyleValueVector values;
+        values.append(style_value_for_length_percentage(origin.x));
+        values.append(style_value_for_length_percentage(origin.y));
+        values.append(style_value_for_length_percentage(origin.z));
+        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+    }
     case PropertyID::Perspective:
         if (auto const& perspective = computed_values.perspective(); perspective.has_value())
             return LengthStyleValue::create(Length::make_px(perspective.value()));
@@ -773,8 +782,14 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return StyleValueList::create(move(values), StyleValueList::Separator::Space);
     }
 
-    // NB: ScrollbarColor is not handled here because the "auto" keyword is lost
-    //     when resolved to Colors. Fall through to ComputedProperties.
+    case PropertyID::ScrollbarColor:
+        if (auto scrollbar = computed_values.scrollbar_color(); scrollbar.has_value()) {
+            StyleValueVector values;
+            values.append(style_value_for_color(scrollbar->thumb_color));
+            values.append(style_value_for_color(scrollbar->track_color));
+            return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+        }
+        return KeywordStyleValue::create(Keyword::Auto);
 
     // ========== Cursor ==========
     case PropertyID::Cursor: {

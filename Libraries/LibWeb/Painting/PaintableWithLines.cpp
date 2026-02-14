@@ -526,7 +526,7 @@ void paint_text_decoration(DisplayListRecordingContext& context, TextPaintable c
             fragment.start_offset() + span.start_code_unit,
             fragment.start_offset() + span.end_code_unit);
     }
-    auto text_underline_offset = paintable.computed_values().text_underline_offset();
+    auto text_underline_offset = paintable.computed_values().text_underline_offset().value_or(CSS::InitialValues::text_underline_offset());
     auto text_underline_position = paintable.computed_values().text_underline_position();
     for (auto line : text_decoration_lines) {
         DevicePixelPoint line_start_point {};

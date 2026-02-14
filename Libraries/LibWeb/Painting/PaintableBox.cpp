@@ -571,7 +571,7 @@ void PaintableBox::paint(DisplayListRecordingContext& context, PaintPhase phase)
 
         if ((g_paint_viewport_scrollbars || !is_viewport_paintable())
             && computed_values().scrollbar_width() != CSS::ScrollbarWidth::None) {
-            auto scrollbar_colors = computed_values().scrollbar_color();
+            auto scrollbar_colors = computed_values().scrollbar_color().value_or(CSS::InitialValues::scrollbar_color());
 
             for (auto direction : { ScrollDirection::Vertical, ScrollDirection::Horizontal }) {
                 auto scrollbar_data = compute_scrollbar_data(direction, metrics);

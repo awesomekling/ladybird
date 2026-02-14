@@ -424,7 +424,7 @@ struct WhiteSpaceTrimData {
 struct TransformOrigin {
     LengthPercentage x { Percentage(50) };
     LengthPercentage y { Percentage(50) };
-    LengthPercentage z { Percentage(0) };
+    LengthPercentage z { Length::make_px(0) };
 };
 
 struct ShadowData {
@@ -522,7 +522,7 @@ public:
     TextJustify text_justify() const { return m_inherited.text_justify; }
     TextIndentData const& text_indent() const { return m_inherited.text_indent; }
     TextWrapMode text_wrap_mode() const { return m_inherited.text_wrap_mode; }
-    CSSPixels text_underline_offset() const { return m_inherited.text_underline_offset; }
+    Optional<CSSPixels> text_underline_offset() const { return m_inherited.text_underline_offset; }
     TextUnderlinePosition text_underline_position() const { return m_inherited.text_underline_position; }
     Vector<TextDecorationLine> const& text_decoration_line() const { return m_noninherited.text_decoration_line; }
     TextDecorationThickness const& text_decoration_thickness() const { return m_noninherited.text_decoration_thickness; }
@@ -688,7 +688,7 @@ public:
     MathStyle math_style() const { return m_inherited.math_style; }
     int math_depth() const { return m_inherited.math_depth; }
 
-    ScrollbarColorData scrollbar_color() const { return m_inherited.scrollbar_color; }
+    Optional<ScrollbarColorData> scrollbar_color() const { return m_inherited.scrollbar_color; }
     ScrollbarWidth scrollbar_width() const { return m_noninherited.scrollbar_width; }
     Resize resize() const { return m_noninherited.resize; }
     WillChange const& will_change() const { return m_noninherited.will_change; }
@@ -730,7 +730,7 @@ protected:
         TextUnderlinePosition text_underline_position { InitialValues::text_underline_position() };
         Variant<Length, double> tab_size { InitialValues::tab_size() };
         TextIndentData text_indent { InitialValues::text_indent() };
-        CSSPixels text_underline_offset { InitialValues::text_underline_offset() };
+        Optional<CSSPixels> text_underline_offset;
         WhiteSpaceCollapse white_space_collapse { InitialValues::white_space_collapse() };
         WordBreak word_break { InitialValues::word_break() };
         ListStylePosition list_style_position { InitialValues::list_style_position() };
@@ -758,7 +758,7 @@ protected:
         LengthPercentage stroke_width { InitialValues::stroke_width() };
         Vector<ShadowData> text_shadow;
         int math_depth { InitialValues::math_depth() };
-        ScrollbarColorData scrollbar_color { InitialValues::scrollbar_color() };
+        Optional<ScrollbarColorData> scrollbar_color;
         float stroke_opacity { InitialValues::stroke_opacity() };
     };
 
@@ -948,7 +948,7 @@ public:
     void set_text_indent(TextIndentData value) { m_inherited.text_indent = move(value); }
     void set_text_wrap_mode(TextWrapMode value) { m_inherited.text_wrap_mode = value; }
     void set_text_overflow(TextOverflow value) { m_noninherited.text_overflow = value; }
-    void set_text_underline_offset(CSSPixels value) { m_inherited.text_underline_offset = value; }
+    void set_text_underline_offset(Optional<CSSPixels> value) { m_inherited.text_underline_offset = value; }
     void set_text_underline_position(TextUnderlinePosition value) { m_inherited.text_underline_position = value; }
     void set_webkit_text_fill_color(Color value) { m_inherited.webkit_text_fill_color = value; }
     void set_position(Positioning position) { m_noninherited.position = position; }
@@ -1012,7 +1012,7 @@ public:
     void set_flex_grow(float value) { m_noninherited.flex_grow = value; }
     void set_flex_shrink(float value) { m_noninherited.flex_shrink = value; }
     void set_order(int value) { m_noninherited.order = value; }
-    void set_accent_color(Color value) { m_inherited.accent_color = value; }
+    void set_accent_color(Optional<Color> value) { m_inherited.accent_color = move(value); }
     void set_align_content(AlignContent value) { m_noninherited.align_content = value; }
     void set_align_items(AlignItems value) { m_noninherited.align_items = value; }
     void set_align_self(AlignSelf value) { m_noninherited.align_self = value; }
@@ -1111,7 +1111,7 @@ public:
     void set_math_style(MathStyle value) { m_inherited.math_style = value; }
     void set_math_depth(int value) { m_inherited.math_depth = value; }
 
-    void set_scrollbar_color(ScrollbarColorData value) { m_inherited.scrollbar_color = move(value); }
+    void set_scrollbar_color(Optional<ScrollbarColorData> value) { m_inherited.scrollbar_color = move(value); }
     void set_scrollbar_width(ScrollbarWidth value) { m_noninherited.scrollbar_width = value; }
     void set_resize(Resize value) { m_noninherited.resize = value; }
 
