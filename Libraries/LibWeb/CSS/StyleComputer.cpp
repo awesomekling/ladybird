@@ -1803,11 +1803,15 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
         computed_values.set_fill(fill.to_color(color_resolution_context).value());
     else if (fill.is_url())
         computed_values.set_fill(fill.as_url().url());
+    else
+        computed_values.clear_fill();
     auto const& stroke = computed_style.property(PropertyID::Stroke);
     if (stroke.has_color())
         computed_values.set_stroke(stroke.to_color(color_resolution_context).value());
     else if (stroke.is_url())
         computed_values.set_stroke(stroke.as_url().url());
+    else
+        computed_values.clear_stroke();
 
     // Shadow properties (need both color and calc resolution).
     computed_values.set_text_shadow(computed_style.text_shadow(color_resolution_context, calculation_context));
@@ -1951,8 +1955,7 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_grid_template_areas(computed_style.grid_template_areas());
     computed_values.set_grid_auto_flow(computed_style.grid_auto_flow());
 
-    if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
-        computed_values.set_font_language_override(maybe_font_language_override.release_value());
+    computed_values.set_font_language_override(computed_style.font_language_override());
     computed_values.set_font_variation_settings(computed_style.font_variation_settings());
 
     auto border_radius_data_from_style_value = [](StyleValue const& value) -> BorderRadiusData {

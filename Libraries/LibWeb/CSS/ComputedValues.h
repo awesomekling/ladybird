@@ -1069,7 +1069,9 @@ public:
     void set_touch_action(TouchActionData value) { m_noninherited.touch_action = value; }
 
     void set_fill(SVGPaint value) { m_inherited.fill = move(value); }
+    void clear_fill() { m_inherited.fill = {}; }
     void set_stroke(SVGPaint value) { m_inherited.stroke = move(value); }
+    void clear_stroke() { m_inherited.stroke = {}; }
     void set_fill_rule(FillRule value) { m_inherited.fill_rule = value; }
     void set_fill_opacity(float value) { m_inherited.fill_opacity = value; }
     void set_stroke_dasharray(Vector<Variant<LengthPercentage, float>> value) { m_inherited.stroke_dasharray = move(value); }
