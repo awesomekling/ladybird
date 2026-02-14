@@ -570,16 +570,20 @@ void FontComputer::did_load_font(FlyString const& family_name)
 
     auto element_uses_font_family = [&](DOM::Element const& element) {
         // Check the element's own font-family.
-        if (auto style = element.computed_properties()) {
-            if (style_value_references_font_family(style->property(PropertyID::FontFamily), family_name))
-                return true;
+        if (auto const* computed_values = element.computed_values()) {
+            if (auto font_family = computed_values->property_value(PropertyID::FontFamily)) {
+                if (style_value_references_font_family(*font_family, family_name))
+                    return true;
+            }
         }
 
         // Check pseudo-elements, which may use a different font-family than the element itself.
         for (size_t i = 0; i < to_underlying(PseudoElement::KnownPseudoElementCount); ++i) {
-            if (auto style = element.computed_properties(static_cast<PseudoElement>(i))) {
-                if (style_value_references_font_family(style->property(PropertyID::FontFamily), family_name))
-                    return true;
+            if (auto const* computed_values = element.computed_values(static_cast<PseudoElement>(i))) {
+                if (auto font_family = computed_values->property_value(PropertyID::FontFamily)) {
+                    if (style_value_references_font_family(*font_family, family_name))
+                        return true;
+                }
             }
         }
 

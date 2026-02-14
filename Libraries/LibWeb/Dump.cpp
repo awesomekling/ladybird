@@ -401,14 +401,14 @@ void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool sho
         }
     }
 
-    if (show_cascaded_properties && layout_node.dom_node() && layout_node.dom_node()->is_element() && as<DOM::Element>(layout_node.dom_node())->computed_properties()) {
+    if (show_cascaded_properties && layout_node.dom_node() && layout_node.dom_node()->is_element() && as<DOM::Element>(layout_node.dom_node())->computed_values()) {
         struct NameAndValue {
             FlyString name;
             String value;
         };
         Vector<NameAndValue> properties;
-        as<DOM::Element>(*layout_node.dom_node()).computed_properties()->for_each_property([&](auto property_id, auto& value) {
-            properties.append({ CSS::string_from_property_id(property_id), value.to_string(CSS::SerializationMode::Normal) });
+        as<DOM::Element>(*layout_node.dom_node()).computed_values()->for_each_property_value([&](auto property_id, auto& value) {
+            properties.append({ CSS::string_from_property_id(property_id), value->to_string(CSS::SerializationMode::Normal) });
         });
         quick_sort(properties, [](auto& a, auto& b) { return a.name < b.name; });
 

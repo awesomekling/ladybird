@@ -503,6 +503,13 @@ public:
     void set_property_value(PropertyID, NonnullRefPtr<StyleValue const>);
     RefPtr<StyleValue const> property_value(PropertyID) const;
 
+    template<typename Callback>
+    void for_each_property_value(Callback callback) const
+    {
+        for (auto const& [property_id, value] : m_property_values)
+            callback(property_id, value);
+    }
+
     AspectRatio aspect_ratio() const { return m_noninherited.aspect_ratio; }
     Float float_() const { return m_noninherited.float_; }
     Length border_spacing_horizontal() const { return m_inherited.border_spacing_horizontal; }
