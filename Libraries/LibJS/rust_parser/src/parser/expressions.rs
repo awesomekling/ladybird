@@ -1206,7 +1206,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expr(start, Expression::StringLiteral(value.clone())), Some(value), is_proto, false)
+                (self.expr(start, Expression::StringLiteral(value)), None, is_proto, false)
             }
             TokenType::NumericLiteral => {
                 let tok = self.consume_and_validate_numeric_literal();
