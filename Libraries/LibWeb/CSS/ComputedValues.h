@@ -500,6 +500,9 @@ public:
         m_noninherited.visit_edges(visitor);
     }
 
+    void set_property_value(PropertyID, NonnullRefPtr<StyleValue const>);
+    RefPtr<StyleValue const> property_value(PropertyID) const;
+
     AspectRatio aspect_ratio() const { return m_noninherited.aspect_ratio; }
     Float float_() const { return m_noninherited.float_; }
     Length border_spacing_horizontal() const { return m_inherited.border_spacing_horizontal; }
@@ -898,6 +901,8 @@ protected:
     };
 
     NonInheritedValues m_noninherited;
+
+    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_property_values;
 };
 
 class ImmutableComputedValues final : public ComputedValues {

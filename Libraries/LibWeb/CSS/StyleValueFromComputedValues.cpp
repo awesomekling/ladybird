@@ -828,13 +828,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return nullptr;
     }
 
-    // FIXME: Serialize these properly from ComputedValues.
-    case PropertyID::CounterIncrement:
-    case PropertyID::CounterReset:
-    case PropertyID::CounterSet:
-    case PropertyID::WhiteSpaceTrim:
-    case PropertyID::ColorScheme:
-        return nullptr;
+    // NB: CounterIncrement, CounterReset, CounterSet, WhiteSpaceTrim,
+    //     and ColorScheme fall through to the default case which reads
+    //     from the supplementary property value map.
 
     // ========== Font properties (partially in ComputedValues) ==========
     case PropertyID::FontLanguageOverride:
@@ -843,7 +839,7 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(Keyword::Normal);
 
     default:
-        return nullptr;
+        return computed_values.property_value(property_id);
     }
 }
 
