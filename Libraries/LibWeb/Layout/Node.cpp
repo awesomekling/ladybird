@@ -628,12 +628,13 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_flood_color(computed_style.color_or_fallback(CSS::PropertyID::FloodColor, color_resolution_context, CSS::InitialValues::flood_color()));
 
-    auto accent_color = computed_style.accent_color(*this);
+    auto accent_color = computed_style.accent_color(color_resolution_context);
     if (accent_color.has_value())
         computed_values.set_accent_color(accent_color.value());
 
-    computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal(*this));
-    computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical(*this));
+    auto calculation_context = CSS::CalculationResolutionContext { .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*this) };
+    computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal(calculation_context));
+    computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical(calculation_context));
 
     auto const& list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
     if (list_style_image.is_abstract_image()) {
@@ -649,12 +650,12 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 
     computed_values.set_webkit_text_fill_color(computed_style.color_or_fallback(CSS::PropertyID::WebkitTextFillColor, color_resolution_context, computed_values.color()));
 
-    computed_values.set_text_shadow(computed_style.text_shadow(*this));
+    computed_values.set_text_shadow(computed_style.text_shadow(color_resolution_context, calculation_context));
 
     computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
     computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
 
-    computed_values.set_box_shadow(computed_style.box_shadow(*this));
+    computed_values.set_box_shadow(computed_style.box_shadow(color_resolution_context, calculation_context));
 
     auto const& transition_delay_property = computed_style.property(CSS::PropertyID::TransitionDelay);
     if (transition_delay_property.is_time()) {
@@ -662,7 +663,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         computed_values.set_transition_delay(transition_delay.time());
     } else if (transition_delay_property.is_calculated()) {
         auto const& transition_delay = transition_delay_property.as_calculated();
-        computed_values.set_transition_delay(transition_delay.resolve_time({ .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*this) }).value());
+        computed_values.set_transition_delay(transition_delay.resolve_time(calculation_context).value());
     }
 
     auto do_border_style = [&](CSS::BorderData& border, CSS::PropertyID width_property, CSS::PropertyID color_property, CSS::PropertyID style_property) {
@@ -721,8 +722,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
             computed_values.set_mask_image_resource(document().ensure_css_image_resource(abstract_image.as_image().url()));
     }
 
-    computed_values.set_scrollbar_color(computed_style.scrollbar_color(*this));
-    computed_values.set_caret_color(computed_style.caret_color(*this));
+    computed_values.set_scrollbar_color(computed_style.scrollbar_color(color_resolution_context));
+    computed_values.set_caret_color(computed_style.caret_color(color_resolution_context, computed_values.color()));
 
     // For nodes that own their ComputedValues (pseudo-elements), these properties
     // need to be set here since they aren't populated during style computation.

@@ -347,7 +347,7 @@ Paintable::SelectionStyle Paintable::selection_style() const
 
         // Only use text-shadow if it was explicitly set in the ::selection rule, not inherited.
         if (!computed_selection_style->is_property_inherited(CSS::PropertyID::TextShadow)) {
-            auto const& css_shadows = computed_selection_style->text_shadow(*element_layout_node);
+            auto const& css_shadows = computed_selection_style->text_shadow(context, { .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*element_layout_node) });
             Vector<ShadowData> shadows;
             shadows.ensure_capacity(css_shadows.size());
             for (auto const& shadow : css_shadows)

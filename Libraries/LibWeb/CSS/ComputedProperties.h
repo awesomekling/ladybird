@@ -99,13 +99,13 @@ public:
     TextUnderlinePosition text_underline_position() const;
     Vector<BackgroundLayerData> background_layers() const;
     BackgroundBox background_color_clip() const;
-    Length border_spacing_horizontal(Layout::Node const&) const;
-    Length border_spacing_vertical(Layout::Node const&) const;
+    Length border_spacing_horizontal(CalculationResolutionContext) const;
+    Length border_spacing_vertical(CalculationResolutionContext) const;
     CaptionSide caption_side() const;
     Clip clip() const;
     Display display() const;
     Float float_() const;
-    Color caret_color(Layout::NodeWithStyle const&) const;
+    Color caret_color(ColorResolutionContext, Color current_color) const;
     Clear clear() const;
     ColumnSpan column_span() const;
     struct ContentDataAndQuoteNestingLevel {
@@ -127,7 +127,7 @@ public:
     TextDecorationStyle text_decoration_style() const;
     TextDecorationThickness text_decoration_thickness() const;
     TextTransform text_transform() const;
-    Vector<ShadowData> text_shadow(Layout::Node const&) const;
+    Vector<ShadowData> text_shadow(ColorResolutionContext, CalculationResolutionContext) const;
     TextIndentData text_indent() const;
     TextWrapMode text_wrap_mode() const;
     ListStyleType list_style_type() const;
@@ -138,7 +138,7 @@ public:
     float flex_grow() const;
     float flex_shrink() const;
     int order() const;
-    Optional<Color> accent_color(Layout::NodeWithStyle const&) const;
+    Optional<Color> accent_color(ColorResolutionContext) const;
     AlignContent align_content() const;
     AlignItems align_items() const;
     AlignSelf align_self() const;
@@ -153,7 +153,7 @@ public:
     JustifySelf justify_self() const;
     Overflow overflow_x() const;
     Overflow overflow_y() const;
-    Vector<ShadowData> box_shadow(Layout::Node const&) const;
+    Vector<ShadowData> box_shadow(ColorResolutionContext, CalculationResolutionContext) const;
     BoxSizing box_sizing() const;
     PointerEvents pointer_events() const;
     Variant<VerticalAlign, LengthPercentage> vertical_align() const;
@@ -260,7 +260,7 @@ public:
     QuotesData quotes() const;
     Vector<CounterData> counter_data(PropertyID) const;
 
-    ScrollbarColorData scrollbar_color(Layout::NodeWithStyle const& layout_node) const;
+    ScrollbarColorData scrollbar_color(ColorResolutionContext) const;
     ScrollbarWidth scrollbar_width() const;
     Resize resize() const;
 
@@ -278,7 +278,7 @@ public:
 
 private:
     Overflow overflow(PropertyID) const;
-    Vector<ShadowData> shadow(PropertyID, Layout::Node const&) const;
+    Vector<ShadowData> shadow(PropertyID, ColorResolutionContext, CalculationResolutionContext) const;
     Position position_value(PropertyID) const;
 
     Array<RefPtr<StyleValue const>, number_of_longhand_properties> m_property_values;

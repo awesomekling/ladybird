@@ -47,8 +47,6 @@
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/BlockContainer.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Platform/FontPlugin.h>
 
 namespace Web::CSS {
@@ -701,13 +699,13 @@ BackgroundBox ComputedProperties::background_color_clip() const
     return keyword_to_background_box(background_clip_values[final_layer_index]->to_keyword()).value();
 }
 
-Length ComputedProperties::border_spacing_horizontal(Layout::Node const& layout_node) const
+Length ComputedProperties::border_spacing_horizontal(CalculationResolutionContext calculation_context) const
 {
     auto resolve_value = [&](auto const& style_value) -> Optional<Length> {
         if (style_value.is_length())
             return style_value.as_length().length();
         if (style_value.is_calculated())
-            return style_value.as_calculated().resolve_length({ .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node) }).value_or(Length::make_px(0));
+            return style_value.as_calculated().resolve_length(calculation_context).value_or(Length::make_px(0));
         return {};
     };
 
@@ -723,13 +721,13 @@ Length ComputedProperties::border_spacing_horizontal(Layout::Node const& layout_
     return *resolved_value;
 }
 
-Length ComputedProperties::border_spacing_vertical(Layout::Node const& layout_node) const
+Length ComputedProperties::border_spacing_vertical(CalculationResolutionContext calculation_context) const
 {
     auto resolve_value = [&](auto const& style_value) -> Optional<Length> {
         if (style_value.is_length())
             return style_value.as_length().length();
         if (style_value.is_calculated())
-            return style_value.as_calculated().resolve_length({ .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node) }).value_or(Length::make_px(0));
+            return style_value.as_calculated().resolve_length(calculation_context).value_or(Length::make_px(0));
         return {};
     };
 
@@ -882,11 +880,11 @@ TransformStyle ComputedProperties::transform_style() const
     return keyword_to_transform_style(value.to_keyword()).release_value();
 }
 
-Optional<Color> ComputedProperties::accent_color(Layout::NodeWithStyle const& node) const
+Optional<Color> ComputedProperties::accent_color(ColorResolutionContext color_resolution_context) const
 {
     auto const& value = property(PropertyID::AccentColor);
     if (value.has_color())
-        return value.to_color(ColorResolutionContext::for_layout_node_with_style(node));
+        return value.to_color(color_resolution_context);
     return {};
 }
 
@@ -1171,14 +1169,14 @@ Float ComputedProperties::float_() const
     return keyword_to_float(value.to_keyword()).release_value();
 }
 
-Color ComputedProperties::caret_color(Layout::NodeWithStyle const& node) const
+Color ComputedProperties::caret_color(ColorResolutionContext color_resolution_context, Color current_color) const
 {
     auto const& value = property(PropertyID::CaretColor);
     if (value.is_keyword() && value.to_keyword() == Keyword::Auto)
-        return node.computed_values().color();
+        return current_color;
 
     if (value.has_color())
-        return value.to_color(ColorResolutionContext::for_layout_node_with_style(node)).value();
+        return value.to_color(color_resolution_context).value();
 
     return InitialValues::caret_color();
 }
@@ -1430,19 +1428,19 @@ Overflow ComputedProperties::overflow(PropertyID property_id) const
     return keyword_to_overflow(value.to_keyword()).release_value();
 }
 
-Vector<ShadowData> ComputedProperties::shadow(PropertyID property_id, Layout::Node const& layout_node) const
+Vector<ShadowData> ComputedProperties::shadow(PropertyID property_id, ColorResolutionContext color_resolution_context, CalculationResolutionContext calculation_context) const
 {
     auto const& value = property(property_id);
 
-    auto resolve_to_length = [&layout_node](NonnullRefPtr<StyleValue const> const& value) -> Optional<Length> {
+    auto resolve_to_length = [&calculation_context](NonnullRefPtr<StyleValue const> const& value) -> Optional<Length> {
         if (value->is_length())
             return value->as_length().length();
         if (value->is_calculated())
-            return value->as_calculated().resolve_length({ .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node) });
+            return value->as_calculated().resolve_length(calculation_context);
         return {};
     };
 
-    auto make_shadow_data = [resolve_to_length, &layout_node](ShadowStyleValue const& value) -> Optional<ShadowData> {
+    auto make_shadow_data = [resolve_to_length, &color_resolution_context](ShadowStyleValue const& value) -> Optional<ShadowData> {
         auto maybe_offset_x = resolve_to_length(value.offset_x());
         if (!maybe_offset_x.has_value())
             return {};
@@ -1460,7 +1458,7 @@ Vector<ShadowData> ComputedProperties::shadow(PropertyID property_id, Layout::No
             maybe_offset_y.release_value(),
             maybe_blur_radius.release_value(),
             maybe_spread_distance.release_value(),
-            value.color()->to_color(ColorResolutionContext::for_layout_node_with_style(as<Layout::NodeWithStyle>(layout_node))).value(),
+            value.color()->to_color(color_resolution_context).value(),
             value.placement()
         };
     };
@@ -1482,14 +1480,14 @@ Vector<ShadowData> ComputedProperties::shadow(PropertyID property_id, Layout::No
     return shadow_data;
 }
 
-Vector<ShadowData> ComputedProperties::box_shadow(Layout::Node const& layout_node) const
+Vector<ShadowData> ComputedProperties::box_shadow(ColorResolutionContext color_resolution_context, CalculationResolutionContext calculation_context) const
 {
-    return shadow(PropertyID::BoxShadow, layout_node);
+    return shadow(PropertyID::BoxShadow, color_resolution_context, calculation_context);
 }
 
-Vector<ShadowData> ComputedProperties::text_shadow(Layout::Node const& layout_node) const
+Vector<ShadowData> ComputedProperties::text_shadow(ColorResolutionContext color_resolution_context, CalculationResolutionContext calculation_context) const
 {
-    return shadow(PropertyID::TextShadow, layout_node);
+    return shadow(PropertyID::TextShadow, color_resolution_context, calculation_context);
 }
 
 TextIndentData ComputedProperties::text_indent() const
@@ -2377,7 +2375,7 @@ Vector<CounterData> ComputedProperties::counter_data(PropertyID property_id) con
     return {};
 }
 
-ScrollbarColorData ComputedProperties::scrollbar_color(Layout::NodeWithStyle const& layout_node) const
+ScrollbarColorData ComputedProperties::scrollbar_color(ColorResolutionContext color_resolution_context) const
 {
     auto const& value = property(PropertyID::ScrollbarColor);
     if (value.is_keyword() && value.as_keyword().keyword() == Keyword::Auto)
@@ -2385,8 +2383,8 @@ ScrollbarColorData ComputedProperties::scrollbar_color(Layout::NodeWithStyle con
 
     if (value.is_scrollbar_color()) {
         auto& scrollbar_color_value = value.as_scrollbar_color();
-        auto thumb_color = scrollbar_color_value.thumb_color()->to_color(ColorResolutionContext::for_layout_node_with_style(layout_node)).value();
-        auto track_color = scrollbar_color_value.track_color()->to_color(ColorResolutionContext::for_layout_node_with_style(layout_node)).value();
+        auto thumb_color = scrollbar_color_value.thumb_color()->to_color(color_resolution_context).value();
+        auto track_color = scrollbar_color_value.track_color()->to_color(color_resolution_context).value();
         return { thumb_color, track_color };
     }
 
