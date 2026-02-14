@@ -356,12 +356,11 @@ impl<'a> Parser<'a> {
         // Close function scope.
         self.scope_collector.close_scope();
 
+        if name.is_some() {
+            self.check_identifier_name_for_assignment_validity(&fn_name, has_use_strict);
+        }
         if has_use_strict || kind != FunctionKind::Normal {
-            let force_strict = has_use_strict;
-            if name.is_some() {
-                self.check_identifier_name_for_assignment_validity(&fn_name, force_strict);
-            }
-            self.check_parameters_post_body(&param_info, force_strict, kind);
+            self.check_parameters_post_body(&param_info, has_use_strict, kind);
         }
 
         let might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -431,12 +430,11 @@ impl<'a> Parser<'a> {
         // Close function scope.
         self.scope_collector.close_scope();
 
+        if name.is_some() {
+            self.check_identifier_name_for_assignment_validity(&fn_name_value, has_use_strict);
+        }
         if has_use_strict || kind != FunctionKind::Normal {
-            let force_strict = has_use_strict;
-            if name.is_some() {
-                self.check_identifier_name_for_assignment_validity(&fn_name_value, force_strict);
-            }
-            self.check_parameters_post_body(&param_info, force_strict, kind);
+            self.check_parameters_post_body(&param_info, has_use_strict, kind);
         }
 
         let might_need_arguments = self.flags.function_might_need_arguments_object;
