@@ -860,8 +860,8 @@ impl<'a> Parser<'a> {
 
         self.flags.strict_mode = strict_before;
         self.flags.await_expression_is_valid = await_before;
-        // has_top_level_await would need scope analysis to determine correctly.
-        (children, false)
+        let has_top_level_await = self.scope_collector.contains_await_expression();
+        (children, has_top_level_await)
     }
 
     pub(crate) fn parse_directive(&mut self) -> (bool, Vec<Statement>) {
