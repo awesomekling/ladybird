@@ -10,6 +10,7 @@
 #include <LibGC/CellAllocator.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
+#include <LibWeb/CSS/PseudoClassBitmap.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/PixelUnits.h>
@@ -41,6 +42,9 @@ class WEB_API PseudoElement : public JS::Cell {
     CSSPixelPoint scroll_offset() const { return m_scroll_offset; }
     void set_scroll_offset(CSSPixelPoint value) { m_scroll_offset = value; }
 
+    bool has_attempted_match_against_pseudo_class(CSS::PseudoClass pseudo_class) const { return m_attempted_pseudo_class_matches.get(pseudo_class); }
+    void set_attempted_pseudo_class_matches(CSS::PseudoClassBitmap const& bitmap) { m_attempted_pseudo_class_matches = bitmap; }
+
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
@@ -50,6 +54,7 @@ private:
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     OwnPtr<CSS::CountersSet> m_counters_set;
     CSSPixelPoint m_scroll_offset {};
+    CSS::PseudoClassBitmap m_attempted_pseudo_class_matches;
 };
 
 // https://drafts.csswg.org/css-view-transitions/#pseudo-element-tree

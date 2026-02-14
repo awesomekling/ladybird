@@ -2207,7 +2207,7 @@ RefPtr<ComputedProperties> StyleComputer::compute_style_impl(DOM::AbstractElemen
     }
 
     auto computed_properties = compute_properties(abstract_element, cascaded_properties);
-    computed_properties->set_attempted_pseudo_class_matches(attempted_pseudo_class_matches);
+    abstract_element.set_attempted_pseudo_class_matches(attempted_pseudo_class_matches);
 
     if (did_change_custom_properties.has_value()) {
         auto new_custom_property_data = abstract_element.custom_property_data();

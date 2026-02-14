@@ -18,8 +18,6 @@
 #include <LibWeb/CSS/FontFeatureData.h>
 #include <LibWeb/CSS/LengthBox.h>
 #include <LibWeb/CSS/PropertyID.h>
-#include <LibWeb/CSS/PseudoClass.h>
-#include <LibWeb/CSS/PseudoClassBitmap.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Export.h>
 
@@ -289,16 +287,6 @@ public:
 
     static NonnullRefPtr<Gfx::Font const> font_fallback(bool monospace, bool bold, float point_size);
 
-    bool has_attempted_match_against_pseudo_class(PseudoClass pseudo_class) const
-    {
-        return m_attempted_pseudo_class_matches.get(pseudo_class);
-    }
-
-    void set_attempted_pseudo_class_matches(PseudoClassBitmap const& results)
-    {
-        m_attempted_pseudo_class_matches = results;
-    }
-
 private:
     Overflow overflow(PropertyID) const;
     Vector<ShadowData> shadow(PropertyID, ColorResolutionContext, CalculationResolutionContext) const;
@@ -326,8 +314,6 @@ private:
     // Used by recompute_inherited_style() to re-resolve these properties
     // when an ancestor's style changes.
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_pre_absolutized_values;
-
-    PseudoClassBitmap m_attempted_pseudo_class_matches;
 };
 
 }

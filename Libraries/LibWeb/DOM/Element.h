@@ -13,6 +13,7 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/ShadowRootPrototype.h>
 #include <LibWeb/CSS/CascadedProperties.h>
+#include <LibWeb/CSS/PseudoClassBitmap.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/DOM/ChildNode.h>
@@ -323,6 +324,7 @@ public:
     static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::ComputedProperties>, Element*);
 
     [[nodiscard]] bool affected_by_pseudo_class(CSS::PseudoClass) const;
+    void set_attempted_pseudo_class_matches(CSS::PseudoClassBitmap const& bitmap) { m_attempted_pseudo_class_matches = bitmap; }
     bool includes_properties_from_invalidation_set(CSS::InvalidationSet const&) const;
 
     void set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::PseudoElement, GC::Ptr<Layout::NodeWithStyle>);
@@ -606,6 +608,7 @@ private:
     OwnPtr<CSS::AnimatedPropertyData> m_animated_property_data;
     OwnPtr<CSS::ComputedValues> m_computed_values;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
+    CSS::PseudoClassBitmap m_attempted_pseudo_class_matches;
 
     using PseudoElementData = HashMap<CSS::PseudoElement, GC::Ref<PseudoElement>>;
     mutable OwnPtr<PseudoElementData> m_pseudo_element_data;

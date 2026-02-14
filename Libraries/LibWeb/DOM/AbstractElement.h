@@ -8,6 +8,7 @@
 
 #include <LibGC/Cell.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
+#include <LibWeb/CSS/PseudoClassBitmap.h>
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/Forward.h>
 
@@ -54,6 +55,8 @@ public:
     Optional<CSS::CountersSet const&> counters_set() const;
     CSS::CountersSet& ensure_counters_set();
     void set_counters_set(OwnPtr<CSS::CountersSet>&&);
+
+    void set_attempted_pseudo_class_matches(CSS::PseudoClassBitmap const&);
 
     HashMap<FlyString, GC::Ref<CSS::CSSAnimation>>* css_defined_animations() const;
     void set_has_css_defined_animations();

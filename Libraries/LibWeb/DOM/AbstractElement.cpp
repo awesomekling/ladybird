@@ -197,6 +197,16 @@ void AbstractElement::set_counters_set(OwnPtr<CSS::CountersSet>&& counters_set)
     }
 }
 
+void AbstractElement::set_attempted_pseudo_class_matches(CSS::PseudoClassBitmap const& bitmap)
+{
+    if (m_pseudo_element.has_value()) {
+        if (auto pseudo_element = m_element->get_pseudo_element(*m_pseudo_element); pseudo_element.has_value())
+            pseudo_element->set_attempted_pseudo_class_matches(bitmap);
+    } else {
+        m_element->set_attempted_pseudo_class_matches(bitmap);
+    }
+}
+
 String AbstractElement::debug_description() const
 {
     if (m_pseudo_element.has_value()) {
