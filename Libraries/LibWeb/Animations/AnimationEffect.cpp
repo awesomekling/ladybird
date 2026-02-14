@@ -811,12 +811,16 @@ static CSS::RequiredInvalidationAfterStyleChange compute_required_invalidation_f
 AnimationUpdateContext::~AnimationUpdateContext()
 {
     for (auto& it : elements) {
-        auto style = it.value->target_style;
-        if (!style)
-            continue;
         auto& element = it.key;
         GC::Ref<DOM::Element> target = element.element();
-        auto invalidation = compute_required_invalidation_for_animated_properties(it.value->animated_properties_before_update, style->animated_property_values());
+
+        auto computed_properties = target->computed_properties(element.pseudo_element());
+        if (!computed_properties)
+            continue;
+
+        auto const* animated_data = element.animated_property_data();
+        auto const& new_animated_properties = animated_data ? animated_data->values : HashMap<CSS::PropertyID, NonnullRefPtr<CSS::StyleValue const>> {};
+        auto invalidation = compute_required_invalidation_for_animated_properties(it.value->animated_properties_before_update, new_animated_properties);
 
         if (invalidation.is_none())
             continue;
@@ -830,13 +834,16 @@ AnimationUpdateContext::~AnimationUpdateContext()
             return TraversalDecision::Continue;
         });
 
+        // Clear the font cache since animated properties may have changed font-related values.
+        computed_properties->clear_computed_font_list_cache();
+
         if (!element.pseudo_element().has_value()) {
-            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *style, target->document());
+            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *computed_properties, target->document());
             if (target->layout_node())
-                target->layout_node()->apply_style(*style);
+                target->layout_node()->apply_style(*computed_properties);
         } else {
             if (auto pseudo_element_node = target->get_pseudo_element_node(element.pseudo_element().value()))
-                pseudo_element_node->apply_style(*style);
+                pseudo_element_node->apply_style(*computed_properties);
         }
 
         if (invalidation.relayout && target->layout_node())

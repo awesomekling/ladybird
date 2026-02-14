@@ -950,10 +950,10 @@ void KeyframeEffect::update_computed_properties(AnimationUpdateContext& context)
         return;
     DOM::AbstractElement abstract_element { *target, pseudo_element_type() };
     auto& animated_data = computed_properties->mutable_animated_property_data();
-    context.elements.ensure(abstract_element, [&animated_data, computed_properties] {
+    context.elements.ensure(abstract_element, [&animated_data] {
         auto old_animated_properties = animated_data.values;
         animated_data.reset_non_inherited_properties();
-        return make<AnimationUpdateContext::ElementData>(move(old_animated_properties), computed_properties);
+        return make<AnimationUpdateContext::ElementData>(AnimationUpdateContext::ElementData { move(old_animated_properties) });
     });
 
     target->document().style_computer().collect_animation_into(abstract_element, *this, *computed_properties, animated_data);

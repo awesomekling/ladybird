@@ -68,7 +68,6 @@ struct AnimationUpdateContext {
     struct ElementData {
         using PropertyMap = HashMap<CSS::PropertyID, NonnullRefPtr<CSS::StyleValue const>>;
         PropertyMap animated_properties_before_update;
-        RefPtr<CSS::ComputedProperties> target_style;
     };
 
     ~AnimationUpdateContext();
