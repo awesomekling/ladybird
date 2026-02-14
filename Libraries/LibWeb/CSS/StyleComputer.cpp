@@ -1356,20 +1356,8 @@ CSSPixels StyleComputer::relative_size_mapping(RelativeSize relative_size, CSSPi
 
 LogicalAliasMappingContext StyleComputer::compute_logical_alias_mapping_context(DOM::AbstractElement abstract_element, ComputeStyleMode mode, MatchingRuleSet const& matching_rule_set) const
 {
-    auto normalize_value = [&](auto property_id, auto value) {
-        if (!value || value->is_inherit() || value->is_unset()) {
-            if (auto const inheritance_parent = abstract_element.element_to_inherit_style_from(); inheritance_parent.has_value()) {
-                value = inheritance_parent->computed_properties()->property(property_id);
-            } else {
-                value = property_initial_value(property_id);
-            }
-        }
-
-        if (value->is_initial())
-            value = property_initial_value(property_id);
-
-        return value;
-    };
+    auto parent = abstract_element.element_to_inherit_style_from();
+    auto const* parent_values = (parent.has_value() ? parent->computed_values() : nullptr);
 
     bool did_match_any_pseudo_element_rules = false;
 
@@ -1384,12 +1372,27 @@ LogicalAliasMappingContext StyleComputer::compute_logical_alias_mapping_context(
         {},
         properties_to_cascade);
 
-    auto writing_mode = normalize_value(PropertyID::WritingMode, cascaded_properties->property(PropertyID::WritingMode));
-    auto direction = normalize_value(PropertyID::Direction, cascaded_properties->property(PropertyID::Direction));
+    auto resolve_writing_mode = [&]() -> WritingMode {
+        auto value = cascaded_properties->property(PropertyID::WritingMode);
+        if (!value || value->is_inherit() || value->is_unset())
+            return parent_values ? parent_values->writing_mode() : InitialValues::writing_mode();
+        if (value->is_initial())
+            return InitialValues::writing_mode();
+        return keyword_to_writing_mode(value->to_keyword()).release_value();
+    };
+
+    auto resolve_direction = [&]() -> Direction {
+        auto value = cascaded_properties->property(PropertyID::Direction);
+        if (!value || value->is_inherit() || value->is_unset())
+            return parent_values ? parent_values->direction() : InitialValues::direction();
+        if (value->is_initial())
+            return InitialValues::direction();
+        return keyword_to_direction(value->to_keyword()).release_value();
+    };
 
     return LogicalAliasMappingContext {
-        .writing_mode = keyword_to_writing_mode(writing_mode->to_keyword()).release_value(),
-        .direction = keyword_to_direction(direction->to_keyword()).release_value()
+        .writing_mode = resolve_writing_mode(),
+        .direction = resolve_direction()
     };
 }
 
@@ -1530,11 +1533,12 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
     // value of start or end is interpreted against the parent’s direction value and results in a computed value of
     // either left or right. Computes to start when specified on the root element.
     if (text_align_keyword == Keyword::MatchParent) {
-        if (auto const parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
-            auto const& parent_text_align = parent->computed_properties()->property(PropertyID::TextAlign);
-            auto parent_direction = parent->computed_values() ? parent->computed_values()->direction() : Direction::Ltr;
-            switch (parent_text_align.to_keyword()) {
-            case Keyword::Start:
+        auto const parent = abstract_element.element_to_inherit_style_from();
+        if (parent.has_value() && parent->computed_values()) {
+            auto parent_text_align = parent->computed_values()->text_align();
+            auto parent_direction = parent->computed_values()->direction();
+            switch (parent_text_align) {
+            case TextAlign::Start:
                 if (parent_direction == Direction::Ltr) {
                     style.set_property(PropertyID::TextAlign, KeywordStyleValue::create(Keyword::Left));
                 } else {
@@ -1542,7 +1546,7 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
                 }
                 break;
 
-            case Keyword::End:
+            case TextAlign::End:
                 if (parent_direction == Direction::Ltr) {
                     style.set_property(PropertyID::TextAlign, KeywordStyleValue::create(Keyword::Right));
                 } else {
@@ -1551,7 +1555,7 @@ static void compute_text_align(ComputedProperties& style, DOM::AbstractElement a
                 break;
 
             default:
-                style.set_property(PropertyID::TextAlign, parent_text_align);
+                style.set_property(PropertyID::TextAlign, KeywordStyleValue::create(to_keyword(parent_text_align)));
             }
         } else {
             style.set_property(PropertyID::TextAlign, KeywordStyleValue::create(Keyword::Start));
