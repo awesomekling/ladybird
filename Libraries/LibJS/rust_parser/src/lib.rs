@@ -85,7 +85,7 @@ pub mod parser;
 pub mod scope_collector;
 pub mod token;
 
-use ast::Statement;
+use ast::StatementKind;
 use parser::{Parser, ProgramType};
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -96,7 +96,7 @@ use std::rc::Rc;
 /// Called by all three program-level entry points after parsing and scope analysis.
 unsafe fn compile_program_body(
     gen: &mut bytecode::generator::Generator,
-    program: &ast::Stmt,
+    program: &ast::Statement,
     scope_ref: &Rc<RefCell<ast::ScopeData>>,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
@@ -202,7 +202,7 @@ pub unsafe extern "C" fn rust_compile_program(
         return std::ptr::null_mut();
     }
 
-    let scope_ref = if let Statement::Program(ref data) = program.inner {
+    let scope_ref = if let StatementKind::Program(ref data) = program.inner {
         data.scope.clone()
     } else {
         return std::ptr::null_mut();
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn rust_compile_script(
         return std::ptr::null_mut();
     }
 
-    let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
+    let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
         (data.scope.clone(), data.is_strict_mode)
     } else {
         return std::ptr::null_mut();
@@ -338,7 +338,7 @@ pub unsafe extern "C" fn rust_compile_eval(
         return std::ptr::null_mut();
     }
 
-    let (scope_ref, is_strict) = if let Statement::Program(ref data) = program.inner {
+    let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
         (data.scope.clone(), data.is_strict_mode)
     } else {
         return std::ptr::null_mut();
@@ -443,17 +443,17 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
 
     // Extract the FunctionExpression from the program.
     // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
-    let func_data = if let Statement::Program(ref data) = program.inner {
+    let func_data = if let StatementKind::Program(ref data) = program.inner {
         let scope = data.scope.borrow();
         let mut found: Option<ast::FunctionData> = None;
         for child in &scope.children {
             match &child.inner {
-                Statement::FunctionDeclaration(fd) => {
+                StatementKind::FunctionDeclaration(fd) => {
                     found = Some(fd.as_ref().clone());
                     break;
                 }
-                Statement::Expression(expr) => {
-                    if let ast::Expression::Function(fd) = &expr.inner {
+                StatementKind::Expression(expr) => {
+                    if let ast::ExpressionKind::Function(fd) = &expr.inner {
                         found = Some(fd.as_ref().clone());
                         break;
                     }
@@ -482,12 +482,12 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
 /// statements, excluding function/class bodies (which create new var scopes).
 /// Calls `push_name` for each discovered name.
 unsafe fn collect_var_names_recursive(
-    stmt: &ast::Statement,
+    stmt: &ast::StatementKind,
     ctx: *mut c_void,
     push_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
 ) {
     match stmt {
-        ast::Statement::VariableDeclaration {
+        ast::StatementKind::VariableDeclaration {
             kind: ast::DeclarationKind::Var,
             declarations,
         } => {
@@ -523,12 +523,12 @@ unsafe fn extract_gdi_common(
     push_annex_b_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
     push_lexical_binding: unsafe extern "C" fn(*mut c_void, *const u16, usize, bool),
 ) {
-    use ast::{DeclarationKind, Statement};
+    use ast::{DeclarationKind, StatementKind};
 
     // Var names (var declarations at any nesting level + top-level function declarations)
     for child in &scope.children {
         collect_var_names_recursive(&child.inner, ctx, push_var_name);
-        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+        if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name) = func_data.name {
                 push_var_name(ctx, name.name.as_ptr(), name.name.len());
             }
@@ -539,7 +539,7 @@ unsafe fn extract_gdi_common(
     let mut seen_names: Vec<Vec<u16>> = Vec::new();
     let mut funcs_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
     for child in scope.children.iter().rev() {
-        if let Statement::FunctionDeclaration(func_data) = &child.inner {
+        if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
                 if !seen_names.iter().any(|n| *n == name_ident.name) {
                     seen_names.push(name_ident.name.clone());
@@ -566,7 +566,7 @@ unsafe fn extract_gdi_common(
     // Lexical bindings (name + is_constant)
     for child in &scope.children {
         match &child.inner {
-            Statement::VariableDeclaration { kind, declarations }
+            StatementKind::VariableDeclaration { kind, declarations }
                 if *kind != DeclarationKind::Var =>
             {
                 let is_constant = *kind == DeclarationKind::Const;
@@ -578,7 +578,7 @@ unsafe fn extract_gdi_common(
                     }
                 }
             }
-            Statement::UsingDeclaration { declarations } => {
+            StatementKind::UsingDeclaration { declarations } => {
                 for decl in declarations {
                     let mut names = Vec::new();
                     collect_bound_names_from_target(&decl.target, &mut names);
@@ -587,7 +587,7 @@ unsafe fn extract_gdi_common(
                     }
                 }
             }
-            Statement::ClassDeclaration(class_data) => {
+            StatementKind::ClassDeclaration(class_data) => {
                 if let Some(ref name) = class_data.name {
                     push_lexical_binding(ctx, name.name.as_ptr(), name.name.len(), false);
                 }
@@ -632,7 +632,7 @@ unsafe fn extract_script_gdi(
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
 ) {
-    use ast::{DeclarationKind, Statement};
+    use ast::{DeclarationKind, StatementKind};
     use bytecode::ffi::{
         script_gdi_push_annex_b_name, script_gdi_push_function, script_gdi_push_lexical_binding,
         script_gdi_push_lexical_name, script_gdi_push_var_name, script_gdi_push_var_scoped_name,
@@ -641,7 +641,7 @@ unsafe fn extract_script_gdi(
     // Lexical names (let/const/using/class at top level) — script-only step.
     for child in &scope.children {
         match &child.inner {
-            Statement::VariableDeclaration { kind, declarations }
+            StatementKind::VariableDeclaration { kind, declarations }
                 if *kind != DeclarationKind::Var =>
             {
                 for decl in declarations {
@@ -652,7 +652,7 @@ unsafe fn extract_script_gdi(
                     }
                 }
             }
-            Statement::UsingDeclaration { declarations } => {
+            StatementKind::UsingDeclaration { declarations } => {
                 for decl in declarations {
                     let mut names = Vec::new();
                     collect_bound_names_from_target(&decl.target, &mut names);
@@ -661,7 +661,7 @@ unsafe fn extract_script_gdi(
                     }
                 }
             }
-            Statement::ClassDeclaration(class_data) => {
+            StatementKind::ClassDeclaration(class_data) => {
                 if let Some(ref name) = class_data.name {
                     script_gdi_push_lexical_name(ctx, name.name.as_ptr(), name.name.len());
                 }
@@ -682,48 +682,48 @@ unsafe fn extract_script_gdi(
 
 /// Visit each child statement of a statement, excluding function/class bodies
 /// (which create new var scopes). This enables recursive var-declaration walking.
-fn for_each_child_statement(stmt: &ast::Statement, f: &mut dyn FnMut(&ast::Statement)) {
-    use ast::Statement;
+fn for_each_child_statement(stmt: &ast::StatementKind, f: &mut dyn FnMut(&ast::StatementKind)) {
+    use ast::StatementKind;
 
     match stmt {
-        Statement::Block(scope) => {
+        StatementKind::Block(scope) => {
             for child in &scope.borrow().children {
                 f(&child.inner);
             }
         }
-        Statement::If { consequent, alternate, .. } => {
+        StatementKind::If { consequent, alternate, .. } => {
             f(&consequent.inner);
             if let Some(alt) = alternate {
                 f(&alt.inner);
             }
         }
-        Statement::While { body, .. }
-        | Statement::DoWhile { body, .. }
-        | Statement::With { body, .. } => {
+        StatementKind::While { body, .. }
+        | StatementKind::DoWhile { body, .. }
+        | StatementKind::With { body, .. } => {
             f(&body.inner);
         }
-        Statement::For { init, body, .. } => {
+        StatementKind::For { init, body, .. } => {
             if let Some(init) = init {
                 f(&init.inner);
             }
             f(&body.inner);
         }
-        Statement::ForIn { lhs, body, .. }
-        | Statement::ForOf { lhs, body, .. }
-        | Statement::ForAwaitOf { lhs, body, .. } => {
+        StatementKind::ForIn { lhs, body, .. }
+        | StatementKind::ForOf { lhs, body, .. }
+        | StatementKind::ForAwaitOf { lhs, body, .. } => {
             if let ast::ForInOfLhs::Declaration(decl) = lhs {
                 f(&decl.inner);
             }
             f(&body.inner);
         }
-        Statement::Switch(data) => {
+        StatementKind::Switch(data) => {
             for case in &data.cases {
                 for child in &case.scope.borrow().children {
                     f(&child.inner);
                 }
             }
         }
-        Statement::Try(data) => {
+        StatementKind::Try(data) => {
             f(&data.block.inner);
             if let Some(ref handler) = data.handler {
                 f(&handler.body.inner);
@@ -732,7 +732,7 @@ fn for_each_child_statement(stmt: &ast::Statement, f: &mut dyn FnMut(&ast::State
                 f(&finalizer.inner);
             }
         }
-        Statement::Labelled { item, .. } => {
+        StatementKind::Labelled { item, .. } => {
             f(&item.inner);
         }
         // Don't recurse into function/class bodies (new var scopes)
@@ -810,7 +810,7 @@ pub unsafe extern "C" fn rust_compile_function(
 
     // Extract local variables from the function body's scope data.
     let body_scope = match &func_data.body.inner {
-        Statement::FunctionBody { ref scope, .. } => Some(scope),
+        StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         _ => None,
     };
 
@@ -929,7 +929,7 @@ pub unsafe extern "C" fn rust_compile_function(
 /// ScopeData (populated by the scope collector after analyze()).
 unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, func_data: &ast::FunctionData) {
     let body_scope = match &func_data.body.inner {
-        ast::Statement::FunctionBody { ref scope, .. } => Some(scope),
+        ast::StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         _ => None,
     };
 

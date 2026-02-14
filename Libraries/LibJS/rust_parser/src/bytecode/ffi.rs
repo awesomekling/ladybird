@@ -79,8 +79,7 @@ extern "C" {
         shared_function_data_count: usize,
         class_blueprints: *const *mut c_void,
         class_blueprint_count: usize,
-        regex_patterns: *const FFIUtf16Slice,
-        regex_flags: *const FFIUtf16Slice,
+        compiled_regexes: *const *mut c_void,
         regex_count: usize,
     ) -> *mut c_void;
 
@@ -150,12 +149,13 @@ extern "C" {
     pub fn eval_gdi_push_annex_b_name(ctx: *mut c_void, name: *const u16, len: usize);
     pub fn eval_gdi_push_lexical_binding(ctx: *mut c_void, name: *const u16, len: usize, is_constant: bool);
 
-    pub fn rust_validate_regex(
+    pub fn rust_compile_regex(
         pattern_data: *const u16,
         pattern_len: usize,
         flags_data: *const u16,
         flags_len: usize,
-    ) -> *const std::os::raw::c_char;
+        error_out: *mut *const std::os::raw::c_char,
+    ) -> *mut c_void;
 
     pub fn rust_free_error_string(str: *const std::os::raw::c_char);
 }
@@ -377,24 +377,6 @@ pub unsafe fn create_executable(
     // Collect class blueprint pointers
     let bp_ptrs: Vec<*mut c_void> = gen.class_blueprints.clone();
 
-    // Build regex table slices
-    let regex_pattern_slices: Vec<FFIUtf16Slice> = gen
-        .regex_table
-        .iter()
-        .map(|(pattern, _)| FFIUtf16Slice {
-            data: pattern.as_ptr(),
-            length: pattern.len(),
-        })
-        .collect();
-    let regex_flags_slices: Vec<FFIUtf16Slice> = gen
-        .regex_table
-        .iter()
-        .map(|(_, flags)| FFIUtf16Slice {
-            data: flags.as_ptr(),
-            length: flags.len(),
-        })
-        .collect();
-
     rust_create_executable(
         vm_ptr,
         source_code_ptr,
@@ -428,28 +410,29 @@ pub unsafe fn create_executable(
         sfd_ptrs.len(),
         bp_ptrs.as_ptr(),
         bp_ptrs.len(),
-        regex_pattern_slices.as_ptr(),
-        regex_flags_slices.as_ptr(),
-        regex_pattern_slices.len(),
+        gen.compiled_regexes.as_ptr(),
+        gen.compiled_regexes.len(),
     )
 }
 
-/// Validate a regex pattern using the C++ regex engine.
+/// Compile a regex pattern+flags using the C++ regex engine.
 ///
-/// Returns `Some(error_message)` if the pattern is invalid, `None` if valid.
-/// This is a safe wrapper around the FFI call to `rust_validate_regex`.
-pub fn validate_regex_pattern(pattern: &[u16], flags: &[u16]) -> Option<String> {
+/// On success, returns an opaque handle to the compiled regex (a C++
+/// RustCompiledRegex*). On failure, returns the error message.
+pub fn compile_regex(pattern: &[u16], flags: &[u16]) -> Result<*mut c_void, String> {
     unsafe {
-        let error = rust_validate_regex(
+        let mut error: *const std::os::raw::c_char = std::ptr::null();
+        let handle = rust_compile_regex(
             pattern.as_ptr(), pattern.len(),
             flags.as_ptr(), flags.len(),
+            &mut error,
         );
         if error.is_null() {
-            None
+            Ok(handle)
         } else {
             let msg = std::ffi::CStr::from_ptr(error).to_string_lossy().into_owned();
             rust_free_error_string(error);
-            Some(msg)
+            Err(msg)
         }
     }
 }

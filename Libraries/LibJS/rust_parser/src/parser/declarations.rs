@@ -12,25 +12,25 @@ use crate::ast::*;
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType};
 use crate::token::TokenType;
 
-/// Extract an Identifier from an Expression::Identifier node.
-fn expr_into_identifier(expr: Expr) -> Rc<Identifier> {
+/// Extract an Identifier from an ExpressionKind::Identifier node.
+fn expr_into_identifier(expr: Expression) -> Rc<Identifier> {
     match expr.inner {
-        Expression::Identifier(id) => id,
+        ExpressionKind::Identifier(id) => id,
         _ => unreachable!("expected Identifier expression"),
     }
 }
 
 /// Extract bound names from a declaration for export statements.
-fn get_declaration_export_names(stmt: &Stmt) -> Vec<Vec<u16>> {
+fn get_declaration_export_names(stmt: &Statement) -> Vec<Vec<u16>> {
     match &stmt.inner {
-        Statement::VariableDeclaration { declarations, .. } => {
+        StatementKind::VariableDeclaration { declarations, .. } => {
             let mut names = Vec::new();
             for decl in declarations {
                 collect_declarator_names(&decl.target, &mut names);
             }
             names
         }
-        Statement::UsingDeclaration { declarations } => {
+        StatementKind::UsingDeclaration { declarations } => {
             let mut names = Vec::new();
             for decl in declarations {
                 if let VariableDeclaratorTarget::Identifier(id) = &decl.target {
@@ -39,14 +39,14 @@ fn get_declaration_export_names(stmt: &Stmt) -> Vec<Vec<u16>> {
             }
             names
         }
-        Statement::FunctionDeclaration(func) => {
+        StatementKind::FunctionDeclaration(func) => {
             if let Some(ref name) = func.name {
                 vec![name.name.clone()]
             } else {
                 Vec::new()
             }
         }
-        Statement::ClassDeclaration(class) => {
+        StatementKind::ClassDeclaration(class) => {
             if let Some(ref name) = class.name {
                 vec![name.name.clone()]
             } else {
@@ -80,7 +80,7 @@ fn collect_pattern_names(pat: &BindingPattern, names: &mut Vec<Vec<u16>>) {
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn parse_declaration(&mut self) -> Stmt {
+    pub(crate) fn parse_declaration(&mut self) -> Statement {
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
             if next.token_type == TokenType::Function && !next.trivia_has_line_terminator {
@@ -102,12 +102,12 @@ impl<'a> Parser<'a> {
                 self.expected("declaration");
                 let start = self.position();
                 self.consume();
-                self.stmt(start, Statement::Empty)
+                self.stmt(start, StatementKind::Empty)
             }
         }
     }
 
-    pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Stmt {
+    pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
         let decl_column = self.current_token().line_column;
@@ -231,13 +231,13 @@ impl<'a> Parser<'a> {
             self.for_loop_declaration_is_var = kind == DeclarationKind::Var;
         }
 
-        self.stmt(start, Statement::VariableDeclaration {
+        self.stmt(start, StatementKind::VariableDeclaration {
             kind,
             declarations: declarators,
         })
     }
 
-    pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Stmt {
+    pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
         let decl_column = self.current_token().line_column;
@@ -299,12 +299,12 @@ impl<'a> Parser<'a> {
             self.consume_or_insert_semicolon();
         }
 
-        self.stmt(start, Statement::UsingDeclaration {
+        self.stmt(start, StatementKind::UsingDeclaration {
             declarations: declarators,
         })
     }
 
-    pub(crate) fn parse_function_declaration(&mut self) -> Stmt {
+    pub(crate) fn parse_function_declaration(&mut self) -> Statement {
         let start = self.position();
         let decl_line = self.current_token().line_number;
         let decl_column = self.current_token().line_column;
@@ -373,7 +373,7 @@ impl<'a> Parser<'a> {
         let might_need_arguments = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
-        self.stmt(start, Statement::FunctionDeclaration(Box::new(FunctionData {
+        self.stmt(start, StatementKind::FunctionDeclaration(Box::new(FunctionData {
             name,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
@@ -391,7 +391,7 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    pub(crate) fn parse_function_expression(&mut self) -> Expr {
+    pub(crate) fn parse_function_expression(&mut self) -> Expression {
         let start = self.position();
 
         let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
         let might_need_arguments = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
-        self.expr(start, Expression::Function(Box::new(FunctionData {
+        self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
             name,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
@@ -463,7 +463,7 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    pub(crate) fn parse_class_expression(&mut self, expect_name: bool) -> Expr {
+    pub(crate) fn parse_class_expression(&mut self, expect_name: bool) -> Expression {
         let start = self.position();
 
         let strict_before = self.flags.strict_mode;
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
         // Class body.
         self.consume_token(TokenType::CurlyOpen);
         let mut elements: Vec<Node<ClassElement>> = Vec::new();
-        let mut constructor: Option<Expr> = None;
+        let mut constructor: Option<Expression> = None;
 
         let saved_class_has_super = self.class_has_super_class;
         self.class_has_super_class = super_class.is_some();
@@ -548,7 +548,7 @@ impl<'a> Parser<'a> {
 
         self.last_class_name = saved_class_name;
 
-        self.expr(start, Expression::Class(Box::new(ClassData {
+        self.expr(start, ExpressionKind::Class(Box::new(ClassData {
             name: name_id,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
@@ -558,12 +558,12 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    pub(crate) fn parse_class_declaration(&mut self) -> Stmt {
+    pub(crate) fn parse_class_declaration(&mut self) -> Statement {
         let start = self.position();
         let class_expr = self.parse_class_expression(true);
         // Convert the class expression into a class declaration by extracting ClassData.
         match class_expr.inner {
-            Expression::Class(data) => {
+            ExpressionKind::Class(data) => {
                 // Register class name as lexical declaration in the outer scope.
                 // The inner class scope (opened/closed inside parse_class_expression)
                 // binds the name for self-reference. The outer scope needs the name
@@ -579,13 +579,13 @@ impl<'a> Parser<'a> {
                         Some(DeclarationKind::Let),
                     );
                 }
-                self.stmt(start, Statement::ClassDeclaration(data))
+                self.stmt(start, StatementKind::ClassDeclaration(data))
             }
-            _ => unreachable!("parse_class_expression must return Expression::Class"),
+            _ => unreachable!("parse_class_expression must return ExpressionKind::Class"),
         }
     }
 
-    fn synthesize_default_constructor(&mut self, start: Position, class_name: &[u16], has_super: bool) -> Expr {
+    fn synthesize_default_constructor(&mut self, start: Position, class_name: &[u16], has_super: bool) -> Expression {
         let ctor_name = if !class_name.is_empty() {
             Some(self.make_identifier(start, class_name.to_vec()))
         } else {
@@ -600,15 +600,15 @@ impl<'a> Parser<'a> {
             let args_name: Vec<u16> = "args".encode_utf16().collect();
 
             let args_ref = Rc::new(Identifier::new(self.range_from(start), args_name.clone()));
-            let args_expr = self.expr(start, Expression::Identifier(args_ref));
-            let spread_expr = self.expr(start, Expression::Spread(Box::new(args_expr)));
+            let args_expr = self.expr(start, ExpressionKind::Identifier(args_ref));
+            let spread_expr = self.expr(start, ExpressionKind::Spread(Box::new(args_expr)));
 
-            let super_call = self.expr(start, Expression::SuperCall(SuperCallData {
+            let super_call = self.expr(start, ExpressionKind::SuperCall(SuperCallData {
                 arguments: vec![CallArgument { value: spread_expr, is_spread: true }],
                 is_synthetic: true,
             }));
-            let return_stmt = self.stmt(start, Statement::Return(Some(Box::new(super_call))));
-            let body = self.stmt(start, Statement::FunctionBody {
+            let return_stmt = self.stmt(start, StatementKind::Return(Some(Box::new(super_call))));
+            let body = self.stmt(start, StatementKind::FunctionBody {
                 scope: ScopeData::shared_with_children(vec![return_stmt]),
                 in_strict_mode: true,
             });
@@ -620,7 +620,7 @@ impl<'a> Parser<'a> {
                 is_rest: true,
             }];
 
-            self.expr(start, Expression::Function(Box::new(FunctionData {
+            self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
@@ -639,12 +639,12 @@ impl<'a> Parser<'a> {
             })))
         } else {
             // Base class: empty constructor() {}
-            let body = self.stmt(start, Statement::FunctionBody {
+            let body = self.stmt(start, StatementKind::FunctionBody {
                 scope: ScopeData::shared_with_children(Vec::new()),
                 in_strict_mode: true,
             });
 
-            self.expr(start, Expression::Function(Box::new(FunctionData {
+            self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
@@ -664,7 +664,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_class_element(&mut self) -> (Option<Node<ClassElement>>, Option<Expr>) {
+    fn parse_class_element(&mut self) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
         let is_static = if self.match_token(TokenType::Static) {
             self.consume();
@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
                 let scope = ScopeData::shared_with_children(children);
                 self.scope_collector.set_scope_node(scope.clone());
                 self.scope_collector.close_scope();
-                let body = self.stmt(start, Statement::FunctionBody {
+                let body = self.stmt(start, StatementKind::FunctionBody {
                     scope,
                     in_strict_mode: self.flags.strict_mode,
                 });
@@ -814,7 +814,7 @@ impl<'a> Parser<'a> {
         })), None)
     }
 
-    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, is_simple: bool) -> (Stmt, bool, FunctionParsingInsights) {
+    pub(crate) fn parse_function_body(&mut self, is_async: bool, is_generator: bool, is_simple: bool) -> (Statement, bool, FunctionParsingInsights) {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
 
@@ -855,7 +855,7 @@ impl<'a> Parser<'a> {
         let scope = ScopeData::shared_with_children(children);
         self.scope_collector.set_scope_node(scope.clone());
 
-        let body = self.stmt(start, Statement::FunctionBody {
+        let body = self.stmt(start, StatementKind::FunctionBody {
             scope,
             in_strict_mode: body_is_strict,
         });
@@ -1169,7 +1169,7 @@ impl<'a> Parser<'a> {
         BindingPattern { kind, entries }
     }
 
-    pub(crate) fn parse_import_statement(&mut self) -> Stmt {
+    pub(crate) fn parse_import_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Import);
 
@@ -1182,7 +1182,7 @@ impl<'a> Parser<'a> {
             let module_specifier = self.consume_module_specifier();
             let attributes = self.parse_with_clause();
             self.consume_or_insert_semicolon();
-            return self.stmt(start, Statement::Import(ImportStatementData {
+            return self.stmt(start, StatementKind::Import(ImportStatementData {
                 module_request: ModuleRequest { module_specifier, attributes },
                 entries: Vec::new(),
             }));
@@ -1297,13 +1297,13 @@ impl<'a> Parser<'a> {
         let attributes = self.parse_with_clause();
         self.consume_or_insert_semicolon();
 
-        self.stmt(start, Statement::Import(ImportStatementData {
+        self.stmt(start, StatementKind::Import(ImportStatementData {
             module_request: ModuleRequest { module_specifier, attributes },
             entries,
         }))
     }
 
-    pub(crate) fn parse_export_statement(&mut self) -> Stmt {
+    pub(crate) fn parse_export_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Export);
 
@@ -1312,7 +1312,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut entries: Vec<ExportEntry> = Vec::new();
-        let mut statement: Option<Box<Stmt>> = None;
+        let mut statement: Option<Box<Statement>> = None;
         let mut is_default = false;
         let mut from_specifier: Option<Vec<u16>> = None;
 
@@ -1328,7 +1328,7 @@ impl<'a> Parser<'a> {
                 let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
                 let decl = self.parse_function_declaration_for_export(has_default_name);
                 if !has_default_name {
-                    if let Statement::FunctionDeclaration(ref func) = decl.inner {
+                    if let StatementKind::FunctionDeclaration(ref func) = decl.inner {
                         if let Some(ref name_id) = func.name {
                             local_name = Some(name_id.name.clone());
                         }
@@ -1340,7 +1340,7 @@ impl<'a> Parser<'a> {
                 if next.token_type != TokenType::CurlyOpen && next.token_type != TokenType::Extends {
                     // Named class declaration.
                     let decl = self.parse_class_declaration();
-                    if let Statement::ClassDeclaration(ref class) = decl.inner {
+                    if let StatementKind::ClassDeclaration(ref class) = decl.inner {
                         if let Some(ref name_id) = class.name {
                             local_name = Some(name_id.name.clone());
                         }
@@ -1351,7 +1351,7 @@ impl<'a> Parser<'a> {
                     let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                     self.consume_or_insert_semicolon();
                     let expr_range = expr.range;
-                    statement = Some(Box::new(Stmt::new(expr_range, Statement::Expression(Box::new(expr)))));
+                    statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
                 }
             } else if self.match_expression() {
                 let special_case = self.match_token(TokenType::Class)
@@ -1365,7 +1365,7 @@ impl<'a> Parser<'a> {
                     self.consume_or_insert_semicolon();
                 }
                 let expr_range = expr.range;
-                statement = Some(Box::new(Stmt::new(expr_range, Statement::Expression(Box::new(expr)))));
+                statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
             } else {
                 self.expected("declaration or assignment expression");
             }
@@ -1488,7 +1488,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.stmt(start, Statement::Export(ExportStatementData {
+        self.stmt(start, StatementKind::Export(ExportStatementData {
             statement,
             entries,
             is_default_export: is_default,
@@ -1620,7 +1620,7 @@ impl<'a> Parser<'a> {
         MatchesFunctionDeclaration::No
     }
 
-    fn parse_function_declaration_for_export(&mut self, has_default_name: bool) -> Stmt {
+    fn parse_function_declaration_for_export(&mut self, has_default_name: bool) -> Statement {
         if has_default_name {
             self.has_default_export_name = true;
             let result = self.parse_function_declaration();

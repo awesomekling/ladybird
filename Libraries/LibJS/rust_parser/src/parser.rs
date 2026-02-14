@@ -37,8 +37,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast::{
-    BindingPattern, Expr, Expression, FunctionParameter, Identifier,
-    SourceRange, Stmt, Statement, ScopeData, ProgramData,
+    BindingPattern, Expression, ExpressionKind, FunctionParameter, Identifier,
+    SourceRange, Statement, StatementKind, ScopeData, ProgramData,
 };
 use crate::lexer::Lexer;
 use crate::scope_collector::{ScopeCollector, ScopeCollectorState};
@@ -298,12 +298,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn expr(&self, start: Position, expression: Expression) -> Expr {
-        Expr::new(self.range_from(start), expression)
+    pub(crate) fn expr(&self, start: Position, expression: ExpressionKind) -> Expression {
+        Expression::new(self.range_from(start), expression)
     }
 
-    pub(crate) fn stmt(&self, start: Position, statement: Statement) -> Stmt {
-        Stmt::new(self.range_from(start), statement)
+    pub(crate) fn stmt(&self, start: Position, statement: StatementKind) -> Statement {
+        Statement::new(self.range_from(start), statement)
     }
 
     pub(crate) fn make_identifier(&self, start: Position, name: Vec<u16>) -> Rc<Identifier> {
@@ -528,9 +528,15 @@ impl<'a> Parser<'a> {
         self.syntax_error(&msg);
     }
 
-    pub(crate) fn validate_regex_pattern(&mut self, pattern: &[u16], flags: &[u16]) {
-        if let Some(msg) = crate::bytecode::ffi::validate_regex_pattern(pattern, flags) {
-            self.syntax_error(&msg);
+    /// Compile a regex pattern+flags and return the opaque compiled handle.
+    /// On error, reports a syntax error and returns null.
+    pub(crate) fn compile_regex_pattern(&mut self, pattern: &[u16], flags: &[u16]) -> *mut std::ffi::c_void {
+        match crate::bytecode::ffi::compile_regex(pattern, flags) {
+            Ok(handle) => handle,
+            Err(msg) => {
+                self.syntax_error(&msg);
+                std::ptr::null_mut()
+            }
         }
     }
 
@@ -737,36 +743,36 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if a node is a valid simple assignment target.
-    pub(crate) fn is_simple_assignment_target(expr: &Expr, allow_call_expression: bool) -> bool {
+    pub(crate) fn is_simple_assignment_target(expr: &Expression, allow_call_expression: bool) -> bool {
         matches!(&expr.inner,
-            Expression::Identifier(_)
-            | Expression::Member { .. }
-        ) || (allow_call_expression && matches!(&expr.inner, Expression::Call(_)))
+            ExpressionKind::Identifier(_)
+            | ExpressionKind::Member { .. }
+        ) || (allow_call_expression && matches!(&expr.inner, ExpressionKind::Call(_)))
     }
 
-    fn is_object_expression(expr: &Expr) -> bool {
-        matches!(&expr.inner, Expression::Object(_))
+    fn is_object_expression(expr: &Expression) -> bool {
+        matches!(&expr.inner, ExpressionKind::Object(_))
     }
 
-    fn is_array_expression(expr: &Expr) -> bool {
-        matches!(&expr.inner, Expression::Array(_))
+    fn is_array_expression(expr: &Expression) -> bool {
+        matches!(&expr.inner, ExpressionKind::Array(_))
     }
 
-    fn is_identifier(expr: &Expr) -> bool {
-        matches!(&expr.inner, Expression::Identifier(_))
+    fn is_identifier(expr: &Expression) -> bool {
+        matches!(&expr.inner, ExpressionKind::Identifier(_))
     }
 
-    fn is_member_expression(expr: &Expr) -> bool {
-        matches!(&expr.inner, Expression::Member { .. })
+    fn is_member_expression(expr: &Expression) -> bool {
+        matches!(&expr.inner, ExpressionKind::Member { .. })
     }
 
-    fn is_call_expression(expr: &Expr) -> bool {
-        matches!(&expr.inner, Expression::Call(_))
+    fn is_call_expression(expr: &Expression) -> bool {
+        matches!(&expr.inner, ExpressionKind::Call(_))
     }
 
     // === Main entry point ===
 
-    pub fn parse_program(&mut self, starts_in_strict_mode: bool) -> Stmt {
+    pub fn parse_program(&mut self, starts_in_strict_mode: bool) -> Statement {
         let start = self.position();
 
         if self.program_type == ProgramType::Script {
@@ -776,7 +782,7 @@ impl<'a> Parser<'a> {
             // Now close it after children are set.
             self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
-            self.stmt(start, Statement::Program(ProgramData {
+            self.stmt(start, StatementKind::Program(ProgramData {
                 scope,
                 program_type: ProgramType::Script,
                 is_strict_mode: is_strict,
@@ -787,7 +793,7 @@ impl<'a> Parser<'a> {
             let scope = ScopeData::shared_with_children(children);
             self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
-            self.stmt(start, Statement::Program(ProgramData {
+            self.stmt(start, StatementKind::Program(ProgramData {
                 scope,
                 program_type: ProgramType::Module,
                 is_strict_mode: true,
@@ -796,7 +802,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_script(&mut self, starts_in_strict_mode: bool) -> (Vec<Stmt>, bool) {
+    fn parse_script(&mut self, starts_in_strict_mode: bool) -> (Vec<Statement>, bool) {
         // Open program scope — will be closed in parse_program after ScopeData is created.
         self.scope_collector.open_program_scope(ProgramType::Script);
 
@@ -822,7 +828,7 @@ impl<'a> Parser<'a> {
         (children, is_strict)
     }
 
-    fn parse_module(&mut self) -> (Vec<Stmt>, bool) {
+    fn parse_module(&mut self) -> (Vec<Statement>, bool) {
         // Open program scope — will be closed in parse_program after ScopeData is created.
         self.scope_collector.open_program_scope(ProgramType::Module);
 
@@ -858,7 +864,7 @@ impl<'a> Parser<'a> {
         (children, false)
     }
 
-    pub(crate) fn parse_directive(&mut self) -> (bool, Vec<Stmt>) {
+    pub(crate) fn parse_directive(&mut self) -> (bool, Vec<Statement>) {
         let mut found_use_strict = false;
         let mut stmts = Vec::new();
         while !self.done() && self.match_token(TokenType::StringLiteral) {
@@ -878,7 +884,7 @@ impl<'a> Parser<'a> {
         (found_use_strict, stmts)
     }
 
-    pub(crate) fn parse_statement_list(&mut self, allow_labelled_functions: bool) -> Vec<Stmt> {
+    pub(crate) fn parse_statement_list(&mut self, allow_labelled_functions: bool) -> Vec<Statement> {
         let mut stmts = Vec::new();
         while !self.done() {
             if self.match_export_or_import() {

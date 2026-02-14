@@ -1022,7 +1022,7 @@ impl ScopeCollector {
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
-                if let crate::ast::Statement::FunctionDeclaration(ref func_data) = sd.children[i].inner {
+                if let crate::ast::StatementKind::FunctionDeclaration(ref func_data) = sd.children[i].inner {
                     if let Some(ref name_ident) = func_data.name {
                         if !seen_function_names.contains(&name_ident.name) {
                             seen_function_names.push(name_ident.name.clone());
@@ -1155,7 +1155,7 @@ impl ScopeCollector {
                 if let Some(ref block_scope) = func.block_scope_data {
                     let mut bs = block_scope.borrow_mut();
                     for child in &mut bs.children {
-                        if let crate::ast::Statement::FunctionDeclaration(ref mut fd)
+                        if let crate::ast::StatementKind::FunctionDeclaration(ref mut fd)
                             = child.inner
                         {
                             if fd.name.as_ref().is_some_and(|n| n.name == func.name) {

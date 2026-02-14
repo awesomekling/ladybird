@@ -11,8 +11,8 @@
 //!
 //! ## Design
 //!
-//! - `Expression` and `Statement` are flat enums — pattern matching replaces
-//!   virtual dispatch.
+//! - `ExpressionKind` and `StatementKind` are flat enums — pattern matching
+//!   replaces virtual dispatch.
 //! - `Node<T>` wraps every AST node with source location info.
 //! - `Identifier` uses `Cell` fields for scope analysis results that are
 //!   written after parsing (by the scope collector).
@@ -56,11 +56,11 @@ pub struct Node<T> {
     pub inner: T,
 }
 
-/// Expression node: `Node<Expression>`.
-pub type Expr = Node<Expression>;
+/// Expression node: `Node<ExpressionKind>`.
+pub type Expression = Node<ExpressionKind>;
 
-/// Statement node: `Node<Statement>`.
-pub type Stmt = Node<Statement>;
+/// Statement node: `Node<StatementKind>`.
+pub type Statement = Node<StatementKind>;
 
 impl<T> Node<T> {
     pub fn new(range: SourceRange, inner: T) -> Self {
@@ -275,7 +275,7 @@ pub struct FunctionParsingInsights {
 #[derive(Clone)]
 pub struct FunctionParameter {
     pub binding: FunctionParameterBinding,
-    pub default_value: Option<Expr>,
+    pub default_value: Option<Expression>,
     pub is_rest: bool,
 }
 
@@ -291,7 +291,7 @@ pub struct FunctionData {
     pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
-    pub body: Box<Stmt>,
+    pub body: Box<Statement>,
     pub parameters: Vec<FunctionParameter>,
     pub function_length: i32,
     pub kind: FunctionKind,
@@ -311,26 +311,26 @@ pub struct ClassData {
     pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
     pub source_text_end: u32,
-    pub constructor: Option<Box<Expr>>,
-    pub super_class: Option<Box<Expr>>,
+    pub constructor: Option<Box<Expression>>,
+    pub super_class: Option<Box<Expression>>,
     pub elements: Vec<Node<ClassElement>>,
 }
 
 #[derive(Clone)]
 pub enum ClassElement {
     Method {
-        key: Box<Expr>,
-        function: Box<Expr>,
+        key: Box<Expression>,
+        function: Box<Expression>,
         kind: ClassMethodKind,
         is_static: bool,
     },
     Field {
-        key: Box<Expr>,
-        initializer: Option<Box<Expr>>,
+        key: Box<Expression>,
+        initializer: Option<Box<Expression>>,
         is_static: bool,
     },
     StaticInitializer {
-        body: Box<Stmt>,
+        body: Box<Statement>,
     },
 }
 
@@ -363,7 +363,7 @@ pub enum BindingPatternKind {
 pub struct BindingEntry {
     pub name: BindingEntryName,
     pub alias: BindingEntryAlias,
-    pub initializer: Option<Expr>,
+    pub initializer: Option<Expression>,
     pub is_rest: bool,
 }
 
@@ -375,7 +375,7 @@ pub struct BindingEntry {
 pub enum BindingEntryName {
     Empty,
     Identifier(Rc<Identifier>),
-    Expression(Box<Expr>),
+    Expression(Box<Expression>),
 }
 
 /// The "alias" (target) of a binding entry.
@@ -388,7 +388,7 @@ pub enum BindingEntryAlias {
     Empty,
     Identifier(Rc<Identifier>),
     BindingPattern(Box<BindingPattern>),
-    MemberExpression(Box<Expr>),
+    MemberExpression(Box<Expression>),
 }
 
 // =============================================================================
@@ -399,7 +399,7 @@ pub enum BindingEntryAlias {
 pub struct VariableDeclarator {
     pub range: SourceRange,
     pub target: VariableDeclaratorTarget,
-    pub init: Option<Expr>,
+    pub init: Option<Expression>,
 }
 
 #[derive(Clone)]
@@ -416,8 +416,8 @@ pub enum VariableDeclaratorTarget {
 pub struct ObjectProperty {
     pub range: SourceRange,
     pub property_type: ObjectPropertyType,
-    pub key: Box<Expr>,
-    pub value: Option<Box<Expr>>,
+    pub key: Box<Expression>,
+    pub value: Option<Box<Expression>>,
     pub is_method: bool,
     pub is_computed: bool,
 }
@@ -438,13 +438,13 @@ pub enum ObjectPropertyType {
 
 #[derive(Clone)]
 pub struct CallArgument {
-    pub value: Expr,
+    pub value: Expression,
     pub is_spread: bool,
 }
 
 #[derive(Clone)]
 pub struct CallExpressionData {
-    pub callee: Box<Expr>,
+    pub callee: Box<Expression>,
     pub arguments: Vec<CallArgument>,
     pub is_parenthesized: bool,
     pub is_inside_parens: bool,
@@ -473,7 +473,7 @@ pub enum OptionalChainReference {
         mode: OptionalChainMode,
     },
     ComputedReference {
-        expression: Box<Expr>,
+        expression: Box<Expression>,
         mode: OptionalChainMode,
     },
     MemberReference {
@@ -492,7 +492,7 @@ pub enum OptionalChainReference {
 
 #[derive(Clone)]
 pub struct TemplateLiteralData {
-    pub expressions: Vec<Expr>,
+    pub expressions: Vec<Expression>,
     pub raw_strings: Vec<Utf16String>,
 }
 
@@ -500,10 +500,40 @@ pub struct TemplateLiteralData {
 // RegExp literal
 // =============================================================================
 
-#[derive(Clone)]
 pub struct RegExpLiteralData {
     pub pattern: Utf16String,
     pub flags: Utf16String,
+    /// Opaque handle to a C++ `RustCompiledRegex` object, compiled during parsing.
+    /// Ownership lifecycle: the parser compiles the regex via FFI and stores it here.
+    /// Codegen takes ownership via `Cell::replace(null_mut())`. If neither codegen
+    /// nor clone takes ownership, `Drop` frees the handle via FFI.
+    pub compiled_regex: Cell<*mut c_void>,
+}
+
+/// Clone transfers ownership of the compiled regex to the clone (original becomes null).
+/// This supports the SFD (saved function data) path where the AST is cloned for lazy
+/// compilation — the clone is the one that will be compiled, so it needs the handle.
+impl Clone for RegExpLiteralData {
+    fn clone(&self) -> Self {
+        Self {
+            pattern: self.pattern.clone(),
+            flags: self.flags.clone(),
+            compiled_regex: Cell::new(self.compiled_regex.replace(std::ptr::null_mut())),
+        }
+    }
+}
+
+extern "C" {
+    fn rust_free_compiled_regex(ptr: *mut c_void);
+}
+
+impl Drop for RegExpLiteralData {
+    fn drop(&mut self) {
+        let ptr = self.compiled_regex.get();
+        if !ptr.is_null() {
+            unsafe { rust_free_compiled_regex(ptr) };
+        }
+    }
 }
 
 // =============================================================================
@@ -512,16 +542,16 @@ pub struct RegExpLiteralData {
 
 #[derive(Clone)]
 pub struct TryStatementData {
-    pub block: Box<Stmt>,
+    pub block: Box<Statement>,
     pub handler: Option<CatchClause>,
-    pub finalizer: Option<Box<Stmt>>,
+    pub finalizer: Option<Box<Statement>>,
 }
 
 #[derive(Clone)]
 pub struct CatchClause {
     pub range: SourceRange,
     pub parameter: CatchParameter,
-    pub body: Box<Stmt>,
+    pub body: Box<Statement>,
 }
 
 #[derive(Clone)]
@@ -538,7 +568,7 @@ pub enum CatchParameter {
 #[derive(Clone)]
 pub struct SwitchStatementData {
     pub scope: Rc<RefCell<ScopeData>>,
-    pub discriminant: Box<Expr>,
+    pub discriminant: Box<Expression>,
     pub cases: Vec<SwitchCase>,
 }
 
@@ -546,7 +576,7 @@ pub struct SwitchStatementData {
 pub struct SwitchCase {
     pub range: SourceRange,
     pub scope: Rc<RefCell<ScopeData>>,
-    pub test: Option<Expr>,
+    pub test: Option<Expression>,
 }
 
 // =============================================================================
@@ -596,7 +626,7 @@ pub struct ExportEntry {
 
 #[derive(Clone)]
 pub struct ExportStatementData {
-    pub statement: Option<Box<Stmt>>,
+    pub statement: Option<Box<Statement>>,
     pub entries: Vec<ExportEntry>,
     pub is_default_export: bool,
     pub module_request: Option<ModuleRequest>,
@@ -610,9 +640,9 @@ pub struct ExportStatementData {
 #[derive(Clone)]
 pub enum ForInOfLhs {
     /// A variable declaration (`for (let x of ...)`)
-    Declaration(Box<Stmt>),
+    Declaration(Box<Statement>),
     /// An expression (`for (x in obj)`)
-    Expression(Box<Expr>),
+    Expression(Box<Expression>),
     /// A binding pattern (`for ({a, b} of ...)`)
     Pattern(BindingPattern),
 }
@@ -624,7 +654,7 @@ pub enum ForInOfLhs {
 /// Left-hand side of an assignment expression.
 #[derive(Clone)]
 pub enum AssignmentLhs {
-    Expression(Box<Expr>),
+    Expression(Box<Expression>),
     Pattern(BindingPattern),
 }
 
@@ -652,7 +682,7 @@ pub struct LocalVariable {
 /// FunctionBody, SwitchStatement, SwitchCase).
 #[derive(Clone, Default)]
 pub struct ScopeData {
-    pub children: Vec<Stmt>,
+    pub children: Vec<Statement>,
     pub local_variables: Vec<LocalVariable>,
     pub function_scope_data: Option<Box<FunctionScopeData>>,
     pub hoisted_functions: Vec<usize>,
@@ -672,7 +702,7 @@ impl ScopeData {
         Rc::new(RefCell::new(Self::default()))
     }
 
-    pub fn shared_with_children(children: Vec<Stmt>) -> Rc<RefCell<Self>> {
+    pub fn shared_with_children(children: Vec<Statement>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             children,
             ..Default::default()
@@ -715,7 +745,7 @@ pub struct VarToInit {
 // =============================================================================
 
 #[derive(Clone)]
-pub enum Expression {
+pub enum ExpressionKind {
     // Literals
     NumericLiteral(f64),
     StringLiteral(Utf16String),
@@ -731,43 +761,43 @@ pub enum Expression {
     // Operators
     Binary {
         op: BinaryOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: Box<Expression>,
+        rhs: Box<Expression>,
     },
     Logical {
         op: LogicalOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: Box<Expression>,
+        rhs: Box<Expression>,
     },
     Unary {
         op: UnaryOp,
-        operand: Box<Expr>,
+        operand: Box<Expression>,
     },
     Update {
         op: UpdateOp,
-        argument: Box<Expr>,
+        argument: Box<Expression>,
         prefixed: bool,
     },
     Assignment {
         op: AssignmentOp,
         lhs: AssignmentLhs,
-        rhs: Box<Expr>,
+        rhs: Box<Expression>,
     },
     Conditional {
-        test: Box<Expr>,
-        consequent: Box<Expr>,
-        alternate: Box<Expr>,
+        test: Box<Expression>,
+        consequent: Box<Expression>,
+        alternate: Box<Expression>,
     },
-    Sequence(Vec<Expr>),
+    Sequence(Vec<Expression>),
 
     // Member access
     Member {
-        object: Box<Expr>,
-        property: Box<Expr>,
+        object: Box<Expression>,
+        property: Box<Expression>,
         computed: bool,
     },
     OptionalChain {
-        base: Box<Expr>,
+        base: Box<Expression>,
         references: Vec<OptionalChainReference>,
     },
 
@@ -777,7 +807,7 @@ pub enum Expression {
     SuperCall(SuperCallData),
 
     // Spread
-    Spread(Box<Expr>),
+    Spread(Box<Expression>),
 
     // This / Super
     This,
@@ -790,29 +820,29 @@ pub enum Expression {
     Class(Box<ClassData>),
 
     // Collections
-    Array(Vec<Option<Expr>>),
+    Array(Vec<Option<Expression>>),
     Object(Vec<ObjectProperty>),
 
     // Templates
     TemplateLiteral(TemplateLiteralData),
     TaggedTemplateLiteral {
-        tag: Box<Expr>,
-        template_literal: Box<Expr>,
+        tag: Box<Expression>,
+        template_literal: Box<Expression>,
     },
 
     // Meta
     MetaProperty(MetaPropertyType),
     ImportCall {
-        specifier: Box<Expr>,
-        options: Option<Box<Expr>>,
+        specifier: Box<Expression>,
+        options: Option<Box<Expression>>,
     },
 
     // Async / Generator
     Yield {
-        argument: Option<Box<Expr>>,
+        argument: Option<Box<Expression>>,
         is_yield_from: bool,
     },
-    Await(Box<Expr>),
+    Await(Box<Expression>),
 
     // Error recovery
     Error,
@@ -823,11 +853,11 @@ pub enum Expression {
 // =============================================================================
 
 #[derive(Clone)]
-pub enum Statement {
+pub enum StatementKind {
     // Basic
     Empty,
     Error,
-    Expression(Box<Expr>),
+    Expression(Box<Expression>),
     Debugger,
 
     // Blocks (carry ScopeData for scope analysis)
@@ -840,47 +870,47 @@ pub enum Statement {
 
     // Control flow
     If {
-        predicate: Box<Expr>,
-        consequent: Box<Stmt>,
-        alternate: Option<Box<Stmt>>,
+        predicate: Box<Expression>,
+        consequent: Box<Statement>,
+        alternate: Option<Box<Statement>>,
     },
     While {
-        test: Box<Expr>,
-        body: Box<Stmt>,
+        test: Box<Expression>,
+        body: Box<Statement>,
     },
     DoWhile {
-        test: Box<Expr>,
-        body: Box<Stmt>,
+        test: Box<Expression>,
+        body: Box<Statement>,
     },
     For {
-        init: Option<Box<Stmt>>,
-        test: Option<Box<Expr>>,
-        update: Option<Box<Expr>>,
-        body: Box<Stmt>,
+        init: Option<Box<Statement>>,
+        test: Option<Box<Expression>>,
+        update: Option<Box<Expression>>,
+        body: Box<Statement>,
     },
     ForIn {
         lhs: ForInOfLhs,
-        rhs: Box<Expr>,
-        body: Box<Stmt>,
+        rhs: Box<Expression>,
+        body: Box<Statement>,
     },
     ForOf {
         lhs: ForInOfLhs,
-        rhs: Box<Expr>,
-        body: Box<Stmt>,
+        rhs: Box<Expression>,
+        body: Box<Statement>,
     },
     ForAwaitOf {
         lhs: ForInOfLhs,
-        rhs: Box<Expr>,
-        body: Box<Stmt>,
+        rhs: Box<Expression>,
+        body: Box<Statement>,
     },
     Switch(SwitchStatementData),
     With {
-        object: Box<Expr>,
-        body: Box<Stmt>,
+        object: Box<Expression>,
+        body: Box<Statement>,
     },
     Labelled {
         label: Utf16String,
-        item: Box<Stmt>,
+        item: Box<Statement>,
     },
 
     // Jumps
@@ -890,8 +920,8 @@ pub enum Statement {
     Continue {
         target_label: Option<Utf16String>,
     },
-    Return(Option<Box<Expr>>),
-    Throw(Box<Expr>),
+    Return(Option<Box<Expression>>),
+    Throw(Box<Expression>),
     Try(TryStatementData),
 
     // Declarations
@@ -912,7 +942,7 @@ pub enum Statement {
 
     // Special
     ClassFieldInitializer {
-        expression: Box<Expr>,
+        expression: Box<Expression>,
         field_name: Utf16String,
     },
 }

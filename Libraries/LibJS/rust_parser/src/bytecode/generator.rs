@@ -146,7 +146,7 @@ pub struct Generator {
     pub string_table: Vec<Vec<u16>>,
     pub identifier_table: Vec<Vec<u16>>,
     pub property_key_table: Vec<Vec<u16>>,
-    pub regex_table: Vec<(Vec<u16>, Vec<u16>)>, // (pattern, flags)
+    pub compiled_regexes: Vec<*mut std::ffi::c_void>,
 
     // --- Scope/unwind state ---
     pub boundaries: Vec<BlockBoundaryType>,
@@ -251,7 +251,7 @@ impl Generator {
             string_table: Vec::new(),
             identifier_table: Vec::new(),
             property_key_table: Vec::new(),
-            regex_table: Vec::new(),
+            compiled_regexes: Vec::new(),
             boundaries: Vec::new(),
             continuable_scopes: Vec::new(),
             breakable_scopes: Vec::new(),
@@ -490,9 +490,9 @@ impl Generator {
         index
     }
 
-    pub fn intern_regex(&mut self, pattern: Vec<u16>, flags: Vec<u16>) -> RegexTableIndex {
-        let index = self.regex_table.len() as u32;
-        self.regex_table.push((pattern, flags));
+    pub fn intern_regex(&mut self, compiled: *mut std::ffi::c_void) -> RegexTableIndex {
+        let index = self.compiled_regexes.len() as u32;
+        self.compiled_regexes.push(compiled);
         RegexTableIndex(index)
     }
 

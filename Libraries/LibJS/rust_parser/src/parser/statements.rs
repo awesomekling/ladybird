@@ -15,12 +15,12 @@ use crate::token::TokenType;
 /// Used in parse_for_statement to track whether the init is a
 /// declaration or expression, since they have different Rust types.
 enum ForInit {
-    Declaration(Stmt),
-    Expression(Expr),
+    Declaration(Statement),
+    Expression(Expression),
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn parse_statement(&mut self, allow_labelled_function: bool) -> Stmt {
+    pub(crate) fn parse_statement(&mut self, allow_labelled_function: bool) -> Statement {
         let start = self.position();
         let tt = self.current_token_type();
 
@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
             TokenType::Debugger => self.parse_debugger_statement(),
             TokenType::Semicolon => {
                 self.consume();
-                self.stmt(start, Statement::Empty)
+                self.stmt(start, StatementKind::Empty)
             }
             TokenType::Slash | TokenType::SlashEquals => {
                 let tok = self.lexer.force_slash_as_regex();
@@ -67,14 +67,14 @@ impl<'a> Parser<'a> {
                 } else {
                     self.expected("statement");
                     self.consume();
-                    self.stmt(start, Statement::Empty)
+                    self.stmt(start, StatementKind::Empty)
                 }
             }
         }
     }
 
     /// Parse a block statement `{ ... }`.
-    pub(crate) fn parse_block_statement(&mut self) -> Stmt {
+    pub(crate) fn parse_block_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
 
@@ -94,10 +94,10 @@ impl<'a> Parser<'a> {
         let scope = ScopeData::shared_with_children(children);
         self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
-        self.stmt(start, Statement::Block(scope))
+        self.stmt(start, StatementKind::Block(scope))
     }
 
-    fn parse_expression_statement(&mut self) -> Stmt {
+    fn parse_expression_statement(&mut self) -> Statement {
         let start = self.position();
 
         if self.match_token(TokenType::Function) || self.match_token(TokenType::Class) {
@@ -107,10 +107,10 @@ impl<'a> Parser<'a> {
 
         let expr = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_or_insert_semicolon();
-        self.stmt(start, Statement::Expression(Box::new(expr)))
+        self.stmt(start, StatementKind::Expression(Box::new(expr)))
     }
 
-    fn parse_return_statement(&mut self) -> Stmt {
+    fn parse_return_statement(&mut self) -> Statement {
         let start = self.position();
         if !self.flags.in_function_context {
             self.syntax_error("'return' not allowed outside of a function");
@@ -123,15 +123,15 @@ impl<'a> Parser<'a> {
             || self.done()
         {
             self.consume_or_insert_semicolon();
-            return self.stmt(start, Statement::Return(None));
+            return self.stmt(start, StatementKind::Return(None));
         }
 
         let argument = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_or_insert_semicolon();
-        self.stmt(start, Statement::Return(Some(Box::new(argument))))
+        self.stmt(start, StatementKind::Return(Some(Box::new(argument))))
     }
 
-    fn parse_throw_statement(&mut self) -> Stmt {
+    fn parse_throw_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Throw);
 
@@ -141,10 +141,10 @@ impl<'a> Parser<'a> {
 
         let argument = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_or_insert_semicolon();
-        self.stmt(start, Statement::Throw(Box::new(argument)))
+        self.stmt(start, StatementKind::Throw(Box::new(argument)))
     }
 
-    fn parse_break_statement(&mut self) -> Stmt {
+    fn parse_break_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Break);
 
@@ -174,10 +174,10 @@ impl<'a> Parser<'a> {
             self.syntax_error("Unlabeled 'break' not allowed outside of a loop or switch statement");
         }
 
-        self.stmt(start, Statement::Break { target_label: label })
+        self.stmt(start, StatementKind::Break { target_label: label })
     }
 
-    fn parse_continue_statement(&mut self) -> Stmt {
+    fn parse_continue_statement(&mut self) -> Statement {
         let start = self.position();
         if !self.flags.in_continue_context {
             self.syntax_error("'continue' not allow outside of a loop");
@@ -209,17 +209,17 @@ impl<'a> Parser<'a> {
 
         self.consume_or_insert_semicolon();
 
-        self.stmt(start, Statement::Continue { target_label: label })
+        self.stmt(start, StatementKind::Continue { target_label: label })
     }
 
-    fn parse_debugger_statement(&mut self) -> Stmt {
+    fn parse_debugger_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Debugger);
         self.consume_or_insert_semicolon();
-        self.stmt(start, Statement::Debugger)
+        self.stmt(start, StatementKind::Debugger)
     }
 
-    fn parse_if_statement(&mut self) -> Stmt {
+    fn parse_if_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::If);
         self.consume_token(TokenType::ParenOpen);
@@ -243,7 +243,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.stmt(start, Statement::If {
+        self.stmt(start, StatementKind::If {
             predicate: Box::new(predicate),
             consequent: Box::new(consequent),
             alternate,
@@ -252,17 +252,17 @@ impl<'a> Parser<'a> {
 
     /// Annex B: Parse a function declaration as if wrapped in a synthetic block.
     /// See https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses
-    fn parse_function_declaration_as_block_statement(&mut self) -> Stmt {
+    fn parse_function_declaration_as_block_statement(&mut self) -> Statement {
         let start = self.position();
         self.scope_collector.open_block_scope(None);
         let decl = self.parse_function_declaration();
         let scope = ScopeData::shared_with_children(vec![decl]);
         self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
-        self.stmt(start, Statement::Block(scope))
+        self.stmt(start, StatementKind::Block(scope))
     }
 
-    fn parse_while_statement(&mut self) -> Stmt {
+    fn parse_while_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::While);
         self.consume_token(TokenType::ParenOpen);
@@ -279,13 +279,13 @@ impl<'a> Parser<'a> {
         self.flags.in_break_context = break_before;
         self.flags.in_continue_context = continue_before;
 
-        self.stmt(start, Statement::While {
+        self.stmt(start, StatementKind::While {
             test: Box::new(test),
             body: Box::new(body),
         })
     }
 
-    fn parse_do_while_statement(&mut self) -> Stmt {
+    fn parse_do_while_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Do);
 
@@ -305,13 +305,13 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenClose);
         self.consume_or_insert_semicolon();
 
-        self.stmt(start, Statement::DoWhile {
+        self.stmt(start, StatementKind::DoWhile {
             test: Box::new(test),
             body: Box::new(body),
         })
     }
 
-    fn parse_for_statement(&mut self) -> Stmt {
+    fn parse_for_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::For);
 
@@ -400,7 +400,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             };
-            let result = self.stmt(start, Statement::ForIn {
+            let result = self.stmt(start, StatementKind::ForIn {
                 lhs,
                 rhs: Box::new(rhs),
                 body: Box::new(body),
@@ -456,14 +456,14 @@ impl<'a> Parser<'a> {
                     }
                 };
                 if is_await {
-                    let result = self.stmt(start, Statement::ForAwaitOf {
+                    let result = self.stmt(start, StatementKind::ForAwaitOf {
                         lhs,
                         rhs: Box::new(rhs),
                         body: Box::new(body),
                     });
                     return self.close_for_loop_scope(start, result);
                 }
-                let result = self.stmt(start, Statement::ForOf {
+                let result = self.stmt(start, StatementKind::ForOf {
                     lhs,
                     rhs: Box::new(rhs),
                     body: Box::new(body),
@@ -474,7 +474,7 @@ impl<'a> Parser<'a> {
 
         // Standard for loop — const requires initializer.
         if let ForInit::Declaration(ref decl) = init {
-            if let Statement::VariableDeclaration { kind: DeclarationKind::Const, ref declarations } = decl.inner {
+            if let StatementKind::VariableDeclaration { kind: DeclarationKind::Const, ref declarations } = decl.inner {
                 for d in declarations {
                     if d.init.is_none() {
                         self.syntax_error("Missing initializer in const declaration");
@@ -487,7 +487,7 @@ impl<'a> Parser<'a> {
             ForInit::Declaration(decl) => Some(Box::new(decl)),
             ForInit::Expression(expr) => {
                 let range = expr.range;
-                Some(Box::new(Stmt::new(range, Statement::Expression(Box::new(expr)))))
+                Some(Box::new(Statement::new(range, StatementKind::Expression(Box::new(expr)))))
             }
         };
         let result = self.parse_standard_for_loop(start, init_stmt);
@@ -496,14 +496,14 @@ impl<'a> Parser<'a> {
 
     /// Close the for-loop scope and wrap the for-loop statement in a Block
     /// with scope data.
-    fn close_for_loop_scope(&mut self, start: Position, inner: Stmt) -> Stmt {
+    fn close_for_loop_scope(&mut self, start: Position, inner: Statement) -> Statement {
         let scope = ScopeData::shared_with_children(vec![inner]);
         self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
-        self.stmt(start, Statement::Block(scope))
+        self.stmt(start, StatementKind::Block(scope))
     }
 
-    fn parse_standard_for_loop(&mut self, start: Position, init: Option<Box<Stmt>>) -> Stmt {
+    fn parse_standard_for_loop(&mut self, start: Position, init: Option<Box<Statement>>) -> Statement {
         let test = if self.match_token(TokenType::Semicolon) {
             None
         } else {
@@ -528,7 +528,7 @@ impl<'a> Parser<'a> {
         self.flags.in_break_context = break_before;
         self.flags.in_continue_context = continue_before;
 
-        self.stmt(start, Statement::For {
+        self.stmt(start, StatementKind::For {
             init,
             test,
             update,
@@ -536,7 +536,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_with_statement(&mut self) -> Stmt {
+    fn parse_with_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::With);
         self.consume_token(TokenType::ParenOpen);
@@ -545,13 +545,13 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_with_scope(None);
         let body = self.parse_statement(false);
         self.scope_collector.close_scope();
-        self.stmt(start, Statement::With {
+        self.stmt(start, StatementKind::With {
             object: Box::new(object),
             body: Box::new(body),
         })
     }
 
-    fn parse_switch_statement(&mut self) -> Stmt {
+    fn parse_switch_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Switch);
         self.consume_token(TokenType::ParenOpen);
@@ -579,7 +579,7 @@ impl<'a> Parser<'a> {
         self.scope_collector.set_scope_node(scope.clone());
         self.scope_collector.close_scope();
 
-        self.stmt(start, Statement::Switch(SwitchStatementData {
+        self.stmt(start, StatementKind::Switch(SwitchStatementData {
             scope,
             discriminant: Box::new(discriminant),
             cases,
@@ -621,7 +621,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_try_statement(&mut self) -> Stmt {
+    fn parse_try_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::Try);
 
@@ -644,7 +644,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("try statement must have a catch or finally clause");
         }
 
-        self.stmt(start, Statement::Try(TryStatementData {
+        self.stmt(start, StatementKind::Try(TryStatementData {
             block: Box::new(block),
             handler,
             finalizer,
@@ -698,7 +698,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn try_parse_labelled_statement(&mut self, allow_labelled_function: bool) -> Option<Stmt> {
+    fn try_parse_labelled_statement(&mut self, allow_labelled_function: bool) -> Option<Statement> {
         let start = self.position();
 
         if !self.match_identifier_name() {
@@ -762,7 +762,7 @@ impl<'a> Parser<'a> {
         self.flags.in_break_context = break_before;
         self.last_inner_label_is_iteration = is_iteration;
 
-        Some(self.stmt(start, Statement::Labelled {
+        Some(self.stmt(start, StatementKind::Labelled {
             label,
             item: Box::new(body),
         }))
