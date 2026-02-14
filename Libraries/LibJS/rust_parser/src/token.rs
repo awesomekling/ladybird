@@ -415,10 +415,11 @@ impl TokenType {
     }
 
     pub fn is_identifier_name(self) -> bool {
-        matches!(
-            self.category(),
-            TokenCategory::Identifier | TokenCategory::Keyword | TokenCategory::ControlKeyword
-        )
+        self != TokenType::PrivateIdentifier
+            && matches!(
+                self.category(),
+                TokenCategory::Identifier | TokenCategory::Keyword | TokenCategory::ControlKeyword
+            )
     }
 }
 
