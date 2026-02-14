@@ -578,7 +578,7 @@ static void cascade_custom_properties(DOM::AbstractElement abstract_element, Vec
     custom_properties.update(important_custom_properties);
 }
 
-void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element, GC::Ref<Animations::KeyframeEffect> effect, ComputedProperties& computed_properties) const
+void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element, GC::Ref<Animations::KeyframeEffect> effect, ComputedProperties& computed_properties, AnimatedPropertyData& animated_data) const
 {
     auto animation = effect->associated_animation();
     if (!animation)
@@ -795,7 +795,7 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
 
         if (!resolved_end_property) {
             if (resolved_start_property) {
-                computed_properties.set_animated_property(it.key, *resolved_start_property, is_result_of_transition);
+                animated_data.set(it.key, *resolved_start_property, is_result_of_transition);
                 dbgln_if(LIBWEB_CSS_ANIMATION_DEBUG, "No end property for property {}, using {}", string_from_property_id(it.key), resolved_start_property->to_string(SerializationMode::Normal));
             }
             continue;
@@ -825,11 +825,11 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
 
         if (auto next_value = interpolate_property(*effect->target(), it.key, *start, *end, progress_in_keyframe, AllowDiscrete::Yes)) {
             dbgln_if(LIBWEB_CSS_ANIMATION_DEBUG, "Interpolated value for property {} at {}: {} -> {} = {}", string_from_property_id(it.key), progress_in_keyframe, start->to_string(SerializationMode::Normal), end->to_string(SerializationMode::Normal), next_value->to_string(SerializationMode::Normal));
-            computed_properties.set_animated_property(it.key, *next_value, is_result_of_transition);
+            animated_data.set(it.key, *next_value, is_result_of_transition);
         } else {
             // If interpolate_property() fails, the element should not be rendered
             dbgln_if(LIBWEB_CSS_ANIMATION_DEBUG, "Interpolated value for property {} at {}: {} -> {} is invalid", string_from_property_id(it.key), progress_in_keyframe, start->to_string(SerializationMode::Normal), end->to_string(SerializationMode::Normal));
-            computed_properties.set_animated_property(PropertyID::Visibility, KeywordStyleValue::create(Keyword::Hidden), is_result_of_transition);
+            animated_data.set(PropertyID::Visibility, KeywordStyleValue::create(Keyword::Hidden), is_result_of_transition);
         }
     }
 }
@@ -985,7 +985,7 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
             auto transition = CSSTransition::start_a_transition(abstract_element, property_id,
                 document().transition_generation(), delay, start_time, end_time, start_value, end_value, reversing_adjusted_start_value, reversing_shortening_factor);
             // Immediately set the property's value to the transition's current value, to prevent single-frame jumps.
-            collect_animation_into(abstract_element, as<Animations::KeyframeEffect>(*transition->effect()), new_style);
+            collect_animation_into(abstract_element, as<Animations::KeyframeEffect>(*transition->effect()), new_style, new_style.mutable_animated_property_data());
         };
 
         // 1. If all of the following are true:
@@ -2410,7 +2410,7 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
             if (auto effect = animation->effect(); effect && effect->is_keyframe_effect()) {
                 auto& keyframe_effect = *static_cast<Animations::KeyframeEffect*>(effect.ptr());
                 if (keyframe_effect.pseudo_element_type() == abstract_element.pseudo_element())
-                    collect_animation_into(abstract_element, keyframe_effect, computed_style);
+                    collect_animation_into(abstract_element, keyframe_effect, computed_style, computed_style->mutable_animated_property_data());
             }
         }
     }

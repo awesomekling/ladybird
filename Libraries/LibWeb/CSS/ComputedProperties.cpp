@@ -85,6 +85,18 @@ void AnimatedPropertyData::set_result_of_transition(PropertyID property_id, bool
         result_of_transition[n / 8] &= ~(1 << (n % 8));
 }
 
+void AnimatedPropertyData::set(PropertyID property_id, NonnullRefPtr<StyleValue const> value, AnimatedPropertyResultOfTransition result_of_transition, bool inherited)
+{
+    values.set(property_id, move(value));
+    set_inherited(property_id, inherited);
+    set_result_of_transition(property_id, result_of_transition == AnimatedPropertyResultOfTransition::Yes);
+}
+
+void AnimatedPropertyData::remove(PropertyID property_id)
+{
+    values.remove(property_id);
+}
+
 void AnimatedPropertyData::reset_non_inherited_properties()
 {
     for (auto property_id : values.keys()) {

@@ -955,7 +955,7 @@ void KeyframeEffect::update_computed_properties(AnimationUpdateContext& context)
         return make<AnimationUpdateContext::ElementData>(move(old_animated_properties), computed_properties);
     });
 
-    target->document().style_computer().collect_animation_into(abstract_element, *this, *computed_properties);
+    target->document().style_computer().collect_animation_into(abstract_element, *this, *computed_properties, computed_properties->mutable_animated_property_data());
 }
 
 Bindings::CompositeOperation css_animation_composition_to_bindings_composite_operation(CSS::AnimationComposition composition)

@@ -121,7 +121,7 @@ public:
 
     void set_viewport_rect(Badge<DOM::Document>, CSSPixelRect const& viewport_rect) { m_viewport_rect = viewport_rect; }
 
-    void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect> animation, ComputedProperties&) const;
+    void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect> animation, ComputedProperties&, AnimatedPropertyData&) const;
 
     [[nodiscard]] NonnullRefPtr<ComputedProperties> compute_properties(DOM::AbstractElement, CascadedProperties&) const;
 

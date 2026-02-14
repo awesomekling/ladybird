@@ -48,6 +48,8 @@ struct AnimatedPropertyData {
     void set_inherited(PropertyID, bool);
     void set_result_of_transition(PropertyID, bool);
 
+    void set(PropertyID, NonnullRefPtr<StyleValue const>, AnimatedPropertyResultOfTransition, bool inherited = false);
+    void remove(PropertyID);
     void reset_non_inherited_properties();
 };
 
@@ -75,7 +77,14 @@ public:
     void set_external_animated_data(AnimatedPropertyData* data) { m_external_animated_data = data; }
 
     AnimatedPropertyData const& animated_property_data() const { return m_external_animated_data ? *m_external_animated_data : m_animated_properties; }
+    AnimatedPropertyData& mutable_animated_property_data() { return m_external_animated_data ? *m_external_animated_data : m_animated_properties; }
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> const& animated_property_values() const { return animated_property_data().values; }
+
+    void clear_computed_font_list_cache()
+    {
+        m_cached_computed_font_list = nullptr;
+        m_cached_first_available_computed_font = nullptr;
+    }
     void reset_non_inherited_animated_properties(Badge<Animations::KeyframeEffect>);
 
     bool is_property_important(PropertyID property_id) const;
@@ -313,11 +322,6 @@ private:
 
     RefPtr<Gfx::FontCascadeList const> m_cached_computed_font_list;
     RefPtr<Gfx::Font const> m_cached_first_available_computed_font;
-    void clear_computed_font_list_cache()
-    {
-        m_cached_computed_font_list = nullptr;
-        m_cached_first_available_computed_font = nullptr;
-    }
 
     Optional<CSSPixels> m_line_height;
 
