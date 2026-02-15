@@ -32,6 +32,13 @@ pub fn generate_expr(
     gen.current_source_start = expr.range.start.offset;
     gen.current_source_end = expr.range.end.offset;
 
+    // NamedEvaluation: only function/class expressions consume pending_lhs_name.
+    // Clear it for all other expression types so it doesn't leak through to
+    // nested function expressions (e.g. IIFEs: `let x = (function() { ... })()`).
+    if !matches!(expr.inner, ExpressionKind::Function(_) | ExpressionKind::Class(_)) {
+        gen.pending_lhs_name = None;
+    }
+
     let result = match &expr.inner {
         // === Literals ===
         ExpressionKind::NumericLiteral(value) => Some(gen.add_constant_number(*value)),
@@ -191,8 +198,6 @@ pub fn generate_expr(
 
         // === Logical (short-circuit) ===
         ExpressionKind::Logical { op, lhs, rhs } => {
-            // Logical expressions are not named evaluations.
-            gen.pending_lhs_name = None;
             generate_logical(gen, *op, lhs, rhs, preferred_dst)
         }
 
@@ -202,15 +207,11 @@ pub fn generate_expr(
             consequent,
             alternate,
         } => {
-            // Conditional expressions are not named evaluations.
-            gen.pending_lhs_name = None;
             generate_conditional(gen, test, consequent, alternate, preferred_dst)
         }
 
         // === Sequence ===
         ExpressionKind::Sequence(exprs) => {
-            // Sequence expressions are not named evaluations.
-            gen.pending_lhs_name = None;
             let mut last = None;
             for expr in exprs {
                 last = generate_expr(expr, gen, None);
@@ -293,9 +294,6 @@ pub fn generate_expr(
 
         // === Array ===
         ExpressionKind::Array(elements) => {
-            // Array literals are not named evaluations.
-            gen.pending_lhs_name = None;
-
             // If all elements are constant primitives, emit NewPrimitiveArray.
             if !elements.is_empty() && elements.iter().all(|e| match e {
                 None => true, // holes
