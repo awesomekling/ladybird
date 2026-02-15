@@ -74,7 +74,7 @@ pub fn generate_expr(
             // OPTIMIZATION: When function_environment_needed is false, the `this`
             // value is inherited from the outer function and already in the register.
             if gen.function_environment_needed {
-                gen.emit(Instruction::ResolveThisBinding);
+                emit_resolve_this_if_needed(gen);
             }
             Some(gen.this_value())
         }
@@ -2664,8 +2664,7 @@ fn generate_call_expression(
                 // For super.method(), the this value should be the
                 // current this binding, not the super base.
                 let this_val = if is_super {
-                    gen.emit(Instruction::ResolveThisBinding);
-                    gen.this_value()
+                    emit_resolve_this_binding(gen)
                 } else {
                     obj
                 };
@@ -3344,10 +3343,26 @@ fn generate_assignment_expression(
     }
 }
 
-/// Emit ResolveThisBinding and return the this value register.
+/// Emit ResolveThisBinding (if not already resolved in current block) and return
+/// the this value register.
 fn emit_resolve_this_binding(gen: &mut Generator) -> ScopedOperand {
-    gen.emit(Instruction::ResolveThisBinding);
+    emit_resolve_this_if_needed(gen);
     gen.this_value()
+}
+
+/// Emit ResolveThisBinding only if not already resolved in the current or entry block.
+fn emit_resolve_this_if_needed(gen: &mut Generator) {
+    let idx = gen.current_block_index();
+    if gen.basic_blocks[idx].resolved_this {
+        return;
+    }
+    if gen.basic_blocks[0].resolved_this {
+        gen.basic_blocks[idx].resolved_this = true;
+        return;
+    }
+    gen.emit(Instruction::ResolveThisBinding);
+    let idx = gen.current_block_index();
+    gen.basic_blocks[idx].resolved_this = true;
 }
 
 /// Emit a super property get (uses WithThis variants).

@@ -24,6 +24,7 @@ pub struct BasicBlock {
     pub instructions: Vec<(Instruction, SourceMapEntry)>,
     pub handler: Option<usize>,
     pub terminated: bool,
+    pub resolved_this: bool,
 }
 
 impl BasicBlock {
@@ -33,6 +34,7 @@ impl BasicBlock {
             instructions: Vec::new(),
             handler: None,
             terminated: false,
+            resolved_this: false,
         }
     }
 
