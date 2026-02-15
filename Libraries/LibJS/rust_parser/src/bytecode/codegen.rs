@@ -5299,23 +5299,24 @@ fn generate_for_in_statement(
         }
     }
 
+    // Match C++ block creation order: end_block and update_block first,
+    // then nullish_block and continuation_block during head evaluation.
+    let end_block = gen.make_block();
+    let update_block = gen.make_block();
+    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
+
+    // B.3.5 Initializers in ForIn Statement Heads: evaluate initializer before RHS.
     // Create TDZ for lexical declarations before evaluating the RHS expression.
     let entered_tdz = enter_for_in_of_head_tdz(gen, lhs);
     let object = generate_expr_or_undefined(rhs, gen, None);
     if entered_tdz {
         leave_for_in_of_head_tdz(gen);
     }
-    let end_block = gen.make_block();
-    let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    // Allocate iterator registers (matching C++ order in for_in_of_head_evaluation).
+    let iterator_object = gen.allocate_register();
+    let iterator_next_method = gen.allocate_register();
+    let iterator_done = gen.allocate_register();
 
     // Check for null/undefined
     let nullish_block = gen.make_block();
@@ -5334,9 +5335,6 @@ fn generate_for_in_statement(
     gen.switch_to_basic_block(continue_block);
 
     // Get property iterator
-    let iterator_object = gen.allocate_register();
-    let iterator_next_method = gen.allocate_register();
-    let iterator_done = gen.allocate_register();
     gen.emit(Instruction::GetObjectPropertyIterator {
         dst_iterator_object: iterator_object.operand(),
         dst_iterator_next: iterator_next_method.operand(),
@@ -5344,8 +5342,16 @@ fn generate_for_in_statement(
         object: object.operand(),
     });
 
-    let loop_block = gen.make_block();
-    let update_block = gen.make_block();
+    // Body evaluation: completion, then jump to update block.
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
+
     gen.emit(Instruction::Jump {
         target: Label(update_block as u32),
     });
@@ -5376,13 +5382,7 @@ fn generate_for_in_statement(
     // Assign to LHS
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
-    // Jump to body
-    gen.emit(Instruction::Jump {
-        target: Label(loop_block as u32),
-    });
-
     // Body — use cleanup blocks for break/continue if we have a lexical env.
-    gen.switch_to_basic_block(loop_block);
     let (break_target, continue_target) = if needs_lexical_env {
         (gen.make_block(), gen.make_block())
     } else {
