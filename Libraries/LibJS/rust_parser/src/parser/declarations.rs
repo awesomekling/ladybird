@@ -1458,16 +1458,8 @@ impl<'a> Parser<'a> {
                     statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
                 }
             } else if self.match_expression() {
-                let special_case = self.match_token(TokenType::Class)
-                    || self.match_token(TokenType::Function)
-                    || (self.match_token(TokenType::Async) && {
-                        let nt = self.next_token();
-                        nt.token_type == TokenType::Function && !nt.trivia_has_line_terminator
-                    });
                 let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-                if !special_case {
-                    self.consume_or_insert_semicolon();
-                }
+                self.consume_or_insert_semicolon();
                 let expr_range = expr.range;
                 statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
             } else {

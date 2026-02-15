@@ -393,14 +393,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn consume_and_allow_division(&mut self) -> Token {
-        let old = std::mem::replace(&mut self.current_token, self.lexer.next());
-        self.check_arguments_or_eval(&old);
-        self.flags.previous_token_was_period = old.token_type == TokenType::Period;
-        old
-    }
-
     fn check_arguments_or_eval(&mut self, token: &Token) {
         if token.token_type == TokenType::Identifier && !self.flags.previous_token_was_period {
             let value: &[u16] = if let Some(ref v) = token.identifier_value {

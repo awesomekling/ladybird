@@ -122,7 +122,6 @@ pub struct Generator {
     // --- Basic block management ---
     pub basic_blocks: Vec<BasicBlock>,
     current_block_index: usize,
-    next_block_id: u32,
 
     // --- Register allocation ---
     next_register: u32,
@@ -240,7 +239,6 @@ impl Generator {
         Self {
             basic_blocks: Vec::new(),
             current_block_index: 0,
-            next_block_id: 1,
             next_register: Register::RESERVED_COUNT,
             constants: Vec::new(),
             true_constant: None,
@@ -517,7 +515,6 @@ impl Generator {
         }
 
         self.basic_blocks.push(block);
-        self.next_block_id += 1;
         index
     }
 
@@ -798,14 +795,13 @@ impl Generator {
     }
 
     /// For break/continue through nested finally: create a trampoline block.
-    fn emit_trampoline_through_finally(&mut self, is_break: bool) {
+    fn emit_trampoline_through_finally(&mut self) {
         let trampoline_block = self.make_block();
         self.register_jump_in_finally_context(Label(trampoline_block as u32));
         self.switch_to_basic_block(trampoline_block);
         // Pop to the parent FinallyContext (simulating the inner finally completing).
         let index = self.current_finally_context.unwrap();
         self.current_finally_context = self.finally_contexts[index].parent_index;
-        let _ = is_break;
     }
 
     /// Generate a break, walking boundaries and handling FinallyContext.
@@ -888,7 +884,7 @@ impl Generator {
                         self.current_finally_context = saved_ctx;
                         return;
                     }
-                    self.emit_trampoline_through_finally(is_break);
+                    self.emit_trampoline_through_finally();
                 }
                 _ => {}
             }
@@ -943,7 +939,7 @@ impl Generator {
                             self.current_finally_context = saved_ctx;
                             return;
                         }
-                        self.emit_trampoline_through_finally(is_break);
+                        self.emit_trampoline_through_finally();
                     }
                     b if (is_break && b == BlockBoundaryType::Break)
                         || (!is_break && b == BlockBoundaryType::Continue) =>
@@ -1171,7 +1167,6 @@ impl Generator {
                         offset += inst.encoded_size();
                     }
                 }
-                let _ = inst_idx;
             }
             // Unterminated blocks get an implicit End(undefined) appended.
             if !block.terminated {
