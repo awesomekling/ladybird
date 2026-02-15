@@ -172,7 +172,7 @@ private:
     [[nodiscard]] RefPtr<ComputedProperties> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&) const;
     [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, bool did_match_any_pseudo_element_rules, ComputeStyleMode, MatchingRuleSet const&, Optional<LogicalAliasMappingContext>, ReadonlySpan<PropertyID> properties_to_cascade) const;
     void compute_custom_properties(ComputedProperties&, DOM::AbstractElement) const;
-    void start_needed_transitions(ComputedProperties const& old_style, ComputedProperties& new_style, DOM::AbstractElement) const;
+    void start_needed_transitions(ComputedValues const& old_values, ComputedProperties& new_style, DOM::AbstractElement) const;
     void resolve_effective_overflow_values(ComputedProperties&) const;
     void transform_box_type_if_needed(ComputedProperties&, DOM::AbstractElement) const;
 

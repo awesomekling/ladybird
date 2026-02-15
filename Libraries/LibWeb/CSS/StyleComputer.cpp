@@ -952,7 +952,7 @@ static void compute_transitioned_properties(ComputedProperties const& style, DOM
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
-void StyleComputer::start_needed_transitions(ComputedProperties const& previous_style, ComputedProperties& new_style, DOM::AbstractElement abstract_element) const
+void StyleComputer::start_needed_transitions(ComputedValues const& old_values, ComputedProperties& new_style, DOM::AbstractElement abstract_element) const
 {
     // https://drafts.csswg.org/css-transitions/#transition-combined-duration
     auto combined_duration = [](Animations::Animatable::TransitionAttributes const& transition_attributes) {
@@ -969,11 +969,25 @@ void StyleComputer::start_needed_transitions(ComputedProperties const& previous_
     auto& element = abstract_element.element();
     auto pseudo_element = abstract_element.pseudo_element();
 
+    // Read the before-change value from ComputedValues, with animated overrides applied.
+    auto const* animated_data = abstract_element.animated_property_data();
+    auto get_before_change_value = [&old_values, animated_data](PropertyID property_id) -> StyleValue const& {
+        if (animated_data) {
+            if (!old_values.is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                if (auto it = animated_data->values.find(property_id); it != animated_data->values.end())
+                    return *it->value;
+            }
+        }
+        if (auto value = old_values.property_value(property_id))
+            return *value;
+        return *property_initial_value(property_id);
+    };
+
     // OPTIMIZATION: Instead of iterating over all properties we split the logic into two loops, one for the properties
     //               which appear in transition-property and one for those which have existing transitions
     for (auto property_id : element.property_ids_with_matching_transition_property_entry(pseudo_element)) {
         auto matching_transition_properties = element.property_transition_attributes(pseudo_element, property_id).value();
-        auto const& before_change_value = previous_style.property(property_id, ComputedProperties::WithAnimationsApplied::Yes);
+        auto const& before_change_value = get_before_change_value(property_id);
         auto const& after_change_value = new_style.property(property_id, ComputedProperties::WithAnimationsApplied::No);
 
         auto existing_transition = element.property_transition(pseudo_element, property_id);
@@ -2489,8 +2503,8 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
     // Transition declarations [css-transitions-1]
     // Theoretically this should be part of the cascade, but it works with computed values, which we don't have until now.
     compute_transitioned_properties(computed_style, abstract_element);
-    if (auto previous_style = abstract_element.computed_properties()) {
-        start_needed_transitions(*previous_style, computed_style, abstract_element);
+    if (auto const* previous_values = abstract_element.computed_values()) {
+        start_needed_transitions(*previous_values, computed_style, abstract_element);
         computed_style->clear_computed_font_list_cache();
     }
 
