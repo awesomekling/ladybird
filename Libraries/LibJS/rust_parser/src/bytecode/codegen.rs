@@ -1839,7 +1839,7 @@ fn generate_conditional(
     let dst = choose_dst(gen, preferred_dst);
 
     gen.switch_to_basic_block(true_block);
-    let cons_val = generate_expr(consequent, gen, Some(&dst));
+    let cons_val = generate_expr(consequent, gen, None);
     if let Some(val) = &cons_val {
         gen.emit_mov(&dst, val);
     }
@@ -1850,7 +1850,7 @@ fn generate_conditional(
     }
 
     gen.switch_to_basic_block(false_block);
-    let alt_val = generate_expr(alternate, gen, Some(&dst));
+    let alt_val = generate_expr(alternate, gen, None);
     if let Some(val) = &alt_val {
         gen.emit_mov(&dst, val);
     }
@@ -1939,6 +1939,9 @@ fn generate_if_statement(
             target: Label(end_block as u32),
         });
     }
+    // Drop cons_result before generating alternate to match C++ register
+    // lifetime behavior (C++ build_block lambda drops value on exit).
+    drop(cons_result);
     gen.current_completion_register = saved_completion.clone();
 
     // Alternate
@@ -5360,6 +5363,8 @@ fn generate_for_in_statement(
         dst_iterator_done: iterator_done.operand(),
         object: object.operand(),
     });
+    // Drop `object` to match C++ lifetime (freed when for_in_of_head_evaluation returns).
+    drop(object);
 
     // Body evaluation: completion, then jump to update block.
     let completion = if gen.must_propagate_completion {
