@@ -49,7 +49,7 @@ void SVGForeignObjectElement::visit_edges(Cell::Visitor& visitor)
 
 GC::Ptr<Layout::Node> SVGForeignObjectElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGForeignObjectBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGForeignObjectBox>(document(), *this);
 }
 
 GC::Ref<SVG::SVGAnimatedLength> SVGForeignObjectElement::x()

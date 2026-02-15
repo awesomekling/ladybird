@@ -21,6 +21,11 @@ public:
     HTML::FormAssociatedElement& dom_node() { return as<HTML::FormAssociatedElement>(LabelableNode::dom_node()); }
 
 protected:
+    FormAssociatedLabelableNode(DOM::Document& document, HTML::FormAssociatedElement& element)
+        : LabelableNode(document, element.form_associated_element_to_html_element())
+    {
+    }
+
     FormAssociatedLabelableNode(DOM::Document& document, HTML::FormAssociatedElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
         : LabelableNode(document, element.form_associated_element_to_html_element(), move(style))
     {

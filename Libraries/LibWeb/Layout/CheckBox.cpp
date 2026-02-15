@@ -13,8 +13,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(CheckBox);
 
-CheckBox::CheckBox(DOM::Document& document, HTML::HTMLInputElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : FormAssociatedLabelableNode(document, element, move(style))
+CheckBox::CheckBox(DOM::Document& document, HTML::HTMLInputElement& element)
+    : FormAssociatedLabelableNode(document, element)
 {
 }
 

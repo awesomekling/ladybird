@@ -10,8 +10,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(LegendBox);
 
-LegendBox::LegendBox(DOM::Document& document, DOM::Element& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : BlockContainer(document, &element, move(style))
+LegendBox::LegendBox(DOM::Document& document, DOM::Element& element)
+    : BlockContainer(document, element)
 {
 }
 

@@ -17,7 +17,7 @@ class SVGMaskBox : public SVGGraphicsBox {
     GC_DECLARE_ALLOCATOR(SVGMaskBox);
 
 public:
-    SVGMaskBox(DOM::Document&, SVG::SVGMaskElement&, NonnullRefPtr<CSS::ComputedProperties>);
+    SVGMaskBox(DOM::Document&, SVG::SVGMaskElement&);
     virtual ~SVGMaskBox() override = default;
 
     virtual bool is_svg_mask_box() const override { return true; }

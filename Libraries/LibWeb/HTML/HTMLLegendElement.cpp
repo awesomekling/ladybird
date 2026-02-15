@@ -42,7 +42,7 @@ HTMLFormElement* HTMLLegendElement::form()
 
 GC::Ptr<Layout::Node> HTMLLegendElement::create_layout_node()
 {
-    return heap().allocate<Layout::LegendBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::LegendBox>(document(), *this);
 }
 
 Layout::LegendBox* HTMLLegendElement::layout_node()

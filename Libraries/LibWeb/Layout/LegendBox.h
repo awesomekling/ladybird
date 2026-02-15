@@ -16,7 +16,7 @@ class LegendBox final : public BlockContainer {
     GC_DECLARE_ALLOCATOR(LegendBox);
 
 public:
-    LegendBox(DOM::Document&, DOM::Element&, NonnullRefPtr<CSS::ComputedProperties>);
+    LegendBox(DOM::Document&, DOM::Element&);
     virtual ~LegendBox() override;
 
     DOM::Element& dom_node() { return static_cast<DOM::Element&>(*Box::dom_node()); }

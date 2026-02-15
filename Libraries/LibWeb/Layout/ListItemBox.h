@@ -16,6 +16,7 @@ class ListItemBox final : public BlockContainer {
     GC_DECLARE_ALLOCATOR(ListItemBox);
 
 public:
+    ListItemBox(DOM::Document&, DOM::Element&);
     ListItemBox(DOM::Document&, DOM::Element*, NonnullRefPtr<CSS::ComputedProperties>);
     virtual ~ListItemBox() override;
 

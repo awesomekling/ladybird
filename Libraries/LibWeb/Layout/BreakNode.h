@@ -16,7 +16,7 @@ class BreakNode final : public NodeWithStyleAndBoxModelMetrics {
     GC_DECLARE_ALLOCATOR(BreakNode);
 
 public:
-    BreakNode(DOM::Document&, HTML::HTMLBRElement&, NonnullRefPtr<CSS::ComputedProperties>);
+    BreakNode(DOM::Document&, HTML::HTMLBRElement&);
     virtual ~BreakNode() override;
 
     HTML::HTMLBRElement const& dom_node() const { return as<HTML::HTMLBRElement>(*Node::dom_node()); }

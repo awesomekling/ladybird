@@ -15,8 +15,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(SVGSVGBox);
 
-SVGSVGBox::SVGSVGBox(DOM::Document& document, SVG::SVGSVGElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : ReplacedBox(document, element, style)
+SVGSVGBox::SVGSVGBox(DOM::Document& document, SVG::SVGSVGElement& element)
+    : ReplacedBox(document, element)
 {
 }
 

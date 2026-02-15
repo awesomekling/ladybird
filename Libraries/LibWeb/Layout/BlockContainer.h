@@ -17,6 +17,7 @@ class BlockContainer : public Box {
     GC_DECLARE_ALLOCATOR(BlockContainer);
 
 public:
+    BlockContainer(DOM::Document&, DOM::Element&);
     BlockContainer(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     BlockContainer(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
     virtual ~BlockContainer() override;

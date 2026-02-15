@@ -30,7 +30,7 @@ void HTMLBRElement::initialize(JS::Realm& realm)
 
 GC::Ptr<Layout::Node> HTMLBRElement::create_layout_node()
 {
-    return heap().allocate<Layout::BreakNode>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::BreakNode>(document(), *this);
 }
 
 bool HTMLBRElement::is_presentational_hint(FlyString const& name) const

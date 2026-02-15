@@ -17,8 +17,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(NavigableContainerViewport);
 
-NavigableContainerViewport::NavigableContainerViewport(DOM::Document& document, HTML::NavigableContainer& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : ReplacedBox(document, element, move(style))
+NavigableContainerViewport::NavigableContainerViewport(DOM::Document& document, HTML::NavigableContainer& element)
+    : ReplacedBox(document, element)
 {
 }
 

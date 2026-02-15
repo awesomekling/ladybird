@@ -28,7 +28,7 @@ void HTMLAudioElement::initialize(JS::Realm& realm)
 
 GC::Ptr<Layout::Node> HTMLAudioElement::create_layout_node()
 {
-    return heap().allocate<Layout::AudioBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::AudioBox>(document(), *this);
 }
 
 Layout::AudioBox* HTMLAudioElement::layout_node()

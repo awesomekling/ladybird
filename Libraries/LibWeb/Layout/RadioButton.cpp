@@ -14,8 +14,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(RadioButton);
 
-RadioButton::RadioButton(DOM::Document& document, HTML::HTMLInputElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : FormAssociatedLabelableNode(document, element, move(style))
+RadioButton::RadioButton(DOM::Document& document, HTML::HTMLInputElement& element)
+    : FormAssociatedLabelableNode(document, element)
 {
 }
 

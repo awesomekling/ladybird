@@ -209,7 +209,7 @@ void SVGImageElement::fetch_the_document(URL::URL const& url)
 
 GC::Ptr<Layout::Node> SVGImageElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGImageBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGImageBox>(document(), *this);
 }
 
 bool SVGImageElement::is_image_available() const

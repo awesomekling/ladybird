@@ -13,8 +13,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(VideoBox);
 
-VideoBox::VideoBox(DOM::Document& document, DOM::Element& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : ReplacedBox(document, element, move(style))
+VideoBox::VideoBox(DOM::Document& document, DOM::Element& element)
+    : ReplacedBox(document, element)
 {
     document.register_viewport_client(*this);
 }

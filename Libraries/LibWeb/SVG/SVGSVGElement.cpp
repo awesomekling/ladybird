@@ -47,7 +47,7 @@ void SVGSVGElement::visit_edges(Visitor& visitor)
 
 GC::Ptr<Layout::Node> SVGSVGElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGSVGBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGSVGBox>(document(), *this);
 }
 
 RefPtr<CSS::StyleValue const> SVGSVGElement::width_style_value_from_attribute() const

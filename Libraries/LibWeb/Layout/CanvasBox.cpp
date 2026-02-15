@@ -11,8 +11,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(CanvasBox);
 
-CanvasBox::CanvasBox(DOM::Document& document, HTML::HTMLCanvasElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : ReplacedBox(document, element, move(style))
+CanvasBox::CanvasBox(DOM::Document& document, HTML::HTMLCanvasElement& element)
+    : ReplacedBox(document, element)
 {
 }
 

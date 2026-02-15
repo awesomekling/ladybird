@@ -17,7 +17,7 @@ class SVGTextBox final : public SVGGraphicsBox {
     GC_DECLARE_ALLOCATOR(SVGTextBox);
 
 public:
-    SVGTextBox(DOM::Document&, SVG::SVGTextPositioningElement&, NonnullRefPtr<CSS::ComputedProperties>);
+    SVGTextBox(DOM::Document&, SVG::SVGTextPositioningElement&);
     virtual ~SVGTextBox() override = default;
 
     SVG::SVGTextPositioningElement& dom_node() { return static_cast<SVG::SVGTextPositioningElement&>(SVGGraphicsBox::dom_node()); }

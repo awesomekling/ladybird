@@ -15,6 +15,12 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(ImageBox);
 
+ImageBox::ImageBox(DOM::Document& document, DOM::Element& element, ImageProvider const& image_provider)
+    : ReplacedBox(document, element)
+    , m_image_provider(image_provider)
+{
+}
+
 ImageBox::ImageBox(DOM::Document& document, GC::Ptr<DOM::Element> element, NonnullRefPtr<CSS::ComputedProperties> style, ImageProvider const& image_provider)
     : ReplacedBox(document, element, move(style))
     , m_image_provider(image_provider)

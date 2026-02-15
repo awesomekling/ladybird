@@ -635,9 +635,9 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
             // TODO: Implement changing element contents with the `content` property.
             if (context.layout_svg_mask_or_clip_path) {
                 if (is<SVG::SVGMaskElement>(dom_node))
-                    layout_node = document.heap().allocate<Layout::SVGMaskBox>(document, static_cast<SVG::SVGMaskElement&>(dom_node), *style);
+                    layout_node = document.heap().allocate<Layout::SVGMaskBox>(document, static_cast<SVG::SVGMaskElement&>(dom_node));
                 else if (is<SVG::SVGClipPathElement>(dom_node))
-                    layout_node = document.heap().allocate<Layout::SVGClipBox>(document, static_cast<SVG::SVGClipPathElement&>(dom_node), *style);
+                    layout_node = document.heap().allocate<Layout::SVGClipBox>(document, static_cast<SVG::SVGClipPathElement&>(dom_node));
                 else
                     VERIFY_NOT_REACHED();
                 // Only layout direct uses of SVG masks/clipPaths.

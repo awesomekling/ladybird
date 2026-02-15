@@ -30,7 +30,7 @@ void SVGGeometryElement::visit_edges(Cell::Visitor& visitor)
 
 GC::Ptr<Layout::Node> SVGGeometryElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGGeometryBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGGeometryBox>(document(), *this);
 }
 
 float SVGGeometryElement::get_total_length()

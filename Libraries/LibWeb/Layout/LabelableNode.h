@@ -22,6 +22,11 @@ public:
     DOM::Element& dom_node() { return *ReplacedBox::dom_node(); }
 
 protected:
+    LabelableNode(DOM::Document& document, DOM::Element& element)
+        : ReplacedBox(document, element)
+    {
+    }
+
     LabelableNode(DOM::Document& document, DOM::Element& element, NonnullRefPtr<CSS::ComputedProperties> style)
         : ReplacedBox(document, element, move(style))
     {

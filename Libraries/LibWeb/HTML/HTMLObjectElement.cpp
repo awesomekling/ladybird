@@ -193,10 +193,10 @@ GC::Ptr<Layout::Node> HTMLObjectElement::create_layout_node()
     case Representation::Children:
         return NavigableContainer::create_layout_node();
     case Representation::ContentNavigable:
-        return heap().allocate<Layout::NavigableContainerViewport>(document(), *this, *computed_properties());
+        return heap().allocate<Layout::NavigableContainerViewport>(document(), *this);
     case Representation::Image:
         if (image_data())
-            return heap().allocate<Layout::ImageBox>(document(), *this, *computed_properties(), *this);
+            return heap().allocate<Layout::ImageBox>(document(), *this, *this);
         break;
     default:
         break;

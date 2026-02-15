@@ -129,7 +129,7 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node()
     // NOTE: Image inputs are `appearance: none` per the default UA style,
     //       but we still need to create an ImageBox for them, or no image will get loaded.
     if (type_state() == TypeAttributeState::ImageButton) {
-        return heap().allocate<Layout::ImageBox>(document(), *this, move(style), *this);
+        return heap().allocate<Layout::ImageBox>(document(), *this, *this);
     }
 
     // https://drafts.csswg.org/css-ui/#appearance-switching
@@ -145,11 +145,11 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node()
     case TypeAttributeState::SubmitButton:
     case TypeAttributeState::Button:
     case TypeAttributeState::ResetButton:
-        return heap().allocate<Layout::BlockContainer>(document(), this, move(style));
+        return heap().allocate<Layout::BlockContainer>(document(), *this);
     case TypeAttributeState::Checkbox:
-        return heap().allocate<Layout::CheckBox>(document(), *this, move(style));
+        return heap().allocate<Layout::CheckBox>(document(), *this);
     case TypeAttributeState::RadioButton:
-        return heap().allocate<Layout::RadioButton>(document(), *this, move(style));
+        return heap().allocate<Layout::RadioButton>(document(), *this);
     case TypeAttributeState::Text:
     case TypeAttributeState::Search:
     case TypeAttributeState::URL:
@@ -158,7 +158,7 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node()
     case TypeAttributeState::Password:
     case TypeAttributeState::Number:
         // FIXME: text padding issues
-        return heap().allocate<Layout::TextInputBox>(document(), *this, move(style));
+        return heap().allocate<Layout::TextInputBox>(document(), *this);
     default:
         return Element::create_layout_node_for_display_type(document(), style->display(), move(style), this);
     }

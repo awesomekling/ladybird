@@ -25,7 +25,7 @@ void SVGTextElement::initialize(JS::Realm& realm)
 
 GC::Ptr<Layout::Node> SVGTextElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGTextBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGTextBox>(document(), *this);
 }
 
 }

@@ -16,7 +16,7 @@ class SVGSVGBox final : public ReplacedBox {
     GC_DECLARE_ALLOCATOR(SVGSVGBox);
 
 public:
-    SVGSVGBox(DOM::Document&, SVG::SVGSVGElement&, NonnullRefPtr<CSS::ComputedProperties>);
+    SVGSVGBox(DOM::Document&, SVG::SVGSVGElement&);
     virtual ~SVGSVGBox() override = default;
 
     SVG::SVGSVGElement& dom_node() { return as<SVG::SVGSVGElement>(*ReplacedBox::dom_node()); }

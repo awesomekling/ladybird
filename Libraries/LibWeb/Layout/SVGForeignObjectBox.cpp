@@ -12,8 +12,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(SVGForeignObjectBox);
 
-SVGForeignObjectBox::SVGForeignObjectBox(DOM::Document& document, SVG::SVGForeignObjectElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : BlockContainer(document, &element, style)
+SVGForeignObjectBox::SVGForeignObjectBox(DOM::Document& document, SVG::SVGForeignObjectElement& element)
+    : BlockContainer(document, element)
 {
 }
 

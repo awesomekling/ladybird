@@ -491,7 +491,7 @@ Optional<String> HTMLTextAreaElement::placeholder_value() const
 
 GC::Ptr<Layout::Node> HTMLTextAreaElement::create_layout_node()
 {
-    return heap().allocate<Layout::TextAreaBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::TextAreaBox>(document(), *this);
 }
 
 }

@@ -39,7 +39,7 @@ void HTMLIFrameElement::initialize(JS::Realm& realm)
 
 GC::Ptr<Layout::Node> HTMLIFrameElement::create_layout_node()
 {
-    return heap().allocate<Layout::NavigableContainerViewport>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::NavigableContainerViewport>(document(), *this);
 }
 
 void HTMLIFrameElement::attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_)

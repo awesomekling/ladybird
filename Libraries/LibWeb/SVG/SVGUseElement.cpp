@@ -296,7 +296,7 @@ GC::Ptr<SVGElement> SVGUseElement::animated_instance_root() const
 
 GC::Ptr<Layout::Node> SVGUseElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this);
 }
 
 }

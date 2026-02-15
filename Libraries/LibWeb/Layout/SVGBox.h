@@ -17,7 +17,7 @@ class SVGBox : public Box {
     GC_DECLARE_ALLOCATOR(SVGBox);
 
 public:
-    SVGBox(DOM::Document&, SVG::SVGElement&, NonnullRefPtr<CSS::ComputedProperties>);
+    SVGBox(DOM::Document&, SVG::SVGElement&);
     virtual ~SVGBox() override = default;
 
     SVG::SVGElement& dom_node() { return as<SVG::SVGElement>(*Box::dom_node()); }

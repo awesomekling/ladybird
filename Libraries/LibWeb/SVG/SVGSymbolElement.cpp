@@ -67,7 +67,7 @@ GC::Ptr<Layout::Node> SVGSymbolElement::create_layout_node()
     if (!is_direct_child_of_use_shadow_tree())
         return {};
 
-    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this, *computed_properties());
+    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this);
 }
 
 }

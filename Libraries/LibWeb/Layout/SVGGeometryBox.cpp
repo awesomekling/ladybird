@@ -14,8 +14,8 @@ namespace Web::Layout {
 
 GC_DEFINE_ALLOCATOR(SVGGeometryBox);
 
-SVGGeometryBox::SVGGeometryBox(DOM::Document& document, SVG::SVGGeometryElement& element, NonnullRefPtr<CSS::ComputedProperties> style)
-    : SVGGraphicsBox(document, element, style)
+SVGGeometryBox::SVGGeometryBox(DOM::Document& document, SVG::SVGGeometryElement& element)
+    : SVGGraphicsBox(document, element)
 {
 }
 

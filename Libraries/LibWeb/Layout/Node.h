@@ -294,6 +294,7 @@ public:
     void set_owned_computed_values(NonnullOwnPtr<CSS::ComputedValues>);
 
 protected:
+    NodeWithStyle(DOM::Document&, DOM::Element&);
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
 
@@ -327,6 +328,11 @@ public:
     virtual void visit_edges(Cell::Visitor& visitor) override;
 
 protected:
+    NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Element& element)
+        : NodeWithStyle(document, element)
+    {
+    }
+
     NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Node* node, NonnullRefPtr<CSS::ComputedProperties> style)
         : NodeWithStyle(document, node, style)
     {

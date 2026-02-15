@@ -15,6 +15,7 @@ class InlineNode final : public NodeWithStyleAndBoxModelMetrics {
     GC_DECLARE_ALLOCATOR(InlineNode);
 
 public:
+    InlineNode(DOM::Document&, DOM::Element&);
     InlineNode(DOM::Document&, DOM::Element*, NonnullRefPtr<CSS::ComputedProperties>);
     virtual ~InlineNode() override;
 
