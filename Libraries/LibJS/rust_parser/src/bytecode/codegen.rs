@@ -1770,8 +1770,8 @@ fn generate_logical(
     rhs: &Expression,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
+    let lhs_val = generate_expr(lhs, gen, preferred_dst)?;
     let dst = choose_dst(gen, preferred_dst);
-    let lhs_val = generate_expr(lhs, gen, Some(&dst))?;
     gen.emit_mov(&dst, &lhs_val);
 
     let rhs_block = gen.make_block();
