@@ -996,12 +996,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
             if (!pseudo_element.has_value() || !pseudo_element->layout_node())
                 continue;
 
-            auto pseudo_element_style = computed_properties(pseudo_element_type);
-            if (!pseudo_element_style)
+            auto const* pseudo_computed_values = pseudo_element->computed_values();
+            if (!pseudo_computed_values)
                 continue;
 
             if (auto node_with_style = pseudo_element->layout_node()) {
-                node_with_style->apply_style(*pseudo_element_style);
+                auto temporary_style = CSS::StyleComputer::create_computed_properties_from_computed_values(
+                    *pseudo_computed_values, pseudo_element->animated_property_data());
+                node_with_style->apply_style(*temporary_style);
                 if (invalidation.repaint && node_with_style->first_paintable()) {
                     node_with_style->first_paintable()->set_needs_paint_only_properties_update(true);
                     node_with_style->first_paintable()->set_needs_display();
