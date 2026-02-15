@@ -32,6 +32,11 @@ Box::Box(DOM::Document& document, DOM::Node* node, NonnullOwnPtr<CSS::ComputedVa
 {
 }
 
+Box::Box(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+    : NodeWithStyleAndBoxModelMetrics(document, node, external_values)
+{
+}
+
 Box::~Box()
 {
 }

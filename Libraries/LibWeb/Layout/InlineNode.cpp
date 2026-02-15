@@ -26,6 +26,11 @@ InlineNode::InlineNode(DOM::Document& document, DOM::Element* element, NonnullRe
 {
 }
 
+InlineNode::InlineNode(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+    : Layout::NodeWithStyleAndBoxModelMetrics(document, node, external_values)
+{
+}
+
 InlineNode::~InlineNode() = default;
 
 GC::Ptr<Painting::PaintableWithLines> InlineNode::create_paintable_for_line_with_index(size_t line_index) const

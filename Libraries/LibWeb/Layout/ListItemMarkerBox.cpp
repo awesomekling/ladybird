@@ -21,6 +21,14 @@ ListItemMarkerBox::ListItemMarkerBox(DOM::Document& document, CSS::ListStyleType
 {
 }
 
+ListItemMarkerBox::ListItemMarkerBox(DOM::Document& document, CSS::ListStyleType style_type, CSS::ListStylePosition style_position, GC::Ref<DOM::Element> list_item_element, CSS::ComputedValues& external_values)
+    : Box(document, nullptr, external_values)
+    , m_list_style_type(style_type)
+    , m_list_style_position(style_position)
+    , m_list_item_element(list_item_element)
+{
+}
+
 ListItemMarkerBox::~ListItemMarkerBox() = default;
 
 Optional<String> ListItemMarkerBox::text() const

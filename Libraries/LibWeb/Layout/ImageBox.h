@@ -18,6 +18,7 @@ class ImageBox final : public ReplacedBox {
 public:
     ImageBox(DOM::Document&, DOM::Element&, ImageProvider const&);
     ImageBox(DOM::Document&, GC::Ptr<DOM::Element>, NonnullRefPtr<CSS::ComputedProperties>, ImageProvider const&);
+    ImageBox(DOM::Document&, GC::Ptr<DOM::Element>, CSS::ComputedValues& external_values, ImageProvider const&);
     virtual ~ImageBox() override;
 
     bool renders_as_alt_text() const;

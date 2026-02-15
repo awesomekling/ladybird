@@ -26,6 +26,11 @@ BlockContainer::BlockContainer(DOM::Document& document, DOM::Node* node, Nonnull
 {
 }
 
+BlockContainer::BlockContainer(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+    : Box(document, node, external_values)
+{
+}
+
 BlockContainer::~BlockContainer() = default;
 
 Painting::PaintableWithLines const* BlockContainer::paintable_with_lines() const

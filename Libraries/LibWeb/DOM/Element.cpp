@@ -865,6 +865,50 @@ GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM:
     return document.heap().allocate<Layout::InlineNode>(document, element, move(style));
 }
 
+GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, CSS::ComputedValues& computed_values)
+{
+    if (display.is_none())
+        return {};
+
+    if (display.is_table_inside() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row())
+        return document.heap().allocate<Layout::Box>(document, nullptr, computed_values);
+
+    if (display.is_list_item())
+        return document.heap().allocate<Layout::ListItemBox>(document, nullptr, computed_values);
+
+    if (display.is_table_cell())
+        return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+
+    if (display.is_table_column() || display.is_table_column_group() || display.is_table_caption())
+        return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+
+    if (display.is_math_inside())
+        return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+
+    if (display.is_inline_outside()) {
+        if (display.is_flow_root_inside())
+            return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+        if (display.is_flow_inside())
+            return document.heap().allocate<Layout::InlineNode>(document, nullptr, computed_values);
+        if (display.is_flex_inside())
+            return document.heap().allocate<Layout::Box>(document, nullptr, computed_values);
+        if (display.is_grid_inside())
+            return document.heap().allocate<Layout::Box>(document, nullptr, computed_values);
+        return document.heap().allocate<Layout::InlineNode>(document, nullptr, computed_values);
+    }
+
+    if (display.is_flex_inside() || display.is_grid_inside())
+        return document.heap().allocate<Layout::Box>(document, nullptr, computed_values);
+
+    if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_contents())
+        return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+
+    if (display.is_ruby_inside())
+        return document.heap().allocate<Layout::BlockContainer>(document, nullptr, computed_values);
+
+    return document.heap().allocate<Layout::InlineNode>(document, nullptr, computed_values);
+}
+
 void Element::run_attribute_change_steps(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_)
 {
     attribute_changed(local_name, old_value, value, namespace_);

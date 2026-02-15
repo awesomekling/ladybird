@@ -574,6 +574,14 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, NonnullOw
     m_has_style = true;
 }
 
+NodeWithStyle::NodeWithStyle(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+    : Node(document, node)
+    , m_computed_values_ptr(&external_values)
+{
+    m_has_style = true;
+    apply_style();
+}
+
 void NodeWithStyle::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);

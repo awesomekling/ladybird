@@ -297,6 +297,7 @@ protected:
     NodeWithStyle(DOM::Document&, DOM::Element&);
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     NodeWithStyle(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
+    NodeWithStyle(DOM::Document&, DOM::Node*, CSS::ComputedValues& external_values);
 
 private:
     virtual bool is_node_with_style() const final { return true; }
@@ -340,6 +341,11 @@ protected:
 
     NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Node* node, NonnullOwnPtr<CSS::ComputedValues> computed_values)
         : NodeWithStyle(document, node, move(computed_values))
+    {
+    }
+
+    NodeWithStyleAndBoxModelMetrics(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+        : NodeWithStyle(document, node, external_values)
     {
     }
 

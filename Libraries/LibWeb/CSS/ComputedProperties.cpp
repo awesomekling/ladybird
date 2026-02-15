@@ -1189,9 +1189,11 @@ ColumnSpan ComputedProperties::column_span() const
 
 ComputedProperties::ContentDataAndQuoteNestingLevel ComputedProperties::content(DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level) const
 {
-    auto const& value = property(PropertyID::Content);
-    auto quotes_data = quotes();
+    return resolve_content(property(PropertyID::Content), quotes(), element_reference, initial_quote_nesting_level);
+}
 
+ComputedProperties::ContentDataAndQuoteNestingLevel ComputedProperties::resolve_content(StyleValue const& value, QuotesData const& quotes_data, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level)
+{
     auto quote_nesting_level = initial_quote_nesting_level;
 
     auto get_quote_string = [&](bool open, auto depth) {

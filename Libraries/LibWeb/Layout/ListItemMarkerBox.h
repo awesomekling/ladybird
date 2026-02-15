@@ -18,6 +18,7 @@ class ListItemMarkerBox final : public Box {
 
 public:
     explicit ListItemMarkerBox(DOM::Document&, CSS::ListStyleType, CSS::ListStylePosition, GC::Ref<DOM::Element>, NonnullRefPtr<CSS::ComputedProperties>);
+    explicit ListItemMarkerBox(DOM::Document&, CSS::ListStyleType, CSS::ListStylePosition, GC::Ref<DOM::Element>, CSS::ComputedValues& external_values);
     virtual ~ListItemMarkerBox() override;
 
     Optional<String> text() const;

@@ -20,6 +20,7 @@ public:
     BlockContainer(DOM::Document&, DOM::Element&);
     BlockContainer(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     BlockContainer(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
+    BlockContainer(DOM::Document&, DOM::Node*, CSS::ComputedValues& external_values);
     virtual ~BlockContainer() override;
 
     Painting::PaintableWithLines const* paintable_with_lines() const;

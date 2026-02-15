@@ -73,6 +73,7 @@ protected:
     Box(DOM::Document&, DOM::Element&);
     Box(DOM::Document&, DOM::Node*, NonnullRefPtr<CSS::ComputedProperties>);
     Box(DOM::Document&, DOM::Node*, NonnullOwnPtr<CSS::ComputedValues>);
+    Box(DOM::Document&, DOM::Node*, CSS::ComputedValues& external_values);
     virtual CSS::SizeWithAspectRatio compute_auto_content_box_size() const { return natural_size(); }
 
 private:

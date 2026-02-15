@@ -12,6 +12,7 @@
 #include <AK/Optional.h>
 #include <AK/TemporaryChange.h>
 #include <LibGfx/ImmutableBitmap.h>
+#include <LibWeb/CSS/ApplyStyleValueToComputedValues.h>
 #include <LibWeb/CSS/CSSImageResource.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/ComputedValues.h>
@@ -272,14 +273,50 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
     if (!pseudo.has_value() || !pseudo->computed_values())
         return {};
 
-    auto pseudo_element_style = CSS::StyleComputer::create_computed_properties_from_computed_values(
-        *pseudo->computed_values(), pseudo->animated_property_data());
+    auto& pseudo_computed_values = pseudo->ensure_computed_values();
 
     auto initial_quote_nesting_level = m_quote_nesting_level;
     DOM::AbstractElement element_reference { element, pseudo_element };
-    auto [pseudo_element_content, final_quote_nesting_level] = pseudo_element_style->content(element_reference, initial_quote_nesting_level);
+
+    // Build a lambda that resolves property values with animated data overlay.
+    auto get_property_value = [&](CSS::PropertyID property_id) -> RefPtr<CSS::StyleValue const> {
+        if (auto const* animated_data = pseudo->animated_property_data()) {
+            if (!pseudo_computed_values.is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                if (auto animated_value = animated_data->values.get(property_id); animated_value.has_value())
+                    return *animated_value.value();
+            }
+        }
+        return pseudo_computed_values.property_value(property_id);
+    };
+
+    // If there are animated properties, nodes need their own copy of ComputedValues
+    // with animations baked in. We must not modify the PseudoElement's base values
+    // since the transition system needs them to detect future style changes.
+    auto apply_animated_properties_to_node = [&](NodeWithStyle& node) {
+        auto const* animated_data = pseudo->animated_property_data();
+        if (!animated_data)
+            return;
+        auto owned_values = make<CSS::MutableComputedValues>();
+        owned_values->copy_all_from(pseudo_computed_values);
+        for (auto const& [property_id, value] : animated_data->values) {
+            if (!pseudo_computed_values.is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                owned_values->set_property_value(property_id, *value);
+                CSS::apply_style_value_to_computed_values(*owned_values, property_id, *value);
+            }
+        }
+        node.set_owned_computed_values(move(owned_values));
+        node.apply_style();
+    };
+
+    CSS::ContentData pseudo_element_content;
+    u32 final_quote_nesting_level = initial_quote_nesting_level;
+    if (auto content_value = get_property_value(CSS::PropertyID::Content)) {
+        auto result = CSS::ComputedProperties::resolve_content(*content_value, pseudo_computed_values.quotes(), element_reference, initial_quote_nesting_level);
+        pseudo_element_content = move(result.content_data);
+        final_quote_nesting_level = result.final_quote_nesting_level;
+    }
     m_quote_nesting_level = final_quote_nesting_level;
-    auto pseudo_element_display = pseudo_element_style->display();
+    auto pseudo_element_display = pseudo_computed_values.display();
 
     Optional<String> content_from_counter_style;
     // ::before and ::after only exist if they have content. `content: normal` computes to `none` for them.
@@ -314,18 +351,19 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
                 list_style_type,
                 list_box->computed_values().list_style_position(),
                 element,
-                *pseudo_element_style);
+                pseudo_computed_values);
+            apply_animated_properties_to_node(*list_item_marker);
             list_box->set_marker(list_item_marker);
             element.set_pseudo_element_node({}, CSS::PseudoElement::Marker, list_item_marker);
-            if (auto marker_pseudo = element.get_pseudo_element(CSS::PseudoElement::Marker); marker_pseudo.has_value())
-                marker_pseudo->set_animated_property_data(make<CSS::AnimatedPropertyData>(pseudo_element_style->animated_property_data()));
             list_box->prepend_child(*list_item_marker);
             return list_item_marker;
         }
 
-    auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, *pseudo_element_style, nullptr);
+    auto pseudo_element_node = DOM::Element::create_layout_node_for_display_type(document, pseudo_element_display, pseudo_computed_values);
     if (!pseudo_element_node)
         return {};
+
+    apply_animated_properties_to_node(*pseudo_element_node);
 
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker
     if (is<ListItemBox>(*pseudo_element_node)) {
@@ -356,13 +394,16 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
     CSS::resolve_counters(element_reference);
     // Now that we have counters, we can compute the content for real. Which is silly.
     if (pseudo_element_content.type == CSS::ContentData::Type::List) {
-        auto [new_content, _] = pseudo_element_style->content(element_reference, initial_quote_nesting_level);
-        pseudo_element_node->mutable_computed_values().set_content(new_content);
+        if (auto content_value = get_property_value(CSS::PropertyID::Content)) {
+            auto result = CSS::ComputedProperties::resolve_content(*content_value, pseudo_computed_values.quotes(), element_reference, initial_quote_nesting_level);
+            pseudo_element_content = move(result.content_data);
+        }
+        pseudo_element_node->mutable_computed_values().set_content(pseudo_element_content);
 
         // FIXME: Handle images, and multiple values
-        if (new_content.type == CSS::ContentData::Type::List) {
+        if (pseudo_element_content.type == CSS::ContentData::Type::List) {
             push_parent(*pseudo_element_node);
-            for (auto& item : new_content.data) {
+            for (auto& item : pseudo_element_content.data) {
                 GC::Ptr<Layout::Node> layout_node;
                 if (auto const* string = item.get_pointer<String>()) {
                     auto text = document.realm().create<DOM::Text>(document, Utf16String::from_utf8(*string));
@@ -371,7 +412,7 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
                     auto& image = *item.get<NonnullRefPtr<CSS::ImageStyleValue>>();
                     auto resource = document.ensure_css_image_resource(image.url());
                     auto image_provider = GeneratedContentImageProvider::create(element.heap(), resource);
-                    layout_node = document.heap().allocate<ImageBox>(document, nullptr, *pseudo_element_style, image_provider);
+                    layout_node = document.heap().allocate<ImageBox>(document, nullptr, pseudo_computed_values, image_provider);
                     image_provider->set_layout_node(*layout_node);
                 }
                 layout_node->set_generated_for(pseudo_element, element);

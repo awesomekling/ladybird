@@ -21,6 +21,11 @@ ReplacedBox::ReplacedBox(DOM::Document& document, GC::Ptr<DOM::Element> element,
 {
 }
 
+ReplacedBox::ReplacedBox(DOM::Document& document, GC::Ptr<DOM::Element> element, CSS::ComputedValues& external_values)
+    : Box(document, element, external_values)
+{
+}
+
 ReplacedBox::~ReplacedBox() = default;
 
 }

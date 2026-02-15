@@ -27,6 +27,12 @@ ImageBox::ImageBox(DOM::Document& document, GC::Ptr<DOM::Element> element, Nonnu
 {
 }
 
+ImageBox::ImageBox(DOM::Document& document, GC::Ptr<DOM::Element> element, CSS::ComputedValues& external_values, ImageProvider const& image_provider)
+    : ReplacedBox(document, element, external_values)
+    , m_image_provider(image_provider)
+{
+}
+
 ImageBox::~ImageBox() = default;
 
 void ImageBox::visit_edges(JS::Cell::Visitor& visitor)

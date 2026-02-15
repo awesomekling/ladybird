@@ -17,6 +17,7 @@ class InlineNode final : public NodeWithStyleAndBoxModelMetrics {
 public:
     InlineNode(DOM::Document&, DOM::Element&);
     InlineNode(DOM::Document&, DOM::Element*, NonnullRefPtr<CSS::ComputedProperties>);
+    InlineNode(DOM::Document&, DOM::Node*, CSS::ComputedValues& external_values);
     virtual ~InlineNode() override;
 
     GC::Ptr<Painting::PaintableWithLines> create_paintable_for_line_with_index(size_t line_index) const;

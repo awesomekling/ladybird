@@ -22,6 +22,11 @@ ListItemBox::ListItemBox(DOM::Document& document, DOM::Element* element, Nonnull
 {
 }
 
+ListItemBox::ListItemBox(DOM::Document& document, DOM::Node* node, CSS::ComputedValues& external_values)
+    : Layout::BlockContainer(document, node, external_values)
+{
+}
+
 ListItemBox::~ListItemBox() = default;
 
 void ListItemBox::visit_edges(Cell::Visitor& visitor)

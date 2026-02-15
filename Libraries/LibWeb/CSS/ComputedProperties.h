@@ -97,6 +97,7 @@ public:
         u32 final_quote_nesting_level { 0 };
     };
     ContentDataAndQuoteNestingLevel content(DOM::AbstractElement&, u32 initial_quote_nesting_level) const;
+    static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const&, QuotesData const&, DOM::AbstractElement&, u32 initial_quote_nesting_level);
     ContentVisibility content_visibility() const;
     Vector<CursorData> cursor() const;
     Variant<Length, double> tab_size() const;
