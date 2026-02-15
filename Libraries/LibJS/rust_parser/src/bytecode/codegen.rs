@@ -2606,13 +2606,8 @@ fn generate_call_expression(
     let dst = choose_dst(gen, preferred_dst);
 
     // Compute expression_string for error messages (e.g. "true is not a function (evaluated from 'a')").
-    let expression_string: Option<StringTableIndex> = match &data.callee.inner {
-        ExpressionKind::Identifier(_) | ExpressionKind::Member { .. } => {
-            let s = expression_to_string_approximation(&data.callee);
-            Some(gen.intern_string(&s))
-        }
-        _ => None,
-    };
+    let expression_string: Option<StringTableIndex> =
+        expression_string_approximation(&data.callee).map(|s| gen.intern_string(&s));
 
     // Detect direct eval calls: bare identifier "eval" as callee.
     let is_direct_eval = !is_new
@@ -7621,29 +7616,72 @@ fn nanboxed_empty() -> u64 {
 /// Intern the base expression as an identifier for error messages like
 /// "Cannot access property X on null object Y".
 fn intern_base_identifier(gen: &mut Generator, base: &Expression) -> Option<IdentifierTableIndex> {
-    match &base.inner {
-        ExpressionKind::Identifier(_)
-        | ExpressionKind::Member { .. }
-        | ExpressionKind::This => {
-            let s = expression_to_string_approximation(base);
-            Some(gen.intern_identifier(&s))
+    expression_identifier(base).map(|s| gen.intern_identifier(&s))
+}
+
+/// Try to produce a human-readable name for an expression (for error messages).
+/// Returns None for expressions that have no meaningful name.
+/// Matches C++ `expression_identifier()` in Generator.cpp.
+fn expression_identifier(expr: &Expression) -> Option<Vec<u16>> {
+    match &expr.inner {
+        ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
+        ExpressionKind::StringLiteral(s) => {
+            let mut result = utf16!("'").to_vec();
+            result.extend_from_slice(s);
+            result.extend_from_slice(utf16!("'"));
+            Some(result)
+        }
+        ExpressionKind::NumericLiteral(n) => {
+            let s = format!("{}", n);
+            Some(s.encode_utf16().collect())
+        }
+        ExpressionKind::This => Some(utf16!("this").to_vec()),
+        ExpressionKind::Member { object, property, computed } => {
+            let mut s = Vec::new();
+            if let Some(obj_id) = expression_identifier(object) {
+                s.extend(obj_id);
+            }
+            if let Some(prop_id) = expression_identifier(property) {
+                if *computed {
+                    s.extend_from_slice(utf16!("["));
+                    s.extend(prop_id);
+                    s.extend_from_slice(utf16!("]"));
+                } else {
+                    s.extend_from_slice(utf16!("."));
+                    s.extend(prop_id);
+                }
+            }
+            Some(s)
         }
         _ => None,
     }
 }
 
-fn expression_to_string_approximation(expr: &Expression) -> Vec<u16> {
+/// Produce a human-readable string for call expression error messages.
+/// Unlike expression_identifier, this always produces output for known types
+/// (using "<object>" for unrecognized sub-expressions).
+/// Matches C++ `CallExpression::expression_string()` + `expression_to_string_approximation()`.
+fn expression_string_approximation(expr: &Expression) -> Option<Vec<u16>> {
+    match &expr.inner {
+        ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
+        ExpressionKind::Member { .. } => Some(member_to_string_approximation(expr)),
+        _ => None,
+    }
+}
+
+fn member_to_string_approximation(expr: &Expression) -> Vec<u16> {
     match &expr.inner {
         ExpressionKind::Identifier(ident) => ident.name.clone(),
         ExpressionKind::Member { object, property, computed } => {
-            let mut s = expression_to_string_approximation(object);
+            let mut s = member_to_string_approximation(object);
+            let prop_str = member_to_string_approximation(property);
             if *computed {
                 s.extend_from_slice(utf16!("["));
-                s.extend(expression_to_string_approximation(property));
+                s.extend(prop_str);
                 s.extend_from_slice(utf16!("]"));
             } else {
                 s.extend_from_slice(utf16!("."));
-                s.extend(expression_to_string_approximation(property));
+                s.extend(prop_str);
             }
             s
         }
