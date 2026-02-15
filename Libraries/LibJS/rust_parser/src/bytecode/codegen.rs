@@ -1821,15 +1821,14 @@ fn generate_conditional(
     alternate: &Expression,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let dst = choose_dst(gen, preferred_dst);
     let predicate = generate_expr(test, gen, None)?;
 
     // OPTIMIZATION: if the predicate is always true/false, only generate the taken expression.
     if let Some(constant) = gen.get_constant(&predicate) {
         if constant_to_boolean(constant) {
-            return generate_expr(consequent, gen, Some(&dst));
+            return generate_expr(consequent, gen, preferred_dst);
         }
-        return generate_expr(alternate, gen, Some(&dst));
+        return generate_expr(alternate, gen, preferred_dst);
     }
 
     let true_block = gen.make_block();
@@ -1837,6 +1836,8 @@ fn generate_conditional(
     let end_block = gen.make_block();
 
     gen.emit_jump_if(&predicate, Label(true_block as u32), Label(false_block as u32));
+
+    let dst = choose_dst(gen, preferred_dst);
 
     gen.switch_to_basic_block(true_block);
     let cons_val = generate_expr(consequent, gen, Some(&dst));
