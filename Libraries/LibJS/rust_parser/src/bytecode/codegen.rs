@@ -3497,7 +3497,17 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
                 src: local.operand(),
             });
         }
-        gen.emit_mov(&local, value);
+        // Match C++ emit_set_variable: only skip self-move for variable locals,
+        // not for arguments. C++ checks is_local() && is_variable() && same index.
+        let is_variable_self_move = ident.local_type.get() == LocalType::Variable
+            && value.operand().is_local()
+            && value.operand().index() == local_index;
+        if !is_variable_self_move {
+            gen.emit(Instruction::Mov {
+                dst: local.operand(),
+                src: value.operand(),
+            });
+        }
     } else if ident.is_global.get() {
         let id = gen.intern_identifier(&ident.name);
         let cache = gen.next_global_variable_cache();

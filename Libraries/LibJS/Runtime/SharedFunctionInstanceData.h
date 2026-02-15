@@ -130,7 +130,7 @@ public:
         No,
         Yes,
     };
-    HashMap<Utf16FlyString, ParameterIsLocal> m_parameter_names;
+    OrderedHashMap<Utf16FlyString, ParameterIsLocal> m_parameter_names;
     struct FunctionToInitialize {
         GC::Ref<SharedFunctionInstanceData> shared_data;
         Utf16FlyString name;
