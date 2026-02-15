@@ -89,7 +89,7 @@ pub mod token;
 use ast::StatementKind;
 use parser::{Parser, ProgramType};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 
@@ -510,11 +510,9 @@ unsafe fn collect_var_names_recursive(
             declarations,
         } => {
             for decl in declarations {
-                let mut names = Vec::new();
-                collect_bound_names_from_target(&decl.target, &mut names);
-                for name in &names {
+                for_each_bound_name(&decl.target, &mut |name| {
                     push_name(ctx, name.as_ptr(), name.len());
-                }
+                });
             }
         }
         _ => {
@@ -588,20 +586,16 @@ unsafe fn extract_gdi_common(
             {
                 let is_constant = *kind == DeclarationKind::Const;
                 for decl in declarations {
-                    let mut names = Vec::new();
-                    collect_bound_names_from_target(&decl.target, &mut names);
-                    for name in &names {
+                    for_each_bound_name(&decl.target, &mut |name| {
                         push_lexical_binding(ctx, name.as_ptr(), name.len(), is_constant);
-                    }
+                    });
                 }
             }
             StatementKind::UsingDeclaration { declarations } => {
                 for decl in declarations {
-                    let mut names = Vec::new();
-                    collect_bound_names_from_target(&decl.target, &mut names);
-                    for name in &names {
+                    for_each_bound_name(&decl.target, &mut |name| {
                         push_lexical_binding(ctx, name.as_ptr(), name.len(), false);
-                    }
+                    });
                 }
             }
             StatementKind::ClassDeclaration(class_data) => {
@@ -662,20 +656,16 @@ unsafe fn extract_script_gdi(
                 if *kind != DeclarationKind::Var =>
             {
                 for decl in declarations {
-                    let mut names = Vec::new();
-                    collect_bound_names_from_target(&decl.target, &mut names);
-                    for name in &names {
+                    for_each_bound_name(&decl.target, &mut |name| {
                         script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
-                    }
+                    });
                 }
             }
             StatementKind::UsingDeclaration { declarations } => {
                 for decl in declarations {
-                    let mut names = Vec::new();
-                    collect_bound_names_from_target(&decl.target, &mut names);
-                    for name in &names {
+                    for_each_bound_name(&decl.target, &mut |name| {
                         script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
-                    }
+                    });
                 }
             }
             StatementKind::ClassDeclaration(class_data) => {
@@ -757,32 +747,28 @@ fn for_each_child_statement(stmt: &ast::StatementKind, f: &mut dyn FnMut(&ast::S
     }
 }
 
-/// Collect bound names from a variable declarator target.
-fn collect_bound_names_from_target(target: &ast::VariableDeclaratorTarget, names: &mut Vec<Vec<u16>>) {
+/// Invoke a callback for each bound name in a variable declarator target.
+fn for_each_bound_name(target: &ast::VariableDeclaratorTarget, f: &mut dyn FnMut(&[u16])) {
     match target {
-        ast::VariableDeclaratorTarget::Identifier(id) => {
-            names.push(id.name.clone());
-        }
+        ast::VariableDeclaratorTarget::Identifier(id) => f(&id.name),
         ast::VariableDeclaratorTarget::BindingPattern(pattern) => {
-            collect_bound_names_from_pattern(pattern, names);
+            for_each_bound_name_in_pattern(pattern, f);
         }
     }
 }
 
-/// Collect bound names from a binding pattern (recursively).
-fn collect_bound_names_from_pattern(pattern: &ast::BindingPattern, names: &mut Vec<Vec<u16>>) {
+/// Invoke a callback for each bound name in a binding pattern (recursively).
+fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnMut(&[u16])) {
     for entry in &pattern.entries {
         match &entry.alias {
             ast::BindingEntryAlias::Empty => {
                 if let ast::BindingEntryName::Identifier(id) = &entry.name {
-                    names.push(id.name.clone());
+                    f(&id.name);
                 }
             }
-            ast::BindingEntryAlias::Identifier(id) => {
-                names.push(id.name.clone());
-            }
+            ast::BindingEntryAlias::Identifier(id) => f(&id.name),
             ast::BindingEntryAlias::BindingPattern(inner) => {
-                collect_bound_names_from_pattern(inner, names);
+                for_each_bound_name_in_pattern(inner, f);
             }
             ast::BindingEntryAlias::MemberExpression(_) => {}
         }
