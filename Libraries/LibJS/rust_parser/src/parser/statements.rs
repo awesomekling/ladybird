@@ -705,6 +705,11 @@ impl<'a> Parser<'a> {
                 }
                 let bound_names: Vec<&[u16]> = self.pattern_bound_names.iter().map(|(n, _)| n.as_slice()).collect();
                 self.scope_collector.add_catch_parameter_pattern(&bound_names);
+                // Register each binding pattern identifier for scope analysis
+                // so they get is_local() annotations (matching variable declarations).
+                for (name, id) in &self.pattern_bound_names {
+                    self.scope_collector.register_identifier(id.clone(), name, None);
+                }
                 CatchParameter::BindingPattern(pattern)
             } else if self.match_identifier() {
                 let param_start = self.position();
