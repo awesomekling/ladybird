@@ -1041,6 +1041,17 @@ impl Generator {
     /// 3. Patch labels in typed instructions (block index → byte offset)
     /// 4. Encode to bytes and build source map + exception handlers
     pub fn assemble(&mut self) -> AssembledBytecode {
+        // If any block is unterminated, ensure the undefined constant exists
+        // for the assembly-time End(undefined) fallthrough. This must happen
+        // before computing number_of_constants so operand rewriting accounts
+        // for it (matching C++ compile()).
+        let has_unterminated = self.basic_blocks.iter().any(|b| !b.terminated);
+        let undefined_constant_operand = if has_unterminated {
+            Some(self.add_constant_undefined().operand())
+        } else {
+            None
+        };
+
         let number_of_registers = self.next_register;
         let number_of_locals = self.local_variables.len() as u32;
         let number_of_constants = self.constants.len() as u32;
@@ -1262,8 +1273,7 @@ impl Generator {
 
             // Unterminated blocks get an implicit End(undefined).
             if !block.terminated {
-                let undef_operand = Operand::constant(number_of_constants - 1);
-                let mut undef_rewritten = undef_operand;
+                let mut undef_rewritten = undefined_constant_operand.unwrap();
                 undef_rewritten.offset_index_by(number_of_registers + number_of_locals);
                 let end_inst = Instruction::End { value: undef_rewritten };
                 let inst_offset = bytecode.len();

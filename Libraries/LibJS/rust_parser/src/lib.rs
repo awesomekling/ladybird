@@ -132,10 +132,13 @@ unsafe fn compile_program_body(
     let result = bytecode::codegen::generate_stmt(program, gen, None);
 
     if !gen.is_current_block_terminated() {
-        let value = result.unwrap_or_else(|| gen.add_constant_undefined());
-        gen.emit(bytecode::instruction::Instruction::End {
-            value: value.operand(),
-        });
+        if let Some(value) = result {
+            gen.emit(bytecode::instruction::Instruction::End {
+                value: value.operand(),
+            });
+        }
+        // If result is None, the assembler will add End(undefined) as a
+        // fallthrough for unterminated blocks, matching C++ compile().
     }
 
     let assembled = gen.assemble();
@@ -899,21 +902,23 @@ pub unsafe extern "C" fn rust_compile_function(
     }
 
     // Generate bytecode for the function body.
-    let _result = bytecode::codegen::generate_stmt(&func_data.body, &mut gen, None);
+    let result = bytecode::codegen::generate_stmt(&func_data.body, &mut gen, None);
 
     if !gen.is_current_block_terminated() {
-        let undef = gen.add_constant_undefined();
         if gen.is_in_generator_or_async_function() {
             // Generator/async functions end with Yield (no continuation = done).
+            let undef = gen.add_constant_undefined();
             gen.emit(bytecode::instruction::Instruction::Yield {
                 continuation_label: None,
                 value: undef.operand(),
             });
-        } else {
+        } else if let Some(value) = result {
             gen.emit(bytecode::instruction::Instruction::End {
-                value: undef.operand(),
+                value: value.operand(),
             });
         }
+        // If result is None, the assembler will add End(undefined) as a
+        // fallthrough for unterminated blocks, matching C++ compile().
     }
 
     // For generator/async functions, terminate all unterminated blocks with Yield.
