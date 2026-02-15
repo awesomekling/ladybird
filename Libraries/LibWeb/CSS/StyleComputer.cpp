@@ -43,6 +43,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/CSS/StyleSheet.h>
+#include <LibWeb/CSS/StyleValueFromComputedValues.h>
 #include <LibWeb/CSS/StyleValues/AddFunctionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
@@ -2278,11 +2279,14 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
 NonnullRefPtr<ComputedProperties> StyleComputer::create_computed_properties_from_computed_values(ComputedValues const& computed_values, AnimatedPropertyData* animated_data)
 {
     auto computed_properties = adopt_ref(*new ComputedProperties);
-    computed_values.for_each_property_value([&](PropertyID property_id, RefPtr<StyleValue const> const& value) {
-        computed_properties->set_property(property_id, *value,
-            computed_values.is_property_inherited(property_id) ? ComputedProperties::Inherited::Yes : ComputedProperties::Inherited::No,
-            computed_values.is_property_important(property_id) ? Important::Yes : Important::No);
-    });
+    for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
+        auto property_id = static_cast<PropertyID>(i);
+        if (auto value = computed_values.property_value(property_id)) {
+            computed_properties->set_property(property_id, *value,
+                computed_values.is_property_inherited(property_id) ? ComputedProperties::Inherited::Yes : ComputedProperties::Inherited::No,
+                computed_values.is_property_important(property_id) ? Important::Yes : Important::No);
+        }
+    }
     if (animated_data)
         computed_properties->set_external_animated_data(animated_data);
     return computed_properties;
