@@ -760,8 +760,54 @@ GC::Ptr<Layout::Node> Element::create_layout_node()
     if (local_name() == "noscript" && document().is_scripting_enabled())
         return nullptr;
 
-    auto style = computed_properties().release_nonnull();
-    return create_layout_node_for_display_type(document(), style->display(), move(style), this);
+    return create_layout_node_for_display_type(document(), computed_values()->display(), *this);
+}
+
+GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, Element& element)
+{
+    if (display.is_none())
+        return {};
+
+    if (display.is_table_inside() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row())
+        return document.heap().allocate<Layout::Box>(document, element);
+
+    if (display.is_list_item())
+        return document.heap().allocate<Layout::ListItemBox>(document, element);
+
+    if (display.is_table_cell())
+        return document.heap().allocate<Layout::BlockContainer>(document, element);
+
+    if (display.is_table_column() || display.is_table_column_group() || display.is_table_caption())
+        return document.heap().allocate<Layout::BlockContainer>(document, element);
+
+    if (display.is_math_inside())
+        return document.heap().allocate<Layout::BlockContainer>(document, element);
+
+    if (display.is_inline_outside()) {
+        if (display.is_flow_root_inside())
+            return document.heap().allocate<Layout::BlockContainer>(document, element);
+        if (display.is_flow_inside())
+            return document.heap().allocate<Layout::InlineNode>(document, element);
+        if (display.is_flex_inside())
+            return document.heap().allocate<Layout::Box>(document, element);
+        if (display.is_grid_inside())
+            return document.heap().allocate<Layout::Box>(document, element);
+        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_string());
+        return document.heap().allocate<Layout::InlineNode>(document, element);
+    }
+
+    if (display.is_flex_inside() || display.is_grid_inside())
+        return document.heap().allocate<Layout::Box>(document, element);
+
+    if (display.is_flow_inside() || display.is_flow_root_inside() || display.is_contents())
+        return document.heap().allocate<Layout::BlockContainer>(document, element);
+
+    dbgln("FIXME: CSS display '{}' not implemented yet.", display.to_string());
+
+    if (display.is_ruby_inside())
+        return document.heap().allocate<Layout::BlockContainer>(document, element);
+
+    return document.heap().allocate<Layout::InlineNode>(document, element);
 }
 
 GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::ComputedProperties> style, Element* element)

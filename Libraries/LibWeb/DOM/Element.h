@@ -329,6 +329,7 @@ public:
     bool should_indicate_focus() const;
     virtual bool is_focusable() const override;
 
+    static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, Element&);
     static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, NonnullRefPtr<CSS::ComputedProperties>, Element*);
 
     [[nodiscard]] bool affected_by_pseudo_class(CSS::PseudoClass) const;
