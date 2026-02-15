@@ -956,6 +956,21 @@ struct SfdMetadata {
     contains_eval: bool,
 }
 
+/// Intermediate scope analysis data extracted from the function body scope.
+struct BodyScopeInfo {
+    uses_this: bool,
+    contains_eval: bool,
+    uses_this_from_env: bool,
+    might_need_arguments: bool,
+    has_function_named_arguments: bool,
+    has_lexically_declared_arguments: bool,
+    non_local_var_count: usize,
+    non_local_var_count_for_param_exprs: usize,
+    var_names: Vec<Vec<u16>>,
+    annexb_function_names: Vec<Vec<u16>>,
+    has_arguments_object_local: bool,
+}
+
 /// Compute FDI runtime metadata matching the C++ SharedFunctionInstanceData
 /// constructor (ECMA-262 §10.2.11).
 fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
@@ -968,35 +983,37 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     let is_arrow = func_data.is_arrow_function;
 
     // Extract all scope analysis data in one borrow.
-    let (uses_this, contains_eval, uses_this_from_env, might_need_arguments,
-         fsd_has_function_named_arguments, fsd_has_lexically_declared_arguments,
-         fsd_non_local_var_count, fsd_non_local_var_count_for_param_exprs,
-         fsd_var_names, annexb_function_names,
-         has_arguments_object_local) = if let Some(scope) = &body_scope {
+    let bsi = if let Some(scope) = &body_scope {
         let sd = scope.borrow();
         let fsd = sd.function_scope_data.as_ref();
-        (
-            sd.uses_this || func_data.parsing_insights.uses_this,
-            sd.contains_direct_call_to_eval,
-            sd.uses_this_from_environment
+        BodyScopeInfo {
+            uses_this: sd.uses_this || func_data.parsing_insights.uses_this,
+            contains_eval: sd.contains_direct_call_to_eval,
+            uses_this_from_env: sd.uses_this_from_environment
                 || func_data.parsing_insights.uses_this_from_environment,
-            func_data.parsing_insights.might_need_arguments_object,
-            fsd.map_or(false, |f| f.has_function_named_arguments),
-            fsd.map_or(false, |f| f.has_lexically_declared_arguments),
-            fsd.map_or(0, |f| f.non_local_var_count),
-            fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
-            fsd.map(|f| &f.var_names).cloned().unwrap_or_default(),
-            sd.annexb_function_names.clone(),
-            sd.local_variables.iter().any(|lv| lv.kind == ast::LocalVarKind::ArgumentsObject),
-        )
+            might_need_arguments: func_data.parsing_insights.might_need_arguments_object,
+            has_function_named_arguments: fsd.map_or(false, |f| f.has_function_named_arguments),
+            has_lexically_declared_arguments: fsd.map_or(false, |f| f.has_lexically_declared_arguments),
+            non_local_var_count: fsd.map_or(0, |f| f.non_local_var_count),
+            non_local_var_count_for_param_exprs: fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
+            var_names: fsd.map(|f| &f.var_names).cloned().unwrap_or_default(),
+            annexb_function_names: sd.annexb_function_names.clone(),
+            has_arguments_object_local: sd.local_variables.iter().any(|lv| lv.kind == ast::LocalVarKind::ArgumentsObject),
+        }
     } else {
-        // No scope body (e.g. synthetic class field initializer functions).
-        // Fall back to parsing insights for the values we have.
-        (func_data.parsing_insights.uses_this,
-         func_data.parsing_insights.contains_direct_call_to_eval,
-         func_data.parsing_insights.uses_this_from_environment,
-         func_data.parsing_insights.might_need_arguments_object,
-         false, false, 0, 0, Vec::new(), Vec::new(), false)
+        BodyScopeInfo {
+            uses_this: func_data.parsing_insights.uses_this,
+            contains_eval: func_data.parsing_insights.contains_direct_call_to_eval,
+            uses_this_from_env: func_data.parsing_insights.uses_this_from_environment,
+            might_need_arguments: func_data.parsing_insights.might_need_arguments_object,
+            has_function_named_arguments: false,
+            has_lexically_declared_arguments: false,
+            non_local_var_count: 0,
+            non_local_var_count_for_param_exprs: 0,
+            var_names: Vec::new(),
+            annexb_function_names: Vec::new(),
+            has_arguments_object_local: false,
+        }
     };
 
     // §10.2.11 step 4: check for parameter expressions.
@@ -1032,7 +1049,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     }
 
     // §10.2.11 steps 15-18: determine if arguments object is needed.
-    let mut arguments_object_needed = might_need_arguments;
+    let mut arguments_object_needed = bsi.might_need_arguments;
     if is_arrow {
         arguments_object_needed = false;
     } else if parameter_names.iter().any(|n| n == utf16!("arguments")) {
@@ -1041,11 +1058,11 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     if body_scope.is_none() {
         arguments_object_needed = false;
     } else {
-        if !has_parameter_expressions && fsd_has_function_named_arguments {
+        if !has_parameter_expressions && bsi.has_function_named_arguments {
             arguments_object_needed = false;
         }
         if !has_parameter_expressions && arguments_object_needed
-            && fsd_has_lexically_declared_arguments
+            && bsi.has_lexically_declared_arguments
         {
             arguments_object_needed = false;
         }
@@ -1053,7 +1070,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
 
     // Arguments object needs an environment binding if it's not a local variable.
     let arguments_object_needs_binding =
-        arguments_object_needed && !has_arguments_object_local;
+        arguments_object_needed && !bsi.has_arguments_object_local;
 
     // --- Compute environment binding counts ---
     let mut function_environment_bindings_count: usize = 0;
@@ -1074,12 +1091,12 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     if body_scope.is_some() {
         if !has_parameter_expressions {
             // §10.2.11 step 27: var env shares function env.
-            function_environment_bindings_count += fsd_non_local_var_count;
+            function_environment_bindings_count += bsi.non_local_var_count;
 
             // Annex B: function names hoisted from blocks that aren't already vars.
             if !strict {
-                for name in &annexb_function_names {
-                    if !fsd_var_names.contains(name) {
+                for name in &bsi.annexb_function_names {
+                    if !bsi.var_names.contains(name) {
                         function_environment_bindings_count += 1;
                     }
                 }
@@ -1092,18 +1109,18 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
                 // Lex env == var env == function env.
                 function_environment_bindings_count += non_local_lex_count;
             } else {
-                let can_elide = !contains_eval && non_local_lex_count == 0;
+                let can_elide = !bsi.contains_eval && non_local_lex_count == 0;
                 if !can_elide {
                     lex_environment_bindings_count += non_local_lex_count;
                 }
             }
         } else {
             // §10.2.11 step 28: separate var environment.
-            var_environment_bindings_count += fsd_non_local_var_count_for_param_exprs;
+            var_environment_bindings_count += bsi.non_local_var_count_for_param_exprs;
 
             if !strict {
-                for name in &annexb_function_names {
-                    if !fsd_var_names.contains(name) {
+                for name in &bsi.annexb_function_names {
+                    if !bsi.var_names.contains(name) {
                         var_environment_bindings_count += 1;
                     }
                 }
@@ -1115,7 +1132,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
                 // Lex env == var env.
                 var_environment_bindings_count += non_local_lex_count;
             } else {
-                let can_elide = !contains_eval && non_local_lex_count == 0;
+                let can_elide = !bsi.contains_eval && non_local_lex_count == 0;
                 if !can_elide {
                     lex_environment_bindings_count += non_local_lex_count;
                 }
@@ -1127,15 +1144,15 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
         || function_environment_bindings_count > 0
         || var_environment_bindings_count > 0
         || lex_environment_bindings_count > 0
-        || uses_this_from_env
-        || contains_eval;
+        || bsi.uses_this_from_env
+        || bsi.contains_eval;
 
     SfdMetadata {
-        uses_this,
+        uses_this: bsi.uses_this,
         function_environment_needed,
         function_environment_bindings_count,
-        might_need_arguments,
-        contains_eval,
+        might_need_arguments: bsi.might_need_arguments,
+        contains_eval: bsi.contains_eval,
     }
 }
 
