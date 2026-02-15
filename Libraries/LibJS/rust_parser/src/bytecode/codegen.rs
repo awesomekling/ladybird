@@ -83,6 +83,7 @@ pub fn generate_expr(
         ExpressionKind::Unary { op, operand } => {
             // typeof and delete on identifiers need special handling BEFORE
             // evaluating the operand to avoid throwing on unresolvable references.
+            // C++ allocates dst before evaluating typeof/not operands.
             if *op == UnaryOp::Typeof {
                 if let ExpressionKind::Identifier(ident) = &operand.inner {
                     if !ident.is_local() {
@@ -96,6 +97,13 @@ pub fn generate_expr(
                         return Some(dst);
                     }
                 }
+                let dst = choose_dst(gen, preferred_dst);
+                let value = generate_expr(operand, gen, None)?;
+                gen.emit(Instruction::Typeof {
+                    dst: dst.operand(),
+                    src: value.operand(),
+                });
+                return Some(dst);
             }
             if *op == UnaryOp::Delete {
                 return Some(emit_delete_reference(gen, operand, preferred_dst));
@@ -155,12 +163,7 @@ pub fn generate_expr(
                         src: value.operand(),
                     });
                 }
-                UnaryOp::Typeof => {
-                    gen.emit(Instruction::Typeof {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    });
-                }
+                UnaryOp::Typeof => unreachable!(),
                 UnaryOp::Void => {
                     return Some(gen.add_constant_undefined());
                 }
@@ -185,8 +188,36 @@ pub fn generate_expr(
                     return Some(dst);
                 }
             }
-            let lhs_val = generate_expr(lhs, gen, None)?;
-            let rhs_val = generate_expr(rhs, gen, None)?;
+            // OPTIMIZATION: Pre-convert numeric literal operands of bitwise
+            // operations to i32/u32 to avoid runtime conversion (matches C++).
+            let lhs_val = match op {
+                BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor
+                | BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => {
+                    if let ExpressionKind::NumericLiteral(n) = &lhs.inner {
+                        gen.add_constant_number(to_int32(*n) as f64)
+                    } else {
+                        generate_expr(lhs, gen, None)?
+                    }
+                }
+                _ => generate_expr(lhs, gen, None)?,
+            };
+            let rhs_val = match op {
+                BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor => {
+                    if let ExpressionKind::NumericLiteral(n) = &rhs.inner {
+                        gen.add_constant_number(to_int32(*n) as f64)
+                    } else {
+                        generate_expr(rhs, gen, None)?
+                    }
+                }
+                BinaryOp::LeftShift | BinaryOp::RightShift | BinaryOp::UnsignedRightShift => {
+                    if let ExpressionKind::NumericLiteral(n) = &rhs.inner {
+                        gen.add_constant_number(to_u32(*n) as f64)
+                    } else {
+                        generate_expr(rhs, gen, None)?
+                    }
+                }
+                _ => generate_expr(rhs, gen, None)?,
+            };
             // OPTIMIZATION: constant folding for binary operations on constants.
             if let Some(folded) = try_constant_fold_binary(gen, *op, &lhs_val, &rhs_val) {
                 return Some(folded);
@@ -1748,7 +1779,18 @@ fn emit_binary_op(
         BinaryOp::LessThan => gen.emit(Instruction::LessThan { dst: d, lhs: l, rhs: r }),
         BinaryOp::LessThanEquals => gen.emit(Instruction::LessThanEquals { dst: d, lhs: l, rhs: r }),
         BinaryOp::BitwiseAnd => gen.emit(Instruction::BitwiseAnd { dst: d, lhs: l, rhs: r }),
-        BinaryOp::BitwiseOr => gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r }),
+        BinaryOp::BitwiseOr => {
+            // OPTIMIZATION: x | 0 == ToInt32(x) (matches C++)
+            if let Some(ConstantValue::Number(n)) = gen.get_constant(rhs) {
+                if *n == 0.0 && n.is_sign_positive() {
+                    gen.emit(Instruction::ToInt32 { dst: d, value: l });
+                } else {
+                    gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r });
+                }
+            } else {
+                gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r });
+            }
+        }
         BinaryOp::BitwiseXor => gen.emit(Instruction::BitwiseXor { dst: d, lhs: l, rhs: r }),
         BinaryOp::LeftShift => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
         BinaryOp::RightShift => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
@@ -2047,6 +2089,7 @@ fn generate_do_while_statement(
 ) -> Option<ScopedOperand> {
     let body_block = gen.make_block();
     let test_block = gen.make_block();
+    let load_result_and_jump_to_end_block = gen.make_block();
     let end_block = gen.make_block();
 
     let completion = if gen.must_propagate_completion {
@@ -2062,6 +2105,17 @@ fn generate_do_while_statement(
         target: Label(body_block as u32),
     });
 
+    // Generate test FIRST, matching C++ which keeps the test ScopedOperand
+    // alive during body generation, consuming a register from the free pool.
+    gen.switch_to_basic_block(test_block);
+    let test_val = generate_expr_or_undefined(test, gen, None);
+    gen.emit_jump_if(
+        &test_val,
+        Label(body_block as u32),
+        Label(load_result_and_jump_to_end_block as u32),
+    );
+
+    // Generate body SECOND (test_val still alive, matching C++ register allocation).
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
     gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
@@ -2087,9 +2141,10 @@ fn generate_do_while_statement(
         });
     }
 
-    gen.switch_to_basic_block(test_block);
-    let test_val = generate_expr_or_undefined(test, gen, None);
-    gen.emit_jump_if(&test_val, Label(body_block as u32), Label(end_block as u32));
+    gen.switch_to_basic_block(load_result_and_jump_to_end_block);
+    gen.emit(Instruction::Jump {
+        target: Label(end_block as u32),
+    });
 
     gen.switch_to_basic_block(end_block);
     completion
@@ -2959,6 +3014,9 @@ fn generate_update_expression(
                         src: value.operand(),
                         base_identifier: None,
                     });
+                    // Match C++ ReferenceOperands destruction order: loaded_value
+                    // (value) is freed before referenced_name (saved_prop).
+                    drop(value);
                     Some(dst)
                 }
             } else if let ExpressionKind::Identifier(prop_ident) = &property.inner {
@@ -4244,12 +4302,18 @@ fn generate_object_expression(
     let dst = choose_dst(gen, preferred_dst);
 
     // Determine if this is a simple object literal (all KeyValue with non-computed
-    // string/identifier keys). Simple literals can benefit from shape caching.
+    // string/identifier keys that are not numeric indices). Simple literals can
+    // benefit from shape caching. Numeric string keys like "0" are stored in
+    // indexed storage rather than shape-based storage, so they can't use the fast path.
     let is_simple = !properties.is_empty() && properties.iter().all(|p| {
         if p.property_type != ObjectPropertyType::KeyValue || p.is_computed {
             return false;
         }
-        matches!(&p.key.inner, ExpressionKind::Identifier(_) | ExpressionKind::StringLiteral(_))
+        match &p.key.inner {
+            ExpressionKind::Identifier(_) => true,
+            ExpressionKind::StringLiteral(s) => !is_numeric_index_key(s),
+            _ => false,
+        }
     });
 
     let cache_index = if is_simple {
@@ -7484,6 +7548,41 @@ fn to_int32(n: f64) -> i32 {
     } else {
         int32bit as i32
     }
+}
+
+/// JS ToUint32 conversion (ECMA-262 7.1.7).
+fn to_u32(n: f64) -> u32 {
+    if n.is_nan() || n.is_infinite() || n == 0.0 {
+        return 0;
+    }
+    let int_val = n.signum() * n.abs().floor();
+    let int32bit = int_val % 4294967296.0; // 2^32
+    if int32bit < 0.0 { (int32bit + 4294967296.0) as u32 } else { int32bit as u32 }
+}
+
+/// Check if a string key is a numeric index (valid u32 < u32::MAX).
+/// Numeric indices are stored in indexed storage rather than shape-based storage.
+fn is_numeric_index_key(key: &[u16]) -> bool {
+    if key.is_empty() {
+        return false;
+    }
+    // Exclude leading zeros in multi-digit strings (e.g., "01")
+    if key[0] == b'0' as u16 && key.len() > 1 {
+        return false;
+    }
+    // Must be all ASCII digits
+    if !key.iter().all(|&c| c >= b'0' as u16 && c <= b'9' as u16) {
+        return false;
+    }
+    // Parse as u64 first to avoid overflow, then check < u32::MAX
+    let mut n: u64 = 0;
+    for &c in key {
+        n = n * 10 + (c - b'0' as u16) as u64;
+        if n > u32::MAX as u64 {
+            return false;
+        }
+    }
+    (n as u32) < u32::MAX
 }
 
 /// Try to constant-fold a unary operation when the operand is a constant.
