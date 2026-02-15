@@ -1774,21 +1774,21 @@ fn generate_logical(
     let lhs_val = generate_expr(lhs, gen, Some(&dst))?;
     gen.emit_mov(&dst, &lhs_val);
 
-    let end_block = gen.make_block();
     let rhs_block = gen.make_block();
+    let end_block = gen.make_block();
 
     match op {
         LogicalOp::And => {
             // If lhs is falsy, short-circuit to end
-            gen.emit_jump_if(&dst, Label(rhs_block as u32), Label(end_block as u32));
+            gen.emit_jump_if(&lhs_val, Label(rhs_block as u32), Label(end_block as u32));
         }
         LogicalOp::Or => {
             // If lhs is truthy, short-circuit to end
-            gen.emit_jump_if(&dst, Label(end_block as u32), Label(rhs_block as u32));
+            gen.emit_jump_if(&lhs_val, Label(end_block as u32), Label(rhs_block as u32));
         }
         LogicalOp::NullishCoalescing => {
             gen.emit(Instruction::JumpNullish {
-                condition: dst.operand(),
+                condition: lhs_val.operand(),
                 true_target: Label(rhs_block as u32),
                 false_target: Label(end_block as u32),
             });
