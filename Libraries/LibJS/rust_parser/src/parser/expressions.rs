@@ -178,14 +178,13 @@ impl<'a> Parser<'a> {
         }
 
         if min_precedence <= 1 && self.match_token(TokenType::Comma) && forbidden.allows(TokenType::Comma) {
-            let start = self.position();
             let mut expressions = vec![expr];
             while self.match_token(TokenType::Comma) {
                 self.consume();
                 expressions.push(self.parse_expression(2, Associativity::Right, forbidden));
             }
             self.last_parsed_identifier_is_eval = false;
-            return self.expr(start, ExpressionKind::Sequence(expressions));
+            return self.expr(lhs_start, ExpressionKind::Sequence(expressions));
         }
 
         expr
