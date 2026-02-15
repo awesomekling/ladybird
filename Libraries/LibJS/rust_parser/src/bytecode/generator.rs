@@ -1147,8 +1147,11 @@ impl Generator {
                                 condition: *condition,
                                 target: *false_target,
                             });
-                            // JumpFalse is: condition + target = 16 bytes
-                            offset += 16;
+                            let replacement = Instruction::JumpFalse {
+                                condition: *condition,
+                                target: *false_target,
+                            };
+                            offset += replacement.encoded_size();
                             continue;
                         }
                         if false_block == block_idx + 1 {
@@ -1156,7 +1159,11 @@ impl Generator {
                                 condition: *condition,
                                 target: *true_target,
                             });
-                            offset += 16;
+                            let replacement = Instruction::JumpTrue {
+                                condition: *condition,
+                                target: *true_target,
+                            };
+                            offset += replacement.encoded_size();
                             continue;
                         }
                         block_actions.push(InstAction::Emit);
