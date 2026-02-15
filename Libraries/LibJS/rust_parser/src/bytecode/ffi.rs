@@ -43,6 +43,10 @@ pub struct FFIClassElement {
     pub private_identifier_len: usize,
     pub shared_function_data_index: i32, // -1 for none
     pub has_initializer: bool,
+    pub literal_value_kind: u8, // 0=none, 1=number, 2=boolean_true, 3=boolean_false, 4=null, 5=string
+    pub literal_value_number: f64,
+    pub literal_value_string: *const u16,
+    pub literal_value_string_len: usize,
 }
 
 extern "C" {
@@ -121,6 +125,7 @@ extern "C" {
     );
 
     pub fn rust_create_class_blueprint(
+        vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,
         name: *const u16,
         name_len: usize,

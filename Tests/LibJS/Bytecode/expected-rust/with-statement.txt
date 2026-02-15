@@ -6,9 +6,9 @@ JS bytecode executable ""
 
 JS bytecode executable "withBlock"
 [   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       NewObject dst:reg5
-[  18]       InitObjectLiteralProperty object:reg5, property:x, src:Int32(42), shape_cache_index:0, property_slot:0
-[  30]       Mov dst:obj~0, src:reg5
+[   8]       NewObject dst:obj~0
+[  18]       InitObjectLiteralProperty object:obj~0, property:x, src:Int32(42), shape_cache_index:0, property_slot:0
+[  30]       CacheObjectShape object:obj~0
 [  40]       EnterObjectEnvironment dst:reg5, object:obj~0
 [  50]       GetBinding dst:reg7, identifier:console
 [  68]       GetById dst:reg8, base:reg7, property:log, base_identifier:console

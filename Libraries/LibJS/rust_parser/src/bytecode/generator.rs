@@ -174,6 +174,7 @@ pub struct Generator {
     pub enclosing_function_kind: FunctionKind,
     pub local_variables: Vec<LocalVariable>,
     pub initialized_locals: Vec<bool>,
+    pub initialized_arguments: Vec<bool>,
 
     /// When set, function/class expressions will use this as their `.name`.
     /// Set by assignment/declaration codegen, consumed by function expression codegen.
@@ -270,6 +271,7 @@ impl Generator {
             enclosing_function_kind: FunctionKind::Normal,
             local_variables: Vec::new(),
             initialized_locals: Vec::new(),
+            initialized_arguments: Vec::new(),
             pending_lhs_name: None,
             current_source_start: 0,
             current_source_end: 0,
@@ -1014,6 +1016,21 @@ impl Generator {
         self.initialized_locals[index] = true;
     }
 
+    pub fn is_argument_initialized(&self, index: u32) -> bool {
+        self.initialized_arguments
+            .get(index as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn mark_argument_initialized(&mut self, index: u32) {
+        let index = index as usize;
+        if index >= self.initialized_arguments.len() {
+            self.initialized_arguments.resize(index + 1, false);
+        }
+        self.initialized_arguments[index] = true;
+    }
+
     // --- Compile/assemble/link pipeline ---
 
     /// Compile all basic blocks into a flat bytecode buffer.
@@ -1166,8 +1183,12 @@ impl Generator {
         let mut bytecode: Vec<u8> = Vec::with_capacity(offset);
         let mut source_map: Vec<SourceMapEntry> = Vec::new();
         let mut exception_handlers: Vec<ExceptionHandler> = Vec::new();
+        // Track which blocks actually produced instructions (matching C++ behavior
+        // of popping basic_block_start_offsets when a block becomes empty).
+        let mut basic_block_start_offsets: Vec<usize> = Vec::with_capacity(num_blocks);
 
         for (block_idx, block) in self.basic_blocks.iter().enumerate() {
+            basic_block_start_offsets.push(bytecode.len());
             let block_start = bytecode.len();
             let handler = block.handler;
             let block_actions = &actions[block_idx];
@@ -1176,10 +1197,11 @@ impl Generator {
                 let action = block_actions[inst_idx];
                 match action {
                     InstAction::Skip => {
-                        // If this skip makes the block empty, adjust block_offsets
-                        // so labels to this block point to the next instruction.
-                        // (The C++ code pops basic_block_start_offsets.take_last()
-                        //  when the block becomes empty.)
+                        // If this skip makes the block empty, remove it from
+                        // basic_block_start_offsets (matching C++ take_last()).
+                        if basic_block_start_offsets.last() == Some(&bytecode.len()) {
+                            basic_block_start_offsets.pop();
+                        }
                     }
                     InstAction::Emit => {
                         let inst_offset = bytecode.len();
@@ -1283,7 +1305,7 @@ impl Generator {
             bytecode,
             source_map,
             exception_handlers: merged_handlers,
-            basic_block_start_offsets: block_offsets,
+            basic_block_start_offsets,
             number_of_registers,
         }
     }

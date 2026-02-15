@@ -22,40 +22,19 @@ JS bytecode executable ""
 
 JS bytecode executable "test"
 [   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       GetLexicalEnvironment dst:reg6
-[  10]       CreateLexicalEnvironment dst:reg7, parent:reg6, capacity:0
-[  20]       CreateVariable identifier:A, is_immutable:true, is_global:false, is_strict:false
-[  30]       SetLexicalEnvironment environment:reg6
-[  38]       NewClass dst:reg5, class_environment:reg7, class_blueprint_index:0, element_keys:[element_keys:String("x"), element_keys:String("y"), element_keys:String("z"), element_keys:String("w"), element_keys:String("s"), element_keys:String("computed")]
-[  70]       Mov dst:A~0, src:reg5
-[  80]       Mov dst:reg6, src:A~0
-[  90]       CallConstruct dst:reg5, callee:reg6, A
-[  a8]       Return value:reg5
+[   8]       CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
+[  18]       CreateVariable identifier:A, is_immutable:true, is_global:false, is_strict:false
+[  28]       SetLexicalEnvironment environment:reg4
+[  30]       NewClass dst:reg6, class_environment:reg5, class_blueprint_index:0, element_keys:[element_keys:String("x"), element_keys:String("y"), element_keys:String("z"), element_keys:String("w"), element_keys:String("s"), element_keys:String("computed")]
+[  68]       Mov dst:A~0, src:reg6
+[  78]       ThrowIfTDZ src:A~0
+[  80]       Mov dst:reg5, src:A~0
+[  90]       CallConstruct dst:reg6, callee:reg5, A
+[  a8]       Return value:reg6
 
 JS bytecode executable "A"
 [   0]    0: GetLexicalEnvironment dst:reg4
 [   8]       End value:Undefined
-
-JS bytecode executable "field"
-[   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Return value:Int32(42)
-
-JS bytecode executable "field"
-[   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       UnaryMinus dst:reg5, src:Int32(1)
-[  18]       Return value:reg5
-
-JS bytecode executable "field"
-[   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Return value:Bool(true)
-
-JS bytecode executable "field"
-[   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Return value:Null
-
-JS bytecode executable "field"
-[   0]    0: GetLexicalEnvironment dst:reg4
-[   8]       Return value:String("hi")
 
 JS bytecode executable "field"
 [   0]    0: GetLexicalEnvironment dst:reg4

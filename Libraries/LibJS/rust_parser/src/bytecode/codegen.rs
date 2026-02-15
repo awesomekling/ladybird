@@ -773,6 +773,9 @@ pub fn generate_stmt(
             // Bind the class name in the outer scope (classes are lexically scoped).
             // Use InitializeLexicalBinding since the name starts in the TDZ
             // (temporal dead zone) until this point, matching `let` semantics.
+            // NB: We do NOT mark the local as initialized here, matching C++
+            // emit_set_variable(Initialize) behavior. This preserves TDZ checks
+            // for subsequent uses of the class name.
             if let (Some(name_ident), Some(val)) = (&data.name, &value) {
                 if name_ident.is_local() {
                     let local_index = name_ident.local_index.get();
@@ -782,7 +785,6 @@ pub fn generate_stmt(
                         LocalType::None => unreachable!(),
                     };
                     gen.emit_mov(&local, &val);
-                    gen.mark_local_initialized(local_index);
                 } else {
                     let id = gen.intern_identifier(&name_ident.name);
                     gen.emit(Instruction::InitializeLexicalBinding {
@@ -1615,8 +1617,15 @@ fn generate_identifier(
             LocalType::Variable => gen.local(local_index),
             LocalType::None => unreachable!(),
         };
-        // Check TDZ for uninitialized locals
-        if !gen.is_local_initialized(local_index)
+        // Check TDZ for uninitialized locals.
+        // NB: For arguments, check initialized_arguments (matching C++
+        // is_local_initialized(Identifier::Local) which checks
+        // m_initialized_arguments for argument-typed locals).
+        let is_initialized = match ident.local_type.get() {
+            LocalType::Argument => gen.is_argument_initialized(local_index),
+            _ => gen.is_local_initialized(local_index),
+        };
+        if !is_initialized
             && ident.declaration_kind.get() != IdentDeclarationKind::Var
         {
             if ident.local_type.get() == LocalType::Argument {
@@ -2289,9 +2298,11 @@ fn generate_scope_children(
                     }
                 }
             }
-        } else if result.is_some() {
-            last_result = result;
         }
+        // NB: When must_propagate_completion is false, we intentionally do NOT
+        // accumulate results into last_result. This matches C++ behavior where
+        // `result` goes out of scope at the end of each loop iteration, freeing
+        // any temporary registers immediately.
         if gen.is_current_block_terminated() {
             break;
         }
@@ -2566,9 +2577,7 @@ fn generate_call_expression(
             // Approximate the member expression as a string (e.g. "o.a", "o[key]").
             let mut s = expression_to_string_approximation(object);
             if *computed {
-                s.extend_from_slice(utf16!("["));
-                s.extend(expression_to_string_approximation(property));
-                s.extend_from_slice(utf16!("]"));
+                s.extend_from_slice(utf16!("[<computed>]"));
             } else {
                 s.extend_from_slice(utf16!("."));
                 s.extend(expression_to_string_approximation(property));
@@ -2600,7 +2609,7 @@ fn generate_call_expression(
                         dst: method.operand(),
                         base: obj.operand(),
                         property: prop.operand(),
-                        base_identifier: base_id,
+                        base_identifier: None,
                     });
                 } else if let ExpressionKind::Identifier(ident) = &property.inner {
                     emit_get_by_id(gen, &method, &obj, &ident.name, base_id);
@@ -2622,7 +2631,22 @@ fn generate_call_expression(
                 };
                 (method, Some(this_val))
             }
-            ExpressionKind::Identifier(ident) if !ident.is_local() && !ident.is_global.get() => {
+            ExpressionKind::Identifier(ident) if ident.is_local() => {
+                // Local identifier: use the local directly, with ThrowIfTDZ
+                // if not yet initialized (matching C++ CallExpression codegen).
+                let local = if ident.local_type.get() == LocalType::Argument {
+                    gen.scoped_operand(Operand::argument(ident.local_index.get()))
+                } else {
+                    gen.local(ident.local_index.get())
+                };
+                if !gen.is_local_initialized(ident.local_index.get()) {
+                    gen.emit(Instruction::ThrowIfTDZ {
+                        src: local.operand(),
+                    });
+                }
+                (local, None)
+            }
+            ExpressionKind::Identifier(ident) if !ident.is_global.get() => {
                 // Non-local, non-global identifier: use GetCalleeAndThisFromEnvironment
                 // to properly handle with-statement bindings and eval.
                 let callee_reg = gen.allocate_register();
@@ -3870,10 +3894,6 @@ fn generate_switch_statement(
     data: &SwitchStatementData,
     _preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let discriminant = generate_expr(&data.discriminant, gen, None)?;
-    let end_block = gen.make_block();
-    let labels = std::mem::take(&mut gen.pending_labels);
-
     let completion = if gen.must_propagate_completion {
         let reg = gen.allocate_register();
         let undef = gen.add_constant_undefined();
@@ -3883,45 +3903,70 @@ fn generate_switch_statement(
         None
     };
 
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    let discriminant = generate_expr(&data.discriminant, gen, None)?;
 
     // Block declaration instantiation: create lexical environment for
     // function declarations and let/const across all switch cases.
     let did_create_env = emit_switch_block_declaration_instantiation(gen, data);
 
-    // Create blocks for each case
-    let case_blocks: Vec<usize> = data.cases.iter().map(|_| gen.make_block()).collect();
+    // Create first test block and jump to it (matching C++ structure).
+    let first_test_block = gen.make_block();
+    gen.emit(Instruction::Jump {
+        target: Label(first_test_block as u32),
+    });
 
-    // Find default block first (it may appear before or after other cases).
-    let default_block = data.cases.iter().enumerate()
-        .find(|(_, c)| c.test.is_none())
-        .map(|(i, _)| case_blocks[i]);
-    let fallthrough_target = default_block.unwrap_or(end_block);
-
-    // Emit comparison chain
-    for (i, case) in data.cases.iter().enumerate() {
-        if let Some(test) = &case.test {
-            let test_val = generate_expr(test, gen, None)?;
-            let cmp = gen.allocate_register();
-            gen.emit(Instruction::StrictlyEquals {
-                dst: cmp.operand(),
-                lhs: discriminant.operand(),
-                rhs: test_val.operand(),
-            });
-            let next_check = gen.make_block();
-            gen.emit_jump_if(&cmp, Label(case_blocks[i] as u32), Label(next_check as u32));
-            gen.switch_to_basic_block(next_check);
+    // Pre-allocate test blocks for each case with a test expression.
+    let mut test_blocks: Vec<usize> = Vec::new();
+    for case in &data.cases {
+        if case.test.is_some() {
+            test_blocks.push(gen.make_block());
         }
     }
 
-    // After all comparisons fail, jump to default or end.
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump {
-            target: Label(fallthrough_target as u32),
-        });
+    // Emit comparison chain: for each case, create the case body block,
+    // switch to the test block, evaluate the test, and emit comparison.
+    // This matches C++ block creation order: test blocks interleaved with
+    // case body blocks.
+    let mut next_test_block = first_test_block;
+    let mut case_blocks: Vec<usize> = Vec::new();
+    let mut default_block = None;
+    let mut test_block_idx = 0;
+
+    for case in &data.cases {
+        let case_block = gen.make_block();
+        if let Some(test) = &case.test {
+            gen.switch_to_basic_block(next_test_block);
+            let test_val = generate_expr(test, gen, None)?;
+            let cmp = gen.allocate_register();
+            // NB: test_value is LHS, discriminant is RHS (matching C++).
+            gen.emit(Instruction::StrictlyEquals {
+                dst: cmp.operand(),
+                lhs: test_val.operand(),
+                rhs: discriminant.operand(),
+            });
+            next_test_block = test_blocks[test_block_idx];
+            test_block_idx += 1;
+            gen.emit_jump_if(&cmp, Label(case_block as u32), Label(next_test_block as u32));
+        } else {
+            default_block = Some(case_block);
+        }
+        case_blocks.push(case_block);
     }
 
-    // Emit case bodies (fall-through by default)
+    // Switch to the last test block and create end block.
+    gen.switch_to_basic_block(next_test_block);
+    let end_block = gen.make_block();
+    let labels = std::mem::take(&mut gen.pending_labels);
+
+    // Jump to default case or end block.
+    let fallthrough_target = default_block.unwrap_or(end_block);
+    gen.emit(Instruction::Jump {
+        target: Label(fallthrough_target as u32),
+    });
+
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+
+    // Emit case bodies (fall-through by default).
     for (i, case) in data.cases.iter().enumerate() {
         gen.switch_to_basic_block(case_blocks[i]);
 
@@ -4580,13 +4625,14 @@ fn generate_class_expression(
     data: &ClassData,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let dst = choose_dst(gen, preferred_dst);
     let has_super = data.super_class.is_some();
     let lhs_name = if data.name.is_none() { gen.pending_lhs_name.take() } else { None };
 
     // Step 2: Save parent environment, create class lexical environment.
+    // NB: class_env is allocated before dst to match C++ register ordering.
     let parent_env = gen.current_lexical_environment();
     let class_env = gen.allocate_register();
+    let dst = choose_dst(gen, preferred_dst);
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: class_env.operand(),
         parent: parent_env.operand(),
@@ -4660,6 +4706,8 @@ fn generate_class_expression(
     // Process class elements.
     let mut ffi_elements = Vec::new();
     let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
+    // Keep literal string data alive until FFI call.
+    let mut literal_string_storage: Vec<Vec<u16>> = Vec::new();
 
     for elem_node in &data.elements {
         match &elem_node.inner {
@@ -4711,6 +4759,10 @@ fn generate_class_expression(
                     private_identifier_len: priv_len,
                     shared_function_data_index: sfd_index,
                     has_initializer: false,
+                    literal_value_kind: 0,
+                    literal_value_number: 0.0,
+                    literal_value_string: std::ptr::null(),
+                    literal_value_string_len: 0,
                 });
             }
             ClassElement::Field {
@@ -4718,81 +4770,115 @@ fn generate_class_expression(
                 initializer,
                 is_static,
             } => {
-                // For fields with initializers, wrap the initializer in a
-                // synthetic function so the runtime can call it to get the
-                // initial value (a ClassFieldInitializerStatement).
-                let sfd_index = if let Some(init_expr) = initializer {
-                    // Determine field name for anonymous function naming.
-                    let field_name = match &key.inner {
-                        ExpressionKind::Identifier(ident) => ident.name.clone(),
-                        ExpressionKind::StringLiteral(s) => s.clone(),
-                        ExpressionKind::PrivateIdentifier(p) => p.name.clone(),
-                        _ => Vec::new(),
-                    };
+                // Detect literal initializers and store the value directly,
+                // avoiding function creation for simple cases like x = 0.
+                // This matches C++ ASTCodegen.cpp behavior.
+                let mut literal_value_kind: u8 = 0;
+                let mut literal_value_number: f64 = 0.0;
+                let mut literal_value_string: Vec<u16> = Vec::new();
+                let mut sfd_index: i32 = -1;
 
-                    // Wrap the expression in a ClassFieldInitializer statement.
-                    let body_stmt = Statement::new(
-                        init_expr.range,
-                        StatementKind::ClassFieldInitializer {
-                            expression: Box::new(init_expr.as_ref().clone()),
-                            field_name,
-                        },
-                    );
-                    let wrapper_body = Statement::new(
-                        init_expr.range,
-                        StatementKind::Block(ScopeData::shared_with_children(vec![body_stmt])),
-                    );
-
-                    // Class bodies are always strict mode.
-                    let func_data = FunctionData {
-                        name: None,
-                        source_text_start: init_expr.range.start.offset,
-                        source_text_end: init_expr.range.end.offset,
-                        body: Box::new(wrapper_body),
-                        parameters: Vec::new(),
-                        function_length: 0,
-                        kind: FunctionKind::Normal,
-                        is_strict_mode: true,
-                        is_arrow_function: false,
-                        parsing_insights: FunctionParsingInsights {
-                            uses_this: true,
-                            uses_this_from_environment: true,
-                            ..Default::default()
-                        },
-                        is_hoisted: false,
-                    };
-                    let index = emit_new_function(gen, &func_data, Some(utf16!("field")));
-
-                    // Set class_field_initializer_name on the SFD so that
-                    // eval("arguments") inside field initializers correctly
-                    // throws a SyntaxError.
-                    let sfd_ptr = gen.shared_function_data[index as usize];
-                    let key_is_private = is_private_key(key);
-                    let key_name: Vec<u16> = match &key.inner {
-                        ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
-                        ExpressionKind::Identifier(ident) => ident.name.clone(),
-                        ExpressionKind::StringLiteral(s) => s.clone(),
+                if let Some(init_expr) = initializer {
+                    let is_literal = match &init_expr.inner {
                         ExpressionKind::NumericLiteral(n) => {
-                            let s = format!("{}", n);
-                            s.encode_utf16().collect()
+                            literal_value_kind = 1;
+                            literal_value_number = *n;
+                            true
                         }
-                        _ => Vec::new(),
+                        ExpressionKind::BooleanLiteral(b) => {
+                            literal_value_kind = if *b { 2 } else { 3 };
+                            true
+                        }
+                        ExpressionKind::NullLiteral => {
+                            literal_value_kind = 4;
+                            true
+                        }
+                        ExpressionKind::StringLiteral(s) => {
+                            literal_value_kind = 5;
+                            literal_value_string = s.clone();
+                            true
+                        }
+                        ExpressionKind::Unary { op, operand } if *op == UnaryOp::Minus => {
+                            if let ExpressionKind::NumericLiteral(n) = &operand.inner {
+                                literal_value_kind = 1;
+                                literal_value_number = -n;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
                     };
-                    if !key_name.is_empty() {
-                        unsafe {
-                            super::ffi::rust_sfd_set_class_field_initializer_name(
-                                sfd_ptr,
-                                key_name.as_ptr(),
-                                key_name.len(),
-                                key_is_private,
-                            );
-                        }
-                    }
 
-                    index as i32
-                } else {
-                    -1i32
-                };
+                    if !is_literal {
+                        // Determine field name for anonymous function naming.
+                        let field_name = match &key.inner {
+                            ExpressionKind::Identifier(ident) => ident.name.clone(),
+                            ExpressionKind::StringLiteral(s) => s.clone(),
+                            ExpressionKind::PrivateIdentifier(p) => p.name.clone(),
+                            _ => Vec::new(),
+                        };
+
+                        // Wrap the expression in a ClassFieldInitializer statement.
+                        let body_stmt = Statement::new(
+                            init_expr.range,
+                            StatementKind::ClassFieldInitializer {
+                                expression: Box::new(init_expr.as_ref().clone()),
+                                field_name,
+                            },
+                        );
+                        let wrapper_body = Statement::new(
+                            init_expr.range,
+                            StatementKind::Block(ScopeData::shared_with_children(vec![body_stmt])),
+                        );
+
+                        // Class bodies are always strict mode.
+                        let func_data = FunctionData {
+                            name: None,
+                            source_text_start: init_expr.range.start.offset,
+                            source_text_end: init_expr.range.end.offset,
+                            body: Box::new(wrapper_body),
+                            parameters: Vec::new(),
+                            function_length: 0,
+                            kind: FunctionKind::Normal,
+                            is_strict_mode: true,
+                            is_arrow_function: false,
+                            parsing_insights: FunctionParsingInsights {
+                                uses_this: true,
+                                uses_this_from_environment: true,
+                                ..Default::default()
+                            },
+                            is_hoisted: false,
+                        };
+                        let index = emit_new_function(gen, &func_data, Some(utf16!("field")));
+
+                        // Set class_field_initializer_name on the SFD.
+                        let sfd_ptr = gen.shared_function_data[index as usize];
+                        let key_is_private = is_private_key(key);
+                        let key_name: Vec<u16> = match &key.inner {
+                            ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
+                            ExpressionKind::Identifier(ident) => ident.name.clone(),
+                            ExpressionKind::StringLiteral(s) => s.clone(),
+                            ExpressionKind::NumericLiteral(n) => {
+                                let s = format!("{}", n);
+                                s.encode_utf16().collect()
+                            }
+                            _ => Vec::new(),
+                        };
+                        if !key_name.is_empty() {
+                            unsafe {
+                                super::ffi::rust_sfd_set_class_field_initializer_name(
+                                    sfd_ptr,
+                                    key_name.as_ptr(),
+                                    key_name.len(),
+                                    key_is_private,
+                                );
+                            }
+                        }
+
+                        sfd_index = index as i32;
+                    }
+                }
 
                 let is_private = is_private_key(key);
 
@@ -4805,6 +4891,15 @@ fn generate_class_expression(
 
                 let (priv_ptr, priv_len) = get_private_identifier_ptr(key);
 
+                // Keep literal string data alive until FFI call.
+                let (str_ptr, str_len) = if !literal_value_string.is_empty() {
+                    literal_string_storage.push(literal_value_string);
+                    let s = literal_string_storage.last().unwrap();
+                    (s.as_ptr(), s.len())
+                } else {
+                    (std::ptr::null(), 0)
+                };
+
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: 3u8, // Field
                     is_static: *is_static,
@@ -4813,6 +4908,10 @@ fn generate_class_expression(
                     private_identifier_len: priv_len,
                     shared_function_data_index: sfd_index,
                     has_initializer: initializer.is_some(),
+                    literal_value_kind,
+                    literal_value_number,
+                    literal_value_string: str_ptr,
+                    literal_value_string_len: str_len,
                 });
             }
             ClassElement::StaticInitializer { body } => {
@@ -4846,6 +4945,10 @@ fn generate_class_expression(
                     private_identifier_len: 0,
                     shared_function_data_index: sfd_index,
                     has_initializer: false,
+                    literal_value_kind: 0,
+                    literal_value_number: 0.0,
+                    literal_value_string: std::ptr::null(),
+                    literal_value_string_len: 0,
                 });
             }
         }
@@ -4865,6 +4968,7 @@ fn generate_class_expression(
     // Create the ClassBlueprint via FFI
     let bp_ptr = unsafe {
         super::ffi::rust_create_class_blueprint(
+            gen.vm_ptr,
             gen.source_code_ptr,
             name_ptr,
             name_len,
@@ -5351,6 +5455,11 @@ fn generate_for_of_statement_inner(
     let needs_lexical_env = for_in_of_needs_lexical_env(lhs);
     let old_handler = gen.current_unwind_handler;
 
+    // NB: Create update_block before exception blocks to match C++ block ordering
+    // (C++ creates loop_end and loop_update in ForOfStatement, then exception blocks
+    // in for_in_of_body_evaluation).
+    let update_block = gen.make_block();
+
     // Get iterator
     let iterator_object = gen.allocate_register();
     let iterator_next_method = gen.allocate_register();
@@ -5362,6 +5471,19 @@ fn generate_for_of_statement_inner(
         iterable: object.operand(),
         hint: if is_await { 1 } else { 0 },
     });
+
+    // Drop `object` to free its register, matching C++ where the rhs ScopedOperand
+    // goes out of scope when for_in_of_head_evaluation returns.
+    drop(object);
+
+    let completion = if gen.must_propagate_completion {
+        let reg = gen.allocate_register();
+        let undef = gen.add_constant_undefined();
+        gen.emit_mov(&reg, &undef);
+        Some(reg)
+    } else {
+        None
+    };
 
     // Set up iterator close via synthetic FinallyContext.
     let close_completion_type = gen.allocate_register();
@@ -5382,21 +5504,11 @@ fn generate_for_of_statement_inner(
         lexical_environment_at_entry: lexical_env_at_entry.clone(),
     });
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
-
     // Break scope wraps the ReturnToFinally so break hits ReturnToFinally first.
     let labels = std::mem::take(&mut gen.pending_labels);
     gen.begin_breakable_scope(Label(end_block as u32), labels.clone(), completion.clone());
     gen.start_boundary(BlockBoundaryType::ReturnToFinally);
 
-    let update_block = gen.make_block();
     gen.emit(Instruction::Jump {
         target: Label(update_block as u32),
     });
@@ -5415,8 +5527,17 @@ fn generate_for_of_statement_inner(
             iterator_next: iterator_next_method.operand(),
             iterator_done: iterator_done.operand(),
         });
-        // Await the next result.
-        let awaited = generate_await(gen, next_result.clone());
+        // Await the next result. Pre-allocate completion registers and emit
+        // Mov(received_completion, accumulator) before Await to match C++.
+        let received_completion = gen.allocate_register();
+        let received_completion_type = gen.allocate_register();
+        let received_completion_value = gen.allocate_register();
+        let acc = gen.accumulator();
+        gen.emit_mov(&received_completion, &acc);
+        let awaited = generate_await_with_completions(
+            gen, next_result.clone(),
+            &received_completion, &received_completion_type, &received_completion_value,
+        );
         gen.emit_mov(&next_result, &awaited);
         // Type check
         gen.emit(Instruction::ThrowIfNotObject {
@@ -5534,16 +5655,60 @@ fn generate_for_of_statement_inner(
         false_target: Label(non_throw_close_block as u32),
     });
 
-    // Non-throw close: IteratorClose with Normal completion, then dispatch.
+    // Non-throw close: close the iterator with Normal completion, then dispatch.
     gen.switch_to_basic_block(non_throw_close_block);
-    let undef = gen.add_constant_undefined();
-    gen.emit(Instruction::IteratorClose {
-        iterator_object: iterator_object.operand(),
-        iterator_next: iterator_next_method.operand(),
-        iterator_done: iterator_done.operand(),
-        completion_type: 1, // Completion::Type::Normal
-        completion_value: undef.operand(),
-    });
+
+    if is_await {
+        // For async iterators, inline AsyncIteratorClose using GetMethod+Call+Await
+        // instead of the synchronous IteratorClose instruction. This avoids spinning
+        // the event loop inside bytecode execution.
+        let after_close = gen.make_block();
+        let return_method = gen.allocate_register();
+        let return_key = gen.intern_property_key(utf16!("return"));
+        gen.emit(Instruction::GetMethod {
+            dst: return_method.operand(),
+            object: iterator_object.operand(),
+            property: return_key,
+        });
+        let call_return_block = gen.make_block();
+        gen.emit(Instruction::JumpUndefined {
+            condition: return_method.operand(),
+            true_target: Label(after_close as u32),
+            false_target: Label(call_return_block as u32),
+        });
+        gen.switch_to_basic_block(call_return_block);
+
+        let inner_result = gen.allocate_register();
+        gen.emit(Instruction::Call {
+            dst: inner_result.operand(),
+            callee: return_method.operand(),
+            this_value: iterator_object.operand(),
+            expression_string: None,
+            argument_count: 0,
+            arguments: vec![],
+        });
+
+        // Pre-allocate completion registers in this scope so they're freed
+        // together with return_method and inner_result (matching C++ destructor order).
+        let rc = gen.allocate_register();
+        let rct = gen.allocate_register();
+        let rcv = gen.allocate_register();
+        let awaited = generate_await_with_completions(
+            gen, inner_result.clone(), &rc, &rct, &rcv,
+        );
+        gen.emit(Instruction::ThrowIfNotObject { src: awaited.operand() });
+        gen.emit(Instruction::Jump { target: Label(after_close as u32) });
+        gen.switch_to_basic_block(after_close);
+    } else {
+        let undef = gen.add_constant_undefined();
+        gen.emit(Instruction::IteratorClose {
+            iterator_object: iterator_object.operand(),
+            iterator_next: iterator_next_method.operand(),
+            iterator_done: iterator_done.operand(),
+            completion_type: 1, // Completion::Type::Normal
+            completion_value: undef.operand(),
+        });
+    }
 
     // Dispatch registered jumps (break/continue targets).
     let registered_jumps = std::mem::take(&mut gen.finally_contexts[finally_ctx_index].registered_jumps);
@@ -5578,7 +5743,7 @@ fn generate_for_of_statement_inner(
         gen.emit_mov(&outer_ct, &close_completion_type);
         gen.emit_mov(&outer_cv, &close_completion_value);
         gen.emit(Instruction::Jump { target: outer_fb });
-    } else if gen.is_in_generator_or_async_function() {
+    } else if gen.is_in_generator_function() {
         gen.emit(Instruction::Yield {
             continuation_label: None,
             value: close_completion_value.operand(),
@@ -5595,20 +5760,101 @@ fn generate_for_of_statement_inner(
         src: close_completion_value.operand(),
     });
 
-    // Throw close: IteratorClose with Throw completion, then rethrow.
+    // Throw close: close iterator then rethrow original exception.
     gen.switch_to_basic_block(throw_close_block);
-    gen.emit(Instruction::IteratorClose {
-        iterator_object: iterator_object.operand(),
-        iterator_next: iterator_next_method.operand(),
-        iterator_done: iterator_done.operand(),
-        completion_type: 5, // Completion::Type::Throw
-        completion_value: close_completion_value.operand(),
-    });
-    if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Throw {
-            src: close_completion_value.operand(),
+
+    if is_await {
+        // Inline AsyncIteratorClose with exception handler: any error from the close
+        // steps is discarded and the original exception is rethrown.
+        let rethrow_block = gen.make_block();
+        let close_catch_block = gen.make_block();
+
+        // Set up an exception handler that catches errors from the close and rethrows original.
+        let old_close_handler = gen.current_unwind_handler;
+        gen.current_unwind_handler = Some(close_catch_block);
+
+        // Jump to a block created inside the unwind context so that
+        // GetMethod/Call/Await all have the exception handler set.
+        let close_try_block = gen.make_block();
+        gen.emit(Instruction::Jump { target: Label(close_try_block as u32) });
+        gen.switch_to_basic_block(close_try_block);
+
+        let return_method = gen.allocate_register();
+        let return_key = gen.intern_property_key(utf16!("return"));
+        gen.emit(Instruction::GetMethod {
+            dst: return_method.operand(),
+            object: iterator_object.operand(),
+            property: return_key,
         });
+
+        let call_return_block = gen.make_block();
+        gen.emit(Instruction::JumpUndefined {
+            condition: return_method.operand(),
+            true_target: Label(rethrow_block as u32),
+            false_target: Label(call_return_block as u32),
+        });
+        gen.switch_to_basic_block(call_return_block);
+
+        let inner_result = gen.allocate_register();
+        gen.emit(Instruction::Call {
+            dst: inner_result.operand(),
+            callee: return_method.operand(),
+            this_value: iterator_object.operand(),
+            expression_string: None,
+            argument_count: 0,
+            arguments: vec![],
+        });
+
+        // Pre-allocate completion registers in this scope so they're freed
+        // together with return_method and inner_result (matching C++ destructor order).
+        let rc = gen.allocate_register();
+        let rct = gen.allocate_register();
+        let rcv = gen.allocate_register();
+        generate_await_with_completions(gen, inner_result.clone(), &rc, &rct, &rcv);
+
+        // Even if close succeeded, rethrow original (spec step 5).
+        gen.emit(Instruction::Jump { target: Label(rethrow_block as u32) });
+
+        // Free registers in C++ destructor order (reverse declaration):
+        // rcv, rct, rc, inner_result, return_method.
+        // This ensures `discarded` below gets the same register as C++.
+        drop(rcv);
+        drop(rct);
+        drop(rc);
+        drop(inner_result);
+        drop(return_method);
+
+        // Exception handler: discard close error, rethrow original.
+        gen.current_unwind_handler = old_close_handler;
+        gen.switch_to_basic_block(close_catch_block);
+        let discarded = gen.allocate_register();
+        gen.emit(Instruction::Catch { dst: discarded.operand() });
+        gen.emit(Instruction::Jump { target: Label(rethrow_block as u32) });
+
+        gen.switch_to_basic_block(rethrow_block);
+        gen.emit(Instruction::Throw { src: close_completion_value.operand() });
+    } else {
+        gen.emit(Instruction::IteratorClose {
+            iterator_object: iterator_object.operand(),
+            iterator_next: iterator_next_method.operand(),
+            iterator_done: iterator_done.operand(),
+            completion_type: 5, // Completion::Type::Throw
+            completion_value: close_completion_value.operand(),
+        });
+        if !gen.is_current_block_terminated() {
+            gen.emit(Instruction::Throw {
+                src: close_completion_value.operand(),
+            });
+        }
     }
+
+    // Release the FinallyContext's ScopedOperands so their registers
+    // can be reused (matching C++ where the FinallyContext goes out
+    // of scope on the stack after for-of codegen).
+    let dummy = gen.add_constant_undefined();
+    gen.finally_contexts[finally_ctx_index].completion_type = dummy.clone();
+    gen.finally_contexts[finally_ctx_index].completion_value = dummy;
+    gen.finally_contexts[finally_ctx_index].lexical_environment_at_entry = None;
 
     gen.switch_to_basic_block(end_block);
     completion
@@ -5722,9 +5968,6 @@ fn emit_set_variable_with_mode(
             LocalType::None => unreachable!(),
         };
         gen.emit_mov(&local, value);
-        if mode != BindingMode::Set {
-            gen.mark_local_initialized(local_index);
-        }
     } else {
         let id = gen.intern_identifier(&ident.name);
         match mode {
@@ -6414,7 +6657,7 @@ fn generate_try_statement(
                 gen.emit_mov(&outer_cv, &ctx_cv);
                 gen.emit(Instruction::Jump { target: outer_fb });
             } else {
-                if gen.is_in_generator_or_async_function() {
+                if gen.is_in_generator_function() {
                     gen.emit(Instruction::Yield {
                         continuation_label: None,
                         value: ctx_cv.operand(),
@@ -6432,6 +6675,18 @@ fn generate_try_statement(
                 src: ctx_cv.operand(),
             });
         }
+
+        // Release the FinallyContext's ScopedOperands so their registers
+        // can be reused (matching C++ where the FinallyContext goes out
+        // of scope on the stack after try-statement codegen).
+        // NB: Free in reverse declaration order (value before type) to
+        // match C++ destructor ordering and register reuse patterns.
+        drop(ctx_ct);
+        drop(ctx_cv);
+        gen.finally_contexts[ctx_index].lexical_environment_at_entry = None;
+        let dummy = gen.add_constant_undefined();
+        gen.finally_contexts[ctx_index].completion_value = dummy.clone();
+        gen.finally_contexts[ctx_index].completion_type = dummy;
     }
 
     // Switch to the next block for code after the try statement.
@@ -6664,7 +6919,7 @@ pub fn emit_function_declaration_instantiation(
                     let local_idx = ident.local_index.get();
                     match ident.local_type.get() {
                         LocalType::Variable => gen.mark_local_initialized(local_idx),
-                        LocalType::Argument => gen.mark_local_initialized(local_idx),
+                        LocalType::Argument => gen.mark_argument_initialized(local_idx),
                         _ => {}
                     }
                 } else {

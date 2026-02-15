@@ -850,18 +850,9 @@ pub unsafe extern "C" fn rust_compile_function(
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
-    // Initialize the lexical environment register.
-    {
-        use bytecode::operand::{Operand, Register};
-        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
-        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
-            dst: env_reg.operand(),
-        });
-        gen.lexical_environment_register_stack.push(env_reg);
-    }
-
-    // For async (non-generator) functions, emit the initial Yield BEFORE FDI
-    // so that parameter evaluation errors are caught by the async promise wrapper.
+    // For async (non-generator) functions, emit the initial Yield BEFORE
+    // GetLexicalEnvironment so that parameter evaluation errors are caught
+    // by the async promise wrapper. This matches C++ ordering.
     if gen.is_in_async_function() && !gen.is_in_generator_function() {
         let start_block = gen.make_block();
         let undef = gen.add_constant_undefined();
@@ -870,6 +861,16 @@ pub unsafe extern "C" fn rust_compile_function(
             value: undef.operand(),
         });
         gen.switch_to_basic_block(start_block);
+    }
+
+    // Initialize the lexical environment register.
+    {
+        use bytecode::operand::{Operand, Register};
+        let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+        gen.emit(bytecode::instruction::Instruction::GetLexicalEnvironment {
+            dst: env_reg.operand(),
+        });
+        gen.lexical_environment_register_stack.push(env_reg);
     }
 
     // Emit FDI (FunctionDeclarationInstantiation) bytecode.

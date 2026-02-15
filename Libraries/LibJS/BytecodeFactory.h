@@ -53,6 +53,10 @@ struct FFIClassElement {
     size_t private_identifier_len;
     int32_t shared_function_data_index; // -1 for none
     bool has_initializer;
+    uint8_t literal_value_kind; // 0=none, 1=number, 2=boolean_true, 3=boolean_false, 4=null, 5=string
+    double literal_value_number;
+    uint16_t const* literal_value_string;
+    size_t literal_value_string_len;
 };
 
 #ifdef __cplusplus
@@ -232,6 +236,8 @@ void rust_sfd_set_metadata(
 //
 // Returns a heap-allocated ClassBlueprint* cast to void*.
 void* rust_create_class_blueprint(
+    // VM pointer for creating GC objects (e.g. PrimitiveString)
+    void* vm_ptr,
     // Source code object for substring_view
     void const* source_code_ptr,
     // Class name (empty for anonymous)

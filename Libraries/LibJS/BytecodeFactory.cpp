@@ -481,6 +481,7 @@ extern "C" void rust_sfd_set_class_field_initializer_name(
 }
 
 extern "C" void* rust_create_class_blueprint(
+    void* vm_ptr,
     void const* source_code_ptr,
     uint16_t const* name,
     size_t name_len,
@@ -518,6 +519,28 @@ extern "C" void* rust_create_class_blueprint(
         if (elem.shared_function_data_index >= 0)
             desc.shared_function_data_index = static_cast<u32>(elem.shared_function_data_index);
         desc.has_initializer = elem.has_initializer;
+        switch (elem.literal_value_kind) {
+        case 0: // none
+            break;
+        case 1: // number
+            desc.literal_value = JS::Value(elem.literal_value_number);
+            break;
+        case 2: // boolean true
+            desc.literal_value = JS::Value(true);
+            break;
+        case 3: // boolean false
+            desc.literal_value = JS::Value(false);
+            break;
+        case 4: // null
+            desc.literal_value = JS::js_null();
+            break;
+        case 5: { // string
+            auto& vm = *static_cast<JS::VM*>(vm_ptr);
+            auto str_view = Utf16View(reinterpret_cast<char16_t const*>(elem.literal_value_string), elem.literal_value_string_len);
+            desc.literal_value = JS::Value(JS::PrimitiveString::create(vm, str_view));
+            break;
+        }
+        }
         blueprint->elements.append(desc);
     }
 

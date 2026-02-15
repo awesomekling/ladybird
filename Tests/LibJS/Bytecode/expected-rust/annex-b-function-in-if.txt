@@ -16,26 +16,25 @@ JS bytecode executable "annexBFunctionInIf"
 [   0]    0: GetLexicalEnvironment dst:reg4
 [   8]       CreateVariable identifier:inner, is_immutable:false, is_global:false, is_strict:false
 [  18]       InitializeVariableBinding identifier:inner, src:Undefined
-[  30]       JumpIf condition:arg0, true_target:@40, false_target:@d0
+[  30]       JumpFalse condition:arg0, target:@d0
 [  40]    1: CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
-[  50]       CreateVariable identifier:inner, is_immutable:false, is_global:false, is_strict:false
+[  50]       CreateMutableBinding environment:reg5, identifier:inner, can_be_deleted:false
 [  60]       NewFunction dst:reg6, shared_function_data_index:0
 [  78]       InitializeLexicalBinding identifier:inner, src:reg6
 [  90]       GetBinding dst:reg6, identifier:inner
 [  a8]       SetVariableBinding identifier:inner, src:reg6
 [  c0]       SetLexicalEnvironment environment:reg4
-[  c8]       Jump target:@160
+[  c8]       Jump target:@158
 [  d0]    2: CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
-[  e0]       CreateVariable identifier:inner, is_immutable:false, is_global:false, is_strict:false
+[  e0]       CreateMutableBinding environment:reg5, identifier:inner, can_be_deleted:false
 [  f0]       NewFunction dst:reg6, shared_function_data_index:1
 [ 108]       InitializeLexicalBinding identifier:inner, src:reg6
 [ 120]       GetBinding dst:reg6, identifier:inner
 [ 138]       SetVariableBinding identifier:inner, src:reg6
 [ 150]       SetLexicalEnvironment environment:reg4
-[ 158]       Jump target:@160
-[ 160]    3: GetCalleeAndThisFromEnvironment callee:reg6, this_value:reg7, identifier:inner
-[ 178]       Call dst:reg5, callee:reg6, this_value:reg7, inner
-[ 198]       Return value:reg5
+[ 158]    3: GetCalleeAndThisFromEnvironment callee:reg6, this_value:reg7, identifier:inner
+[ 170]       Call dst:reg5, callee:reg6, this_value:reg7, inner
+[ 190]       Return value:reg5
 
 JS bytecode executable "inner"
 [   0]    0: GetLexicalEnvironment dst:reg4
