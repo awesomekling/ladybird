@@ -1689,6 +1689,13 @@ fn generate_identifier(
             identifier: id,
             cache_index: cache,
         });
+    } else if ident.declaration_kind.get() == IdentDeclarationKind::Var {
+        let id = gen.intern_identifier(&ident.name);
+        gen.emit(Instruction::GetInitializedBinding {
+            dst: dst.operand(),
+            identifier: id,
+            cache: EnvironmentCoordinate::empty(),
+        });
     } else {
         let id = gen.intern_identifier(&ident.name);
         gen.emit(Instruction::GetBinding {
