@@ -2601,18 +2601,8 @@ fn generate_call_expression(
 
     // Compute expression_string for error messages (e.g. "true is not a function (evaluated from 'a')").
     let expression_string: Option<StringTableIndex> = match &data.callee.inner {
-        ExpressionKind::Identifier(ident) => {
-            Some(gen.intern_string(&ident.name))
-        }
-        ExpressionKind::Member { object, property, computed } => {
-            // Approximate the member expression as a string (e.g. "o.a", "o[key]").
-            let mut s = expression_to_string_approximation(object);
-            if *computed {
-                s.extend_from_slice(utf16!("[<computed>]"));
-            } else {
-                s.extend_from_slice(utf16!("."));
-                s.extend(expression_to_string_approximation(property));
-            }
+        ExpressionKind::Identifier(_) | ExpressionKind::Member { .. } => {
+            let s = expression_to_string_approximation(&data.callee);
             Some(gen.intern_string(&s))
         }
         _ => None,
