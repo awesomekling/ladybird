@@ -446,7 +446,7 @@ impl<'a> Parser<'a> {
                 let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
                 (self.expr(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
                     pattern, flags,
-                    compiled_regex: std::cell::Cell::new(compiled_regex),
+                    compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
                 })), true)
             }
 
@@ -470,7 +470,7 @@ impl<'a> Parser<'a> {
                 let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
                 (self.expr(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
                     pattern, flags,
-                    compiled_regex: std::cell::Cell::new(compiled_regex),
+                    compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
                 })), true)
             }
 

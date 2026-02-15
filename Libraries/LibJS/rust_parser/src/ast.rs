@@ -500,40 +500,48 @@ pub struct TemplateLiteralData {
 // RegExp literal
 // =============================================================================
 
-pub struct RegExpLiteralData {
-    pub pattern: Utf16String,
-    pub flags: Utf16String,
-    /// Opaque handle to a C++ `RustCompiledRegex` object, compiled during parsing.
-    /// Ownership lifecycle: the parser compiles the regex via FFI and stores it here.
-    /// Codegen takes ownership via `Cell::replace(null_mut())`. If neither codegen
-    /// nor clone takes ownership, `Drop` frees the handle via FFI.
-    pub compiled_regex: Cell<*mut c_void>,
-}
-
-/// Clone transfers ownership of the compiled regex to the clone (original becomes null).
-/// This supports the SFD (saved function data) path where the AST is cloned for lazy
-/// compilation — the clone is the one that will be compiled, so it needs the handle.
-impl Clone for RegExpLiteralData {
-    fn clone(&self) -> Self {
-        Self {
-            pattern: self.pattern.clone(),
-            flags: self.flags.clone(),
-            compiled_regex: Cell::new(self.compiled_regex.replace(std::ptr::null_mut())),
-        }
-    }
-}
+/// RAII wrapper for a compiled regex handle from C++.
+/// Takes ownership via `take()` and frees via FFI on drop.
+pub struct CompiledRegex(Cell<*mut c_void>);
 
 extern "C" {
     fn rust_free_compiled_regex(ptr: *mut c_void);
 }
 
-impl Drop for RegExpLiteralData {
+impl CompiledRegex {
+    pub fn new(ptr: *mut c_void) -> Self {
+        Self(Cell::new(ptr))
+    }
+
+    /// Take ownership of the compiled regex handle, leaving null behind.
+    pub fn take(&self) -> *mut c_void {
+        self.0.replace(std::ptr::null_mut())
+    }
+}
+
+impl Drop for CompiledRegex {
     fn drop(&mut self) {
-        let ptr = self.compiled_regex.get();
+        let ptr = self.0.get();
         if !ptr.is_null() {
             unsafe { rust_free_compiled_regex(ptr) };
         }
     }
+}
+
+impl Clone for CompiledRegex {
+    /// Clone transfers ownership (original becomes null).
+    /// This supports the SFD path where the AST is cloned for lazy
+    /// compilation — the clone needs the handle.
+    fn clone(&self) -> Self {
+        Self(Cell::new(self.take()))
+    }
+}
+
+#[derive(Clone)]
+pub struct RegExpLiteralData {
+    pub pattern: Utf16String,
+    pub flags: Utf16String,
+    pub compiled_regex: CompiledRegex,
 }
 
 // =============================================================================

@@ -54,7 +54,7 @@ pub fn generate_expr(
         ExpressionKind::RegExpLiteral(data) => {
             let source_index = gen.intern_string(&data.pattern);
             let flags_index = gen.intern_string(&data.flags);
-            let compiled = data.compiled_regex.replace(std::ptr::null_mut());
+            let compiled = data.compiled_regex.take();
             let regex_index = gen.intern_regex(compiled);
             let dst = choose_dst(gen, preferred_dst);
             gen.emit(Instruction::NewRegExp {
