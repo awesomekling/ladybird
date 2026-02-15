@@ -50,7 +50,7 @@
 //!   name within one scope (multiple `foo` refs are grouped together)
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{
@@ -1073,14 +1073,13 @@ impl ScopeCollector {
         // Build functions_to_initialize by scanning children for FunctionDeclarations.
         // Walk in reverse order, deduplicating by name.
         let mut functions_to_initialize: Vec<crate::ast::FunctionToInit> = Vec::new();
-        let mut seen_function_names: Vec<Vec<u16>> = Vec::new();
+        let mut seen_function_names: HashSet<Vec<u16>> = HashSet::new();
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
                 if let crate::ast::StatementKind::FunctionDeclaration(ref func_data) = sd.children[i].inner {
                     if let Some(ref name_ident) = func_data.name {
-                        if !seen_function_names.contains(&name_ident.name) {
-                            seen_function_names.push(name_ident.name.clone());
+                        if seen_function_names.insert(name_ident.name.clone()) {
                             functions_to_initialize.push(crate::ast::FunctionToInit {
                                 child_index: i,
                             });

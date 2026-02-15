@@ -89,6 +89,7 @@ pub mod token;
 use ast::StatementKind;
 use parser::{Parser, ProgramType};
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::rc::Rc;
 
@@ -553,13 +554,12 @@ unsafe fn extract_gdi_common(
     }
 
     // Functions to initialize (reverse order, deduplicated by name).
-    let mut seen_names: Vec<Vec<u16>> = Vec::new();
+    let mut seen_names: HashSet<Vec<u16>> = HashSet::new();
     let mut funcs_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
     for child in scope.children.iter().rev() {
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
-                if !seen_names.iter().any(|n| *n == name_ident.name) {
-                    seen_names.push(name_ident.name.clone());
+                if seen_names.insert(name_ident.name.clone()) {
                     funcs_to_init.push((func_data, name_ident.name.clone()));
                 }
             }
@@ -1023,13 +1023,12 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     });
 
     // §10.2.11 steps 5-8: count non-local unique parameter names.
-    let mut parameter_names: Vec<Vec<u16>> = Vec::new();
+    let mut parameter_names: HashSet<Vec<u16>> = HashSet::new();
     let mut parameters_in_environment: usize = 0;
     for param in &func_data.parameters {
         match &param.binding {
             ast::FunctionParameterBinding::Identifier(ident) => {
-                if !parameter_names.contains(&ident.name) {
-                    parameter_names.push(ident.name.clone());
+                if parameter_names.insert(ident.name.clone()) {
                     if !ident.is_local() {
                         parameters_in_environment += 1;
                     }
@@ -1037,8 +1036,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
             }
             ast::FunctionParameterBinding::BindingPattern(pattern) => {
                 for_each_binding_pattern_identifier(pattern, &mut |ident| {
-                    if !parameter_names.contains(&ident.name) {
-                        parameter_names.push(ident.name.clone());
+                    if parameter_names.insert(ident.name.clone()) {
                         if !ident.is_local() {
                             parameters_in_environment += 1;
                         }
@@ -1052,7 +1050,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     let mut arguments_object_needed = bsi.might_need_arguments;
     if is_arrow {
         arguments_object_needed = false;
-    } else if parameter_names.iter().any(|n| n == utf16!("arguments")) {
+    } else if parameter_names.contains(utf16!("arguments")) {
         arguments_object_needed = false;
     }
     if body_scope.is_none() {

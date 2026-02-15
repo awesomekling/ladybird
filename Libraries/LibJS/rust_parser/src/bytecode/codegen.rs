@@ -13,7 +13,7 @@
 //! - `Some(op)` if the node produces a value (expressions)
 //! - `None` for statements that don't produce values
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 
@@ -2517,29 +2517,29 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
     // Pass 2: Instantiate function declarations.
     // For duplicate names, only instantiate the last declaration (it wins).
     // Process in reverse to find which index is "last" per name.
-    let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
+    let mut last_func_indices: HashMap<Vec<u16>, usize> = HashMap::new();
     for (i, child) in scope.children.iter().enumerate().rev() {
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
-                if !last_func_indices.iter().any(|(n, _)| *n == name_ident.name) {
-                    last_func_indices.push((name_ident.name.clone(), i));
-                }
+                last_func_indices.entry(name_ident.name.clone()).or_insert(i);
             }
         }
     }
-    // Emit in forward order.
-    last_func_indices.reverse();
-    for (_, index) in &last_func_indices {
-        if let StatementKind::FunctionDeclaration(func_data) = &scope.children[*index].inner {
-            let sfd_index = emit_new_function(gen, func_data, None);
-            let fo = gen.allocate_register();
-            gen.emit(Instruction::NewFunction {
-                dst: fo.operand(),
-                shared_function_data_index: sfd_index,
-                home_object: None,
-                lhs_name: None,
-            });
+    // Emit in forward order — only the last declaration per name.
+    for (i, child) in scope.children.iter().enumerate() {
+        if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
+                if last_func_indices.get(name_ident.name.as_slice()) != Some(&i) {
+                    continue;
+                }
+                let sfd_index = emit_new_function(gen, func_data, None);
+                let fo = gen.allocate_register();
+                gen.emit(Instruction::NewFunction {
+                    dst: fo.operand(),
+                    shared_function_data_index: sfd_index,
+                    home_object: None,
+                    lhs_name: None,
+                });
                 if name_ident.is_local() {
                     let local_idx = name_ident.local_index.get();
                     let local = gen.local(local_idx);
@@ -4242,20 +4242,18 @@ fn emit_switch_block_declaration_instantiation(
     create_lexical_bindings_for_block(gen, &new_env, all_children.iter().copied());
 
     // Pass 2: Instantiate function declarations (last one wins for duplicates).
-    let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
+    let mut last_func_indices: HashMap<Vec<u16>, usize> = HashMap::new();
     for (i, child) in all_children.iter().enumerate().rev() {
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
-                if !last_func_indices.iter().any(|(n, _)| *n == name_ident.name) {
-                    last_func_indices.push((name_ident.name.clone(), i));
-                }
+                last_func_indices.entry(name_ident.name.clone()).or_insert(i);
             }
         }
     }
     for (i, child) in all_children.iter().enumerate() {
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name_ident) = func_data.name {
-                if last_func_indices.iter().any(|(n, index)| *n == name_ident.name && *index == i) {
+                if last_func_indices.get(name_ident.name.as_slice()) == Some(&i) {
                     let sfd_index = emit_new_function(gen, func_data, None);
                     let fo = gen.allocate_register();
                     gen.emit(Instruction::NewFunction {

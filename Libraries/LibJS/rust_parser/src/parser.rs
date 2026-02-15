@@ -32,7 +32,7 @@
 //! save and restore the full parser state including lexer position, current
 //! token, error list, and all boolean flags.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use std::rc::Rc;
 
@@ -675,24 +675,20 @@ impl<'a> Parser<'a> {
         force_strict: bool,
         _kind: FunctionKind,
     ) {
-        let mut seen_names: Vec<&[u16]> = Vec::new();
+        let mut seen_names: HashSet<&[u16]> = HashSet::new();
         for pi in param_info {
             let name = &pi.name;
             if name.is_empty() {
                 continue;
             }
             self.check_identifier_name_for_assignment_validity(name, force_strict);
-            for &prev_name in &seen_names {
-                if prev_name == name.as_slice() {
-                    let name_str = String::from_utf16_lossy(name);
-                    self.syntax_error(&format!(
-                        "Duplicate parameter '{}' not allowed in strict mode",
-                        name_str
-                    ));
-                    break;
-                }
+            if !seen_names.insert(name.as_slice()) {
+                let name_str = String::from_utf16_lossy(name);
+                self.syntax_error(&format!(
+                    "Duplicate parameter '{}' not allowed in strict mode",
+                    name_str
+                ));
             }
-            seen_names.push(name);
         }
     }
 
