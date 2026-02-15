@@ -1029,9 +1029,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
                 continue;
 
             if (auto node_with_style = pseudo_element->layout_node()) {
-                auto temporary_style = CSS::StyleComputer::create_computed_properties_from_computed_values(
-                    *pseudo_computed_values, pseudo_element->animated_property_data());
-                node_with_style->apply_style(*temporary_style);
+                node_with_style->mutable_computed_values().copy_all_from(*pseudo_computed_values);
+                node_with_style->apply_style();
                 if (invalidation.repaint && node_with_style->first_paintable()) {
                     node_with_style->first_paintable()->set_needs_paint_only_properties_update(true);
                     node_with_style->first_paintable()->set_needs_display();

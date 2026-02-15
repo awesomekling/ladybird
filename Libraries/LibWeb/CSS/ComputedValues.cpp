@@ -52,6 +52,15 @@ void ComputedValues::set_property_inherited(PropertyID property_id, bool inherit
         m_property_inherited[n / 8] &= ~(1 << (n % 8));
 }
 
+void ComputedValues::copy_all_from(ComputedValues const& other)
+{
+    m_inherited = other.m_inherited;
+    m_noninherited = other.m_noninherited;
+    m_property_values = other.m_property_values;
+    m_property_important = other.m_property_important;
+    m_property_inherited = other.m_property_inherited;
+}
+
 NonnullOwnPtr<ComputedValues> ComputedValues::clone_inherited_values() const
 {
     auto clone = make<ComputedValues>();

@@ -512,6 +512,8 @@ public:
     bool is_property_inherited(PropertyID) const;
     void set_property_inherited(PropertyID, bool);
 
+    void copy_all_from(ComputedValues const&);
+
     template<typename Callback>
     void for_each_property_value(Callback callback) const
     {

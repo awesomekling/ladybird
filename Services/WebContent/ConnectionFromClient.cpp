@@ -502,32 +502,45 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
     auto& element = as<Web::DOM::Element>(*node);
     node->document().set_inspected_node(node);
 
-    RefPtr<Web::CSS::ComputedProperties> properties;
+    Web::CSS::ComputedValues const* computed_values = nullptr;
+    Web::CSS::AnimatedPropertyData const* animated_data = nullptr;
     if (pseudo_element.has_value()) {
         if (auto pseudo = element.get_pseudo_element(*pseudo_element); pseudo.has_value() && pseudo->computed_values()) {
-            properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
-                *pseudo->computed_values(), pseudo->animated_property_data());
+            computed_values = pseudo->computed_values();
+            animated_data = pseudo->animated_property_data();
         }
-    } else if (auto const* computed_values = element.computed_values()) {
-        properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
-            *computed_values, element.animated_property_data());
+    } else {
+        computed_values = element.computed_values();
+        animated_data = element.animated_property_data();
     }
 
-    if (!properties) {
+    if (!computed_values) {
         async_did_inspect_dom_node(page_id, { property_type, {} });
         return;
     }
 
+    auto get_property_value = [&](Web::CSS::PropertyID property_id) -> RefPtr<Web::CSS::StyleValue const> {
+        if (animated_data) {
+            if (!computed_values->is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                if (auto animated_value = animated_data->values.get(property_id); animated_value.has_value())
+                    return *animated_value.value();
+            }
+        }
+        return computed_values->property_value(property_id);
+    };
+
     auto serialize_computed_style = [&]() {
         JsonObject serialized;
 
-        properties->for_each_property([&](auto property_id, auto& value) {
-            serialized.set(
-                Web::CSS::string_from_property_id(property_id),
-                value.to_string(Web::CSS::SerializationMode::Normal));
-        });
+        for (auto i = to_underlying(Web::CSS::first_longhand_property_id); i <= to_underlying(Web::CSS::last_longhand_property_id); ++i) {
+            auto property_id = static_cast<Web::CSS::PropertyID>(i);
+            if (auto value = computed_values->property_value(property_id)) {
+                serialized.set(
+                    Web::CSS::string_from_property_id(property_id),
+                    value->to_string(Web::CSS::SerializationMode::Normal));
+            }
+        }
 
-        // FIXME: Custom properties are not yet included in ComputedProperties, so add them manually.
         if (auto custom_property_data = element.custom_property_data(pseudo_element)) {
             custom_property_data->for_each_property([&](FlyString const& name, Web::CSS::StyleProperty const& value) {
                 serialized.set(name, value.value->to_string(Web::CSS::SerializationMode::Normal));
@@ -565,12 +578,18 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
         serialized.set("border-bottom-width"sv, box_model.border.bottom.to_double());
         serialized.set("border-left-width"sv, box_model.border.left.to_double());
 
-        serialized.set("box-sizing"sv, properties->property(Web::CSS::PropertyID::BoxSizing).to_string(Web::CSS::SerializationMode::Normal));
-        serialized.set("display"sv, properties->property(Web::CSS::PropertyID::Display).to_string(Web::CSS::SerializationMode::Normal));
-        serialized.set("float"sv, properties->property(Web::CSS::PropertyID::Float).to_string(Web::CSS::SerializationMode::Normal));
-        serialized.set("line-height"sv, properties->property(Web::CSS::PropertyID::LineHeight).to_string(Web::CSS::SerializationMode::Normal));
-        serialized.set("position"sv, properties->property(Web::CSS::PropertyID::Position).to_string(Web::CSS::SerializationMode::Normal));
-        serialized.set("z-index"sv, properties->property(Web::CSS::PropertyID::ZIndex).to_string(Web::CSS::SerializationMode::Normal));
+        auto property_string = [&](Web::CSS::PropertyID property_id) -> String {
+            if (auto value = get_property_value(property_id))
+                return value->to_string(Web::CSS::SerializationMode::Normal);
+            return {};
+        };
+
+        serialized.set("box-sizing"sv, property_string(Web::CSS::PropertyID::BoxSizing));
+        serialized.set("display"sv, property_string(Web::CSS::PropertyID::Display));
+        serialized.set("float"sv, property_string(Web::CSS::PropertyID::Float));
+        serialized.set("line-height"sv, property_string(Web::CSS::PropertyID::LineHeight));
+        serialized.set("position"sv, property_string(Web::CSS::PropertyID::Position));
+        serialized.set("z-index"sv, property_string(Web::CSS::PropertyID::ZIndex));
 
         return serialized;
     };
@@ -578,7 +597,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
     auto serialize_used_fonts = [&]() {
         JsonArray serialized;
 
-        properties->computed_font_list(node->document().font_computer())->for_each_font_entry([&](Gfx::FontCascadeList::Entry const& entry) {
+        computed_values->font_list().for_each_font_entry([&](Gfx::FontCascadeList::Entry const& entry) {
             auto const& font = *entry.font;
 
             JsonObject font_object;
