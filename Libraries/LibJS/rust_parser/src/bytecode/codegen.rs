@@ -3218,7 +3218,9 @@ fn generate_assignment_expression(
                         src: dst.operand(),
                         base_identifier: None,
                     });
-                    // Match C++ register free order (loaded_value before referenced_name).
+                    // Match C++ destruction order: rhs drops first, then
+                    // reference_operands (loaded_value before referenced_name).
+                    drop(rhs_val);
                     drop(old_val);
                     drop(saved_prop);
                     return Some(dst);
