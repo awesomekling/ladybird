@@ -275,6 +275,7 @@ public:
     GC::Ref<NodeWithStyle> create_anonymous_wrapper() const;
 
     void transfer_table_box_computed_values_to_wrapper_computed_values(CSS::ComputedValues& wrapper_computed_values);
+    void reset_table_box_computed_values_used_by_wrapper_to_init_values();
 
     bool is_body() const;
     bool is_scroll_container() const;
@@ -298,7 +299,6 @@ protected:
 private:
     virtual bool is_node_with_style() const final { return true; }
 
-    void reset_table_box_computed_values_used_by_wrapper_to_init_values();
     void propagate_non_inherit_values(NodeWithStyle& target_node) const;
     void propagate_style_to_anonymous_wrappers();
 

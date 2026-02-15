@@ -919,8 +919,18 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     if (had_list_marker || m_computed_values->display().is_list_item())
         recompute_pseudo_element_style(CSS::PseudoElement::Marker);
 
-    if (invalidation.is_none())
+    if (invalidation.is_none()) {
+        // NB: populate_computed_values() in compute_style() unconditionally writes all property values
+        //     (including table-transferred properties) to this element's ComputedValues. For table boxes
+        //     whose properties have been transferred to a wrapper, this overwrites the reset-to-initial
+        //     values. Since we're not going to call apply_style() (which would re-do the transfer),
+        //     we must explicitly reset them here.
+        if (layout_node() && layout_node()->display().is_table_inside()
+            && layout_node()->parent() && layout_node()->parent()->is_table_wrapper()) {
+            layout_node()->reset_table_box_computed_values_used_by_wrapper_to_init_values();
+        }
         return invalidation;
+    }
 
     if (invalidation.repaint && paintable())
         paintable()->set_needs_paint_only_properties_update(true);

@@ -1739,6 +1739,7 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     computed_values.set_position(computed_style.position());
     computed_values.set_z_index(computed_style.z_index());
     computed_values.set_inset(computed_style.length_box(PropertyID::Left, PropertyID::Top, PropertyID::Right, PropertyID::Bottom, LengthPercentageOrAuto::make_auto()));
+    computed_values.set_margin(computed_style.length_box(PropertyID::MarginLeft, PropertyID::MarginTop, PropertyID::MarginRight, PropertyID::MarginBottom, Length::make_px(0)));
 
     // Resolve color-scheme first (needed for system colors and color resolution).
     auto color_scheme = computed_style.color_scheme(document.page().preferred_color_scheme(), document.supported_color_schemes());
