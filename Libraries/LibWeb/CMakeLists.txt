@@ -98,6 +98,7 @@ set(SOURCES
     Crypto/SubtleCrypto.cpp
     CSS/Angle.cpp
     CSS/AnimationEvent.cpp
+    CSS/ApplyStyleValueToComputedValues.cpp
     CSS/BooleanExpression.cpp
     CSS/CalculatedOr.cpp
     CSS/CascadedProperties.cpp
