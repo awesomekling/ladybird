@@ -3223,6 +3223,9 @@ fn generate_assignment_expression(
                         src: dst.operand(),
                         base_identifier: None,
                     });
+                    // Match C++ register free order (loaded_value before referenced_name).
+                    drop(old_val);
+                    drop(saved_prop);
                     return Some(dst);
                 } else {
                     if let ExpressionKind::Identifier(ident) = &property.inner {
