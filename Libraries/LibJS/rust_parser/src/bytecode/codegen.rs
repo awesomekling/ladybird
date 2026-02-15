@@ -3149,11 +3149,11 @@ fn generate_assignment_expression(
                 // Compound/logical member assignment: match C++ emit_load_from_reference
                 // pattern (no base copy, save property after GetByValue).
                 let base = base_raw;
-                let old_val = gen.allocate_register();
                 let base_id = intern_base_identifier(gen, object);
                 let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
 
                 if is_super {
+                    let old_val = gen.allocate_register();
                     let computed_key = emit_super_get(gen, &old_val, &base, property, *computed, super_this.as_ref().unwrap());
                     if is_logical {
                         let rhs_block = gen.make_block();
@@ -3181,6 +3181,7 @@ fn generate_assignment_expression(
 
                 if *computed {
                     let prop = generate_expr(property, gen, None)?;
+                    let old_val = gen.allocate_register();
                     gen.emit(Instruction::GetByValue {
                         dst: old_val.operand(),
                         base: base.operand(),
@@ -3190,6 +3191,7 @@ fn generate_assignment_expression(
                     // Save property for store-back (matching C++ emit_load_from_reference).
                     let saved_prop = gen.allocate_register();
                     gen.emit_mov(&saved_prop, &prop);
+                    drop(prop);
                     if is_logical {
                         let rhs_block = gen.make_block();
                         let lhs_block = gen.make_block();
@@ -3224,6 +3226,7 @@ fn generate_assignment_expression(
                     return Some(dst);
                 } else {
                     if let ExpressionKind::Identifier(ident) = &property.inner {
+                        let old_val = gen.allocate_register();
                         emit_get_by_id(gen, &old_val, &base, &ident.name, None);
                         if is_logical {
                             let rhs_block = gen.make_block();
@@ -3264,6 +3267,7 @@ fn generate_assignment_expression(
                         });
                         return Some(dst);
                     } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
+                        let old_val = gen.allocate_register();
                         let id = gen.intern_identifier(&priv_ident.name);
                         gen.emit(Instruction::GetPrivateById {
                             dst: old_val.operand(),
