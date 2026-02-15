@@ -11,6 +11,7 @@
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Bindings/AnimationEffectPrototype.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/CSS/ApplyStyleValueToComputedValues.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -833,17 +834,66 @@ AnimationUpdateContext::~AnimationUpdateContext()
             return TraversalDecision::Continue;
         });
 
-        // Create a temporary ComputedProperties from ComputedValues to re-populate typed fields
-        // with animated overrides applied.
-        auto computed_properties = CSS::StyleComputer::create_computed_properties_from_computed_values(*computed_values, animated_data);
+        // Try the surgical per-property update path: directly apply animated StyleValues to
+        // the typed fields in ComputedValues, avoiding a full round-trip through ComputedProperties.
+        bool used_surgical_path = false;
+        if (animated_data && !new_animated_properties.is_empty()) {
+            // Check if any properties stopped being animated (present in old set but not new).
+            // If so, we need the full round-trip to restore their base values.
+            bool properties_stopped = false;
+            for (auto const& [property_id, _] : it.value->animated_properties_before_update) {
+                if (!new_animated_properties.contains(property_id)) {
+                    properties_stopped = true;
+                    break;
+                }
+            }
 
-        if (!element.pseudo_element().has_value()) {
-            CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *computed_properties, target->document());
-            if (target->layout_node())
-                target->layout_node()->apply_style();
-        } else {
-            if (auto pseudo_element_node = target->get_pseudo_element_node(element.pseudo_element().value()))
-                pseudo_element_node->apply_style(*computed_properties);
+            if (!properties_stopped) {
+                bool all_handled = true;
+                if (!element.pseudo_element().has_value()) {
+                    auto& mutable_values = static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values());
+                    for (auto const& [property_id, style_value] : new_animated_properties) {
+                        if (!CSS::apply_style_value_to_computed_values(mutable_values, property_id, *style_value)) {
+                            all_handled = false;
+                            break;
+                        }
+                    }
+                    if (all_handled) {
+                        if (target->layout_node())
+                            target->layout_node()->apply_style();
+                        used_surgical_path = true;
+                    }
+                } else {
+                    if (auto pseudo_element_node = target->get_pseudo_element_node(element.pseudo_element().value())) {
+                        auto& mutable_values = pseudo_element_node->mutable_computed_values();
+                        for (auto const& [property_id, style_value] : new_animated_properties) {
+                            if (!CSS::apply_style_value_to_computed_values(mutable_values, property_id, *style_value)) {
+                                all_handled = false;
+                                break;
+                            }
+                        }
+                        if (all_handled) {
+                            pseudo_element_node->apply_style();
+                            used_surgical_path = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!used_surgical_path) {
+            // Full round-trip: create a temporary ComputedProperties from ComputedValues
+            // and re-populate all typed fields with animated overrides applied.
+            auto computed_properties = CSS::StyleComputer::create_computed_properties_from_computed_values(*computed_values, animated_data);
+
+            if (!element.pseudo_element().has_value()) {
+                CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *computed_properties, target->document());
+                if (target->layout_node())
+                    target->layout_node()->apply_style();
+            } else {
+                if (auto pseudo_element_node = target->get_pseudo_element_node(element.pseudo_element().value()))
+                    pseudo_element_node->apply_style(*computed_properties);
+            }
         }
 
         if (invalidation.relayout && target->layout_node())
@@ -864,6 +914,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
             if (invalidation.rebuild_accumulated_visual_contexts)
                 element.document().set_needs_accumulated_visual_contexts_update(true);
 
+            element.document().set_needs_to_resolve_paint_only_properties();
             element.document().set_needs_display();
         }
         if (invalidation.rebuild_stacking_context_tree)
