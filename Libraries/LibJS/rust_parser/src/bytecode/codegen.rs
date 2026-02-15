@@ -3456,7 +3456,9 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             LocalType::None => unreachable!(),
         };
         // TDZ check: throw ReferenceError if assigning to an uninitialized let binding.
-        if !gen.is_local_initialized(local_index)
+        // Arguments are never lexically declared, so skip (matching C++ is_local_lexically_declared).
+        if ident.local_type.get() != LocalType::Argument
+            && !gen.is_local_initialized(local_index)
             && ident.declaration_kind.get() != IdentDeclarationKind::Var
         {
             gen.emit(Instruction::ThrowIfTDZ {
