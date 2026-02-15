@@ -1423,7 +1423,6 @@ impl<'a> Parser<'a> {
         // For non-tagged templates, we collect parts as expressions (alternating
         // string parts and interpolation expressions). For tagged templates, we
         // also collect raw strings separately.
-        let mut _last_was_expr = needs_leading_empty;
 
         loop {
             if self.match_token(TokenType::TemplateLiteralEnd) {
@@ -1447,7 +1446,6 @@ impl<'a> Parser<'a> {
                     }
                     expressions.push(self.expr(start, ExpressionKind::StringLiteral(value)));
                 }
-                _last_was_expr = false;
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
                 let expr = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
@@ -1460,7 +1458,6 @@ impl<'a> Parser<'a> {
                         raw_strings.push(Vec::new());
                     }
                 }
-                _last_was_expr = true;
             } else if self.done() {
                 self.expected("template literal end");
                 break;
@@ -2040,7 +2037,7 @@ fn token_to_binary_op(tt: TokenType) -> BinaryOp {
         TokenType::UnsignedShiftRight => BinaryOp::UnsignedRightShift,
         TokenType::In => BinaryOp::In,
         TokenType::Instanceof => BinaryOp::InstanceOf,
-        _ => BinaryOp::Addition,
+        _ => unreachable!("unexpected token {:?} in binary expression", tt),
     }
 }
 
@@ -2062,7 +2059,7 @@ fn token_to_assignment_op(tt: TokenType) -> AssignmentOp {
         TokenType::DoubleAmpersandEquals => AssignmentOp::AndAssignment,
         TokenType::DoublePipeEquals => AssignmentOp::OrAssignment,
         TokenType::DoubleQuestionMarkEquals => AssignmentOp::NullishAssignment,
-        _ => AssignmentOp::Assignment,
+        _ => unreachable!("unexpected token {:?} in assignment expression", tt),
     }
 }
 

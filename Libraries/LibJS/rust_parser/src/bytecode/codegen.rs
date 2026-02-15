@@ -3876,8 +3876,9 @@ fn emit_compound_assignment(
         AssignmentOp::LeftShiftAssignment => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
         AssignmentOp::RightShiftAssignment => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
         AssignmentOp::UnsignedRightShiftAssignment => gen.emit(Instruction::UnsignedRightShift { dst: d, lhs: l, rhs: r }),
-        // Logical assignments (these shouldn't reach here, handled separately)
-        AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment => {}
+        AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment => {
+            unreachable!("logical assignment in compound path")
+        }
         AssignmentOp::Assignment => unreachable!("plain assignment in compound path"),
     }
 }

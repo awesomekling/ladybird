@@ -759,6 +759,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn consume_regex_literal(&mut self) -> TokenType {
+        self.regex_is_in_character_class = false;
         while !self.is_eof() {
             if self.is_line_terminator() || (!self.regex_is_in_character_class && self.current_code_unit == b'/' as u16) {
                 break;
@@ -768,8 +769,6 @@ impl<'a> Lexer<'a> {
                 self.regex_is_in_character_class = true;
             } else if self.current_code_unit == b']' as u16 {
                 self.regex_is_in_character_class = false;
-            } else if !self.regex_is_in_character_class && self.current_code_unit == b'/' as u16 {
-                break;
             }
 
             if self.match2(b'\\' as u16, b'/' as u16)
