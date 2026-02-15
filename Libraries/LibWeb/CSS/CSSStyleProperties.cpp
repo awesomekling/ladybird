@@ -654,17 +654,28 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         return used_value_for_property(move(used_value_getter));
     };
 
-    auto const& computed_values = layout_node.computed_values();
-
     auto abstract_element = *owner_node();
 
+    // NB: Read computed values from the AbstractElement (Element or PseudoElement) rather than from
+    //     the layout node. For pseudo-elements, the layout node owns a separate ComputedValues that
+    //     can be stale when invalidation required a layout tree rebuild (since apply_style() is not
+    //     called in that case). The Element/PseudoElement's ComputedValues are always up-to-date
+    //     after recompute_style().
+    auto const* computed_values_ptr = abstract_element.computed_values();
+    if (!computed_values_ptr)
+        return nullptr;
+    auto const& computed_values = *computed_values_ptr;
+
     // Read property values with animation overrides applied.
-    // Animated values take priority over base values from the overflow map.
+    // Animated values take priority over base values from the overflow map,
+    // but !important properties are not overridden by animations (only transitions can do that).
     auto* animated_data = abstract_element.animated_property_data();
     auto get_computed_value = [&computed_values, animated_data](PropertyID property_id) -> StyleValue const& {
         if (animated_data) {
-            if (auto it = animated_data->values.find(property_id); it != animated_data->values.end())
-                return *it->value;
+            if (!computed_values.is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                if (auto it = animated_data->values.find(property_id); it != animated_data->values.end())
+                    return *it->value;
+            }
         }
         if (auto value = computed_values.property_value(property_id))
             return *value;
