@@ -442,8 +442,10 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         return std::ptr::null_mut();
     }
 
-    // Run scope analysis.
-    parser.scope_collector.analyze(false);
+    // Run scope analysis. Use analyze_as_dynamic_function() to suppress
+    // marking identifiers as global, matching the C++ path which parses
+    // as a FunctionExpression (no Program scope for globals to bind to).
+    parser.scope_collector.analyze_as_dynamic_function();
 
     if parser.scope_collector.has_errors() {
         return std::ptr::null_mut();
@@ -474,10 +476,14 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         None
     };
 
-    let func_data = match func_data {
+    let mut func_data = match func_data {
         Some(fd) => fd,
         None => return std::ptr::null_mut(),
     };
+
+    // Dynamic functions always need an arguments object, matching the C++
+    // path in FunctionConstructor::create_dynamic_function.
+    func_data.parsing_insights.might_need_arguments_object = true;
 
     // Determine strictness: the function itself may be strict.
     let is_strict = func_data.is_strict_mode;

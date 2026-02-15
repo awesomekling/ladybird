@@ -765,19 +765,31 @@ impl ScopeCollector {
     // === Post-parse analysis ===
 
     pub fn analyze(&mut self, initiated_by_eval: bool) {
+        self.analyze_inner(initiated_by_eval, false);
+    }
+
+    /// Like analyze(), but suppresses marking identifiers as global.
+    /// Used for dynamic functions (new Function(...)) where the source is
+    /// parsed as a Script but identifiers must not use GetGlobal/SetGlobal,
+    /// matching the C++ path which parses as a FunctionExpression.
+    pub fn analyze_as_dynamic_function(&mut self) {
+        self.analyze_inner(false, true);
+    }
+
+    fn analyze_inner(&mut self, initiated_by_eval: bool, suppress_globals: bool) {
         if !self.records.is_empty() {
-            self.analyze_recursive(0, initiated_by_eval);
+            self.analyze_recursive(0, initiated_by_eval, suppress_globals);
         }
     }
 
     /// Analyze a scope and all its descendants, bottom-up.
     /// Children are analyzed first so that unresolved identifiers bubble up
     /// to their parent, and eval poisoning propagates outward.
-    fn analyze_recursive(&mut self, index: usize, initiated_by_eval: bool) {
+    fn analyze_recursive(&mut self, index: usize, initiated_by_eval: bool, suppress_globals: bool) {
         // Process children first (bottom-up traversal).
         let children = std::mem::take(&mut self.records[index].children);
         for child_idx in children {
-            self.analyze_recursive(child_idx, initiated_by_eval);
+            self.analyze_recursive(child_idx, initiated_by_eval, suppress_globals);
         }
 
         // Steps 1-3 must run even for scopes without scope_data (e.g. catch
@@ -788,7 +800,7 @@ impl ScopeCollector {
         // 1. Propagate eval() flags from children to parent.
         Self::propagate_eval_poisoning(&mut self.records, index);
         // 2. Match identifier references to declarations; optimize as locals.
-        Self::resolve_identifiers(&mut self.records, index, initiated_by_eval);
+        Self::resolve_identifiers(&mut self.records, index, initiated_by_eval, suppress_globals);
         // 3. Annex B: hoist block-scoped functions to enclosing function scope.
         Self::hoist_functions(&mut self.records, index);
 
@@ -838,7 +850,7 @@ impl ScopeCollector {
     /// - It's NOT captured by a nested function
     /// - It's NOT used inside a `with` statement
     /// - The scope chain is NOT poisoned by `eval()`
-    fn resolve_identifiers(records: &mut [ScopeRecord], index: usize, initiated_by_eval: bool) {
+    fn resolve_identifiers(records: &mut [ScopeRecord], index: usize, initiated_by_eval: bool, suppress_globals: bool) {
         let groups = std::mem::take(&mut records[index].identifier_groups);
         // Sort groups by name for deterministic local variable indices
         // (HashMap iteration order is arbitrary).
@@ -932,7 +944,7 @@ impl ScopeCollector {
             }
 
             if records[index].scope_type == ScopeType::Program {
-                let can_use_global = !(group.used_inside_with_statement || initiated_by_eval);
+                let can_use_global = !suppress_globals && !(group.used_inside_with_statement || initiated_by_eval);
                 if can_use_global {
                     for id in &group.identifiers {
                         if !id.is_inside_scope_with_eval.get() {
