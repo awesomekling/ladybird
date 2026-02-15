@@ -2358,7 +2358,17 @@ fn generate_block_statement(
     if did_create_env {
         gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
     }
-    let result = generate_scope_children(gen, scope, preferred_dst);
+
+    // The Rust parser wraps for-loop statements in a Block for scope tracking
+    // (via close_for_loop_scope). When the block doesn't create a lexical
+    // environment and its only child is a for-loop variant, skip
+    // generate_scope_children and generate the child directly to avoid
+    // emitting a redundant completion Mov that C++ doesn't produce.
+    let result = if !did_create_env && scope.children.len() == 1 && is_for_loop(&scope.children[0]) {
+        generate_stmt(&scope.children[0], gen, preferred_dst)
+    } else {
+        generate_scope_children(gen, scope, preferred_dst)
+    };
 
     if did_create_env {
         gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
@@ -7233,6 +7243,17 @@ pub fn emit_function_declaration_instantiation(
             }
         }
     }
+}
+
+/// Check if a statement is a for-loop variant (for, for-in, for-of, for-await-of).
+fn is_for_loop(stmt: &Statement) -> bool {
+    matches!(
+        stmt.inner,
+        StatementKind::For { .. }
+            | StatementKind::ForIn { .. }
+            | StatementKind::ForOf { .. }
+            | StatementKind::ForAwaitOf { .. }
+    )
 }
 
 /// Check if a block needs block declaration instantiation.
