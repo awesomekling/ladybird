@@ -2279,8 +2279,8 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
 NonnullRefPtr<ComputedProperties> StyleComputer::create_computed_properties_from_computed_values(ComputedValues const& computed_values, AnimatedPropertyData* animated_data)
 {
     auto computed_properties = adopt_ref(*new ComputedProperties);
-    computed_values.for_each_property_value([&](PropertyID property_id, NonnullRefPtr<StyleValue const> const& value) {
-        computed_properties->set_property(property_id, value,
+    computed_values.for_each_property_value([&](PropertyID property_id, RefPtr<StyleValue const> const& value) {
+        computed_properties->set_property(property_id, *value,
             computed_values.is_property_inherited(property_id) ? ComputedProperties::Inherited::Yes : ComputedProperties::Inherited::No,
             computed_values.is_property_important(property_id) ? Important::Yes : Important::No);
     });

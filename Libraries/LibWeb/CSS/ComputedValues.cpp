@@ -12,15 +12,14 @@ ComputedValues::~ComputedValues() = default;
 
 void ComputedValues::set_property_value(PropertyID property_id, NonnullRefPtr<StyleValue const> value)
 {
-    m_property_values.set(property_id, move(value));
+    size_t index = to_underlying(property_id) - to_underlying(first_longhand_property_id);
+    m_property_values[index] = move(value);
 }
 
 RefPtr<StyleValue const> ComputedValues::property_value(PropertyID property_id) const
 {
-    auto it = m_property_values.find(property_id);
-    if (it != m_property_values.end())
-        return it->value;
-    return nullptr;
+    size_t index = to_underlying(property_id) - to_underlying(first_longhand_property_id);
+    return m_property_values[index];
 }
 
 bool ComputedValues::is_property_important(PropertyID property_id) const

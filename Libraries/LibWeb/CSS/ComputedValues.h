@@ -514,8 +514,12 @@ public:
     template<typename Callback>
     void for_each_property_value(Callback callback) const
     {
-        for (auto const& [property_id, value] : m_property_values)
-            callback(property_id, value);
+        for (size_t i = 0; i < number_of_longhand_properties; ++i) {
+            if (m_property_values[i]) {
+                auto property_id = static_cast<PropertyID>(i + to_underlying(first_longhand_property_id));
+                callback(property_id, m_property_values[i]);
+            }
+        }
     }
 
     AspectRatio aspect_ratio() const { return m_noninherited.aspect_ratio; }
@@ -919,7 +923,7 @@ protected:
 
     NonInheritedValues m_noninherited;
 
-    HashMap<PropertyID, NonnullRefPtr<StyleValue const>> m_property_values;
+    Array<RefPtr<StyleValue const>, number_of_longhand_properties> m_property_values;
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_important {};
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> m_property_inherited {};
 };
