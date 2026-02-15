@@ -295,7 +295,6 @@ pub fn generate_expr(
         ExpressionKind::Array(elements) => {
             // Array literals are not named evaluations.
             gen.pending_lhs_name = None;
-            let dst = choose_dst(gen, preferred_dst);
 
             // If all elements are constant primitives, emit NewPrimitiveArray.
             if !elements.is_empty() && elements.iter().all(|e| match e {
@@ -311,6 +310,7 @@ pub fn generate_expr(
                         _ => unreachable!(),
                     },
                 }).collect();
+                let dst = choose_dst(gen, preferred_dst);
                 gen.emit(Instruction::NewPrimitiveArray {
                     dst: dst.operand(),
                     element_count: values.len() as u32,
@@ -338,6 +338,7 @@ pub fn generate_expr(
                     }
                 }
             }
+            let dst = choose_dst(gen, preferred_dst);
             let args: Vec<Operand> = scoped_args.iter().map(|s| s.operand()).collect();
             gen.emit(Instruction::NewArray {
                 dst: dst.operand(),
