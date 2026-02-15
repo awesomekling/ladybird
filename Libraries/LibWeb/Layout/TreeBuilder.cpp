@@ -615,8 +615,7 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
     if (!should_create_layout_node) {
         if (is<DOM::Element>(dom_node)) {
             auto& element = static_cast<DOM::Element&>(dom_node);
-            style = element.computed_properties();
-            display = style->display();
+            display = element.computed_values()->display();
         }
         layout_node = dom_node.layout_node();
     } else {
@@ -628,8 +627,7 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                 old_backdrop_node->remove();
             element.clear_pseudo_element_nodes({});
             VERIFY(!element.needs_style_update());
-            style = element.computed_properties();
-            display = style->display();
+            display = element.computed_values()->display();
             if (display.is_none())
                 return;
             // TODO: Implement changing element contents with the `content` property.
