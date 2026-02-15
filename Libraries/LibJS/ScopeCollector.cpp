@@ -608,6 +608,22 @@ void ScopeCollector::build_function_scope_data(ScopeRecord& scope)
         }
     }
 
+    // Sort by name so FDI bytecode output is deterministic regardless of
+    // HashMap iteration order.
+    // NB: VarToInitialize contains a reference so we sort via index permutation.
+    Vector<size_t> indices;
+    indices.ensure_capacity(data->vars_to_initialize.size());
+    for (size_t i = 0; i < data->vars_to_initialize.size(); ++i)
+        indices.append(i);
+    quick_sort(indices, [&](auto a, auto b) {
+        return data->vars_to_initialize[a].identifier.string() < data->vars_to_initialize[b].identifier.string();
+    });
+    Vector<VarToInitialize> sorted;
+    sorted.ensure_capacity(indices.size());
+    for (auto i : indices)
+        sorted.append(data->vars_to_initialize[i]);
+    data->vars_to_initialize = move(sorted);
+
     scope.ast_node->set_function_scope_data(move(data));
 }
 
