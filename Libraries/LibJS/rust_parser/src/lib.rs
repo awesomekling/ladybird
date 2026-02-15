@@ -172,11 +172,8 @@ pub unsafe extern "C" fn rust_compile_program(
     in_class_field_initializer: bool,
 ) -> *mut c_void {
     let source_slice = std::slice::from_raw_parts(source, source_len);
-    let pt = if program_type == 1 {
-        ProgramType::Module
-    } else {
-        ProgramType::Script
-    };
+    assert!(program_type <= 1, "invalid program_type: {program_type}");
+    let pt: ProgramType = std::mem::transmute(program_type);
     let mut parser = Parser::new(source_slice, pt);
     if initiated_by_eval {
         parser.initiated_by_eval = true;
@@ -399,14 +396,17 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     source_code_ptr: *const c_void,
     function_kind: u8,
 ) -> *mut c_void {
+    assert!(function_kind <= 3, "invalid function_kind: {function_kind}");
+    let kind: ast::FunctionKind = std::mem::transmute(function_kind);
+
     // Validate parameters: wrap in the appropriate function kind and parse.
     {
         let mut validate_src: Vec<u16> = Vec::new();
-        match function_kind {
-            1 => validate_src.extend_from_slice(utf16!("function* test(")),
-            2 => validate_src.extend_from_slice(utf16!("async function test(")),
-            3 => validate_src.extend_from_slice(utf16!("async function* test(")),
-            _ => validate_src.extend_from_slice(utf16!("function test(")),
+        match kind {
+            ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test(")),
+            ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test(")),
+            ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
+            ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
         }
         let params_slice = std::slice::from_raw_parts(params_source, params_source_len);
         validate_src.extend_from_slice(params_slice);
@@ -421,11 +421,11 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     // Validate body: wrap in "function test() { BODY }" and parse.
     {
         let mut validate_src: Vec<u16> = Vec::new();
-        match function_kind {
-            1 => validate_src.extend_from_slice(utf16!("function* test() {")),
-            2 => validate_src.extend_from_slice(utf16!("async function test() {")),
-            3 => validate_src.extend_from_slice(utf16!("async function* test() {")),
-            _ => validate_src.extend_from_slice(utf16!("function test() {")),
+        match kind {
+            ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test() {")),
+            ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test() {")),
+            ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test() {")),
+            ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test() {")),
         }
         let body_slice = std::slice::from_raw_parts(body_source, body_source_len);
         validate_src.extend_from_slice(body_slice);

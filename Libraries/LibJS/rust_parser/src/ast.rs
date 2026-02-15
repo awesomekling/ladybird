@@ -180,9 +180,10 @@ impl FunctionKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ProgramType {
-    Script,
-    Module,
+    Script = 0,
+    Module = 1,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
