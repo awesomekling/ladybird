@@ -1017,9 +1017,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
 
 CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
 {
-    auto computed_properties = this->computed_properties();
-    if (!computed_properties || !layout_node())
+    auto const* computed_values = this->computed_values();
+    if (!computed_values || !layout_node())
         return {};
+
+    // Create a temporary ComputedProperties from the stored ComputedValues
+    // so we can re-resolve inherited and pre-absolutized property values.
+    auto computed_properties = CSS::StyleComputer::create_computed_properties_from_computed_values(
+        *computed_values, m_animated_property_data.ptr());
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
