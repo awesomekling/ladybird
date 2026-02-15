@@ -65,7 +65,7 @@ pub struct Lexer<'a> {
     regex_is_in_character_class: bool,
     allow_html_comments: bool,
     template_states: Vec<TemplateState>,
-    pub(crate) saved_states: Vec<SavedLexerState>,
+    saved_states: Vec<SavedLexerState>,
 }
 
 // Unicode constants used by the lexical grammar.
@@ -1234,6 +1234,10 @@ impl<'a> Lexer<'a> {
         self.line_column = state.line_column;
         self.current_token_type = state.current_token_type;
         self.template_states = state.template_states;
+    }
+
+    pub fn discard_saved_state(&mut self) {
+        self.saved_states.pop();
     }
 
     /// Re-lex the current Slash or SlashEquals token as a regex literal.

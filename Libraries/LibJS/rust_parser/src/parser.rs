@@ -297,11 +297,7 @@ impl<'a> Parser<'a> {
     // === AST construction helpers ===
 
     pub(crate) fn range_from(&self, start: Position) -> SourceRange {
-        let end = self.position();
-        SourceRange {
-            start: Position { line: start.line, column: start.column, offset: start.offset },
-            end: Position { line: end.line, column: end.column, offset: end.offset },
-        }
+        SourceRange { start, end: self.position() }
     }
 
     pub(crate) fn expr(&self, start: Position, expression: ExpressionKind) -> Expression {
@@ -605,7 +601,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn discard_saved_state(&mut self) {
         self.saved_states.pop();
-        self.lexer.saved_states.pop();
+        self.lexer.discard_saved_state();
     }
 
     // === Token matching helpers ===

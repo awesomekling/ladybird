@@ -1452,8 +1452,7 @@ fn generate_yield_from(
 
     // Throw a TypeError: iterator does not have a throw method.
     let exception = gen.allocate_register();
-    let error_msg = utf16!("yield* protocol violation: iterator must have a throw method").to_vec();
-    let error_string = gen.intern_string(&error_msg);
+    let error_string = gen.intern_string(utf16!("yield* protocol violation: iterator must have a throw method"));
     gen.emit(Instruction::NewTypeError {
         dst: exception.operand(),
         error_string,
@@ -2237,9 +2236,9 @@ fn generate_for_statement(
     });
 
     // Test
-    if test.is_some() {
+    if let Some(test_expr) = test {
         gen.switch_to_basic_block(test_block);
-        let test_val = generate_expr_or_undefined(test.unwrap(), gen, None);
+        let test_val = generate_expr_or_undefined(test_expr, gen, None);
 
         // OPTIMIZATION: test value is always falsey, skip body entirely.
         if let Some(constant) = gen.get_constant(&test_val) {
@@ -2263,9 +2262,9 @@ fn generate_for_statement(
     }
 
     // Update
-    if update.is_some() {
+    if let Some(update_expr) = update {
         gen.switch_to_basic_block(update_block);
-        generate_expr(update.unwrap(), gen, None);
+        generate_expr(update_expr, gen, None);
         gen.emit(Instruction::Jump {
             target: Label(test_block as u32),
         });
@@ -3068,8 +3067,7 @@ fn generate_update_expression(
             // expression first, then throw ReferenceError.
             generate_expr(argument, gen, None);
             let exception = gen.allocate_register();
-            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
-            let error_string = gen.intern_string(&error_msg);
+            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
             gen.emit(Instruction::NewReferenceError {
                 dst: exception.operand(),
                 error_string,
@@ -3389,8 +3387,7 @@ fn generate_assignment_expression(
             // before evaluating the RHS.
             generate_expr(lhs_expr, gen, None);
             let exception = gen.allocate_register();
-            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
-            let error_string = gen.intern_string(&error_msg);
+            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
             gen.emit(Instruction::NewReferenceError {
                 dst: exception.operand(),
                 error_string,
@@ -3820,8 +3817,7 @@ fn emit_store_to_reference(
             // Evaluate the expression for side effects, then throw ReferenceError.
             generate_expr(target, gen, None);
             let exception = gen.allocate_register();
-            let error_msg = utf16!("Invalid left-hand side in assignment").to_vec();
-            let error_string = gen.intern_string(&error_msg);
+            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
             gen.emit(Instruction::NewReferenceError {
                 dst: exception.operand(),
                 error_string,
@@ -5306,7 +5302,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: new_env.operand(),
         parent: parent.operand(),
-        capacity: 0.max(1) as u32,
+        capacity: 1,
     });
     gen.lexical_environment_register_stack.push(new_env);
 

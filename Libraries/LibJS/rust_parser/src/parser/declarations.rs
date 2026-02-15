@@ -707,14 +707,7 @@ impl<'a> Parser<'a> {
             // ClassStaticBlock : `static` `{` ClassStaticBlockBody `}`
             if self.match_token(TokenType::CurlyOpen) {
                 self.consume(); // consume '{'
-                let saved_break = self.flags.in_break_context;
-                let saved_continue = self.flags.in_continue_context;
-                let saved_function = self.flags.in_function_context;
-                let saved_generator = self.flags.in_generator_function_context;
-                let saved_await = self.flags.await_expression_is_valid;
-                let saved_field_init = self.flags.in_class_field_initializer;
-                let saved_static_init = self.flags.in_class_static_init_block;
-                let saved_super = self.flags.allow_super_property_lookup;
+                let saved_flags = self.flags;
                 self.flags.in_break_context = false;
                 self.flags.in_continue_context = false;
                 self.flags.in_function_context = false;
@@ -725,14 +718,7 @@ impl<'a> Parser<'a> {
                 self.flags.allow_super_property_lookup = true;
                 self.scope_collector.open_static_init_scope(None);
                 let children = self.parse_statement_list(false);
-                self.flags.in_break_context = saved_break;
-                self.flags.in_continue_context = saved_continue;
-                self.flags.in_function_context = saved_function;
-                self.flags.in_generator_function_context = saved_generator;
-                self.flags.await_expression_is_valid = saved_await;
-                self.flags.in_class_field_initializer = saved_field_init;
-                self.flags.in_class_static_init_block = saved_static_init;
-                self.flags.allow_super_property_lookup = saved_super;
+                self.flags = saved_flags;
                 self.consume_token(TokenType::CurlyClose);
                 let scope = ScopeData::shared_with_children(children);
                 self.scope_collector.set_scope_node(scope.clone());
