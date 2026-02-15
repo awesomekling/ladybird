@@ -30,6 +30,7 @@
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ScrollbarColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
+#include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/CSS/StyleValues/TextIndentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
@@ -869,7 +870,7 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Font properties (partially in ComputedValues) ==========
     case PropertyID::FontLanguageOverride:
         if (auto override = computed_values.font_language_override(); override.has_value())
-            return CustomIdentStyleValue::create(override.release_value());
+            return StringStyleValue::create(override.release_value());
         return KeywordStyleValue::create(Keyword::Normal);
 
     default:
