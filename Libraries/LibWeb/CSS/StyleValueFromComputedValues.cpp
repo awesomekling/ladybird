@@ -368,8 +368,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return style_value_for_length_percentage(computed_values.y());
 
     // ========== LengthPercentageOrAuto properties ==========
-    // FIXME: Rx causes test regression in all-prop-revert-layer; needs investigation.
-    //        Fall through to ComputedProperties for now.
+    case PropertyID::Rx:
+        return style_value_for_length_percentage_or_auto(computed_values.rx());
     case PropertyID::Ry:
         return style_value_for_length_percentage_or_auto(computed_values.ry());
 
