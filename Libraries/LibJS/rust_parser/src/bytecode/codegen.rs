@@ -331,7 +331,7 @@ pub fn generate_expr(
                 match elem {
                     Some(e) => {
                         let val = generate_expr_or_undefined(e, gen, None);
-                        scoped_args.push(val);
+                        scoped_args.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
                     }
                     None => {
                         scoped_args.push(gen.add_constant_empty());
