@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Layout/Node.h>
@@ -331,22 +332,23 @@ Paintable::SelectionStyle Paintable::selection_style() const
         if (!element_layout_node)
             return {};
 
-        auto computed_selection_style = element.computed_properties(CSS::PseudoElement::Selection);
-        if (!computed_selection_style)
+        auto pseudo_element = element.get_pseudo_element(CSS::PseudoElement::Selection);
+        if (!pseudo_element.has_value())
+            return {};
+        auto const* selection_values = pseudo_element->computed_values();
+        if (!selection_values)
             return {};
 
-        auto context = CSS::ColorResolutionContext::for_layout_node_with_style(*element_layout_node);
-
         SelectionStyle style;
-        style.background_color = computed_selection_style->color_or_fallback(CSS::PropertyID::BackgroundColor, context, Color::Transparent);
+        style.background_color = selection_values->background_color();
 
         // Only use text color if it was explicitly set in the ::selection rule, not inherited.
-        if (!computed_selection_style->is_property_inherited(CSS::PropertyID::Color))
-            style.text_color = computed_selection_style->color_or_fallback(CSS::PropertyID::Color, context, Color::Transparent);
+        if (!selection_values->is_property_inherited(CSS::PropertyID::Color))
+            style.text_color = selection_values->color();
 
         // Only use text-shadow if it was explicitly set in the ::selection rule, not inherited.
-        if (!computed_selection_style->is_property_inherited(CSS::PropertyID::TextShadow)) {
-            auto const& css_shadows = computed_selection_style->text_shadow(context, { .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*element_layout_node) });
+        if (!selection_values->is_property_inherited(CSS::PropertyID::TextShadow)) {
+            auto const& css_shadows = selection_values->text_shadow();
             Vector<ShadowData> shadows;
             shadows.ensure_capacity(css_shadows.size());
             for (auto const& shadow : css_shadows)
@@ -355,11 +357,11 @@ Paintable::SelectionStyle Paintable::selection_style() const
         }
 
         // Only use text-decoration if it was explicitly set in the ::selection rule, not inherited.
-        if (!computed_selection_style->is_property_inherited(CSS::PropertyID::TextDecorationLine)) {
+        if (!selection_values->is_property_inherited(CSS::PropertyID::TextDecorationLine)) {
             style.text_decoration = TextDecorationStyle {
-                .line = computed_selection_style->text_decoration_line(),
-                .style = computed_selection_style->text_decoration_style(),
-                .color = computed_selection_style->color_or_fallback(CSS::PropertyID::TextDecorationColor, context, style.text_color.value_or(Color::Black)),
+                .line = selection_values->text_decoration_line(),
+                .style = selection_values->text_decoration_style(),
+                .color = selection_values->text_decoration_color(),
             };
         }
 

@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
 #include <LibWeb/Fetch/Response.h>
@@ -579,9 +580,13 @@ void FontComputer::did_load_font(FlyString const& family_name)
 
         // Check pseudo-elements, which may use a different font-family than the element itself.
         for (size_t i = 0; i < to_underlying(PseudoElement::KnownPseudoElementCount); ++i) {
-            if (auto style = element.computed_properties(static_cast<PseudoElement>(i))) {
-                if (style_value_references_font_family(style->property(PropertyID::FontFamily), family_name))
-                    return true;
+            if (auto pseudo_element = element.get_pseudo_element(static_cast<PseudoElement>(i)); pseudo_element.has_value()) {
+                if (auto const* pseudo_values = pseudo_element->computed_values()) {
+                    if (auto font_family = pseudo_values->property_value(PropertyID::FontFamily)) {
+                        if (style_value_references_font_family(*font_family, family_name))
+                            return true;
+                    }
+                }
             }
         }
 
