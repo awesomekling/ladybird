@@ -11,6 +11,7 @@
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
@@ -742,7 +743,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
                 return KeywordStyleValue::create(Keyword::None);
             },
             [](CounterStyleNameKeyword keyword) -> NonnullRefPtr<StyleValue const> {
-                return KeywordStyleValue::create(to_keyword(keyword));
+                return CounterStyleStyleValue::create(
+                    FlyString::from_utf8_without_validation(string_from_keyword(to_keyword(keyword)).bytes()));
             },
             [](String const&) -> NonnullRefPtr<StyleValue const> {
                 // FIXME: Serialize custom counter style string properly
