@@ -575,9 +575,9 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 {
     auto& computed_values = mutable_computed_values();
 
-    // NB: float, clear, position, inset, margin, and z_index must be set in apply_style(),
-    //     NOT in populate_computed_values(), because transfer_table_box_computed_values_to_wrapper_computed_values()
-    //     modifies them on table boxes and populate_computed_values() would clobber those changes.
+    // NB: Table-transferred properties must be set here from ComputedProperties, because during
+    //     layout tree rebuild, the shared ComputedValues may have stale values (reset to initial
+    //     by a previous table transfer) that populate_computed_values() set earlier.
     computed_values.set_float(computed_style.float_());
     computed_values.set_clear(computed_style.clear());
     computed_values.set_position(computed_style.position());
@@ -585,23 +585,31 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
     computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
 
-    auto const& list_style_image = computed_style.property(CSS::PropertyID::ListStyleImage);
-    if (list_style_image.is_abstract_image()) {
-        m_list_style_image = list_style_image.as_abstract_image();
-        if (m_list_style_image->is_image())
-            m_list_style_image_resource = document().ensure_css_image_resource(m_list_style_image->as_image().url());
-    }
-
     // For nodes that own their ComputedValues (pseudo-elements), all properties
     // need to be populated here via populate_computed_values().
     // For element-backed nodes, populate_computed_values() is called during style computation.
     if (m_owned_computed_values)
         CSS::StyleComputer::populate_computed_values(computed_values, computed_style, document());
 
+    apply_style();
+}
+
+void NodeWithStyle::apply_style()
+{
+    auto const& computed_values = this->computed_values();
+
+    if (auto list_style_image = computed_values.property_value(CSS::PropertyID::ListStyleImage)) {
+        if (list_style_image->is_abstract_image()) {
+            m_list_style_image = list_style_image->as_abstract_image();
+            if (m_list_style_image->is_image())
+                m_list_style_image_resource = document().ensure_css_image_resource(m_list_style_image->as_image().url());
+        }
+    }
+
     propagate_style_to_anonymous_wrappers();
 
     if (auto* box_node = as_if<NodeWithStyleAndBoxModelMetrics>(*this))
-        box_node->propagate_style_along_continuation(computed_style);
+        box_node->propagate_style_along_continuation();
 }
 
 void NodeWithStyle::propagate_non_inherit_values(NodeWithStyle& target_node) const
@@ -1079,13 +1087,13 @@ bool NodeWithStyleAndBoxModelMetrics::should_create_inline_continuation() const
     return true;
 }
 
-void NodeWithStyleAndBoxModelMetrics::propagate_style_along_continuation(CSS::ComputedProperties const& computed_style) const
+void NodeWithStyleAndBoxModelMetrics::propagate_style_along_continuation() const
 {
     auto continuation = continuation_of_node();
     while (continuation && continuation->is_anonymous())
         continuation = continuation->continuation_of_node();
     if (continuation)
-        continuation->apply_style(computed_style);
+        continuation->apply_style();
 }
 
 void NodeWithStyleAndBoxModelMetrics::visit_edges(Cell::Visitor& visitor)

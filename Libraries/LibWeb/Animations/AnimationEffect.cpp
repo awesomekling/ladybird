@@ -839,7 +839,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
         if (!element.pseudo_element().has_value()) {
             CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *computed_properties, target->document());
             if (target->layout_node())
-                target->layout_node()->apply_style(*computed_properties);
+                target->layout_node()->apply_style();
         } else {
             if (auto pseudo_element_node = target->get_pseudo_element_node(element.pseudo_element().value()))
                 pseudo_element_node->apply_style(*computed_properties);

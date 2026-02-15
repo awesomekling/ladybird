@@ -266,6 +266,7 @@ public:
     CSS::MutableComputedValues& mutable_computed_values() { return static_cast<CSS::MutableComputedValues&>(*m_computed_values_ptr); }
 
     void apply_style(CSS::ComputedProperties const&);
+    void apply_style();
 
     Gfx::Font const& first_available_font() const;
     Vector<CSS::BackgroundLayerData> const& background_layers() const { return computed_values().background_layers(); }
@@ -321,7 +322,7 @@ public:
 
     bool should_create_inline_continuation() const;
 
-    void propagate_style_along_continuation(CSS::ComputedProperties const&) const;
+    void propagate_style_along_continuation() const;
 
     virtual void visit_edges(Cell::Visitor& visitor) override;
 

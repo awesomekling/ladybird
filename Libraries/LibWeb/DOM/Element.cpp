@@ -937,7 +937,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
 
     if (!invalidation.rebuild_layout_tree && layout_node()) {
         // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
-        layout_node()->apply_style(*m_computed_properties);
+        layout_node()->apply_style();
         if (invalidation.repaint && paintable()) {
             paintable()->set_needs_paint_only_properties_update(true);
             paintable()->set_needs_display();
@@ -1022,7 +1022,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
         return invalidation;
 
     CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(ensure_computed_values()), *computed_properties, document());
-    layout_node()->apply_style(*computed_properties);
+    layout_node()->apply_style();
     return invalidation;
 }
 
