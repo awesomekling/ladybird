@@ -498,11 +498,9 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
 
 /// Recursively collect var-declared names from a statement and all nested
 /// statements, excluding function/class bodies (which create new var scopes).
-/// Calls `push_name` for each discovered name.
-unsafe fn collect_var_names_recursive(
+fn collect_var_names_recursive(
     stmt: &ast::StatementKind,
-    ctx: *mut c_void,
-    push_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
+    push_name: &mut dyn FnMut(&[u16]),
 ) {
     match stmt {
         ast::StatementKind::VariableDeclaration {
@@ -510,14 +508,12 @@ unsafe fn collect_var_names_recursive(
             declarations,
         } => {
             for decl in declarations {
-                for_each_bound_name(&decl.target, &mut |name| {
-                    push_name(ctx, name.as_ptr(), name.len());
-                });
+                for_each_bound_name(&decl.target, push_name);
             }
         }
         _ => {
             for_each_child_statement(stmt, &mut |child| {
-                collect_var_names_recursive(child, ctx, push_name);
+                collect_var_names_recursive(child, push_name);
             });
         }
     }
@@ -526,27 +522,27 @@ unsafe fn collect_var_names_recursive(
 /// Collect var names + function declaration names, deduplicated function
 /// initializations, var-scoped names, annex B names, and lexical bindings.
 ///
-/// Shared by both script and eval GDI extraction.
-unsafe fn extract_gdi_common(
+/// Shared by both script and eval GDI extraction. All unsafe FFI calls are
+/// confined to the closures passed in by the caller.
+fn extract_gdi_common(
     scope: &ast::ScopeData,
-    is_strict: bool,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
-    ctx: *mut c_void,
-    push_var_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
-    push_function: unsafe extern "C" fn(*mut c_void, *mut c_void, *const u16, usize),
-    push_var_scoped_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
-    push_annex_b_name: unsafe extern "C" fn(*mut c_void, *const u16, usize),
-    push_lexical_binding: unsafe extern "C" fn(*mut c_void, *const u16, usize, bool),
+    is_strict: bool,
+    push_var_name: &mut dyn FnMut(&[u16]),
+    push_function: &mut dyn FnMut(*mut c_void, &[u16]),
+    push_var_scoped_name: &mut dyn FnMut(&[u16]),
+    push_annex_b_name: &mut dyn FnMut(&[u16]),
+    push_lexical_binding: &mut dyn FnMut(&[u16], bool),
 ) {
     use ast::{DeclarationKind, StatementKind};
 
     // Var names (var declarations at any nesting level + top-level function declarations)
     for child in &scope.children {
-        collect_var_names_recursive(&child.inner, ctx, push_var_name);
+        collect_var_names_recursive(&child.inner, push_var_name);
         if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
             if let Some(ref name) = func_data.name {
-                push_var_name(ctx, name.name.as_ptr(), name.name.len());
+                push_var_name(&name.name);
             }
         }
     }
@@ -564,18 +560,20 @@ unsafe fn extract_gdi_common(
         }
     }
     for (func_data, name) in &funcs_to_init {
-        let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(func_data, vm_ptr, source_code_ptr, is_strict);
-        push_function(ctx, sfd_ptr, name.as_ptr(), name.len());
+        let sfd_ptr = unsafe {
+            bytecode::ffi::create_sfd_for_gdi(func_data, vm_ptr, source_code_ptr, is_strict)
+        };
+        push_function(sfd_ptr, name);
     }
 
     // Var-scoped names (var VariableDeclaration names, excluding function declarations)
     for child in &scope.children {
-        collect_var_names_recursive(&child.inner, ctx, push_var_scoped_name);
+        collect_var_names_recursive(&child.inner, push_var_scoped_name);
     }
 
     // Annex B candidate names
     for name in &scope.annexb_function_names {
-        push_annex_b_name(ctx, name.as_ptr(), name.len());
+        push_annex_b_name(name);
     }
 
     // Lexical bindings (name + is_constant)
@@ -587,20 +585,20 @@ unsafe fn extract_gdi_common(
                 let is_constant = *kind == DeclarationKind::Const;
                 for decl in declarations {
                     for_each_bound_name(&decl.target, &mut |name| {
-                        push_lexical_binding(ctx, name.as_ptr(), name.len(), is_constant);
+                        push_lexical_binding(name, is_constant);
                     });
                 }
             }
             StatementKind::UsingDeclaration { declarations } => {
                 for decl in declarations {
                     for_each_bound_name(&decl.target, &mut |name| {
-                        push_lexical_binding(ctx, name.as_ptr(), name.len(), false);
+                        push_lexical_binding(name, false);
                     });
                 }
             }
             StatementKind::ClassDeclaration(class_data) => {
                 if let Some(ref name) = class_data.name {
-                    push_lexical_binding(ctx, name.name.as_ptr(), name.name.len(), false);
+                    push_lexical_binding(&name.name, false);
                 }
             }
             _ => {}
@@ -625,12 +623,12 @@ unsafe fn extract_eval_gdi(
     eval_gdi_set_strict(ctx, is_strict);
 
     extract_gdi_common(
-        scope, is_strict, vm_ptr, source_code_ptr, ctx,
-        eval_gdi_push_var_name,
-        eval_gdi_push_function,
-        eval_gdi_push_var_scoped_name,
-        eval_gdi_push_annex_b_name,
-        eval_gdi_push_lexical_binding,
+        scope, vm_ptr, source_code_ptr, is_strict,
+        &mut |name| eval_gdi_push_var_name(ctx, name.as_ptr(), name.len()),
+        &mut |sfd_ptr, name| eval_gdi_push_function(ctx, sfd_ptr, name.as_ptr(), name.len()),
+        &mut |name| eval_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len()),
+        &mut |name| eval_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len()),
+        &mut |name, is_const| eval_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const),
     );
 }
 
@@ -678,12 +676,12 @@ unsafe fn extract_script_gdi(
     }
 
     extract_gdi_common(
-        scope, is_strict, vm_ptr, source_code_ptr, ctx,
-        script_gdi_push_var_name,
-        script_gdi_push_function,
-        script_gdi_push_var_scoped_name,
-        script_gdi_push_annex_b_name,
-        script_gdi_push_lexical_binding,
+        scope, vm_ptr, source_code_ptr, is_strict,
+        &mut |name| script_gdi_push_var_name(ctx, name.as_ptr(), name.len()),
+        &mut |sfd_ptr, name| script_gdi_push_function(ctx, sfd_ptr, name.as_ptr(), name.len()),
+        &mut |name| script_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len()),
+        &mut |name| script_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len()),
+        &mut |name, is_const| script_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const),
     );
 }
 
