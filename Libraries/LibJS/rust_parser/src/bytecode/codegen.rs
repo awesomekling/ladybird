@@ -4236,11 +4236,11 @@ fn generate_object_expression(
             continue;
         }
 
-        // For computed keys, evaluate key before value (spec evaluation order).
-        // ComputedPropertyName calls ToPropertyKey, which includes ToPrimitive(hint: string).
-        // The ToPrimitive is the only user-observable step; after this, the ToPrimitive
-        // inside PutOwnByValue's to_property_key is a no-op.
-        let computed_key = if prop.is_computed {
+        // For non-string keys (computed, numeric, etc.), evaluate key before value
+        // (spec evaluation order). C++ treats all non-StringLiteral keys the same:
+        // generate key → ToPrimitiveWithStringHint → generate value → PutByValue.
+        let is_string_key = matches!(&prop.key.inner, ExpressionKind::StringLiteral(_) | ExpressionKind::Identifier(_));
+        let computed_key = if prop.is_computed || !is_string_key {
             let key = generate_expr_or_undefined(&prop.key, gen, None);
             gen.emit(Instruction::ToPrimitiveWithStringHint {
                 dst: key.operand(),
