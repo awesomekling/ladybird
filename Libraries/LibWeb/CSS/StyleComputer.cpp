@@ -2033,9 +2033,15 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
         computed_values.set_mask(mask_image.as_url().url());
     } else if (mask_image.is_abstract_image()) {
         auto const& abstract_image = mask_image.as_abstract_image();
-        computed_values.set_mask_image(abstract_image);
-        if (abstract_image.is_image())
-            computed_values.set_mask_image_resource(document.ensure_css_image_resource(abstract_image.as_image().url()));
+        // NB: Only replace if the value actually changed. Gradients carry mutable resolved
+        //     state (m_resolved), and replacing with an equivalent but new instance would
+        //     discard that state, causing unresolved gradients to be painted.
+        auto existing = computed_values.mask_image();
+        if (!existing || *existing != abstract_image) {
+            computed_values.set_mask_image(abstract_image);
+            if (abstract_image.is_image())
+                computed_values.set_mask_image_resource(document.ensure_css_image_resource(abstract_image.as_image().url()));
+        }
     }
 
     computed_values.set_display(computed_style.display());

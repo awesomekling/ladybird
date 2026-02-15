@@ -127,7 +127,9 @@ bool AbstractElement::is_before(AbstractElement const& other) const
 
 RefPtr<CSS::ComputedProperties const> AbstractElement::computed_properties() const
 {
-    return m_element->computed_properties(m_pseudo_element);
+    if (!m_pseudo_element.has_value())
+        return {};
+    return m_element->computed_properties(*m_pseudo_element);
 }
 
 CSS::ComputedValues const* AbstractElement::computed_values() const

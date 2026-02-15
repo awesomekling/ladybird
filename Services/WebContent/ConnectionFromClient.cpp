@@ -480,7 +480,13 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
     auto& element = as<Web::DOM::Element>(*node);
     node->document().set_inspected_node(node);
 
-    auto properties = element.computed_properties(pseudo_element);
+    RefPtr<Web::CSS::ComputedProperties> properties;
+    if (pseudo_element.has_value()) {
+        properties = element.computed_properties(*pseudo_element);
+    } else if (auto const* computed_values = element.computed_values()) {
+        properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
+            *computed_values, element.animated_property_data());
+    }
 
     if (!properties) {
         async_did_inspect_dom_node(page_id, { property_type, {} });

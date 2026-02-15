@@ -940,7 +940,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
         static_cast<CSS::MutableComputedValues&>(ensure_computed_values()),
         *new_computed_properties, document());
 
-    set_computed_properties({}, move(new_computed_properties));
+    // Transfer animated property data from the new ComputedProperties to Element.
+    m_animated_property_data = make<CSS::AnimatedPropertyData>(new_computed_properties->animated_property_data());
+
+    computed_properties_changed();
 
     if (old_display_is_none != new_display_is_none) {
         for_each_shadow_including_inclusive_descendant([&](auto& node) {
@@ -3297,45 +3300,25 @@ size_t Element::attribute_list_size() const
     return m_attributes ? m_attributes->length() : 0;
 }
 
-RefPtr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type)
+RefPtr<CSS::ComputedProperties> Element::computed_properties(CSS::PseudoElement pseudo_element_type)
 {
-    if (pseudo_element_type.has_value()) {
-        if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
-            return pseudo_element->computed_properties();
-        return {};
-    }
-    return m_computed_properties;
+    if (auto pseudo_element = get_pseudo_element(pseudo_element_type); pseudo_element.has_value())
+        return pseudo_element->computed_properties();
+    return {};
 }
 
-RefPtr<CSS::ComputedProperties const> Element::computed_properties(Optional<CSS::PseudoElement> pseudo_element_type) const
+RefPtr<CSS::ComputedProperties const> Element::computed_properties(CSS::PseudoElement pseudo_element_type) const
 {
-    if (pseudo_element_type.has_value()) {
-        if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
-            return pseudo_element->computed_properties();
-        return {};
-    }
-    return m_computed_properties;
+    if (auto pseudo_element = get_pseudo_element(pseudo_element_type); pseudo_element.has_value())
+        return pseudo_element->computed_properties();
+    return {};
 }
 
-void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_element_type, RefPtr<CSS::ComputedProperties> style)
+void Element::set_computed_properties(CSS::PseudoElement pseudo_element_type, RefPtr<CSS::ComputedProperties> style)
 {
-    if (pseudo_element_type.has_value()) {
-        if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(*pseudo_element_type))
-            return;
-        ensure_pseudo_element(*pseudo_element_type).set_computed_properties(style);
+    if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(pseudo_element_type))
         return;
-    }
-    m_computed_properties = style;
-    if (m_computed_properties) {
-        // Move animated data from ComputedProperties' local storage to Element,
-        // and set the external pointer so future reads/writes go through Element.
-        m_animated_property_data = make<CSS::AnimatedPropertyData>(m_computed_properties->animated_property_data());
-        m_computed_properties->set_external_animated_data(m_animated_property_data.ptr());
-    } else {
-        m_animated_property_data = nullptr;
-    }
-
-    computed_properties_changed();
+    ensure_pseudo_element(pseudo_element_type).set_computed_properties(style);
 }
 
 CSS::ComputedValues& Element::ensure_computed_values()
