@@ -82,9 +82,9 @@ GC::Ref<DOM::DOMTokenList> SVGAElement::rel_list()
     return *m_rel_list;
 }
 
-GC::Ptr<Layout::Node> SVGAElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGAElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this, move(style));
+    return heap().allocate<Layout::SVGGraphicsBox>(document(), *this, *computed_properties());
 }
 
 // https://html.spec.whatwg.org/multipage/links.html#links-created-by-a-and-area-elements

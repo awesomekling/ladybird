@@ -47,7 +47,7 @@ private:
 
     virtual bool is_svg_use_element() const override { return true; }
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
     void process_the_url(Optional<String> const& href);
 

@@ -119,10 +119,12 @@ void HTMLInputElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_resource_request);
 }
 
-GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node()
 {
     if (type_state() == TypeAttributeState::Hidden)
         return nullptr;
+
+    auto style = computed_properties().release_nonnull();
 
     // NOTE: Image inputs are `appearance: none` per the default UA style,
     //       but we still need to create an ImageBox for them, or no image will get loaded.
@@ -135,7 +137,7 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::Co
     // In particular, using appearance: none allows authors to suppress the native appearance of widgets,
     // giving them a primitive appearance where CSS can be used to restyle them.
     if (style->appearance() == CSS::Appearance::None) {
-        return Element::create_layout_node_for_display_type(document(), style->display(), style, this);
+        return Element::create_layout_node_for_display_type(document(), style->display(), move(style), this);
     }
 
     switch (type_state()) {
@@ -158,7 +160,7 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(NonnullRefPtr<CSS::Co
         // FIXME: text padding issues
         return heap().allocate<Layout::TextInputBox>(document(), *this, move(style));
     default:
-        return Element::create_layout_node_for_display_type(document(), style->display(), style, this);
+        return Element::create_layout_node_for_display_type(document(), style->display(), move(style), this);
     }
 }
 

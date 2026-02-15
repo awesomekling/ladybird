@@ -149,7 +149,7 @@ private:
 
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
     void set_raw_value(Utf16String);
 

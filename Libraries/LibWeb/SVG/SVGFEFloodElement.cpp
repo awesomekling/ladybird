@@ -32,9 +32,9 @@ void SVGFEFloodElement::visit_edges(Cell::Visitor& visitor)
     SVGFilterPrimitiveStandardAttributes::visit_edges(visitor);
 }
 
-GC::Ptr<Layout::Node> SVGFEFloodElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGFEFloodElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGBox>(document(), *this, move(style));
+    return heap().allocate<Layout::SVGBox>(document(), *this, *computed_properties());
 }
 
 // https://www.w3.org/TR/filter-effects-1/#FloodColorProperty

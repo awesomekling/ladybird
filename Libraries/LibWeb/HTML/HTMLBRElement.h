@@ -17,7 +17,7 @@ class HTMLBRElement final : public HTMLElement {
 public:
     virtual ~HTMLBRElement() override;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
     virtual bool is_presentational_hint(FlyString const&) const override;
     virtual void apply_presentational_hints(CSS::CascadedProperties&) const override;
     virtual bool disallows_display_contents() const override { return true; }

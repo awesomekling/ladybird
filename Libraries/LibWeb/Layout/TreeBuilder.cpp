@@ -502,8 +502,7 @@ void TreeBuilder::restructure_block_node_in_inline_parent(NodeWithStyleAndBoxMod
             inline_node && is<DOM::Element>(inline_node->dom_node()); inline_node = inline_node->last_child()) {
             auto& element = static_cast<DOM::Element&>(*inline_node->dom_node());
 
-            auto style = element.computed_properties();
-            auto& new_inline_node = static_cast<NodeWithStyleAndBoxModelMetrics&>(*element.create_layout_node(*style));
+            auto& new_inline_node = static_cast<NodeWithStyleAndBoxModelMetrics&>(*element.create_layout_node());
             if (inline_node == topmost_inline_ancestor) {
                 // The topmost inline ancestor points to the middle wrapper, which in turns points to the original node.
                 new_inline_node.set_continuation_of_node({}, middle_wrapper);
@@ -644,7 +643,7 @@ void TreeBuilder::update_layout_tree(DOM::Node& dom_node, TreeBuilder::Context& 
                 // Only layout direct uses of SVG masks/clipPaths.
                 context.layout_svg_mask_or_clip_path = false;
             } else {
-                layout_node = element.create_layout_node(*style);
+                layout_node = element.create_layout_node();
             }
         } else if (is<DOM::Document>(dom_node)) {
             style = style_computer.create_document_style();

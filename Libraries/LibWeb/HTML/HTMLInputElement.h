@@ -65,7 +65,7 @@ class WEB_API HTMLInputElement final
 public:
     virtual ~HTMLInputElement() override;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
     virtual void adjust_computed_style(CSS::ComputedProperties&) override;
 
     enum class TypeAttributeState {

@@ -25,7 +25,7 @@ public:
 
     GC::Ref<DOM::DOMTokenList> rel_list();
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
 private:
     SVGAElement(DOM::Document&, DOM::QualifiedName);

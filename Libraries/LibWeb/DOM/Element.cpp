@@ -755,13 +755,13 @@ Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_assoc
     return elements;
 }
 
-GC::Ptr<Layout::Node> Element::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> Element::create_layout_node()
 {
     if (local_name() == "noscript" && document().is_scripting_enabled())
         return nullptr;
 
-    auto display = style->display();
-    return create_layout_node_for_display_type(document(), display, style, this);
+    auto style = computed_properties().release_nonnull();
+    return create_layout_node_for_display_type(document(), style->display(), move(style), this);
 }
 
 GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, NonnullRefPtr<CSS::ComputedProperties> style, Element* element)

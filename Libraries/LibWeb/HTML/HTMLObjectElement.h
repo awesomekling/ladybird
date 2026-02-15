@@ -57,7 +57,7 @@ private:
     virtual bool is_presentational_hint(FlyString const&) const override;
     virtual void apply_presentational_hints(CSS::CascadedProperties&) const override;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
     virtual bool disallows_display_contents() const override { return true; }
 
     bool has_ancestor_media_element_or_object_element_not_showing_fallback_content() const;

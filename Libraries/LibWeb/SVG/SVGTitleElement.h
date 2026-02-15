@@ -19,7 +19,7 @@ private:
 
     virtual void initialize(JS::Realm&) override;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
     virtual void children_changed(ChildrenChangedMetadata const*) override;
 };
 

@@ -195,9 +195,9 @@ void HTMLCanvasElement::attribute_changed(FlyString const& local_name, Optional<
     }
 }
 
-GC::Ptr<Layout::Node> HTMLCanvasElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLCanvasElement::create_layout_node()
 {
-    return heap().allocate<Layout::CanvasBox>(document(), *this, move(style));
+    return heap().allocate<Layout::CanvasBox>(document(), *this, *computed_properties());
 }
 
 JS::ThrowCompletionOr<HTMLCanvasElement::HasOrCreatedContext> HTMLCanvasElement::create_2d_context(JS::Value options)

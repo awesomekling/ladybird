@@ -45,9 +45,9 @@ void SVGSVGElement::visit_edges(Visitor& visitor)
     visitor.visit(m_active_view_element);
 }
 
-GC::Ptr<Layout::Node> SVGSVGElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGSVGElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGSVGBox>(document(), *this, move(style));
+    return heap().allocate<Layout::SVGSVGBox>(document(), *this, *computed_properties());
 }
 
 RefPtr<CSS::StyleValue const> SVGSVGElement::width_style_value_from_attribute() const

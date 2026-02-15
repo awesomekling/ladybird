@@ -61,9 +61,9 @@ void HTMLVideoElement::attribute_changed(FlyString const& name, Optional<String>
     }
 }
 
-GC::Ptr<Layout::Node> HTMLVideoElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLVideoElement::create_layout_node()
 {
-    return heap().allocate<Layout::VideoBox>(document(), *this, style);
+    return heap().allocate<Layout::VideoBox>(document(), *this, *computed_properties());
 }
 
 Layout::VideoBox* HTMLVideoElement::layout_node()

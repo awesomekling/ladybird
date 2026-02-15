@@ -17,7 +17,7 @@ class SVGTSpanElement : public SVGTextPositioningElement {
     GC_DECLARE_ALLOCATOR(SVGTSpanElement);
 
 public:
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
 protected:
     SVGTSpanElement(DOM::Document&, DOM::QualifiedName);

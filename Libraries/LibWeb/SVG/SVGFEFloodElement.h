@@ -21,7 +21,7 @@ class SVGFEFloodElement final
 public:
     virtual ~SVGFEFloodElement() override = default;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
     Gfx::Color flood_color();
     float flood_opacity() const;

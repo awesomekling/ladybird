@@ -185,9 +185,9 @@ void HTMLImageElement::form_associated_element_attribute_changed(FlyString const
     }
 }
 
-GC::Ptr<Layout::Node> HTMLImageElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> HTMLImageElement::create_layout_node()
 {
-    return heap().allocate<Layout::ImageBox>(document(), *this, move(style), *this);
+    return heap().allocate<Layout::ImageBox>(document(), *this, *computed_properties(), *this);
 }
 
 RefPtr<Gfx::ImmutableBitmap> HTMLImageElement::immutable_bitmap() const

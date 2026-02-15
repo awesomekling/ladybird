@@ -18,7 +18,7 @@ class SVGForeignObjectElement final : public SVGGraphicsElement {
 public:
     virtual ~SVGForeignObjectElement() override;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>) override;
+    virtual GC::Ptr<Layout::Node> create_layout_node() override;
 
     GC::Ref<SVG::SVGAnimatedLength> x();
     GC::Ref<SVG::SVGAnimatedLength> y();

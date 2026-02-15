@@ -24,11 +24,11 @@ void SVGTSpanElement::initialize(JS::Realm& realm)
     Base::initialize(realm);
 }
 
-GC::Ptr<Layout::Node> SVGTSpanElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGTSpanElement::create_layout_node()
 {
     // Text must be within an SVG <text> element.
     if (first_flat_tree_ancestor_of_type<SVGTextElement>())
-        return heap().allocate<Layout::SVGTextBox>(document(), *this, move(style));
+        return heap().allocate<Layout::SVGTextBox>(document(), *this, *computed_properties());
     return {};
 }
 

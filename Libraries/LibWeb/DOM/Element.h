@@ -320,7 +320,7 @@ public:
     [[nodiscard]] Vector<CSSPixelRect> get_client_rects() const;
     [[nodiscard]] GC::Ref<Geometry::DOMRectList> get_client_rects_for_bindings() const;
 
-    virtual GC::Ptr<Layout::Node> create_layout_node(NonnullRefPtr<CSS::ComputedProperties>);
+    virtual GC::Ptr<Layout::Node> create_layout_node();
     virtual void adjust_computed_style(CSS::ComputedProperties&) { }
     virtual bool disallows_display_contents() const { return false; }
 

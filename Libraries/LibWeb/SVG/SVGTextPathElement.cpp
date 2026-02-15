@@ -39,9 +39,9 @@ void SVGTextPathElement::visit_edges(Cell::Visitor& visitor)
     SVGURIReferenceMixin::visit_edges(visitor);
 }
 
-GC::Ptr<Layout::Node> SVGTextPathElement::create_layout_node(NonnullRefPtr<CSS::ComputedProperties> style)
+GC::Ptr<Layout::Node> SVGTextPathElement::create_layout_node()
 {
-    return heap().allocate<Layout::SVGTextPathBox>(document(), *this, move(style));
+    return heap().allocate<Layout::SVGTextPathBox>(document(), *this, *computed_properties());
 }
 
 };
