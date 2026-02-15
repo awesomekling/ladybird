@@ -28,8 +28,11 @@
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ScrollbarColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
+#include <LibWeb/CSS/StyleValues/TextIndentStyleValue.h>
+#include <LibWeb/CSS/StyleValues/TextUnderlinePositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TimeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
@@ -663,24 +666,16 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== Text indent ==========
     case PropertyID::TextIndent: {
         auto const& indent = computed_values.text_indent();
-        StyleValueVector values;
-        values.append(style_value_for_length_percentage(indent.length_percentage));
-        if (indent.each_line)
-            values.append(KeywordStyleValue::create(Keyword::EachLine));
-        if (indent.hanging)
-            values.append(KeywordStyleValue::create(Keyword::Hanging));
-        if (values.size() == 1)
-            return values[0];
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+        return TextIndentStyleValue::create(
+            style_value_for_length_percentage(indent.length_percentage),
+            indent.hanging ? TextIndentStyleValue::Hanging::Yes : TextIndentStyleValue::Hanging::No,
+            indent.each_line ? TextIndentStyleValue::EachLine::Yes : TextIndentStyleValue::EachLine::No);
     }
 
     // ========== Text underline position ==========
     case PropertyID::TextUnderlinePosition: {
         auto const& position = computed_values.text_underline_position();
-        StyleValueVector values;
-        values.append(KeywordStyleValue::create(to_keyword(position.horizontal)));
-        values.append(KeywordStyleValue::create(to_keyword(position.vertical)));
-        return StyleValueList::create(move(values), StyleValueList::Separator::Space);
+        return TextUnderlinePositionStyleValue::create(position.horizontal, position.vertical);
     }
 
     // ========== View transition name ==========
@@ -792,12 +787,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     }
 
     case PropertyID::ScrollbarColor:
-        if (auto scrollbar = computed_values.scrollbar_color(); scrollbar.has_value()) {
-            StyleValueVector values;
-            values.append(style_value_for_color(scrollbar->thumb_color));
-            values.append(style_value_for_color(scrollbar->track_color));
-            return StyleValueList::create(move(values), StyleValueList::Separator::Space);
-        }
+        if (auto scrollbar = computed_values.scrollbar_color(); scrollbar.has_value())
+            return ScrollbarColorStyleValue::create(style_value_for_color(scrollbar->thumb_color), style_value_for_color(scrollbar->track_color));
         return KeywordStyleValue::create(Keyword::Auto);
 
     // ========== Cursor ==========
