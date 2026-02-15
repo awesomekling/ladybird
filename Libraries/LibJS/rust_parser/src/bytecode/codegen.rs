@@ -2950,7 +2950,7 @@ fn generate_update_expression(
                     Some(dst)
                 }
             } else if let ExpressionKind::Identifier(prop_ident) = &property.inner {
-                emit_get_by_id(gen, &value, &base, &prop_ident.name, None);
+                emit_get_by_id(gen, &value, &base, &prop_ident.name, base_id);
                 let key = gen.intern_property_key(&prop_ident.name);
                 if prefixed {
                     match op {
@@ -2975,7 +2975,7 @@ fn generate_update_expression(
                         property: key,
                         src: value.operand(),
                         cache_index: cache2,
-                        base_identifier: base_id,
+                        base_identifier: None,
                     });
                     return Some(dst);
                 }
@@ -2985,7 +2985,7 @@ fn generate_update_expression(
                     property: key,
                     src: value.operand(),
                     cache_index: cache2,
-                    base_identifier: base_id,
+                    base_identifier: None,
                 });
                 Some(value)
             } else {
@@ -3230,7 +3230,7 @@ fn generate_assignment_expression(
                 } else {
                     if let ExpressionKind::Identifier(ident) = &property.inner {
                         let old_val = gen.allocate_register();
-                        emit_get_by_id(gen, &old_val, &base, &ident.name, None);
+                        emit_get_by_id(gen, &old_val, &base, &ident.name, base_id);
                         if is_logical {
                             let rhs_block = gen.make_block();
                             let lhs_block = gen.make_block();
@@ -3247,7 +3247,7 @@ fn generate_assignment_expression(
                                 property: key,
                                 src: dst.operand(),
                                 cache_index: cache2,
-                                base_identifier: base_id,
+                                base_identifier: None,
                             });
                             gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                             gen.switch_to_basic_block(lhs_block);
@@ -3266,7 +3266,7 @@ fn generate_assignment_expression(
                             property: key,
                             src: dst.operand(),
                             cache_index: cache2,
-                            base_identifier: base_id,
+                            base_identifier: None,
                         });
                         return Some(dst);
                     } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
