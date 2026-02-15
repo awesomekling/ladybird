@@ -875,17 +875,32 @@ void Element::run_attribute_change_steps(FlyString const& local_name, Optional<S
     }
 }
 
-static CSS::RequiredInvalidationAfterStyleChange compute_required_invalidation(CSS::ComputedProperties const& old_style, CSS::ComputedProperties const& new_style, CSS::FontComputer const& font_computer)
+static CSS::RequiredInvalidationAfterStyleChange compute_required_invalidation(CSS::ComputedValues const& old_values, CSS::AnimatedPropertyData const* old_animated_data, CSS::ComputedProperties const& new_style, CSS::FontComputer const& font_computer)
 {
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
-    if (old_style.computed_font_list(font_computer) != new_style.computed_font_list(font_computer))
+    if (!old_values.font_list().equals(*new_style.computed_font_list(font_computer)))
         invalidation.relayout = true;
 
     for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
         auto property_id = static_cast<CSS::PropertyID>(i);
 
-        invalidation |= CSS::compute_property_invalidation(property_id, old_style.property(property_id), new_style.property(property_id));
+        // Get old value from ComputedValues, with animated overlay applied
+        // (matching ComputedProperties::property() logic).
+        CSS::StyleValue const* old_value = nullptr;
+        if (old_animated_data
+            && (!old_values.is_property_important(property_id) || old_animated_data->is_result_of_transition(property_id))) {
+            if (auto it = old_animated_data->values.find(property_id); it != old_animated_data->values.end())
+                old_value = it->value.ptr();
+        }
+        if (!old_value) {
+            if (auto value = old_values.property_value(property_id))
+                old_value = value.ptr();
+        }
+        if (!old_value)
+            old_value = CSS::property_initial_value(property_id).ptr();
+
+        invalidation |= CSS::compute_property_invalidation(property_id, *old_value, new_style.property(property_id));
     }
     return invalidation;
 }
@@ -913,8 +928,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     auto new_computed_properties = style_computer.compute_style({ *this }, did_change_custom_properties);
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
-    if (m_computed_properties) {
-        invalidation = compute_required_invalidation(*m_computed_properties, new_computed_properties, document().font_computer());
+    if (m_computed_values) {
+        invalidation = compute_required_invalidation(*m_computed_values, m_animated_property_data.ptr(), new_computed_properties, document().font_computer());
     } else {
         invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
     }
@@ -941,13 +956,15 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     auto recompute_pseudo_element_style = [&](CSS::PseudoElement pseudo_element) {
         style_computer.push_ancestor(*this);
 
-        auto pseudo_element_style = computed_properties(pseudo_element);
+        auto pseudo = get_pseudo_element(pseudo_element);
+        auto const* old_pseudo_values = pseudo.has_value() ? pseudo->computed_values() : nullptr;
+        auto const* old_pseudo_animated_data = pseudo.has_value() ? pseudo->animated_property_data() : nullptr;
         auto new_pseudo_element_style = style_computer.compute_pseudo_element_style_if_needed({ *this, pseudo_element }, did_change_custom_properties);
 
         // TODO: Can we be smarter about invalidation?
-        if (pseudo_element_style && new_pseudo_element_style) {
-            invalidation |= compute_required_invalidation(*pseudo_element_style, *new_pseudo_element_style, document().font_computer());
-        } else if (pseudo_element_style || new_pseudo_element_style) {
+        if (old_pseudo_values && new_pseudo_element_style) {
+            invalidation |= compute_required_invalidation(*old_pseudo_values, old_pseudo_animated_data, *new_pseudo_element_style, document().font_computer());
+        } else if (old_pseudo_values || new_pseudo_element_style) {
             invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         }
 
