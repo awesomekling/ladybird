@@ -95,6 +95,12 @@ pub fn generate_expr(
             }
 
             let value = generate_expr(operand, gen, None)?;
+
+            // OPTIMIZATION: constant fold unary operations on constants.
+            if let Some(folded) = try_constant_fold_unary(gen, *op, &value) {
+                return Some(folded);
+            }
+
             let dst = choose_dst(gen, preferred_dst);
             match op {
                 UnaryOp::BitwiseNot => {
@@ -2591,6 +2597,13 @@ fn generate_call_expression(
     let is_direct_eval = !is_new
         && matches!(&data.callee.inner, ExpressionKind::Identifier(ident) if ident.name == utf16!("eval"));
 
+    // Detect known builtins for member expression callees (e.g. Math.abs).
+    let builtin: Option<u8> = if !is_new {
+        get_builtin(&data.callee)
+    } else {
+        None
+    };
+
     // For method calls (obj.method()), we need to use the object as `this`.
     let (callee, this_value) = if !is_new {
         match &data.callee.inner {
@@ -2764,6 +2777,27 @@ fn generate_call_expression(
                 expression_string,
                 arguments: args,
             });
+        } else if let Some(b) = builtin {
+            if builtin_argument_count(b) == args.len() {
+                gen.emit(Instruction::CallBuiltin {
+                    dst: dst.operand(),
+                    callee: callee.operand(),
+                    this_value: this_value.operand(),
+                    argument_count: args.len() as u32,
+                    builtin: b,
+                    expression_string,
+                    arguments: args,
+                });
+            } else {
+                gen.emit(Instruction::Call {
+                    dst: dst.operand(),
+                    callee: callee.operand(),
+                    this_value: this_value.operand(),
+                    argument_count: args.len() as u32,
+                    expression_string,
+                    arguments: args,
+                });
+            }
         } else {
             gen.emit(Instruction::Call {
                 dst: dst.operand(),
@@ -7271,6 +7305,139 @@ fn collect_binding_pattern_names(
             }
             BindingEntryAlias::MemberExpression(_) => {}
         }
+    }
+}
+
+/// Detect known builtin methods from a callee expression (e.g. Math.abs).
+/// Returns the Builtin enum value as u8, matching C++ Builtins.h ordering.
+fn get_builtin(callee: &Expression) -> Option<u8> {
+    let ExpressionKind::Member { object, property, computed } = &callee.inner else {
+        return None;
+    };
+    if *computed {
+        return None;
+    }
+    let ExpressionKind::Identifier(base_ident) = &object.inner else {
+        return None;
+    };
+    let ExpressionKind::Identifier(prop_ident) = &property.inner else {
+        return None;
+    };
+    // Must match JS_ENUMERATE_BUILTINS order in Builtins.h.
+    static BUILTINS: &[(&[u16], &[u16], u8)] = &[
+        (utf16!("Math"), utf16!("abs"), 0),
+        (utf16!("Math"), utf16!("log"), 1),
+        (utf16!("Math"), utf16!("pow"), 2),
+        (utf16!("Math"), utf16!("exp"), 3),
+        (utf16!("Math"), utf16!("ceil"), 4),
+        (utf16!("Math"), utf16!("floor"), 5),
+        (utf16!("Math"), utf16!("imul"), 6),
+        (utf16!("Math"), utf16!("random"), 7),
+        (utf16!("Math"), utf16!("round"), 8),
+        (utf16!("Math"), utf16!("sqrt"), 9),
+        (utf16!("Math"), utf16!("sin"), 10),
+        (utf16!("Math"), utf16!("cos"), 11),
+        (utf16!("Math"), utf16!("tan"), 12),
+        (utf16!("RegExpPrototype"), utf16!("exec"), 13),
+        (utf16!("RegExpPrototype"), utf16!("replace"), 14),
+        (utf16!("RegExpPrototype"), utf16!("split"), 15),
+        (utf16!("InternalBuiltin"), utf16!("ordinary_has_instance"), 16),
+        (utf16!("ArrayIteratorPrototype"), utf16!("next"), 17),
+        (utf16!("MapIteratorPrototype"), utf16!("next"), 18),
+        (utf16!("SetIteratorPrototype"), utf16!("next"), 19),
+        (utf16!("StringIteratorPrototype"), utf16!("next"), 20),
+    ];
+    for &(base, prop, id) in BUILTINS {
+        if base_ident.name == base && prop_ident.name == prop {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn builtin_argument_count(builtin: u8) -> usize {
+    // Must match JS_ENUMERATE_BUILTINS arg counts in Builtins.h.
+    match builtin {
+        0 => 1,  // MathAbs
+        1 => 1,  // MathLog
+        2 => 2,  // MathPow
+        3 => 1,  // MathExp
+        4 => 1,  // MathCeil
+        5 => 1,  // MathFloor
+        6 => 2,  // MathImul
+        7 => 0,  // MathRandom
+        8 => 1,  // MathRound
+        9 => 1,  // MathSqrt
+        10 => 1, // MathSin
+        11 => 1, // MathCos
+        12 => 1, // MathTan
+        13 => 1, // RegExpPrototypeExec
+        14 => 2, // RegExpPrototypeReplace
+        15 => 2, // RegExpPrototypeSplit
+        16 => 1, // OrdinaryHasInstance
+        17 => 0, // ArrayIteratorPrototypeNext
+        18 => 0, // MapIteratorPrototypeNext
+        19 => 0, // SetIteratorPrototypeNext
+        20 => 0, // StringIteratorPrototypeNext
+        _ => usize::MAX,
+    }
+}
+
+/// JS ToInt32 conversion (ECMA-262 7.1.6).
+fn to_int32(n: f64) -> i32 {
+    if n.is_nan() || n.is_infinite() || n == 0.0 {
+        return 0;
+    }
+    let int_val = n.signum() * n.abs().floor();
+    let int32bit = int_val % 4294967296.0; // 2^32
+    let int32bit = if int32bit < 0.0 { int32bit + 4294967296.0 } else { int32bit };
+    if int32bit >= 2147483648.0 {
+        (int32bit - 4294967296.0) as i32
+    } else {
+        int32bit as i32
+    }
+}
+
+/// Try to constant-fold a unary operation when the operand is a constant.
+fn try_constant_fold_unary(
+    gen: &mut Generator,
+    op: UnaryOp,
+    operand: &ScopedOperand,
+) -> Option<ScopedOperand> {
+    let constant = gen.get_constant(operand)?;
+    match op {
+        UnaryOp::Minus => {
+            if let ConstantValue::Number(n) = constant {
+                Some(gen.add_constant_number(-n))
+            } else {
+                None
+            }
+        }
+        UnaryOp::Plus => {
+            if let ConstantValue::Number(n) = constant {
+                Some(gen.add_constant_number(*n))
+            } else {
+                None
+            }
+        }
+        UnaryOp::BitwiseNot => {
+            if let ConstantValue::Number(n) = constant {
+                Some(gen.add_constant_number((!to_int32(*n)) as f64))
+            } else {
+                None
+            }
+        }
+        UnaryOp::Not => {
+            let as_bool = match constant {
+                ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
+                ConstantValue::Boolean(b) => *b,
+                ConstantValue::Null | ConstantValue::Undefined => false,
+                ConstantValue::String(s) => !s.is_empty(),
+                _ => return None,
+            };
+            Some(gen.add_constant_boolean(!as_bool))
+        }
+        _ => None,
     }
 }
 
