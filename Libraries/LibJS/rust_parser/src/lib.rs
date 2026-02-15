@@ -969,7 +969,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
             sd.contains_direct_call_to_eval,
             sd.uses_this_from_environment
                 || func_data.parsing_insights.uses_this_from_environment,
-            sd.contains_access_to_arguments_object,
+            func_data.parsing_insights.might_need_arguments_object,
             fsd.map_or(false, |f| f.has_function_named_arguments),
             fsd.map_or(false, |f| f.has_lexically_declared_arguments),
             fsd.map_or(0, |f| f.non_local_var_count),
