@@ -1018,7 +1018,7 @@ impl<'a> Parser<'a> {
                 break;
             } else if self.match_token(TokenType::BracketOpen) {
                 self.consume();
-                let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::BracketClose);
                 references.push(OptionalChainReference::ComputedReference {
                     expression: Box::new(expression),
