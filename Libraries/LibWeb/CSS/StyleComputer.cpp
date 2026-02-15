@@ -2270,6 +2270,19 @@ void StyleComputer::populate_computed_values(MutableComputedValues& computed_val
     });
 }
 
+NonnullRefPtr<ComputedProperties> StyleComputer::create_computed_properties_from_computed_values(ComputedValues const& computed_values, AnimatedPropertyData* animated_data)
+{
+    auto computed_properties = adopt_ref(*new ComputedProperties);
+    computed_values.for_each_property_value([&](PropertyID property_id, NonnullRefPtr<StyleValue const> const& value) {
+        computed_properties->set_property(property_id, value,
+            computed_values.is_property_inherited(property_id) ? ComputedProperties::Inherited::Yes : ComputedProperties::Inherited::No,
+            computed_values.is_property_important(property_id) ? Important::Yes : Important::No);
+    });
+    if (animated_data)
+        computed_properties->set_external_animated_data(animated_data);
+    return computed_properties;
+}
+
 NonnullRefPtr<ComputedProperties> StyleComputer::compute_style(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties) const
 {
     auto& style_scope = abstract_element.style_scope();

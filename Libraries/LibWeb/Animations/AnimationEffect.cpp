@@ -813,11 +813,11 @@ AnimationUpdateContext::~AnimationUpdateContext()
         auto& element = it.key;
         GC::Ref<DOM::Element> target = element.element();
 
-        auto computed_properties = target->computed_properties(element.pseudo_element());
-        if (!computed_properties)
+        auto const* computed_values = element.computed_values();
+        if (!computed_values)
             continue;
 
-        auto const* animated_data = element.animated_property_data();
+        auto* animated_data = element.animated_property_data();
         auto const& new_animated_properties = animated_data ? animated_data->values : HashMap<CSS::PropertyID, NonnullRefPtr<CSS::StyleValue const>> {};
         auto invalidation = compute_required_invalidation_for_animated_properties(it.value->animated_properties_before_update, new_animated_properties);
 
@@ -833,8 +833,9 @@ AnimationUpdateContext::~AnimationUpdateContext()
             return TraversalDecision::Continue;
         });
 
-        // Clear the font cache since animated properties may have changed font-related values.
-        computed_properties->clear_computed_font_list_cache();
+        // Create a temporary ComputedProperties from ComputedValues to re-populate typed fields
+        // with animated overrides applied.
+        auto computed_properties = CSS::StyleComputer::create_computed_properties_from_computed_values(*computed_values, animated_data);
 
         if (!element.pseudo_element().has_value()) {
             CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(target->ensure_computed_values()), *computed_properties, target->document());
