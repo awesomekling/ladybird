@@ -2325,7 +2325,7 @@ fn generate_block_statement(
 
 /// Create a lexical environment for a block with non-local lexical declarations.
 /// Returns true if an environment was created.
-fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Iterator<Item = &'a Statement>) {
+fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, environment: &ScopedOperand, children: impl Iterator<Item = &'a Statement>) {
     let mut func_binding_created: HashSet<Vec<u16>> = HashSet::new();
     for child in children {
         match &child.inner {
@@ -2337,13 +2337,19 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                         collect_target_names(&decl.target, &mut names);
                         for (name, _) in &names {
                             let id = gen.intern_identifier(&name);
-                            gen.emit(Instruction::CreateVariable {
-                                identifier: id,
-                                mode: EnvironmentMode::Lexical as u32,
-                                is_immutable: is_constant,
-                                is_global: false,
-                                is_strict: is_constant,
-                            });
+                            if is_constant {
+                                gen.emit(Instruction::CreateImmutableBinding {
+                                    environment: environment.operand(),
+                                    identifier: id,
+                                    strict_binding: true,
+                                });
+                            } else {
+                                gen.emit(Instruction::CreateMutableBinding {
+                                    environment: environment.operand(),
+                                    identifier: id,
+                                    can_be_deleted: false,
+                                });
+                            }
                         }
                     }
                 }
@@ -2352,12 +2358,10 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                 if let Some(ref name_ident) = class_data.name {
                     if !name_ident.is_local() {
                         let id = gen.intern_identifier(&name_ident.name);
-                        gen.emit(Instruction::CreateVariable {
+                        gen.emit(Instruction::CreateMutableBinding {
+                            environment: environment.operand(),
                             identifier: id,
-                            mode: EnvironmentMode::Lexical as u32,
-                            is_immutable: false,
-                            is_global: false,
-                            is_strict: false,
+                            can_be_deleted: false,
                         });
                     }
                 }
@@ -2366,12 +2370,10 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, children: impl Ite
                 if let Some(ref name_ident) = func_data.name {
                     if !name_ident.is_local() && func_binding_created.insert(name_ident.name.clone()) {
                         let id = gen.intern_identifier(&name_ident.name);
-                        gen.emit(Instruction::CreateVariable {
+                        gen.emit(Instruction::CreateMutableBinding {
+                            environment: environment.operand(),
                             identifier: id,
-                            mode: EnvironmentMode::Lexical as u32,
-                            is_immutable: false,
-                            is_global: false,
-                            is_strict: false,
+                            can_be_deleted: false,
                         });
                     }
                 }
@@ -2393,9 +2395,9 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
         parent: parent.operand(),
         capacity: 0,
     });
-    gen.lexical_environment_register_stack.push(new_env);
+    gen.lexical_environment_register_stack.push(new_env.clone());
 
-    create_lexical_bindings_for_block(gen, scope.children.iter());
+    create_lexical_bindings_for_block(gen, &new_env, scope.children.iter());
 
     // Pass 2: Instantiate function declarations.
     // For duplicate names, only instantiate the last declaration (it wins).
@@ -2995,7 +2997,12 @@ fn generate_assignment_expression(
 
                 // Regular compound assignment (+=, -=, etc.)
                 let rhs_val = generate_expr(rhs, gen, None)?;
-                let dst = choose_dst(gen, preferred_dst);
+                // OPTIMIZATION: If LHS is a local, write directly into it.
+                let dst = if lhs_val.operand().is_local() {
+                    lhs_val.clone()
+                } else {
+                    choose_dst(gen, preferred_dst)
+                };
                 emit_compound_assignment(gen, op, &dst, &lhs_val, &rhs_val);
                 emit_set_variable(gen, ident, &dst);
                 return Some(dst);
@@ -4021,9 +4028,9 @@ fn emit_switch_block_declaration_instantiation(
         parent: parent.operand(),
         capacity: 0,
     });
-    gen.lexical_environment_register_stack.push(new_env);
+    gen.lexical_environment_register_stack.push(new_env.clone());
 
-    create_lexical_bindings_for_block(gen, all_children.iter().copied());
+    create_lexical_bindings_for_block(gen, &new_env, all_children.iter().copied());
 
     // Pass 2: Instantiate function declarations (last one wins for duplicates).
     let mut last_func_indices: Vec<(Vec<u16>, usize)> = Vec::new();
@@ -4081,7 +4088,21 @@ fn generate_object_expression(
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
     let dst = choose_dst(gen, preferred_dst);
-    let cache_index = gen.next_object_shape_cache();
+
+    // Determine if this is a simple object literal (all KeyValue with non-computed
+    // string/identifier keys). Simple literals can benefit from shape caching.
+    let is_simple = !properties.is_empty() && properties.iter().all(|p| {
+        if p.property_type != ObjectPropertyType::KeyValue || p.is_computed {
+            return false;
+        }
+        matches!(&p.key.inner, ExpressionKind::Identifier(_) | ExpressionKind::StringLiteral(_))
+    });
+
+    let cache_index = if is_simple {
+        gen.next_object_shape_cache()
+    } else {
+        u32::MAX
+    };
     gen.emit(Instruction::NewObject {
         dst: dst.operand(),
         cache_index,
@@ -4172,8 +4193,26 @@ fn generate_object_expression(
                         src: value.operand(),
                         base_identifier: None,
                     });
-                } else {
+                } else if is_simple {
                     emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, false);
+                } else {
+                    // Non-simple object: use PutOwnById instead of InitObjectLiteralProperty
+                    let prop_key = match &prop.key.inner {
+                        ExpressionKind::Identifier(ident) => gen.intern_property_key(&ident.name),
+                        ExpressionKind::StringLiteral(s) => gen.intern_property_key(s),
+                        _ => {
+                            emit_object_property_set_by_key(gen, &dst, &prop.key, &value, slot as u32, cache_index, false);
+                            continue;
+                        }
+                    };
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::PutOwnById {
+                        base: dst.operand(),
+                        property: prop_key,
+                        src: value.operand(),
+                        cache_index: cache,
+                        base_identifier: None,
+                    });
                 }
             }
             ObjectPropertyType::Getter => {
@@ -4212,6 +4251,13 @@ fn generate_object_expression(
                 });
             }
         }
+    }
+
+    if is_simple {
+        gen.emit(Instruction::CacheObjectShape {
+            object: dst.operand(),
+            cache_index,
+        });
     }
 
     Some(dst)
@@ -4539,16 +4585,14 @@ fn generate_class_expression(
     let lhs_name = if data.name.is_none() { gen.pending_lhs_name.take() } else { None };
 
     // Step 2: Save parent environment, create class lexical environment.
-    let parent_env = gen.allocate_register();
-    gen.emit(Instruction::GetLexicalEnvironment {
-        dst: parent_env.operand(),
-    });
+    let parent_env = gen.current_lexical_environment();
     let class_env = gen.allocate_register();
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: class_env.operand(),
         parent: parent_env.operand(),
         capacity: 0,
     });
+    gen.lexical_environment_register_stack.push(class_env.clone());
 
     // Step 3.a: Create binding for the class name in the class environment.
     // For named classes, this is the class name (e.g. "A" in "class A {}").
@@ -4844,6 +4888,7 @@ fn generate_class_expression(
 
     // Restore parent environment before emitting NewClass.
     gen.emit(Instruction::SetLexicalEnvironment { environment: parent_env.operand() });
+    gen.lexical_environment_register_stack.pop();
 
     // Emit NewClass instruction
     gen.emit(Instruction::NewClass {
@@ -6771,16 +6816,17 @@ pub fn emit_function_declaration_instantiation(
     }
 
     // --- Step 7: Lexical environment for non-local declarations ---
+    // Note: this counts only let/const/class declarations (not function declarations,
+    // which are var-hoisted in function bodies). Matches C++ has_non_local_lexical_declarations().
+    let lex_bindings_count = count_non_local_lexical_bindings(body_scope);
 
-    let has_non_local_lexical_declarations = needs_block_declaration_instantiation(body_scope);
-
-    if !strict && has_non_local_lexical_declarations {
+    if !strict && lex_bindings_count > 0 {
         let parent = gen.current_lexical_environment();
         let new_env = gen.allocate_register();
         gen.emit(Instruction::CreateLexicalEnvironment {
             dst: new_env.operand(),
             parent: parent.operand(),
-            capacity: 0,
+            capacity: lex_bindings_count,
         });
         gen.lexical_environment_register_stack.push(new_env);
     }
@@ -6898,6 +6944,32 @@ fn needs_block_declaration_instantiation(scope: &ScopeData) -> bool {
         }
     }
     false
+}
+
+/// Count non-local lexical bindings in a function body scope.
+/// Matches C++ SharedFunctionInstanceData::m_lex_environment_bindings_count.
+fn count_non_local_lexical_bindings(scope: &ScopeData) -> u32 {
+    let mut count = 0u32;
+    for child in &scope.children {
+        match &child.inner {
+            StatementKind::VariableDeclaration { kind, declarations } => {
+                if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                    for decl in declarations {
+                        let mut names = Vec::new();
+                        collect_target_names(&decl.target, &mut names);
+                        count += names.len() as u32;
+                    }
+                }
+            }
+            StatementKind::ClassDeclaration(class_data) => {
+                if class_data.name.as_ref().is_some_and(|n| !n.is_local()) {
+                    count += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    count
 }
 
 /// Create a ScopedOperand for a VarToInit's local variable (argument or variable).
