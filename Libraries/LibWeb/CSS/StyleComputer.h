@@ -121,7 +121,8 @@ public:
 
     void set_viewport_rect(Badge<DOM::Document>, CSSPixelRect const& viewport_rect) { m_viewport_rect = viewport_rect; }
 
-    void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect> animation, ComputedProperties&, AnimatedPropertyData&) const;
+    void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect>, ComputedProperties&, AnimatedPropertyData&) const;
+    void collect_animation_into(DOM::AbstractElement, GC::Ref<Animations::KeyframeEffect>, ComputedValues const&, AnimatedPropertyData&) const;
 
     [[nodiscard]] NonnullRefPtr<ComputedProperties> compute_properties(DOM::AbstractElement, CascadedProperties&) const;
 
@@ -201,6 +202,7 @@ private:
     Optional<ComputationContext> m_cached_line_height_computation_context;
     Optional<ComputationContext> m_cached_generic_computation_context;
     ComputationContext const& get_computation_context_for_property(PropertyID, ComputedProperties const&, Optional<DOM::AbstractElement>) const;
+    ComputationContext const& get_computation_context_for_property(PropertyID, ComputedValues const&, Optional<DOM::AbstractElement>) const;
     void clear_computation_context_caches() const
     {
         const_cast<StyleComputer*>(this)->m_cached_font_computation_context = {};

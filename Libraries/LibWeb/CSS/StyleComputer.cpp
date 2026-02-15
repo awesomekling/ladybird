@@ -579,7 +579,21 @@ static void cascade_custom_properties(DOM::AbstractElement abstract_element, Vec
     custom_properties.update(important_custom_properties);
 }
 
-void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element, GC::Ref<Animations::KeyframeEffect> effect, ComputedProperties& computed_properties, AnimatedPropertyData& animated_data) const
+// Template helper for collect_animation_into, parameterized on how to read base/current property values,
+// check importance, and get computation contexts. This avoids duplicating the ~250-line function body
+// for the ComputedProperties and ComputedValues overloads.
+template<typename GetBaseValue, typename GetValue, typename IsImportant, typename GetComputationContext>
+static void collect_animation_into_impl(
+    DOM::AbstractElement abstract_element,
+    GC::Ref<Animations::KeyframeEffect> effect,
+    AnimatedPropertyData& animated_data,
+    GetBaseValue&& get_base_value,
+    GetValue&& get_value,
+    WritingMode writing_mode,
+    Direction direction,
+    IsImportant&& is_important,
+    GetComputationContext&& get_computation_context,
+    double device_pixels_per_css_pixel)
 {
     auto animation = effect->associated_animation();
     if (!animation)
@@ -640,7 +654,7 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
     }
 
     // FIXME: Follow https://drafts.csswg.org/web-animations-1/#ref-for-computed-keyframes in whatever the right place is.
-    auto compute_keyframe_values = [&computed_properties, &abstract_element, this](auto const& keyframe_values) {
+    auto compute_keyframe_values = [&](auto const& keyframe_values) {
         HashMap<PropertyID, RefPtr<StyleValue const>> result;
         HashMap<PropertyID, PropertyID> longhands_set_by_property_id;
         AK::FixedBitmap<number_of_longhand_properties> property_is_set_by_use_initial(false);
@@ -692,7 +706,7 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
                     if (property_is_shorthand(property_id))
                         return {};
                     is_use_initial = true;
-                    return computed_properties.property(property_id, ComputedProperties::WithAnimationsApplied::No);
+                    return get_base_value(property_id);
                 },
                 [&](RefPtr<StyleValue const> value) -> RefPtr<StyleValue const> {
                     return value;
@@ -711,8 +725,8 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
             if (style_value->is_unresolved())
                 style_value = Parser::Parser::resolve_unresolved_style_value(Parser::ParsingParams { abstract_element.document() }, abstract_element, PropertyNameAndID::from_id(property_id), style_value->as_unresolved());
 
-            for_each_property_expanding_shorthands(property_id, *style_value, [&](PropertyID longhand_id, StyleValue const& longhand_value) {
-                auto physical_longhand_id = map_logical_alias_to_physical_property(longhand_id, LogicalAliasMappingContext { computed_properties.writing_mode(), computed_properties.direction() });
+            StyleComputer::for_each_property_expanding_shorthands(property_id, *style_value, [&](PropertyID longhand_id, StyleValue const& longhand_value) {
+                auto physical_longhand_id = map_logical_alias_to_physical_property(longhand_id, LogicalAliasMappingContext { writing_mode, direction });
                 auto physical_longhand_id_bitmap_index = to_underlying(physical_longhand_id) - to_underlying(first_longhand_property_id);
 
                 // Don't overwrite values if this is the result of a UseInitial
@@ -725,17 +739,17 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
 
                 auto const& specified_value_with_css_wide_keywords_applied = [&]() -> StyleValue const& {
                     if (longhand_value.is_inherit() || (longhand_value.is_unset() && is_inherited_property(longhand_id))) {
-                        if (auto inherited_animated_value = get_animated_inherit_value(longhand_id, abstract_element); inherited_animated_value.has_value())
+                        if (auto inherited_animated_value = StyleComputer::get_animated_inherit_value(longhand_id, abstract_element); inherited_animated_value.has_value())
                             return inherited_animated_value->value;
 
-                        return get_non_animated_inherit_value(longhand_id, abstract_element);
+                        return StyleComputer::get_non_animated_inherit_value(longhand_id, abstract_element);
                     }
 
                     if (longhand_value.is_initial() || longhand_value.is_unset())
                         return property_initial_value(longhand_id);
 
                     if (longhand_value.is_revert() || longhand_value.is_revert_layer())
-                        return computed_properties.property(longhand_id);
+                        return *get_value(longhand_id);
 
                     return longhand_value;
                 }();
@@ -746,28 +760,24 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
             });
         }
 
-        // NOTE: This doesn't necessarily return the specified value if we reach into computed_properties but that
-        //       doesn't matter as a computed value is always valid as a specified value.
         Function<NonnullRefPtr<StyleValue const>(PropertyID)> get_property_specified_value = [&](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
             if (auto keyframe_value = specified_values.get(property_id); keyframe_value.has_value() && keyframe_value.value())
                 return *keyframe_value.value();
 
-            return computed_properties.property(property_id);
+            return get_value(property_id);
         };
 
         for (auto const& [property_id, style_value] : specified_values) {
             if (!style_value)
                 continue;
 
-            auto const& computation_context = get_computation_context_for_property(property_id, computed_properties, abstract_element);
+            auto const& computation_context = get_computation_context(property_id);
 
-            result.set(property_id, compute_value_of_property(property_id, *style_value, get_property_specified_value, computation_context, m_document->page().client().device_pixels_per_css_pixel()));
+            result.set(property_id, StyleComputer::compute_value_of_property(property_id, *style_value, get_property_specified_value, computation_context, device_pixels_per_css_pixel));
         }
 
         return result;
     };
-
-    clear_computation_context_caches();
 
     HashMap<PropertyID, RefPtr<StyleValue const>> computed_start_values = compute_keyframe_values(keyframe_values);
     HashMap<PropertyID, RefPtr<StyleValue const>> computed_end_values = compute_keyframe_values(keyframe_end_values);
@@ -813,15 +823,15 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
 
         // OPTIMIZATION: Values resulting from animations other than CSS transitions are overriden by important
         //               properties so there's no need to calculate them
-        if (!animation->is_css_transition() && computed_properties.is_property_important(it.key)) {
+        if (!animation->is_css_transition() && is_important(it.key)) {
             continue;
         }
 
-        auto const& underlying_value = computed_properties.property(it.key);
-        if (auto composited_start_value = composite_value(it.key, underlying_value, start, start_composite_operation))
+        auto underlying = get_value(it.key);
+        if (auto composited_start_value = composite_value(it.key, *underlying, start, start_composite_operation))
             start = *composited_start_value;
 
-        if (auto composited_end_value = composite_value(it.key, underlying_value, end, end_composite_operation))
+        if (auto composited_end_value = composite_value(it.key, *underlying, end, end_composite_operation))
             end = *composited_end_value;
 
         if (auto next_value = interpolate_property(*effect->target(), it.key, *start, *end, progress_in_keyframe, AllowDiscrete::Yes)) {
@@ -833,6 +843,59 @@ void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element
             animated_data.set(PropertyID::Visibility, KeywordStyleValue::create(Keyword::Hidden), is_result_of_transition);
         }
     }
+}
+
+void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element, GC::Ref<Animations::KeyframeEffect> effect, ComputedProperties& computed_properties, AnimatedPropertyData& animated_data) const
+{
+    clear_computation_context_caches();
+    collect_animation_into_impl(
+        abstract_element, effect, animated_data,
+        [&](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
+            return computed_properties.property(property_id, ComputedProperties::WithAnimationsApplied::No);
+        },
+        [&](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
+            return computed_properties.property(property_id);
+        },
+        computed_properties.writing_mode(),
+        computed_properties.direction(),
+        [&](PropertyID property_id) -> bool {
+            return computed_properties.is_property_important(property_id);
+        },
+        [&](PropertyID property_id) -> ComputationContext const& {
+            return get_computation_context_for_property(property_id, computed_properties, abstract_element);
+        },
+        m_document->page().client().device_pixels_per_css_pixel());
+}
+
+void StyleComputer::collect_animation_into(DOM::AbstractElement abstract_element, GC::Ref<Animations::KeyframeEffect> effect, ComputedValues const& computed_values, AnimatedPropertyData& animated_data) const
+{
+    clear_computation_context_caches();
+    collect_animation_into_impl(
+        abstract_element, effect, animated_data,
+        [&](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
+            // ComputedValues stores base (non-animated) values in the overflow map.
+            auto value = computed_values.property_value(property_id);
+            VERIFY(value);
+            return value.release_nonnull();
+        },
+        [&](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
+            // For current value: check animated data first (for previously applied animations
+            // in this update cycle), then fall back to base values from ComputedValues.
+            if (auto it = animated_data.values.find(property_id); it != animated_data.values.end())
+                return it->value;
+            auto value = computed_values.property_value(property_id);
+            VERIFY(value);
+            return value.release_nonnull();
+        },
+        computed_values.writing_mode(),
+        computed_values.direction(),
+        [&](PropertyID property_id) -> bool {
+            return computed_values.is_property_important(property_id);
+        },
+        [&](PropertyID property_id) -> ComputationContext const& {
+            return get_computation_context_for_property(property_id, computed_values, abstract_element);
+        },
+        m_document->page().client().device_pixels_per_css_pixel());
 }
 
 // https://drafts.csswg.org/css-animations-1/#animations
@@ -1514,6 +1577,87 @@ ComputationContext const& StyleComputer::get_computation_context_for_property(Pr
                 },
                 .abstract_element = abstract_element,
                 .color_scheme = style.color_scheme(document().page().preferred_color_scheme(), document().supported_color_schemes())
+            };
+        }
+        return m_cached_generic_computation_context.value();
+    }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+ComputationContext const& StyleComputer::get_computation_context_for_property(PropertyID property_id, ComputedValues const& computed_values, Optional<DOM::AbstractElement> abstract_element) const
+{
+    switch (property_id) {
+    case PropertyID::ColorScheme:
+    case PropertyID::FontFamily:
+    case PropertyID::FontFeatureSettings:
+    case PropertyID::FontKerning:
+    case PropertyID::FontOpticalSizing:
+    case PropertyID::FontSize:
+    case PropertyID::FontStyle:
+    case PropertyID::FontVariantAlternates:
+    case PropertyID::FontVariantCaps:
+    case PropertyID::FontVariantEastAsian:
+    case PropertyID::FontVariantEmoji:
+    case PropertyID::FontVariantLigatures:
+    case PropertyID::FontVariantNumeric:
+    case PropertyID::FontVariantPosition:
+    case PropertyID::FontVariationSettings:
+    case PropertyID::FontWeight:
+    case PropertyID::FontWidth:
+    case PropertyID::MathDepth:
+    case PropertyID::TextRendering: {
+        if (!m_cached_font_computation_context.has_value()) {
+            auto inheritance_parent = abstract_element.map([](auto& element) { return element.element_to_inherit_style_from(); }).value_or(OptionalNone {});
+
+            const_cast<StyleComputer*>(this)->m_cached_font_computation_context = {
+                .length_resolution_context = inheritance_parent.has_value()
+                    ? Length::ResolutionContext::for_element(inheritance_parent.value())
+                    : Length::ResolutionContext::for_window(*m_document->window()),
+                .abstract_element = abstract_element
+            };
+        }
+
+        return m_cached_font_computation_context.value();
+    }
+    case PropertyID::LineHeight: {
+        if (!m_cached_line_height_computation_context.has_value()) {
+            auto inheritance_parent = abstract_element.map([](auto& element) { return element.element_to_inherit_style_from(); }).value_or(OptionalNone {});
+
+            auto line_height_font_metrics = Length::FontMetrics {
+                computed_values.font_size(),
+                computed_values.font_list().font_for_code_point(' ').pixel_metrics(),
+                inheritance_parent.has_value() && inheritance_parent->computed_values() ? inheritance_parent->computed_values()->line_height() : InitialValues::line_height()
+            };
+
+            const_cast<StyleComputer*>(this)->m_cached_line_height_computation_context = {
+                .length_resolution_context = {
+                    .viewport_rect = viewport_rect(),
+                    .font_metrics = line_height_font_metrics,
+                    .root_font_metrics = abstract_element.has_value() && abstract_element->element().is_html_html_element()
+                        ? line_height_font_metrics
+                        : m_root_element_font_metrics,
+                },
+                .abstract_element = abstract_element
+            };
+        }
+
+        return m_cached_line_height_computation_context.value();
+    }
+    default: {
+        if (!m_cached_generic_computation_context.has_value()) {
+            const_cast<StyleComputer*>(this)->m_cached_generic_computation_context = {
+                .length_resolution_context = {
+                    .viewport_rect = viewport_rect(),
+                    .font_metrics = {
+                        computed_values.font_size(),
+                        computed_values.font_list().font_for_code_point(' ').pixel_metrics(),
+                        computed_values.line_height() },
+                    .root_font_metrics = m_root_element_font_metrics,
+                },
+                .abstract_element = abstract_element,
+                .color_scheme = computed_values.color_scheme()
             };
         }
         return m_cached_generic_computation_context.value();
