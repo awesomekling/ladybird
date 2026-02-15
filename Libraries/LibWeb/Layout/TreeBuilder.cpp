@@ -268,9 +268,12 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
 {
     auto& document = element.document();
 
-    auto pseudo_element_style = element.computed_properties(pseudo_element);
-    if (!pseudo_element_style)
+    auto pseudo = element.get_pseudo_element(pseudo_element);
+    if (!pseudo.has_value() || !pseudo->computed_values())
         return {};
+
+    auto pseudo_element_style = CSS::StyleComputer::create_computed_properties_from_computed_values(
+        *pseudo->computed_values(), pseudo->animated_property_data());
 
     auto initial_quote_nesting_level = m_quote_nesting_level;
     DOM::AbstractElement element_reference { element, pseudo_element };
