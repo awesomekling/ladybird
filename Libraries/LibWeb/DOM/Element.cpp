@@ -971,13 +971,16 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
             invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         }
 
+        auto& pseudo_data = ensure_pseudo_element(pseudo_element);
+
         // Populate concrete ComputedValues on the PseudoElement.
         if (new_pseudo_element_style) {
-            auto& pseudo_computed_values = static_cast<CSS::MutableComputedValues&>(ensure_pseudo_element(pseudo_element).ensure_computed_values());
+            auto& pseudo_computed_values = static_cast<CSS::MutableComputedValues&>(pseudo_data.ensure_computed_values());
             CSS::StyleComputer::populate_computed_values(pseudo_computed_values, *new_pseudo_element_style, document());
+            pseudo_data.set_animated_property_data(make<CSS::AnimatedPropertyData>(new_pseudo_element_style->animated_property_data()));
+        } else {
+            pseudo_data.set_animated_property_data(nullptr);
         }
-
-        set_computed_properties(pseudo_element, move(new_pseudo_element_style));
 
         style_computer.pop_ancestor(*this);
     };
@@ -3298,27 +3301,6 @@ bool Element::has_attributes() const
 size_t Element::attribute_list_size() const
 {
     return m_attributes ? m_attributes->length() : 0;
-}
-
-RefPtr<CSS::ComputedProperties> Element::computed_properties(CSS::PseudoElement pseudo_element_type)
-{
-    if (auto pseudo_element = get_pseudo_element(pseudo_element_type); pseudo_element.has_value())
-        return pseudo_element->computed_properties();
-    return {};
-}
-
-RefPtr<CSS::ComputedProperties const> Element::computed_properties(CSS::PseudoElement pseudo_element_type) const
-{
-    if (auto pseudo_element = get_pseudo_element(pseudo_element_type); pseudo_element.has_value())
-        return pseudo_element->computed_properties();
-    return {};
-}
-
-void Element::set_computed_properties(CSS::PseudoElement pseudo_element_type, RefPtr<CSS::ComputedProperties> style)
-{
-    if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(pseudo_element_type))
-        return;
-    ensure_pseudo_element(pseudo_element_type).set_computed_properties(style);
 }
 
 CSS::ComputedValues& Element::ensure_computed_values()

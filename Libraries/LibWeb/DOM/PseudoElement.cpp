@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/CascadedProperties.h>
-#include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/Layout/Node.h>
 
@@ -13,8 +11,6 @@ namespace Web::DOM {
 
 GC_DEFINE_ALLOCATOR(PseudoElement);
 GC_DEFINE_ALLOCATOR(PseudoElementTreeNode);
-
-RefPtr<CSS::ComputedProperties> PseudoElement::computed_properties() const { return m_computed_properties; }
 
 CSS::ComputedValues const* PseudoElement::computed_values() const { return m_computed_values.ptr(); }
 
@@ -25,15 +21,9 @@ CSS::ComputedValues& PseudoElement::ensure_computed_values()
     return *m_computed_values;
 }
 
-void PseudoElement::set_computed_properties(RefPtr<CSS::ComputedProperties> value)
+void PseudoElement::set_animated_property_data(OwnPtr<CSS::AnimatedPropertyData> value)
 {
-    m_computed_properties = move(value);
-    if (m_computed_properties) {
-        m_animated_property_data = make<CSS::AnimatedPropertyData>(m_computed_properties->animated_property_data());
-        m_computed_properties->set_external_animated_data(m_animated_property_data.ptr());
-    } else {
-        m_animated_property_data = nullptr;
-    }
+    m_animated_property_data = move(value);
 }
 
 void PseudoElement::visit_edges(JS::Cell::Visitor& visitor)

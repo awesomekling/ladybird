@@ -232,10 +232,6 @@ public:
     GC::Ptr<Layout::NodeWithStyle> layout_node();
     GC::Ptr<Layout::NodeWithStyle const> layout_node() const;
 
-    RefPtr<CSS::ComputedProperties> computed_properties(CSS::PseudoElement);
-    RefPtr<CSS::ComputedProperties const> computed_properties(CSS::PseudoElement) const;
-    void set_computed_properties(CSS::PseudoElement, RefPtr<CSS::ComputedProperties>);
-
     CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
     CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
 

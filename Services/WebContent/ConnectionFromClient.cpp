@@ -361,8 +361,10 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString request, ByteSt
 
                     for (auto pseudo_element_index = 0; pseudo_element_index < to_underlying(Web::CSS::PseudoElement::KnownPseudoElementCount); ++pseudo_element_index) {
                         auto pseudo_element_type = static_cast<Web::CSS::PseudoElement>(pseudo_element_index);
-                        if (auto pseudo_element = element->get_pseudo_element(pseudo_element_type); pseudo_element.has_value() && pseudo_element->computed_properties()) {
-                            dump_style(MUST(String::formatted("PseudoElement {}::{}", node->debug_description(), Web::CSS::pseudo_element_name(pseudo_element_type))), *pseudo_element->computed_properties(), pseudo_element->custom_property_data());
+                        if (auto pseudo_element = element->get_pseudo_element(pseudo_element_type); pseudo_element.has_value() && pseudo_element->computed_values()) {
+                            auto properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
+                                *pseudo_element->computed_values(), pseudo_element->animated_property_data());
+                            dump_style(MUST(String::formatted("PseudoElement {}::{}", node->debug_description(), Web::CSS::pseudo_element_name(pseudo_element_type))), properties, pseudo_element->custom_property_data());
                         }
                     }
                 }
@@ -482,7 +484,10 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
 
     RefPtr<Web::CSS::ComputedProperties> properties;
     if (pseudo_element.has_value()) {
-        properties = element.computed_properties(*pseudo_element);
+        if (auto pseudo = element.get_pseudo_element(*pseudo_element); pseudo.has_value() && pseudo->computed_values()) {
+            properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
+                *pseudo->computed_values(), pseudo->animated_property_data());
+        }
     } else if (auto const* computed_values = element.computed_values()) {
         properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
             *computed_values, element.animated_property_data());

@@ -26,14 +26,12 @@ class WEB_API PseudoElement : public JS::Cell {
     GC::Ptr<Layout::NodeWithStyle> layout_node() const { return m_layout_node; }
     void set_layout_node(GC::Ptr<Layout::NodeWithStyle> value) { m_layout_node = value; }
 
-    RefPtr<CSS::ComputedProperties> computed_properties() const;
-    void set_computed_properties(RefPtr<CSS::ComputedProperties> value);
-
     CSS::ComputedValues const* computed_values() const;
     CSS::ComputedValues& ensure_computed_values();
 
     CSS::AnimatedPropertyData* animated_property_data() { return m_animated_property_data.ptr(); }
     CSS::AnimatedPropertyData const* animated_property_data() const { return m_animated_property_data.ptr(); }
+    void set_animated_property_data(OwnPtr<CSS::AnimatedPropertyData>);
 
     RefPtr<CSS::CustomPropertyData const> custom_property_data() const { return m_custom_property_data; }
     void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) { m_custom_property_data = move(value); }
@@ -53,7 +51,6 @@ class WEB_API PseudoElement : public JS::Cell {
 
 private:
     GC::Ptr<Layout::NodeWithStyle> m_layout_node;
-    RefPtr<CSS::ComputedProperties> m_computed_properties;
     OwnPtr<CSS::ComputedValues> m_computed_values;
     OwnPtr<CSS::AnimatedPropertyData> m_animated_property_data;
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;

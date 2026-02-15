@@ -316,8 +316,9 @@ GC::Ptr<NodeWithStyle> TreeBuilder::create_pseudo_element_if_needed(DOM::Element
                 element,
                 *pseudo_element_style);
             list_box->set_marker(list_item_marker);
-            element.set_computed_properties(CSS::PseudoElement::Marker, pseudo_element_style);
             element.set_pseudo_element_node({}, CSS::PseudoElement::Marker, list_item_marker);
+            if (auto marker_pseudo = element.get_pseudo_element(CSS::PseudoElement::Marker); marker_pseudo.has_value())
+                marker_pseudo->set_animated_property_data(make<CSS::AnimatedPropertyData>(pseudo_element_style->animated_property_data()));
             list_box->prepend_child(*list_item_marker);
             return list_item_marker;
         }
