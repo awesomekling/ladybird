@@ -920,6 +920,11 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     }
     auto new_display_is_none = new_computed_properties->display().is_none();
 
+    // Populate concrete ComputedValues on the Element.
+    CSS::StyleComputer::populate_computed_values(
+        static_cast<CSS::MutableComputedValues&>(ensure_computed_values()),
+        *new_computed_properties, document());
+
     set_computed_properties({}, move(new_computed_properties));
 
     if (old_display_is_none != new_display_is_none) {

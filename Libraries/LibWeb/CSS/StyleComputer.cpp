@@ -2673,12 +2673,6 @@ NonnullRefPtr<ComputedProperties> StyleComputer::compute_properties(DOM::Abstrac
             computed_style->set_property(PropertyID::TextAlign, KeywordStyleValue::create(Keyword::Start));
     }
 
-    // Populate concrete ComputedValues on the Element.
-    if (!abstract_element.pseudo_element().has_value()) {
-        auto& computed_values = static_cast<MutableComputedValues&>(abstract_element.element().ensure_computed_values());
-        populate_computed_values(computed_values, *computed_style, m_document);
-    }
-
     return computed_style;
 }
 
