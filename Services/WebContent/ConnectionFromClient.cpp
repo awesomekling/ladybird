@@ -22,6 +22,7 @@
 #include <LibUnicode/TimeZone.h>
 #include <LibWeb/ARIA/RoleType.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/AnimatedPropertyData.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Parser/ErrorReporter.h>
@@ -362,9 +363,28 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString request, ByteSt
                     for (auto pseudo_element_index = 0; pseudo_element_index < to_underlying(Web::CSS::PseudoElement::KnownPseudoElementCount); ++pseudo_element_index) {
                         auto pseudo_element_type = static_cast<Web::CSS::PseudoElement>(pseudo_element_index);
                         if (auto pseudo_element = element->get_pseudo_element(pseudo_element_type); pseudo_element.has_value() && pseudo_element->computed_values()) {
-                            auto properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
-                                *pseudo_element->computed_values(), pseudo_element->animated_property_data());
-                            dump_style(MUST(String::formatted("PseudoElement {}::{}", node->debug_description(), Web::CSS::pseudo_element_name(pseudo_element_type))), properties, pseudo_element->custom_property_data());
+                            auto const& pseudo_computed_values = *pseudo_element->computed_values();
+                            auto const* pseudo_animated_data = pseudo_element->animated_property_data();
+                            dbgln("+ PseudoElement {}::{}", node->debug_description(), Web::CSS::pseudo_element_name(pseudo_element_type));
+                            for (size_t i = to_underlying(Web::CSS::first_longhand_property_id); i < to_underlying(Web::CSS::last_longhand_property_id); ++i) {
+                                auto property_id = static_cast<Web::CSS::PropertyID>(i);
+                                RefPtr<Web::CSS::StyleValue const> value;
+                                if (pseudo_animated_data
+                                    && (!pseudo_computed_values.is_property_important(property_id) || pseudo_animated_data->is_result_of_transition(property_id))) {
+                                    if (auto animated_value = pseudo_animated_data->values.get(property_id); animated_value.has_value())
+                                        value = *animated_value.value();
+                                }
+                                if (!value)
+                                    value = pseudo_computed_values.property_value(property_id);
+                                if (value)
+                                    dbgln("|  {} = {}", Web::CSS::string_from_property_id(property_id), value->to_string(Web::CSS::SerializationMode::Normal));
+                            }
+                            if (auto custom_property_data = pseudo_element->custom_property_data()) {
+                                custom_property_data->for_each_property([](FlyString const& name, Web::CSS::StyleProperty const& property) {
+                                    dbgln("|  {} = {}", name, property.value->to_string(Web::CSS::SerializationMode::Normal));
+                                });
+                            }
+                            dbgln("---");
                         }
                     }
                 }
