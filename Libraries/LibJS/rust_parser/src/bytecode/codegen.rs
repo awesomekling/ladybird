@@ -1647,17 +1647,16 @@ fn generate_identifier(
             LocalType::Variable => gen.local(local_index),
             LocalType::None => unreachable!(),
         };
-        // Check TDZ for uninitialized locals.
-        // NB: For arguments, check initialized_arguments (matching C++
-        // is_local_initialized(Identifier::Local) which checks
-        // m_initialized_arguments for argument-typed locals).
-        let is_initialized = match ident.local_type.get() {
-            LocalType::Argument => gen.is_argument_initialized(local_index),
-            _ => gen.is_local_initialized(local_index),
+        // Check TDZ for uninitialized bindings.
+        // Arguments may need TDZ during default parameter evaluation;
+        // for variable-type locals, only lexically-declared (let/const) need TDZ.
+        // Matching C++ Identifier::generate_bytecode.
+        let needs_tdz_check = if ident.local_type.get() == LocalType::Argument {
+            !gen.is_argument_initialized(local_index)
+        } else {
+            gen.is_local_lexically_declared(local_index) && !gen.is_local_initialized(local_index)
         };
-        if !is_initialized
-            && ident.declaration_kind.get() != IdentDeclarationKind::Var
-        {
+        if needs_tdz_check {
             if ident.local_type.get() == LocalType::Argument {
                 // Arguments are initialized to undefined by default, so we
                 // need to replace the value with the empty sentinel to
@@ -2678,7 +2677,12 @@ fn generate_call_expression(
                 } else {
                     gen.local(ident.local_index.get())
                 };
-                if !gen.is_local_initialized(ident.local_index.get()) {
+                let needs_tdz = if ident.local_type.get() == LocalType::Argument {
+                    !gen.is_argument_initialized(ident.local_index.get())
+                } else {
+                    gen.is_local_lexically_declared(ident.local_index.get()) && !gen.is_local_initialized(ident.local_index.get())
+                };
+                if needs_tdz {
                     gen.emit(Instruction::ThrowIfTDZ {
                         src: local.operand(),
                     });
