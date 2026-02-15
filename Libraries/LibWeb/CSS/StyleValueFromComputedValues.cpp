@@ -175,8 +175,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.flex_wrap()));
     case PropertyID::Float:
         return KeywordStyleValue::create(to_keyword(computed_values.float_()));
-    case PropertyID::ImageRendering:
-        return KeywordStyleValue::create(to_keyword(computed_values.image_rendering()));
+    // NB: ImageRendering is not handled here because the legacy SVG keywords
+    //     (optimizequality -> smooth, optimizespeed -> pixelated) cause a different
+    //     keyword to be returned via to_keyword() than what was originally specified.
     case PropertyID::Isolation:
         return KeywordStyleValue::create(to_keyword(computed_values.isolation()));
     case PropertyID::JustifyContent:
@@ -854,8 +855,16 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return CounterDefinitionsStyleValue::create(move(definitions));
     }
 
-    // NB: WhiteSpaceTrim, Content, and ColorScheme fall through to the
-    //     default case which reads from the supplementary property value map.
+    // NB: Content, ColorScheme, WhiteSpaceTrim, PaintOrder, TransitionDelay,
+    //     and MaskImage fall through to the default case which reads from
+    //     the supplementary property value map.
+    //
+    //     Content: ContentData loses structural info needed for ContentStyleValue.
+    //     ColorScheme: PreferredColorScheme enum loses scheme list + "only" flag.
+    //     WhiteSpaceTrim: Typed storage is never populated by StyleComputer.
+    //     PaintOrder: "normal" and "fill" both resolve to [Fill, Stroke, Markers].
+    //     TransitionDelay: ComputedValues stores single Time, CSS expects list.
+    //     MaskImage: ComputedValues stores single image, CSS expects list.
 
     // ========== Font properties (partially in ComputedValues) ==========
     case PropertyID::FontLanguageOverride:
