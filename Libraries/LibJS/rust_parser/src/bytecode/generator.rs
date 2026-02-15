@@ -1008,6 +1008,12 @@ impl Generator {
             .unwrap_or(false)
     }
 
+    pub fn is_local_lexically_declared(&self, index: u32) -> bool {
+        self.local_variables
+            .get(index as usize)
+            .is_some_and(|v| v.is_lexically_declared)
+    }
+
     pub fn mark_local_initialized(&mut self, index: u32) {
         let index = index as usize;
         if index >= self.initialized_locals.len() {
