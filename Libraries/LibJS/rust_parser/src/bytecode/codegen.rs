@@ -94,6 +94,32 @@ pub fn generate_expr(
                 return Some(emit_delete_reference(gen, operand, preferred_dst));
             }
 
+            // Not needs dst allocated before operand to match C++ register order.
+            // Also optimize !!x → ToBoolean(x).
+            if *op == UnaryOp::Not {
+                let dst = choose_dst(gen, preferred_dst);
+                if let ExpressionKind::Unary { op: UnaryOp::Not, operand: inner } = &operand.inner {
+                    let value = generate_expr(inner, gen, None)?;
+                    if let Some(folded) = try_constant_fold_to_boolean(gen, &value) {
+                        return Some(folded);
+                    }
+                    gen.emit(Instruction::ToBoolean {
+                        dst: dst.operand(),
+                        value: value.operand(),
+                    });
+                    return Some(dst);
+                }
+                let value = generate_expr(operand, gen, None)?;
+                if let Some(folded) = try_constant_fold_unary(gen, *op, &value) {
+                    return Some(folded);
+                }
+                gen.emit(Instruction::Not {
+                    dst: dst.operand(),
+                    src: value.operand(),
+                });
+                return Some(dst);
+            }
+
             let value = generate_expr(operand, gen, None)?;
 
             // OPTIMIZATION: constant fold unary operations on constants.
@@ -109,12 +135,7 @@ pub fn generate_expr(
                         src: value.operand(),
                     });
                 }
-                UnaryOp::Not => {
-                    gen.emit(Instruction::Not {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    });
-                }
+                UnaryOp::Not => unreachable!(),
                 UnaryOp::Plus => {
                     gen.emit(Instruction::UnaryPlus {
                         dst: dst.operand(),
@@ -7449,6 +7470,22 @@ fn try_constant_fold_unary(
         }
         _ => None,
     }
+}
+
+/// Constant-fold !!x when x is a constant, returning Boolean(x).
+fn try_constant_fold_to_boolean(
+    gen: &mut Generator,
+    operand: &ScopedOperand,
+) -> Option<ScopedOperand> {
+    let constant = gen.get_constant(operand)?;
+    let as_bool = match constant {
+        ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
+        ConstantValue::Boolean(b) => *b,
+        ConstantValue::Null | ConstantValue::Undefined => false,
+        ConstantValue::String(s) => !s.is_empty(),
+        _ => return None,
+    };
+    Some(gen.add_constant_boolean(as_bool))
 }
 
 /// Try to constant-fold a binary operation when both operands are constants.
