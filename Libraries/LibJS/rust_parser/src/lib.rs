@@ -1171,6 +1171,11 @@ fn count_non_local_lex_declarations(scope: &Rc<RefCell<ast::ScopeData>>) -> usiz
                     }
                 }
             }
+            ast::StatementKind::UsingDeclaration { declarations } => {
+                for decl in declarations {
+                    count_non_local_names_in_target(&decl.target, &mut count);
+                }
+            }
             ast::StatementKind::ClassDeclaration(class_data) => {
                 if let Some(ref name_ident) = class_data.name {
                     if !name_ident.is_local() {
