@@ -10,12 +10,14 @@
 #include <LibWeb/CSS/StyleValueFromComputedValues.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CustomIdentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/EdgeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
+#include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackPlacementStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTrackSizeListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
@@ -170,9 +172,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return KeywordStyleValue::create(to_keyword(computed_values.flex_wrap()));
     case PropertyID::Float:
         return KeywordStyleValue::create(to_keyword(computed_values.float_()));
-    // NB: ImageRendering is not handled here because the legacy keyword aliases
-    //     (optimizequality -> smooth, optimizespeed -> pixelated) cause a different
-    //     serialization when round-tripping through the enum.
+    case PropertyID::ImageRendering:
+        return KeywordStyleValue::create(to_keyword(computed_values.image_rendering()));
     case PropertyID::Isolation:
         return KeywordStyleValue::create(to_keyword(computed_values.isolation()));
     case PropertyID::JustifyContent:
@@ -305,8 +306,8 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
     // ========== CSSPixels → Length properties ==========
     case PropertyID::FontSize:
         return LengthStyleValue::create(Length::make_px(computed_values.font_size()));
-    // NB: LetterSpacing is not handled here because percentage values are lost
-    //     when resolved to CSSPixels. Fall through to ComputedProperties.
+    case PropertyID::LetterSpacing:
+        return LengthStyleValue::create(Length::make_px(computed_values.letter_spacing()));
     case PropertyID::LineHeight:
         if (computed_values.line_height() == 0)
             return KeywordStyleValue::create(Keyword::Normal);
@@ -456,9 +457,16 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return FilterValueListStyleValue::create(Vector<FilterValue>(computed_values.filter().filters()));
 
     // ========== Grid properties ==========
-    // NB: GridAutoColumns and GridAutoRows are not handled here because the
-    //     created values don't match their initial values via equals(),
-    //     breaking grid shorthand serialization. Fall through to ComputedProperties.
+    case PropertyID::GridAutoColumns:
+        return GridTrackSizeListStyleValue::create(computed_values.grid_auto_columns());
+    case PropertyID::GridAutoRows:
+        return GridTrackSizeListStyleValue::create(computed_values.grid_auto_rows());
+    case PropertyID::GridAutoFlow: {
+        auto const& flow = computed_values.grid_auto_flow();
+        return GridAutoFlowStyleValue::create(
+            flow.row ? GridAutoFlowStyleValue::Axis::Row : GridAutoFlowStyleValue::Axis::Column,
+            flow.dense ? GridAutoFlowStyleValue::Dense::Yes : GridAutoFlowStyleValue::Dense::No);
+    }
     case PropertyID::GridColumnEnd:
         return GridTrackPlacementStyleValue::create(computed_values.grid_column_end());
     case PropertyID::GridColumnStart:
@@ -467,11 +475,12 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return GridTrackPlacementStyleValue::create(computed_values.grid_row_end());
     case PropertyID::GridRowStart:
         return GridTrackPlacementStyleValue::create(computed_values.grid_row_start());
-    // NB: GridTemplateColumns, GridTemplateRows, GridTemplateAreas,
-    //     GridAutoFlow, GridAutoColumns, and GridAutoRows are not handled here
-    //     because the created values don't match their initial values via
-    //     equals(), breaking grid shorthand serialization.
-    //     Fall through to ComputedProperties.
+    case PropertyID::GridTemplateAreas:
+        return GridTemplateAreaStyleValue::create(computed_values.grid_template_areas());
+    case PropertyID::GridTemplateColumns:
+        return GridTrackSizeListStyleValue::create(computed_values.grid_template_columns());
+    case PropertyID::GridTemplateRows:
+        return GridTrackSizeListStyleValue::create(computed_values.grid_template_rows());
 
     // ========== Transform properties ==========
     case PropertyID::Transform: {
@@ -564,9 +573,9 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
                 return NumberStyleValue::create(number);
             });
 
-    // NB: TransitionDelay is not handled here because populate_computed_values()
-    //     doesn't correctly handle the StyleValueList case for coordinating-list
-    //     properties. Fall through to ComputedProperties.
+    // NB: TransitionDelay is not handled here because it needs to be a
+    //     StyleValueList for shorthand serialization, but ComputedValues
+    //     stores a single Time value. Fall through to ComputedProperties.
 
     // ========== Aspect ratio ==========
     case PropertyID::AspectRatio: {
@@ -828,9 +837,34 @@ RefPtr<StyleValue const> style_value_for_property(PropertyID property_id, Comput
         return nullptr;
     }
 
-    // NB: CounterIncrement, CounterReset, CounterSet, WhiteSpaceTrim,
-    //     and ColorScheme fall through to the default case which reads
-    //     from the supplementary property value map.
+    // ========== Counter properties ==========
+    case PropertyID::CounterIncrement:
+    case PropertyID::CounterReset:
+    case PropertyID::CounterSet: {
+        auto const& counters = property_id == PropertyID::CounterIncrement
+            ? computed_values.counter_increment()
+            : property_id == PropertyID::CounterReset
+            ? computed_values.counter_reset()
+            : computed_values.counter_set();
+        if (counters.is_empty())
+            return KeywordStyleValue::create(Keyword::None);
+        Vector<CounterDefinition> definitions;
+        definitions.ensure_capacity(counters.size());
+        for (auto const& counter : counters) {
+            RefPtr<StyleValue const> value_style_value;
+            if (counter.value.has_value())
+                value_style_value = IntegerStyleValue::create(counter.value.value().value());
+            definitions.append(CounterDefinition {
+                .name = counter.name,
+                .is_reversed = counter.is_reversed,
+                .value = move(value_style_value),
+            });
+        }
+        return CounterDefinitionsStyleValue::create(move(definitions));
+    }
+
+    // NB: WhiteSpaceTrim, Content, and ColorScheme fall through to the
+    //     default case which reads from the supplementary property value map.
 
     // ========== Font properties (partially in ComputedValues) ==========
     case PropertyID::FontLanguageOverride:
