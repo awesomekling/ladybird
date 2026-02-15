@@ -11,7 +11,10 @@
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/IntegerStyleValue.h>
+#include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Dump.h>
@@ -573,23 +576,11 @@ void NodeWithStyle::visit_edges(Visitor& visitor)
 
 void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
 {
-    auto& computed_values = mutable_computed_values();
-
-    // NB: Table-transferred properties must be set here from ComputedProperties, because during
-    //     layout tree rebuild, the shared ComputedValues may have stale values (reset to initial
-    //     by a previous table transfer) that populate_computed_values() set earlier.
-    computed_values.set_float(computed_style.float_());
-    computed_values.set_clear(computed_style.clear());
-    computed_values.set_position(computed_style.position());
-    computed_values.set_z_index(computed_style.z_index());
-    computed_values.set_inset(computed_style.length_box(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
-    computed_values.set_margin(computed_style.length_box(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
-
     // For nodes that own their ComputedValues (pseudo-elements), all properties
     // need to be populated here via populate_computed_values().
     // For element-backed nodes, populate_computed_values() is called during style computation.
     if (m_owned_computed_values)
-        CSS::StyleComputer::populate_computed_values(computed_values, computed_style, document());
+        CSS::StyleComputer::populate_computed_values(mutable_computed_values(), computed_style, document());
 
     apply_style();
 }
@@ -757,21 +748,49 @@ void NodeWithStyle::transfer_table_box_computed_values_to_wrapper_computed_value
     // The computed values of properties 'position', 'float', 'margin-*', 'top', 'right', 'bottom', and 'left' on the table element are used on the table wrapper box and not the table box;
     // all other values of non-inheritable properties are used on the table box and not the table wrapper box.
     // (Where the table element's values are not used on the table and table wrapper boxes, the initial values are used instead.)
+    auto& cv = computed_values();
     auto& mutable_wrapper_computed_values = static_cast<CSS::MutableComputedValues&>(wrapper_computed_values);
     if (display().is_inline_outside())
         mutable_wrapper_computed_values.set_display(CSS::Display::from_short(CSS::Display::Short::InlineBlock));
     else
         mutable_wrapper_computed_values.set_display(CSS::Display::from_short(CSS::Display::Short::FlowRoot));
-    mutable_wrapper_computed_values.set_position(computed_values().position());
-    mutable_wrapper_computed_values.set_inset(computed_values().inset());
-    mutable_wrapper_computed_values.set_float(computed_values().float_());
-    mutable_wrapper_computed_values.set_clear(computed_values().clear());
-    mutable_wrapper_computed_values.set_margin(computed_values().margin());
+
+    // NB: Read transferred properties from the property value map rather than typed field
+    //     accessors, because a previous table transfer may have reset the typed fields to
+    //     initial values. The property value map always has the original values.
+    auto keyword_property = [&](CSS::PropertyID id, auto to_typed, auto initial) {
+        if (auto value = cv.property_value(id))
+            return to_typed(value->to_keyword()).value_or(initial);
+        return initial;
+    };
+    auto length_box_from_property_values = [&](CSS::PropertyID left_id, CSS::PropertyID top_id, CSS::PropertyID right_id, CSS::PropertyID bottom_id, CSS::LengthPercentageOrAuto const& default_value) {
+        auto side = [&](CSS::PropertyID id) -> CSS::LengthPercentageOrAuto {
+            auto value = cv.property_value(id);
+            if (!value)
+                return default_value;
+            if (value->is_calculated() || value->is_percentage() || value->is_length() || value->has_auto())
+                return CSS::LengthPercentageOrAuto::from_style_value(*value);
+            return default_value;
+        };
+        return CSS::LengthBox { side(top_id), side(right_id), side(bottom_id), side(left_id) };
+    };
+    mutable_wrapper_computed_values.set_position(keyword_property(CSS::PropertyID::Position, CSS::keyword_to_positioning, CSS::InitialValues::position()));
+    mutable_wrapper_computed_values.set_float(keyword_property(CSS::PropertyID::Float, CSS::keyword_to_float, CSS::InitialValues::float_()));
+    mutable_wrapper_computed_values.set_clear(keyword_property(CSS::PropertyID::Clear, CSS::keyword_to_clear, CSS::InitialValues::clear()));
+    mutable_wrapper_computed_values.set_inset(length_box_from_property_values(CSS::PropertyID::Left, CSS::PropertyID::Top, CSS::PropertyID::Right, CSS::PropertyID::Bottom, CSS::LengthPercentageOrAuto::make_auto()));
+    mutable_wrapper_computed_values.set_margin(length_box_from_property_values(CSS::PropertyID::MarginLeft, CSS::PropertyID::MarginTop, CSS::PropertyID::MarginRight, CSS::PropertyID::MarginBottom, CSS::Length::make_px(0)));
     // AD-HOC:
     // To match other browsers, z-index needs to be moved to the wrapper box as well,
     // even if the spec does not mention that: https://github.com/w3c/csswg-drafts/issues/11689
     // Note that there may be more properties that need to be added to this list.
-    mutable_wrapper_computed_values.set_z_index(computed_values().z_index());
+    if (auto value = cv.property_value(CSS::PropertyID::ZIndex)) {
+        if (value->has_auto())
+            mutable_wrapper_computed_values.set_z_index({});
+        else if (value->is_integer())
+            mutable_wrapper_computed_values.set_z_index(value->as_integer().integer());
+        else if (value->is_calculated())
+            mutable_wrapper_computed_values.set_z_index(static_cast<int>(value->as_calculated().resolve_integer({}).value_or(0)));
+    }
 
     reset_table_box_computed_values_used_by_wrapper_to_init_values();
 }
