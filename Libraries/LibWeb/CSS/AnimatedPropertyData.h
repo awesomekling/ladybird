@@ -11,6 +11,7 @@
 #include <AK/NonnullRefPtr.h>
 #include <LibWeb/CSS/EasingFunction.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/Export.h>
 
 namespace Web::CSS {
 
@@ -27,7 +28,7 @@ enum class AnimatedPropertyResultOfTransition : u8 {
     Yes
 };
 
-struct AnimatedPropertyData {
+struct WEB_API AnimatedPropertyData {
     HashMap<PropertyID, NonnullRefPtr<StyleValue const>> values;
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> inherited {};
     Array<u8, ceil_div(number_of_longhand_properties, 8uz)> result_of_transition {};

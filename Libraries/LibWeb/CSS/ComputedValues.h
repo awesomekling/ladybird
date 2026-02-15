@@ -36,6 +36,7 @@
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/URL.h>
+#include <LibWeb/Export.h>
 
 namespace Web::CSS {
 
@@ -490,7 +491,7 @@ inline Gfx::ScalingMode to_gfx_scaling_mode(ImageRendering css_value, Gfx::IntSi
     VERIFY_NOT_REACHED();
 }
 
-class ComputedValues {
+class WEB_API ComputedValues {
     AK_MAKE_NONCOPYABLE(ComputedValues);
     AK_MAKE_NONMOVABLE(ComputedValues);
 

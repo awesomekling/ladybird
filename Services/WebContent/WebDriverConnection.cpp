@@ -18,10 +18,11 @@
 #include <LibHTTP/Cookie/ParsedCookie.h>
 #include <LibJS/Runtime/Value.h>
 #include <LibURL/Parser.h>
+#include <LibWeb/CSS/AnimatedPropertyData.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
-#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 #include <LibWeb/Crypto/Crypto.h>
 #include <LibWeb/DOM/Document.h>
@@ -1404,9 +1405,18 @@ Messages::WebDriverClient::GetElementCssValueResponse WebDriverConnection::get_e
                             computed_value = style_property->value->to_string(Web::CSS::SerializationMode::Normal);
                     }
                 } else if (auto const* computed_values = element->computed_values()) {
-                    auto computed_properties = Web::CSS::StyleComputer::create_computed_properties_from_computed_values(
-                        *computed_values, element->animated_property_data());
-                    computed_value = computed_properties->property(property->id()).to_string(Web::CSS::SerializationMode::Normal);
+                    auto property_id = property->id();
+                    RefPtr<Web::CSS::StyleValue const> value;
+                    if (auto* animated_data = element->animated_property_data()) {
+                        if (!computed_values->is_property_important(property_id) || animated_data->is_result_of_transition(property_id)) {
+                            if (auto animated_value = animated_data->values.get(property_id); animated_value.has_value())
+                                value = *animated_value.value();
+                        }
+                    }
+                    if (!value)
+                        value = computed_values->property_value(property_id);
+                    if (value)
+                        computed_value = value->to_string(Web::CSS::SerializationMode::Normal);
                 }
             }
         }
