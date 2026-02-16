@@ -574,6 +574,7 @@ int main(int argc, char** argv)
     int timeout = 10;
     bool enable_debug_printing = false;
     bool disable_core_dumping = false;
+    ByteString bytecode_dump_file;
 
     Core::ArgsParser args_parser;
     args_parser.set_general_help("LibJS test262 runner for streaming tests");
@@ -582,6 +583,7 @@ int main(int argc, char** argv)
     args_parser.add_option(timeout, "Seconds before test should timeout", "timeout", 't', "seconds");
     args_parser.add_option(enable_debug_printing, "Enable debug printing", "debug", 'd');
     args_parser.add_option(disable_core_dumping, "Disable core dumping", "disable-core-dump");
+    args_parser.add_option(bytecode_dump_file, "Dump bytecode to file", "dump-bytecode-to", 0, "path");
     args_parser.parse(arguments);
 
 #ifdef AK_OS_GNU_HURD
@@ -606,6 +608,17 @@ int main(int argc, char** argv)
     if (timeout <= 0) {
         warnln("timeout must be at least 1");
         return exit_wrong_arguments;
+    }
+
+    if (!bytecode_dump_file.is_empty()) {
+        auto* f = fopen(bytecode_dump_file.characters(), "a");
+        if (!f) {
+            perror("fopen");
+            return 1;
+        }
+        dup2(fileno(f), STDERR_FILENO);
+        fclose(f);
+        JS::Bytecode::g_dump_bytecode = true;
     }
 
     AK::set_debug_enabled(enable_debug_printing);
@@ -692,6 +705,9 @@ int main(int argc, char** argv)
         auto& path = path_or_error.value();
 
         s_current_test = path;
+
+        if (JS::Bytecode::g_dump_bytecode)
+            warnln("### TEST: {}", path);
 
         if (s_automatic_harness_detection_mode) {
             if (!extract_harness_directory(path))
