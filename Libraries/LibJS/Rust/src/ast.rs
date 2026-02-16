@@ -23,6 +23,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
+use std::fmt;
 use std::rc::Rc;
 
 // =============================================================================
@@ -134,7 +135,7 @@ pub struct SourceRange {
 // =============================================================================
 
 /// Every AST node wraps its payload with source location.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Node<T> {
     pub range: SourceRange,
     pub inner: T,
@@ -289,7 +290,7 @@ pub enum LocalType {
 ///
 /// Scope analysis results are stored in `Cell` fields because the scope
 /// collector writes them after parsing through shared references.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Identifier {
     pub range: SourceRange,
     pub name: Utf16String,
@@ -319,7 +320,7 @@ impl Identifier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PrivateIdentifier {
     pub range: SourceRange,
     pub name: Utf16String,
@@ -342,21 +343,21 @@ pub struct FunctionParsingInsights {
     pub might_need_arguments_object: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionParameter {
     pub binding: FunctionParameterBinding,
     pub default_value: Option<Expression>,
     pub is_rest: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FunctionParameterBinding {
     Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
 }
 
 /// Shared data for FunctionDeclaration and FunctionExpression.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionData {
     pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
@@ -376,7 +377,7 @@ pub struct FunctionData {
 // =============================================================================
 
 /// Shared data for ClassDeclaration and ClassExpression.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ClassData {
     pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
@@ -386,7 +387,7 @@ pub struct ClassData {
     pub elements: Vec<Node<ClassElement>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ClassElement {
     Method {
         key: Box<Expression>,
@@ -416,7 +417,7 @@ pub enum ClassMethodKind {
 // Binding pattern types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BindingPattern {
     pub kind: BindingPatternKind,
     pub entries: Vec<BindingEntry>,
@@ -428,7 +429,7 @@ pub enum BindingPatternKind {
     Object,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BindingEntry {
     pub name: Option<BindingEntryName>,
     pub alias: Option<BindingEntryAlias>,
@@ -440,7 +441,7 @@ pub struct BindingEntry {
 /// - `None`: elision in array patterns (`[, , x]`)
 /// - `Identifier`: object property shorthand (`{ x }`)
 /// - `Expression`: computed property key (`{ [expression]: x }`)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BindingEntryName {
     Identifier(Rc<Identifier>),
     Expression(Box<Expression>),
@@ -451,7 +452,7 @@ pub enum BindingEntryName {
 /// - `Identifier`: simple binding (`{ x: y }`)
 /// - `BindingPattern`: nested destructuring (`{ x: { a, b } }`)
 /// - `MemberExpression`: assignment target (`{ x: obj.property }`)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BindingEntryAlias {
     Identifier(Rc<Identifier>),
     BindingPattern(Box<BindingPattern>),
@@ -462,14 +463,14 @@ pub enum BindingEntryAlias {
 // Variable declaration types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VariableDeclarator {
     pub range: SourceRange,
     pub target: VariableDeclaratorTarget,
     pub init: Option<Expression>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum VariableDeclaratorTarget {
     Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
@@ -479,7 +480,7 @@ pub enum VariableDeclaratorTarget {
 // Object literal types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ObjectProperty {
     pub range: SourceRange,
     pub property_type: ObjectPropertyType,
@@ -503,13 +504,13 @@ pub enum ObjectPropertyType {
 // Call expression types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallArgument {
     pub value: Expression,
     pub is_spread: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallExpressionData {
     pub callee: Box<Expression>,
     pub arguments: Vec<CallArgument>,
@@ -517,7 +518,7 @@ pub struct CallExpressionData {
     pub is_inside_parens: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SuperCallData {
     pub arguments: Vec<CallArgument>,
     pub is_synthetic: bool,
@@ -533,7 +534,7 @@ pub enum OptionalChainMode {
     NotOptional,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum OptionalChainReference {
     Call {
         arguments: Vec<CallArgument>,
@@ -557,7 +558,7 @@ pub enum OptionalChainReference {
 // Template literal types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TemplateLiteralData {
     pub expressions: Vec<Expression>,
     pub raw_strings: Vec<Utf16String>,
@@ -583,10 +584,16 @@ impl Drop for CompiledRegexInner {
     }
 }
 
+impl fmt::Debug for CompiledRegexInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CompiledRegex({:p})", self.0)
+    }
+}
+
 /// Shared handle to a compiled regex from C++. Cloning shares ownership
 /// via reference counting; the underlying handle is freed when the last
 /// clone is dropped.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CompiledRegex(Rc<CompiledRegexInner>);
 
 impl CompiledRegex {
@@ -600,7 +607,7 @@ impl CompiledRegex {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RegExpLiteralData {
     pub pattern: Utf16String,
     pub flags: Utf16String,
@@ -611,21 +618,21 @@ pub struct RegExpLiteralData {
 // Try/Catch types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TryStatementData {
     pub block: Box<Statement>,
     pub handler: Option<CatchClause>,
     pub finalizer: Option<Box<Statement>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CatchClause {
     pub range: SourceRange,
     pub parameter: CatchParameter,
     pub body: Box<Statement>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum CatchParameter {
     None,
     Identifier(Rc<Identifier>),
@@ -636,14 +643,14 @@ pub enum CatchParameter {
 // Switch types
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SwitchStatementData {
     pub scope: Rc<RefCell<ScopeData>>,
     pub discriminant: Box<Expression>,
     pub cases: Vec<SwitchCase>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SwitchCase {
     pub range: SourceRange,
     pub scope: Rc<RefCell<ScopeData>>,
@@ -654,26 +661,26 @@ pub struct SwitchCase {
 // Module types (import/export)
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ModuleRequest {
     pub module_specifier: Utf16String,
     pub attributes: Vec<ImportAttribute>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImportAttribute {
     pub key: Utf16String,
     pub value: Utf16String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImportEntry {
     /// `None` means namespace import (`import * as x`).
     pub import_name: Option<Utf16String>,
     pub local_name: Utf16String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ImportStatementData {
     pub module_request: ModuleRequest,
     pub entries: Vec<ImportEntry>,
@@ -688,14 +695,14 @@ pub enum ExportEntryKind {
     EmptyNamedExport = 3,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExportEntry {
     pub kind: ExportEntryKind,
     pub export_name: Option<Utf16String>,
     pub local_or_import_name: Option<Utf16String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExportStatementData {
     pub statement: Option<Box<Statement>>,
     pub entries: Vec<ExportEntry>,
@@ -715,7 +722,7 @@ pub enum ForInOfKind {
 }
 
 /// Left-hand side of for-in, for-of, for-await-of.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ForInOfLhs {
     /// A variable declaration (`for (let x of ...)`)
     Declaration(Box<Statement>),
@@ -729,7 +736,7 @@ pub enum ForInOfLhs {
 // Assignment LHS
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AssignmentLhs {
     Expression(Box<Expression>),
     Pattern(BindingPattern),
@@ -749,7 +756,7 @@ pub enum LocalVarKind {
     CatchClauseParameter = 4,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LocalVariable {
     pub name: Utf16String,
     pub kind: LocalVarKind,
@@ -763,7 +770,7 @@ pub struct LocalVariable {
 /// collector's two-phase design (build tree during parsing, then
 /// analyze bottom-up) ensures borrows never overlap — the analysis
 /// phase only borrows one scope at a time in a bottom-up traversal.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ScopeData {
     pub children: Vec<Statement>,
     pub local_variables: Vec<LocalVariable>,
@@ -794,7 +801,7 @@ impl ScopeData {
 }
 
 /// Scope analysis data for function bodies, populated by the scope collector.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionScopeData {
     pub functions_to_initialize: Vec<FunctionToInit>,
     pub vars_to_initialize: Vec<VarToInit>,
@@ -808,7 +815,7 @@ pub struct FunctionScopeData {
 
 /// Reference to a function declaration that needs hoisting/initialization.
 /// Stores the index within the parent ScopeData.children.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionToInit {
     pub child_index: usize,
 }
@@ -821,7 +828,7 @@ pub struct LocalBinding {
 }
 
 /// A `var` binding that needs initialization during function entry.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VarToInit {
     pub name: Utf16String,
     pub is_parameter: bool,
@@ -834,7 +841,7 @@ pub struct VarToInit {
 // Expression enum
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ExpressionKind {
     // Literals
     NumericLiteral(f64),
@@ -942,7 +949,7 @@ pub enum ExpressionKind {
 // Statement enum
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum StatementKind {
     // Basic
     Empty,
@@ -1032,7 +1039,7 @@ pub enum StatementKind {
 // Program data
 // =============================================================================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProgramData {
     pub scope: Rc<RefCell<ScopeData>>,
     pub program_type: ProgramType,

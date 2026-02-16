@@ -1431,7 +1431,7 @@ impl<'a> Parser<'a> {
                 local_or_import_name: local_name,
             });
         } else {
-            #[derive(PartialEq)]
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             enum FromSpecifier { NotAllowed, Optional, Required }
             let mut check_for_from = FromSpecifier::NotAllowed;
 
@@ -1686,7 +1686,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MatchesFunctionDeclaration {
     No,
     Yes,
