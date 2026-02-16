@@ -109,12 +109,14 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
             exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color);
         }
 
-        if (exec_ptr) {
-            auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
-            return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);
+        if (!exec_ptr) {
+            Vector<ParserError> errors;
+            errors.append({ "Rust parser failed"_string, {} });
+            return errors;
         }
 
-        // Fall through to C++ parser on Rust failure.
+        auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+        return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);
     }
 
     // 1. Let script be ParseText(sourceText, Script).
