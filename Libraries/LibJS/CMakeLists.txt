@@ -311,7 +311,7 @@ if (ENABLE_RUST_PARSER)
     )
     FetchContent_MakeAvailable(Corrosion)
 
-    corrosion_import_crate(MANIFEST_PATH rust_parser/Cargo.toml)
+    corrosion_import_crate(MANIFEST_PATH Rust/Cargo.toml)
     target_sources(LibJS PRIVATE BytecodeFactory.cpp)
     target_link_libraries(LibJS PRIVATE libjs_rust_parser)
     target_compile_definitions(LibJS PRIVATE ENABLE_RUST_PARSER)
