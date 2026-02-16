@@ -151,7 +151,9 @@ pub enum TokenCategory {
     Identifier,
 }
 
-const TOKEN_COUNT: usize = 122;
+// Computed from the last variant so adding new tokens triggers a
+// compile error if the lookup tables aren't updated.
+const TOKEN_COUNT: usize = TokenType::Yield as usize + 1;
 
 use TokenCategory::*;
 
