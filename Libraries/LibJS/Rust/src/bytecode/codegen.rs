@@ -6244,7 +6244,10 @@ fn generate_array_binding_pattern(
             };
 
             // Rest element: collect remaining into array.
-            let value = gen.allocate_register();
+            // NB: Allocate register unconditionally, then re-allocate in the
+            // else branch (matching C++ which allocates before the if/else,
+            // then re-allocates after emit_jump_if in the !first path).
+            let mut value = gen.allocate_register();
             if first {
                 gen.emit(Instruction::IteratorToArray {
                     dst: value.operand(),
@@ -6258,6 +6261,8 @@ fn generate_array_binding_pattern(
                 let continuation = gen.make_block();
 
                 gen.emit_jump_if(&is_exhausted, Label(if_exhausted as u32), Label(if_not_exhausted as u32));
+
+                value = gen.allocate_register();
 
                 gen.switch_to_basic_block(if_exhausted);
                 gen.emit(Instruction::NewArray {
