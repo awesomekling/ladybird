@@ -70,6 +70,14 @@ pub struct ParamInfo {
     pub identifier: Option<Rc<Identifier>>,
 }
 
+/// Result of parsing a property key (object literal or class element).
+pub(crate) struct PropertyKey {
+    pub expression: Expression,
+    pub name: Option<Vec<u16>>,
+    pub is_proto: bool,
+    pub is_computed: bool,
+}
+
 /// Method kind for parse_method_definition.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MethodKind {

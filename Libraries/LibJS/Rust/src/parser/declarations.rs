@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType};
+use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType, PropertyKey};
 use crate::token::TokenType;
 
 fn expression_into_identifier(expression: Expression) -> Rc<Identifier> {
@@ -744,7 +744,7 @@ impl<'a> Parser<'a> {
         }
 
         // Parse key. C++ uses the class start position for identifier-name keys.
-        let (key, key_value, _is_proto, _is_computed) = self.parse_property_key(Some(class_start));
+        let PropertyKey { expression: key, name: key_value, .. } = self.parse_property_key(Some(class_start));
 
         // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
         // It is a Syntax Error if PropName of ClassElement is "prototype"

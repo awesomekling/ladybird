@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position};
+use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, PropertyKey};
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
@@ -1169,7 +1169,7 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let (key, key_value, is_proto, is_computed) = self.parse_property_key(Some(obj_start));
+        let PropertyKey { expression: key, name: key_value, is_proto, is_computed } = self.parse_property_key(Some(obj_start));
 
         // https://tc39.es/ecma262/#sec-object-initializer
         // Private names are not allowed in object literals.
@@ -1293,7 +1293,7 @@ impl<'a> Parser<'a> {
         ) || next.token_type.is_identifier_name()
     }
 
-    pub(crate) fn parse_property_key(&mut self, ident_pos_override: Option<Position>) -> (Expression, Option<Vec<u16>>, bool, bool) {
+    pub(crate) fn parse_property_key(&mut self, ident_pos_override: Option<Position>) -> PropertyKey {
         let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {
@@ -1301,7 +1301,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::BracketClose);
-                (expression, None, false, true)
+                PropertyKey { expression, name: None, is_proto: false, is_computed: true }
             }
             TokenType::StringLiteral => {
                 let token = self.consume();
@@ -1317,13 +1317,15 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expression(after_string, ExpressionKind::StringLiteral(value.clone().into())), Some(value), is_proto, false)
+                let expression = self.expression(after_string, ExpressionKind::StringLiteral(value.clone().into()));
+                PropertyKey { expression, name: Some(value), is_proto, is_computed: false }
             }
             TokenType::NumericLiteral => {
                 let token = self.consume_and_validate_numeric_literal();
                 let value_str = self.token_value(&token);
                 let value = parse_numeric_value(value_str);
-                (self.expression(start, ExpressionKind::NumericLiteral(value)), None, false, false)
+                let expression = self.expression(start, ExpressionKind::NumericLiteral(value));
+                PropertyKey { expression, name: None, is_proto: false, is_computed: false }
             }
             // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
             // It is a Syntax Error if the StringValue of PrivateIdentifier is "#constructor".
@@ -1333,10 +1335,11 @@ impl<'a> Parser<'a> {
                 if value == utf16!("#constructor") {
                     self.syntax_error("Private property with name '#constructor' is not allowed");
                 }
-                (self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
+                let expression = self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
                     range: self.range_from(start),
                     name: value.clone().into(),
-                })), Some(value), false, false)
+                }));
+                PropertyKey { expression, name: Some(value), is_proto: false, is_computed: false }
             }
             _ => {
                 if self.match_identifier_name() {
@@ -1345,12 +1348,13 @@ impl<'a> Parser<'a> {
                     let is_proto = value == proto_name;
                     // C++ uses the object expression start position for identifier-name keys.
                     let key_start = ident_pos_override.unwrap_or(start);
-                    let key = self.expression(key_start, ExpressionKind::StringLiteral(value.clone().into()));
-                    (key, Some(value), is_proto, false)
+                    let expression = self.expression(key_start, ExpressionKind::StringLiteral(value.clone().into()));
+                    PropertyKey { expression, name: Some(value), is_proto, is_computed: false }
                 } else {
                     self.expected("property key");
                     self.consume();
-                    (self.expression(start, ExpressionKind::StringLiteral(Utf16String::new())), None, false, false)
+                    let expression = self.expression(start, ExpressionKind::StringLiteral(Utf16String::new()));
+                    PropertyKey { expression, name: None, is_proto: false, is_computed: false }
                 }
             }
         }
