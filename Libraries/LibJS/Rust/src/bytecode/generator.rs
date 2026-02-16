@@ -340,6 +340,10 @@ impl Generator {
         self.enclosing_function_kind != FunctionKind::Normal
     }
 
+    pub fn is_in_finalizer(&self) -> bool {
+        self.boundaries.contains(&BlockBoundaryType::LeaveFinally)
+    }
+
     // --- Register management ---
 
     /// Allocate a new register (or reuse a freed one).
@@ -367,6 +371,12 @@ impl Generator {
     /// Get the this_value register.
     pub fn this_value(&self) -> ScopedOperand {
         self.this_value.clone()
+    }
+
+    /// Get the exception register as a raw Operand (not ScopedOperand since
+    /// it's a fixed register that should not be freed).
+    pub fn exception_operand(&self) -> Operand {
+        Operand::register(Register::EXCEPTION)
     }
 
     /// Copy a local variable into a fresh register to prevent later

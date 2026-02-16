@@ -479,6 +479,17 @@ pub fn generate_expression(
                 // Match C++ YieldExpression::generate_bytecode: create continuation
                 // block, call generate_yield, then handle completion checking.
                 let continuation_block = gen.make_block();
+                let is_in_finalizer = gen.is_in_finalizer();
+
+                // Save exception register before yielding if in a finalizer,
+                // as the act of yielding clears scheduled exceptions.
+                let saved_exception = if is_in_finalizer {
+                    let reg = gen.allocate_register();
+                    gen.emit_mov_raw(reg.operand(), gen.exception_operand());
+                    Some(reg)
+                } else {
+                    None
+                };
 
                 generate_yield(
                     gen,
@@ -491,6 +502,11 @@ pub fn generate_expression(
                 );
 
                 gen.switch_to_basic_block(continuation_block);
+
+                // Restore exception register after resuming.
+                if let Some(ref saved) = saved_exception {
+                    gen.emit_mov_raw(gen.exception_operand(), saved.operand());
+                }
 
                 let acc = gen.accumulator();
                 gen.emit_mov(&received_completion, &acc);
