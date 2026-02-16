@@ -2199,14 +2199,7 @@ fn generate_for_statement(
                     let is_const = *kind == DeclarationKind::Const;
 
                     // begin_variable_scope: CreateLexicalEnvironment
-                    let parent = gen.current_lexical_environment();
-                    let new_env = gen.allocate_register();
-                    gen.emit(Instruction::CreateLexicalEnvironment {
-                        dst: new_env.operand(),
-                        parent: parent.operand(),
-                        capacity: 0,
-                    });
-                    gen.lexical_environment_register_stack.push(new_env);
+                    gen.push_new_lexical_environment(0);
 
                     for (name, _) in &non_local_names {
                         let id = gen.intern_identifier(name);
@@ -2366,13 +2359,7 @@ fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Utf16String]) {
     gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
 
     // Push new environment (begin_variable_scope).
-    let new_env = gen.allocate_register();
-    gen.emit(Instruction::CreateLexicalEnvironment {
-        dst: new_env.operand(),
-        parent: parent.operand(),
-        capacity: 0,
-    });
-    gen.lexical_environment_register_stack.push(new_env);
+    gen.push_new_lexical_environment(0);
 
     // Re-create variables and initialize from saved values.
     for (reg, id) in &saved {
@@ -2523,14 +2510,7 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
         return false;
     }
 
-    let parent = gen.current_lexical_environment();
-    let new_env = gen.allocate_register();
-    gen.emit(Instruction::CreateLexicalEnvironment {
-        dst: new_env.operand(),
-        parent: parent.operand(),
-        capacity: 0,
-    });
-    gen.lexical_environment_register_stack.push(new_env.clone());
+    let new_env = gen.push_new_lexical_environment(0);
 
     create_lexical_bindings_for_block(gen, &new_env, scope.children.iter());
 
@@ -4248,14 +4228,7 @@ fn emit_switch_block_declaration_instantiation(
         return false;
     }
 
-    let parent = gen.current_lexical_environment();
-    let new_env = gen.allocate_register();
-    gen.emit(Instruction::CreateLexicalEnvironment {
-        dst: new_env.operand(),
-        parent: parent.operand(),
-        capacity: 0,
-    });
-    gen.lexical_environment_register_stack.push(new_env.clone());
+    let new_env = gen.push_new_lexical_environment(0);
 
     create_lexical_bindings_for_block(gen, &new_env, all_children.iter().copied());
 
@@ -5318,13 +5291,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
         }
     }
 
-    let new_env = gen.allocate_register();
-    gen.emit(Instruction::CreateLexicalEnvironment {
-        dst: new_env.operand(),
-        parent: parent.operand(),
-        capacity: 1,
-    });
-    gen.lexical_environment_register_stack.push(new_env);
+    gen.push_new_lexical_environment(1);
 
     // Create variable bindings in the new environment.
     for (name, _) in &binding_names {
@@ -5356,14 +5323,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
                     collect_target_names(&declaration.target, &mut names);
                 }
                 if !names.is_empty() {
-                    let parent = gen.current_lexical_environment();
-                    let new_env = gen.allocate_register();
-                    gen.emit(Instruction::CreateLexicalEnvironment {
-                        dst: new_env.operand(),
-                        parent: parent.operand(),
-                        capacity: 0,
-                    });
-                    gen.lexical_environment_register_stack.push(new_env);
+                    gen.push_new_lexical_environment(0);
                     for (name, _) in &names {
                         let id = gen.intern_identifier(name);
                         gen.emit(Instruction::CreateVariable {
@@ -6557,14 +6517,7 @@ fn generate_try_statement(
                         gen.emit_mov(&local, &caught_value);
                         gen.mark_local_initialized(ident.local_index.get());
                     } else {
-                        let parent = gen.current_lexical_environment();
-                        let new_env = gen.allocate_register();
-                        gen.emit(Instruction::CreateLexicalEnvironment {
-                            dst: new_env.operand(),
-                            parent: parent.operand(),
-                            capacity: 0,
-                        });
-                        gen.lexical_environment_register_stack.push(new_env);
+                        gen.push_new_lexical_environment(0);
                         created_catch_scope = true;
 
                         let id = gen.intern_identifier(&ident.name);
@@ -6587,14 +6540,7 @@ fn generate_try_statement(
                     collect_pattern_binding_names(pattern, &mut names);
 
                     if !names.is_empty() {
-                        let parent = gen.current_lexical_environment();
-                        let new_env = gen.allocate_register();
-                        gen.emit(Instruction::CreateLexicalEnvironment {
-                            dst: new_env.operand(),
-                            parent: parent.operand(),
-                            capacity: 0,
-                        });
-                        gen.lexical_environment_register_stack.push(new_env);
+                        gen.push_new_lexical_environment(0);
                         created_catch_scope = true;
 
                         for (name, _) in &names {
@@ -6985,14 +6931,7 @@ pub fn emit_function_declaration_instantiation(
     if has_parameter_expressions {
         let has_non_local_parameters = parameter_names.iter().any(|p| !p.is_local);
         if has_non_local_parameters {
-            let parent = gen.current_lexical_environment();
-            let new_env = gen.allocate_register();
-            gen.emit(Instruction::CreateLexicalEnvironment {
-                dst: new_env.operand(),
-                parent: parent.operand(),
-                capacity: 0,
-            });
-            gen.lexical_environment_register_stack.push(new_env);
+            gen.push_new_lexical_environment(0);
         }
     }
 
@@ -7245,14 +7184,7 @@ pub fn emit_function_declaration_instantiation(
     let lex_bindings_count = count_non_local_lexical_bindings(body_scope);
 
     if !strict && lex_bindings_count > 0 {
-        let parent = gen.current_lexical_environment();
-        let new_env = gen.allocate_register();
-        gen.emit(Instruction::CreateLexicalEnvironment {
-            dst: new_env.operand(),
-            parent: parent.operand(),
-            capacity: lex_bindings_count,
-        });
-        gen.lexical_environment_register_stack.push(new_env);
+        gen.push_new_lexical_environment(lex_bindings_count);
     }
 
     // --- Step 8: Create lexical bindings ---

@@ -692,6 +692,18 @@ impl Generator {
             .unwrap_or_else(|| self.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)))
     }
 
+    pub fn push_new_lexical_environment(&mut self, capacity: u32) -> ScopedOperand {
+        let parent = self.current_lexical_environment();
+        let new_env = self.allocate_register();
+        self.emit(Instruction::CreateLexicalEnvironment {
+            dst: new_env.operand(),
+            parent: parent.operand(),
+            capacity,
+        });
+        self.lexical_environment_register_stack.push(new_env.clone());
+        new_env
+    }
+
     // --- Boundary management ---
 
     pub fn start_boundary(&mut self, ty: BlockBoundaryType) {
