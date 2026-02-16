@@ -93,6 +93,41 @@ use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 
+/// Log parser and scope collector errors, returning true if any were found.
+fn check_errors(parser: &mut Parser, context: &str) -> bool {
+    if parser.has_errors() {
+        for msg in parser.error_messages() {
+            eprintln!("[{context}] parse error: {msg}");
+        }
+        return true;
+    }
+    if parser.scope_collector.has_errors() {
+        for err in parser.scope_collector.drain_errors() {
+            eprintln!("[{context}] scope error: {}", err.message);
+        }
+        return true;
+    }
+    false
+}
+
+/// Create a Generator configured for program-level compilation.
+fn new_program_generator(
+    strict: bool,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    source: *const u16,
+    source_len: usize,
+) -> bytecode::generator::Generator {
+    let mut gen = bytecode::generator::Generator::new();
+    gen.strict = strict;
+    gen.must_propagate_completion = true;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
+    gen
+}
+
 /// Shared compilation pipeline: local variable setup → codegen → assemble → create Executable.
 ///
 /// Called by all three program-level entry points after parsing and scope analysis.
@@ -186,19 +221,9 @@ pub unsafe extern "C" fn rust_compile_program(
 
     let program = parser.parse_program(starts_in_strict_mode);
 
-    if parser.has_errors() {
-        for msg in parser.error_messages() {
-            eprintln!("[rust_compile_program] parse error: {}", msg);
-        }
-        return std::ptr::null_mut();
-    }
-
     parser.scope_collector.analyze(initiated_by_eval);
 
-    if parser.scope_collector.has_errors() {
-        for err in parser.scope_collector.drain_errors() {
-            eprintln!("[rust_compile_program] scope error: {}", err.message);
-        }
+    if check_errors(&mut parser, "rust_compile_program") {
         return std::ptr::null_mut();
     }
 
@@ -208,14 +233,7 @@ pub unsafe extern "C" fn rust_compile_program(
         return std::ptr::null_mut();
     };
 
-    let mut gen = bytecode::generator::Generator::new();
-    gen.strict = starts_in_strict_mode;
-    gen.must_propagate_completion = true;
-    gen.vm_ptr = vm_ptr;
-    gen.source_code_ptr = source_code_ptr;
-    gen.source = source;
-    gen.source_len = source_len;
-
+    let mut gen = new_program_generator(starts_in_strict_mode, vm_ptr, source_code_ptr, source, source_len);
     compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
 }
 
@@ -250,19 +268,9 @@ pub unsafe extern "C" fn rust_compile_script(
 
     let program = parser.parse_program(false);
 
-    if parser.has_errors() {
-        for msg in parser.error_messages() {
-            eprintln!("[rust_compile_script] parse error: {}", msg);
-        }
-        return std::ptr::null_mut();
-    }
-
     parser.scope_collector.analyze(false);
 
-    if parser.scope_collector.has_errors() {
-        for err in parser.scope_collector.drain_errors() {
-            eprintln!("[rust_compile_script] scope error: {}", err.message);
-        }
+    if check_errors(&mut parser, "rust_compile_script") {
         return std::ptr::null_mut();
     }
 
@@ -277,14 +285,7 @@ pub unsafe extern "C" fn rust_compile_script(
         return std::ptr::null_mut();
     };
 
-    let mut gen = bytecode::generator::Generator::new();
-    gen.strict = is_strict;
-    gen.must_propagate_completion = true;
-    gen.vm_ptr = vm_ptr;
-    gen.source_code_ptr = source_code_ptr;
-    gen.source = source;
-    gen.source_len = source_len;
-
+    let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
     let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
     if exec_ptr.is_null() {
         return std::ptr::null_mut();
@@ -334,19 +335,9 @@ pub unsafe extern "C" fn rust_compile_eval(
 
     let program = parser.parse_program(starts_in_strict_mode);
 
-    if parser.has_errors() {
-        for msg in parser.error_messages() {
-            eprintln!("[rust_compile_eval] parse error: {}", msg);
-        }
-        return std::ptr::null_mut();
-    }
-
     parser.scope_collector.analyze(true);
 
-    if parser.scope_collector.has_errors() {
-        for err in parser.scope_collector.drain_errors() {
-            eprintln!("[rust_compile_eval] scope error: {}", err.message);
-        }
+    if check_errors(&mut parser, "rust_compile_eval") {
         return std::ptr::null_mut();
     }
 
@@ -356,14 +347,7 @@ pub unsafe extern "C" fn rust_compile_eval(
         return std::ptr::null_mut();
     };
 
-    let mut gen = bytecode::generator::Generator::new();
-    gen.strict = is_strict;
-    gen.must_propagate_completion = true;
-    gen.vm_ptr = vm_ptr;
-    gen.source_code_ptr = source_code_ptr;
-    gen.source = source;
-    gen.source_len = source_len;
-
+    let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
     let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
     if exec_ptr.is_null() {
         return std::ptr::null_mut();
