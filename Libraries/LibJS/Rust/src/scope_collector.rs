@@ -55,7 +55,7 @@ use std::rc::Rc;
 
 use crate::ast::{
     FunctionScopeData, Identifier, LocalBinding, LocalVarKind,
-    LocalVariable, ScopeData, VarToInit,
+    LocalVariable, ScopeData, Utf16String, VarToInit,
 };
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
 
@@ -599,7 +599,7 @@ impl ScopeCollector {
 
     pub fn set_function_parameters(
         &mut self,
-        entries: &[(Vec<u16>, Option<Rc<Identifier>>, bool, bool)],
+        entries: &[(Utf16String, Option<Rc<Identifier>>, bool, bool)],
     ) {
         let index = self.current.expect("no current scope");
         self.records[index].has_function_parameters = true;
@@ -615,13 +615,13 @@ impl ScopeCollector {
                 }
                 previous_was_pattern = true;
             } else {
-                self.records[index].parameter_names.push(ParameterName { name: name.clone(), is_rest: *is_rest });
+                self.records[index].parameter_names.push(ParameterName { name: name.0.clone(), is_rest: *is_rest });
                 previous_was_pattern = false;
             }
             if let Some(id) = identifier {
                 self.register_identifier(id.clone(), name, None);
             }
-            let var = self.records[index].variables.entry(name.clone()).or_default();
+            let var = self.records[index].variables.entry(name.0.clone()).or_default();
             var.flags |= VarFlags::PARAMETER_CANDIDATE | VarFlags::FORBIDDEN_LEXICAL;
         }
     }
@@ -971,7 +971,7 @@ impl ScopeCollector {
                                 } else {
                                     let lvi = sd.local_variables.len() as u32;
                                     sd.local_variables.push(LocalVariable {
-                                        name: name.clone(),
+                                        name: name.clone().into(),
                                         kind: LocalVarKind::Var,
                                     });
                                     for id in &group.identifiers {
@@ -983,7 +983,7 @@ impl ScopeCollector {
                                 let kind = local_var_kind.expect("local_var_kind must be set for local variables");
                                 let lvi = sd.local_variables.len() as u32;
                                 sd.local_variables.push(LocalVariable {
-                                    name: name.clone(),
+                                    name: name.clone().into(),
                                     kind,
                                 });
                                 for id in &group.identifiers {
@@ -1064,7 +1064,7 @@ impl ScopeCollector {
             for i in (0..sd.children.len()).rev() {
                 if let crate::ast::StatementKind::FunctionDeclaration(ref function_data) = sd.children[i].inner {
                     if let Some(ref name_ident) = function_data.name {
-                        if seen_function_names.insert(name_ident.name.clone()) {
+                        if seen_function_names.insert(name_ident.name.to_vec()) {
                             functions_to_initialize.push(crate::ast::FunctionToInit {
                                 child_index: i,
                             });
@@ -1079,7 +1079,7 @@ impl ScopeCollector {
                 continue;
             }
 
-            var_names.push(name.clone());
+            var_names.push(name.clone().into());
 
             let is_parameter = var.flags.intersects(VarFlags::FORBIDDEN_LEXICAL);
             let is_function_name = var.flags.intersects(VarFlags::BOUND);
@@ -1105,7 +1105,7 @@ impl ScopeCollector {
             }
 
             vars_to_initialize.push(VarToInit {
-                name: name.clone(),
+                name: name.clone().into(),
                 is_parameter,
                 is_function_name,
                 local: local_info,
@@ -1194,8 +1194,8 @@ impl ScopeCollector {
                 // Reached function/program scope — register the hoisted function name.
                 if let Some(ref scope_data) = records[index].scope_data {
                     let mut sd = scope_data.borrow_mut();
-                    if !sd.annexb_function_names.contains(&function.name) {
-                        sd.annexb_function_names.push(function.name.clone());
+                    if !sd.annexb_function_names.iter().any(|n| *n == function.name) {
+                        sd.annexb_function_names.push(function.name.clone().into());
                     }
                 }
                 // Mark all function declarations with this name in the block

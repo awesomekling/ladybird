@@ -287,7 +287,7 @@ pub fn generate_expression(
             // For anonymous function expressions, use the pending LHS name
             // as the function's .name property.
             let lhs_name = if !has_name { gen.pending_lhs_name.take() } else { None };
-            let lhs_name_str: Option<Vec<u16>> = lhs_name.map(|index| gen.identifier_table[index.0 as usize].clone());
+            let lhs_name_str: Option<Utf16String> = lhs_name.map(|index| gen.identifier_table[index.0 as usize].clone());
             let name_override = if !has_name {
                 lhs_name_str.as_deref()
             } else {
@@ -2185,12 +2185,12 @@ fn generate_for_statement(
     // If so, we need to create a lexical environment for the loop variables and
     // implement per-iteration copy semantics (CreatePerIterationEnvironment).
     let mut has_lexical_environment = false;
-    let mut per_iteration_binding_names: Vec<Vec<u16>> = Vec::new();
+    let mut per_iteration_binding_names: Vec<Utf16String> = Vec::new();
 
     if let Some(init) = init {
         if let StatementKind::VariableDeclaration { kind, declarations } = &init.inner {
             if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
-                let mut non_local_names: Vec<(Vec<u16>, bool)> = Vec::new();
+                let mut non_local_names: Vec<(Utf16String, bool)> = Vec::new();
                 for declaration in declarations {
                     collect_target_names(&declaration.target, &mut non_local_names);
                 }
@@ -2342,7 +2342,7 @@ fn generate_for_statement(
 /// Emit CreatePerIterationEnvironment: save current binding values, pop env,
 /// push new env, re-create variables, and re-initialize from saved values.
 /// This implements per-iteration lexical scoping for `for (let ...)` loops.
-fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Vec<u16>]) {
+fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Utf16String]) {
     if bindings.is_empty() {
         return;
     }
@@ -2461,7 +2461,7 @@ fn generate_block_statement(
 /// Create a lexical environment for a block with non-local lexical declarations.
 /// Returns true if an environment was created.
 fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, environment: &ScopedOperand, children: impl Iterator<Item = &'a Statement>) {
-    let mut function_binding_created: HashSet<Vec<u16>> = HashSet::new();
+    let mut function_binding_created: HashSet<Utf16String> = HashSet::new();
     for child in children {
         match &child.inner {
             StatementKind::VariableDeclaration { kind, declarations } => {
@@ -2537,7 +2537,7 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
     // Pass 2: Instantiate function declarations.
     // For duplicate names, only instantiate the last declaration (it wins).
     // Process in reverse to find which index is "last" per name.
-    let mut last_function_indices: HashMap<Vec<u16>, usize> = HashMap::new();
+    let mut last_function_indices: HashMap<Utf16String, usize> = HashMap::new();
     for (i, child) in scope.children.iter().enumerate().rev() {
         if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
             if let Some(ref name_ident) = function_data.name {
@@ -2549,7 +2549,7 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
     for (i, child) in scope.children.iter().enumerate() {
         if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
             if let Some(ref name_ident) = function_data.name {
-                if last_function_indices.get(name_ident.name.as_slice()) != Some(&i) {
+                if last_function_indices.get(&name_ident.name) != Some(&i) {
                     continue;
                 }
                 let sfd_index = emit_new_function(gen, function_data, None);
@@ -3917,7 +3917,7 @@ fn generate_template_literal(
     }).collect();
 
     if segments.is_empty() {
-        return Some(gen.add_constant_string(Vec::new()));
+        return Some(gen.add_constant_string(Utf16String::new()));
     }
 
     if segments.len() == 1 {
@@ -4262,7 +4262,7 @@ fn emit_switch_block_declaration_instantiation(
     create_lexical_bindings_for_block(gen, &new_env, all_children.iter().copied());
 
     // Pass 2: Instantiate function declarations (last one wins for duplicates).
-    let mut last_function_indices: HashMap<Vec<u16>, usize> = HashMap::new();
+    let mut last_function_indices: HashMap<Utf16String, usize> = HashMap::new();
     for (i, child) in all_children.iter().enumerate().rev() {
         if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
             if let Some(ref name_ident) = function_data.name {
@@ -4273,7 +4273,7 @@ fn emit_switch_block_declaration_instantiation(
     for (i, child) in all_children.iter().enumerate() {
         if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
             if let Some(ref name_ident) = function_data.name {
-                if last_function_indices.get(name_ident.name.as_slice()) == Some(&i) {
+                if last_function_indices.get(&name_ident.name) == Some(&i) {
                     let sfd_index = emit_new_function(gen, function_data, None);
                     let fo = gen.allocate_register();
                     gen.emit(Instruction::NewFunction {
@@ -4374,22 +4374,22 @@ fn generate_object_expression(
         // Set pending LHS name for function name inference on non-computed properties.
         // ProtoSetter (__proto__) skips NamedEvaluation per spec.
         if !property.is_computed && property.property_type != ObjectPropertyType::ProtoSetter {
-            let base_name = match &property.key.inner {
+            let base_name: Option<Utf16String> = match &property.key.inner {
                 ExpressionKind::StringLiteral(s) => Some(s.clone()),
                 ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
                 ExpressionKind::NumericLiteral(n) => Some(super::ffi::js_number_to_utf16(*n)),
                 _ => None,
             };
             if let Some(name) = base_name {
-                let full_name = match property.property_type {
+                let full_name: Utf16String = match property.property_type {
                     ObjectPropertyType::Getter => {
-                        let mut prefixed: Vec<u16> = utf16!("get ").to_vec();
-                        prefixed.extend_from_slice(&name);
+                        let mut prefixed = Utf16String(utf16!("get ").to_vec());
+                        prefixed.0.extend_from_slice(&name);
                         prefixed
                     }
                     ObjectPropertyType::Setter => {
-                        let mut prefixed: Vec<u16> = utf16!("set ").to_vec();
-                        prefixed.extend_from_slice(&name);
+                        let mut prefixed = Utf16String(utf16!("set ").to_vec());
+                        prefixed.0.extend_from_slice(&name);
                         prefixed
                     }
                     _ => name,
@@ -4835,7 +4835,7 @@ fn generate_class_expression(
         let name = if let Some(name_ident) = &data.name {
             name_ident.name.clone()
         } else {
-            Vec::new()
+            Utf16String::new()
         };
         let name_id = gen.intern_identifier(&name);
         gen.emit(Instruction::CreateVariable {
@@ -4895,7 +4895,7 @@ fn generate_class_expression(
     let mut ffi_elements = Vec::new();
     let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
     // Keep literal string data alive until FFI call.
-    let mut literal_string_storage: Vec<Vec<u16>> = Vec::new();
+    let mut literal_string_storage: Vec<Utf16String> = Vec::new();
 
     for element_node in &data.elements {
         match &element_node.inner {
@@ -4963,7 +4963,7 @@ fn generate_class_expression(
                 // This matches C++ ASTCodegen.cpp behavior.
                 let mut literal_value_kind = LiteralValueKind::None as u8;
                 let mut literal_value_number: f64 = 0.0;
-                let mut literal_value_string: Vec<u16> = Vec::new();
+                let mut literal_value_string = Utf16String::new();
                 let mut sfd_index: i32 = -1;
 
                 if let Some(init_expression) = initializer {
@@ -5008,7 +5008,7 @@ fn generate_class_expression(
                             ExpressionKind::Identifier(ident) => ident.name.clone(),
                             ExpressionKind::StringLiteral(s) => s.clone(),
                             ExpressionKind::PrivateIdentifier(p) => p.name.clone(),
-                            _ => Vec::new(),
+                            _ => Utf16String::new(),
                         };
 
                         // Wrap the expression in a ClassFieldInitializer statement.
@@ -5047,7 +5047,7 @@ fn generate_class_expression(
                         // Set class_field_initializer_name on the SFD.
                         let sfd_ptr = gen.shared_function_data[index as usize];
                         let key_is_private = is_private_key(key);
-                        let key_name: Vec<u16> = match &key.inner {
+                        let key_name: Utf16String = match &key.inner {
                             ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
                             ExpressionKind::Identifier(ident) => ident.name.clone(),
                             ExpressionKind::StringLiteral(s) => s.clone(),
@@ -5055,7 +5055,7 @@ fn generate_class_expression(
                                 let s = format!("{}", n);
                                 s.encode_utf16().collect()
                             }
-                            _ => Vec::new(),
+                            _ => Utf16String::new(),
                         };
                         if !key_name.is_empty() {
                             unsafe {
@@ -5147,7 +5147,7 @@ fn generate_class_expression(
     }
 
     // Get class name and source text
-    let class_name = data.name.as_ref().map(|n| n.name.as_slice());
+    let class_name: Option<&[u16]> = data.name.as_ref().map(|n| &*n.name);
     let has_name = data.name.is_some();
     let (name_ptr, name_len) = class_name
         .map(|n| (n.as_ptr(), n.len()))
@@ -5266,7 +5266,7 @@ fn for_in_of_needs_lexical_env(lhs: &ForInOfLhs) -> bool {
 }
 
 /// Collect all non-local binding names from a variable declarator target.
-fn collect_target_names(target: &VariableDeclaratorTarget, names: &mut Vec<(Vec<u16>, bool)>) {
+fn collect_target_names(target: &VariableDeclaratorTarget, names: &mut Vec<(Utf16String, bool)>) {
     match target {
         VariableDeclaratorTarget::Identifier(ident) => {
             if !ident.is_local() {
@@ -5280,7 +5280,7 @@ fn collect_target_names(target: &VariableDeclaratorTarget, names: &mut Vec<(Vec<
 }
 
 /// Collect all non-local binding names from a binding pattern (recursive).
-fn collect_pattern_binding_names(pattern: &BindingPattern, names: &mut Vec<(Vec<u16>, bool)>) {
+fn collect_pattern_binding_names(pattern: &BindingPattern, names: &mut Vec<(Utf16String, bool)>) {
     for entry in &pattern.entries {
         match &entry.alias {
             Some(BindingEntryAlias::Identifier(ident)) => {
@@ -5309,7 +5309,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
     let parent = gen.current_lexical_environment();
 
     // Collect all binding names to determine capacity.
-    let mut binding_names: Vec<(Vec<u16>, bool)> = Vec::new();
+    let mut binding_names: Vec<(Utf16String, bool)> = Vec::new();
     let mut is_constant = false;
     if let ForInOfLhs::Declaration(statement) = lhs {
         if let StatementKind::VariableDeclaration { kind, declarations } = &statement.inner {
@@ -5572,12 +5572,12 @@ fn generate_for_in_statement(
 
 fn generate_labelled_statement(
     gen: &mut Generator,
-    label: &[u16],
+    label: &Utf16String,
     item: &Statement,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
     // Collect all labels from nested Labelled statements.
-    let mut labels = vec![label.to_vec()];
+    let mut labels = vec![label.clone()];
     let mut inner = item;
     while let StatementKind::Labelled { label: next_label, item: next_item } = &inner.inner {
         labels.push(next_label.clone());
@@ -6587,7 +6587,7 @@ fn generate_try_statement(
                 }
             }
             CatchParameter::BindingPattern(pattern) => {
-                let mut names: Vec<(Vec<u16>, bool)> = Vec::new();
+                let mut names: Vec<(Utf16String, bool)> = Vec::new();
                 collect_pattern_binding_names(pattern, &mut names);
 
                 if !names.is_empty() {
@@ -7470,7 +7470,7 @@ fn collect_binding_pattern_names(
 
 /// A parameter name with its locality (used during FDI).
 struct FdiParameterName {
-    name: Vec<u16>,
+    name: Utf16String,
     is_local: bool,
 }
 
@@ -7672,7 +7672,7 @@ fn try_constant_fold_binary(
             match (lhs_const, rhs_const) {
                 (ConstantValue::String(a), ConstantValue::String(b)) => {
                     let mut result = a.clone();
-                    result.extend_from_slice(b);
+                    result.0.extend_from_slice(b);
                     Some(gen.add_constant_string(result))
                 }
                 (ConstantValue::Number(a), ConstantValue::Number(b)) => {
@@ -7681,12 +7681,12 @@ fn try_constant_fold_binary(
                 // String + Number or Number + String coercion
                 (ConstantValue::String(a), ConstantValue::Number(b)) => {
                     let mut result = a.clone();
-                    result.extend(super::ffi::js_number_to_utf16(*b));
+                    result.0.extend_from_slice(&super::ffi::js_number_to_utf16(*b));
                     Some(gen.add_constant_string(result))
                 }
                 (ConstantValue::Number(a), ConstantValue::String(b)) => {
                     let mut result = super::ffi::js_number_to_utf16(*a);
-                    result.extend_from_slice(b);
+                    result.0.extend_from_slice(b);
                     Some(gen.add_constant_string(result))
                 }
                 _ => None,
@@ -7794,33 +7794,33 @@ fn intern_base_identifier(gen: &mut Generator, base: &Expression) -> Option<Iden
 /// Try to produce a human-readable name for an expression (for error messages).
 /// Returns None for expressions that have no meaningful name.
 /// Matches C++ `expression_identifier()` in Generator.cpp.
-fn expression_identifier(expression: &Expression) -> Option<Vec<u16>> {
+fn expression_identifier(expression: &Expression) -> Option<Utf16String> {
     match &expression.inner {
         ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
         ExpressionKind::StringLiteral(s) => {
-            let mut result = utf16!("'").to_vec();
-            result.extend_from_slice(s);
-            result.extend_from_slice(utf16!("'"));
+            let mut result = Utf16String(utf16!("'").to_vec());
+            result.0.extend_from_slice(s);
+            result.0.extend_from_slice(utf16!("'"));
             Some(result)
         }
         ExpressionKind::NumericLiteral(n) => {
             let s = format!("{}", n);
             Some(s.encode_utf16().collect())
         }
-        ExpressionKind::This => Some(utf16!("this").to_vec()),
+        ExpressionKind::This => Some(Utf16String(utf16!("this").to_vec())),
         ExpressionKind::Member { object, property, computed } => {
-            let mut s = Vec::new();
+            let mut s = Utf16String::new();
             if let Some(obj_id) = expression_identifier(object) {
-                s.extend(obj_id);
+                s.0.extend_from_slice(&obj_id);
             }
             if let Some(property_id) = expression_identifier(property) {
                 if *computed {
-                    s.extend_from_slice(utf16!("["));
-                    s.extend(property_id);
-                    s.extend_from_slice(utf16!("]"));
+                    s.0.extend_from_slice(utf16!("["));
+                    s.0.extend_from_slice(&property_id);
+                    s.0.extend_from_slice(utf16!("]"));
                 } else {
-                    s.extend_from_slice(utf16!("."));
-                    s.extend(property_id);
+                    s.0.extend_from_slice(utf16!("."));
+                    s.0.extend_from_slice(&property_id);
                 }
             }
             Some(s)
@@ -7833,7 +7833,7 @@ fn expression_identifier(expression: &Expression) -> Option<Vec<u16>> {
 /// Unlike expression_identifier, this always produces output for known types
 /// (using "<object>" for unrecognized sub-expressions).
 /// Matches C++ `CallExpression::expression_string()` + `expression_to_string_approximation()`.
-fn expression_string_approximation(expression: &Expression) -> Option<Vec<u16>> {
+fn expression_string_approximation(expression: &Expression) -> Option<Utf16String> {
     match &expression.inner {
         ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
         ExpressionKind::Member { .. } => Some(member_to_string_approximation(expression)),
@@ -7841,33 +7841,33 @@ fn expression_string_approximation(expression: &Expression) -> Option<Vec<u16>> 
     }
 }
 
-fn member_to_string_approximation(expression: &Expression) -> Vec<u16> {
+fn member_to_string_approximation(expression: &Expression) -> Utf16String {
     match &expression.inner {
         ExpressionKind::Identifier(ident) => ident.name.clone(),
         ExpressionKind::Member { object, property, computed } => {
             let mut s = member_to_string_approximation(object);
             let property_str = member_to_string_approximation(property);
             if *computed {
-                s.extend_from_slice(utf16!("["));
-                s.extend(property_str);
-                s.extend_from_slice(utf16!("]"));
+                s.0.extend_from_slice(utf16!("["));
+                s.0.extend_from_slice(&property_str);
+                s.0.extend_from_slice(utf16!("]"));
             } else {
-                s.extend_from_slice(utf16!("."));
-                s.extend(property_str);
+                s.0.extend_from_slice(utf16!("."));
+                s.0.extend_from_slice(&property_str);
             }
             s
         }
         ExpressionKind::StringLiteral(s) => {
-            let mut result = utf16!("'").to_vec();
-            result.extend_from_slice(s);
-            result.extend_from_slice(utf16!("'"));
+            let mut result = Utf16String(utf16!("'").to_vec());
+            result.0.extend_from_slice(s);
+            result.0.extend_from_slice(utf16!("'"));
             result
         }
         ExpressionKind::NumericLiteral(n) => {
             let s = format!("{}", n);
             s.encode_utf16().collect()
         }
-        ExpressionKind::This => utf16!("this").to_vec(),
-        _ => utf16!("<object>").to_vec(),
+        ExpressionKind::This => Utf16String(utf16!("this").to_vec()),
+        _ => Utf16String(utf16!("<object>").to_vec()),
     }
 }

@@ -20,7 +20,7 @@ fn expression_into_identifier(expression: Expression) -> Rc<Identifier> {
 }
 
 /// Extract bound names from a declaration for export statements.
-fn get_declaration_export_names(statement: &Statement) -> Vec<Vec<u16>> {
+fn get_declaration_export_names(statement: &Statement) -> Vec<Utf16String> {
     match &statement.inner {
         StatementKind::VariableDeclaration { declarations, .. } => {
             let mut names = Vec::new();
@@ -56,14 +56,14 @@ fn get_declaration_export_names(statement: &Statement) -> Vec<Vec<u16>> {
     }
 }
 
-fn collect_declarator_names(target: &VariableDeclaratorTarget, names: &mut Vec<Vec<u16>>) {
+fn collect_declarator_names(target: &VariableDeclaratorTarget, names: &mut Vec<Utf16String>) {
     match target {
         VariableDeclaratorTarget::Identifier(id) => names.push(id.name.clone()),
         VariableDeclaratorTarget::BindingPattern(pat) => collect_pattern_names(pat, names),
     }
 }
 
-fn collect_pattern_names(pat: &BindingPattern, names: &mut Vec<Vec<u16>>) {
+fn collect_pattern_names(pat: &BindingPattern, names: &mut Vec<Utf16String>) {
     for entry in &pat.entries {
         match &entry.alias {
             Some(BindingEntryAlias::Identifier(id)) => names.push(id.name.clone()),
@@ -612,7 +612,7 @@ impl<'a> Parser<'a> {
         if has_super {
             let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
 
-            let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone()));
+            let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone().into()));
             let arguments_expression = self.expression(start, ExpressionKind::Identifier(arguments_ref));
             let spread_expression = self.expression(start, ExpressionKind::Spread(Box::new(arguments_expression)));
 
@@ -625,7 +625,7 @@ impl<'a> Parser<'a> {
                 ScopeData::shared_with_children(vec![return_statement]),
             ));
 
-            let arguments_binding = Rc::new(Identifier::new(self.range_from(start), arguments_name));
+            let arguments_binding = Rc::new(Identifier::new(self.range_from(start), arguments_name.into()));
             let parameters = vec![FunctionParameter {
                 binding: FunctionParameterBinding::Identifier(arguments_binding),
                 default_value: None,
@@ -948,8 +948,8 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone()));
-                parameter_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
+                let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone().into()));
+                parameter_info.push(ParamInfo { name: value.into(), is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
@@ -960,7 +960,7 @@ impl<'a> Parser<'a> {
             } else {
                 self.expected("parameter name");
                 self.consume();
-                let id = Rc::new(Identifier::new(self.range_from(parameter_start), Vec::new()));
+                let id = Rc::new(Identifier::new(self.range_from(parameter_start), Utf16String::default()));
                 (FunctionParameterBinding::Identifier(id), false)
             };
 
@@ -1061,7 +1061,7 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     let mut needs_alias = false;
-                    let mut entry_name_value: Vec<u16> = Vec::new();
+                    let mut entry_name_value = Utf16String::new();
                     let mut entry_is_keyword = false;
 
                     if self.match_identifier_name() || self.match_token(TokenType::StringLiteral) || self.match_token(TokenType::NumericLiteral) || self.match_token(TokenType::BigIntLiteral) {
@@ -1091,7 +1091,7 @@ impl<'a> Parser<'a> {
                         } else {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
-                            entry_name_value = value.clone();
+                            entry_name_value = value.clone().into();
                             let id = self.make_identifier(entry_start, value);
                             // C++ calls parse_identifier() for binding pattern property
                             // keys, which registers them. Do the same here.
@@ -1133,7 +1133,7 @@ impl<'a> Parser<'a> {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
                             let id = self.make_identifier(alias_start, value.clone());
-                            self.pattern_bound_names.push((value, id.clone()));
+                            self.pattern_bound_names.push((value.into(), id.clone()));
                             entry_alias = Some(BindingEntryAlias::Identifier(id));
                         } else {
                             self.expected("identifier or binding pattern");
@@ -1178,7 +1178,7 @@ impl<'a> Parser<'a> {
                     let token = self.consume();
                     let value = self.token_value(&token).to_vec();
                     let id = self.make_identifier(alias_start, value.clone());
-                    self.pattern_bound_names.push((value, id.clone()));
+                    self.pattern_bound_names.push((value.into(), id.clone()));
                     entry_alias = Some(BindingEntryAlias::Identifier(id));
                 } else {
                     self.expected("identifier or binding pattern");
@@ -1250,9 +1250,9 @@ impl<'a> Parser<'a> {
 
         if self.match_imported_binding() {
             let token = self.consume();
-            let local_name = self.token_value(&token).to_vec();
+            let local_name: Utf16String = self.token_value(&token).to_vec().into();
             entries.push(ImportEntry {
-                import_name: Some(utf16!("default").to_vec()),
+                import_name: Some(utf16!("default").to_vec().into()),
                 local_name,
             });
             if self.match_token(TokenType::Comma) {
@@ -1272,7 +1272,7 @@ impl<'a> Parser<'a> {
                 self.consume(); // consume 'as'
                 if self.match_imported_binding() {
                     let token = self.consume();
-                    let namespace_name = self.token_value(&token).to_vec();
+                    let namespace_name: Utf16String = self.token_value(&token).to_vec().into();
                     entries.push(ImportEntry {
                         import_name: None,
                         local_name: namespace_name,
@@ -1296,8 +1296,8 @@ impl<'a> Parser<'a> {
                             let alias = self.token_value(&alias_token).to_vec();
                             self.check_identifier_name_for_assignment_validity(&alias, false);
                             entries.push(ImportEntry {
-                                import_name: Some(name),
-                                local_name: alias,
+                                import_name: Some(name.into()),
+                                local_name: alias.into(),
                             });
                         } else if require_as {
                             self.syntax_error_at_position(
@@ -1306,6 +1306,7 @@ impl<'a> Parser<'a> {
                             );
                         } else {
                             self.check_identifier_name_for_assignment_validity(&name, false);
+                            let name: Utf16String = name.into();
                             entries.push(ImportEntry {
                                 import_name: Some(name.clone()),
                                 local_name: name,
@@ -1324,8 +1325,8 @@ impl<'a> Parser<'a> {
                         let alias = self.token_value(&alias_token).to_vec();
                         self.check_identifier_name_for_assignment_validity(&alias, false);
                         entries.push(ImportEntry {
-                            import_name: Some(name),
-                            local_name: alias,
+                            import_name: Some(name.into()),
+                            local_name: alias.into(),
                         });
                     } else {
                         self.expected("identifier");
@@ -1377,13 +1378,13 @@ impl<'a> Parser<'a> {
         let mut entries: Vec<ExportEntry> = Vec::new();
         let mut statement: Option<Box<Statement>> = None;
         let mut is_default = false;
-        let mut from_specifier: Option<Vec<u16>> = None;
+        let mut from_specifier: Option<Utf16String> = None;
 
         if self.match_token(TokenType::Default) {
             is_default = true;
             self.consume();
 
-            let mut local_name: Option<Vec<u16>> = None;
+            let mut local_name: Option<Utf16String> = None;
 
             let matches_function = self.match_function_declaration_for_export();
 
@@ -1424,12 +1425,12 @@ impl<'a> Parser<'a> {
             }
 
             if local_name.is_none() {
-                local_name = Some(utf16!("*default*").to_vec());
+                local_name = Some(utf16!("*default*").to_vec().into());
             }
 
             entries.push(ExportEntry {
                 kind: ExportEntryKind::NamedExport,
-                export_name: Some(utf16!("default").to_vec()),
+                export_name: Some(utf16!("default").to_vec().into()),
                 local_or_import_name: local_name,
             });
         } else {
@@ -1561,27 +1562,27 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::Identifier) && self.token_original_value(&self.current_token) == utf16!("from")
     }
 
-    fn consume_module_specifier(&mut self) -> Vec<u16> {
+    fn consume_module_specifier(&mut self) -> Utf16String {
         if !self.match_token(TokenType::StringLiteral) {
             self.expected("module specifier (string)");
-            return utf16!("!!invalid!!").to_vec();
+            return utf16!("!!invalid!!").to_vec().into();
         }
         let token = self.consume();
         let (value, _) = self.parse_string_value(&token);
-        value
+        value.into()
     }
 
-    fn parse_module_export_name(&mut self) -> (Vec<u16>, bool) {
+    fn parse_module_export_name(&mut self) -> (Utf16String, bool) {
         if self.match_identifier_name() {
             let token = self.consume();
-            (self.token_value(&token).to_vec(), false)
+            (self.token_value(&token).to_vec().into(), false)
         } else if self.match_token(TokenType::StringLiteral) {
             let token = self.consume();
             let (value, _) = self.parse_string_value(&token);
-            (value, true)
+            (value.into(), true)
         } else {
             self.expected("export specifier (string or identifier)");
-            (Vec::new(), false)
+            (Utf16String::default(), false)
         }
     }
 
@@ -1597,13 +1598,13 @@ impl<'a> Parser<'a> {
 
         let mut attributes = Vec::new();
         while !self.done() && !self.match_token(TokenType::CurlyClose) {
-            let key = if self.match_token(TokenType::StringLiteral) {
+            let key: Utf16String = if self.match_token(TokenType::StringLiteral) {
                 let token = self.consume();
                 let (value, _) = self.parse_string_value(&token);
-                value
+                value.into()
             } else if self.match_identifier_name() {
                 let token = self.consume();
-                self.token_value(&token).to_vec()
+                self.token_value(&token).to_vec().into()
             } else {
                 self.expected("identifier or string as attribute key");
                 self.consume();
@@ -1615,7 +1616,7 @@ impl<'a> Parser<'a> {
             if self.match_token(TokenType::StringLiteral) {
                 let token = self.consume();
                 let (value, _) = self.parse_string_value(&token);
-                attributes.push(ImportAttribute { key, value });
+                attributes.push(ImportAttribute { key, value: value.into() });
             } else {
                 self.expected("string as attribute value");
                 self.consume();

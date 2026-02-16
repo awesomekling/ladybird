@@ -537,8 +537,8 @@ fn extract_gdi_common(
     }
 
     // Functions to initialize (reverse order, deduplicated by name).
-    let mut seen_names: HashSet<Vec<u16>> = HashSet::new();
-    let mut functions_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
+    let mut seen_names: HashSet<ast::Utf16String> = HashSet::new();
+    let mut functions_to_init: Vec<(&ast::FunctionData, ast::Utf16String)> = Vec::new();
     for child in scope.children.iter().rev() {
         if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
             if let Some(ref name_ident) = function_data.name {
@@ -931,8 +931,8 @@ struct BodyScopeInfo {
     has_lexically_declared_arguments: bool,
     non_local_var_count: usize,
     non_local_var_count_for_parameter_expressions: usize,
-    var_names: Vec<Vec<u16>>,
-    annexb_function_names: Vec<Vec<u16>>,
+    var_names: Vec<ast::Utf16String>,
+    annexb_function_names: Vec<ast::Utf16String>,
     has_arguments_object_local: bool,
 }
 
@@ -988,7 +988,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
     });
 
     // §10.2.11 steps 5-8: count non-local unique parameter names.
-    let mut parameter_names: HashSet<Vec<u16>> = HashSet::new();
+    let mut parameter_names: HashSet<ast::Utf16String> = HashSet::new();
     let mut parameters_in_environment: usize = 0;
     for parameter in &function_data.parameters {
         match &parameter.binding {

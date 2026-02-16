@@ -29,7 +29,92 @@ use std::rc::Rc;
 // Source location
 // =============================================================================
 
-pub type Utf16String = Vec<u16>;
+/// A UTF-16 encoded string.
+///
+/// Wraps `Vec<u16>` to provide type safety and distinguish UTF-16 text
+/// from arbitrary `u16` buffers. Access the inner Vec via `.0` when
+/// Vec-specific methods like `push` or `extend` are needed.
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
+pub struct Utf16String(pub Vec<u16>);
+
+impl std::ops::Deref for Utf16String {
+    type Target = [u16];
+    fn deref(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Utf16String {
+    fn deref_mut(&mut self) -> &mut [u16] {
+        &mut self.0
+    }
+}
+
+impl From<Vec<u16>> for Utf16String {
+    fn from(v: Vec<u16>) -> Self {
+        Self(v)
+    }
+}
+
+impl From<&[u16]> for Utf16String {
+    fn from(s: &[u16]) -> Self {
+        Self(s.to_vec())
+    }
+}
+
+impl std::borrow::Borrow<[u16]> for Utf16String {
+    fn borrow(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+impl AsRef<[u16]> for Utf16String {
+    fn as_ref(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+impl PartialEq<[u16]> for Utf16String {
+    fn eq(&self, other: &[u16]) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&[u16]> for Utf16String {
+    fn eq(&self, other: &&[u16]) -> bool {
+        self.0.as_slice() == *other
+    }
+}
+
+impl PartialEq<Vec<u16>> for Utf16String {
+    fn eq(&self, other: &Vec<u16>) -> bool {
+        self.0 == *other
+    }
+}
+
+impl FromIterator<u16> for Utf16String {
+    fn from_iter<I: IntoIterator<Item = u16>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl<'a> IntoIterator for &'a Utf16String {
+    type Item = &'a u16;
+    type IntoIter = std::slice::Iter<'a, u16>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl Utf16String {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn as_slice(&self) -> &[u16] {
+        &self.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Position {
@@ -695,7 +780,7 @@ pub struct ScopeData {
     /// Function names hoisted from inner blocks via Annex B.3.3.
     /// The FDI should create `var` bindings initialized to `undefined`
     /// for each name.
-    pub annexb_function_names: Vec<Vec<u16>>,
+    pub annexb_function_names: Vec<Utf16String>,
     // Scope analysis insights, written by the scope collector after analyze().
     pub uses_this: bool,
     pub uses_this_from_environment: bool,

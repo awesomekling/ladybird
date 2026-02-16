@@ -16,6 +16,7 @@ use std::rc::Rc;
 use super::basic_block::{BasicBlock, SourceMapEntry};
 use super::instruction::Instruction;
 use super::operand::*;
+use crate::ast::Utf16String;
 
 /// Identifies an operand that auto-frees its register when the last
 /// clone is dropped.
@@ -74,7 +75,7 @@ pub enum BlockBoundaryType {
 /// A break/continue scope with its target label and language labels.
 pub struct LabelableScope {
     pub bytecode_target: Label,
-    pub language_label_set: Vec<Vec<u16>>,
+    pub language_label_set: Vec<Utf16String>,
     pub completion_register: Option<ScopedOperand>,
 }
 
@@ -110,7 +111,7 @@ pub struct FinallyJump {
 /// A local variable name with metadata.
 #[derive(Debug, Clone)]
 pub struct LocalVariable {
-    pub name: Vec<u16>,
+    pub name: Utf16String,
     pub is_lexically_declared: bool,
     pub is_initialized_during_declaration_instantiation: bool,
 }
@@ -137,21 +138,19 @@ pub struct Generator {
     undefined_constant: Option<ScopedOperand>,
     empty_constant: Option<ScopedOperand>,
     int32_constants: HashMap<i32, ScopedOperand>,
-    string_constants: HashMap<Vec<u16>, ScopedOperand>,
+    string_constants: HashMap<Utf16String, ScopedOperand>,
 
     // --- String/identifier/property tables ---
-    // These are Vec<Vec<u16>> (UTF-16 strings) that will be passed to
-    // FFI when creating the Executable.
-    pub string_table: Vec<Vec<u16>>,
-    pub identifier_table: Vec<Vec<u16>>,
-    pub property_key_table: Vec<Vec<u16>>,
+    pub string_table: Vec<Utf16String>,
+    pub identifier_table: Vec<Utf16String>,
+    pub property_key_table: Vec<Utf16String>,
     pub compiled_regexes: Vec<*mut std::ffi::c_void>,
 
     // --- Scope/unwind state ---
     pub boundaries: Vec<BlockBoundaryType>,
     pub continuable_scopes: Vec<LabelableScope>,
     pub breakable_scopes: Vec<LabelableScope>,
-    pub pending_labels: Vec<Vec<u16>>,
+    pub pending_labels: Vec<Utf16String>,
     pub lexical_environment_register_stack: Vec<ScopedOperand>,
     pub home_objects: Vec<ScopedOperand>,
 
@@ -210,7 +209,7 @@ pub struct Generator {
     // --- AnnexB function names ---
     // Names approved for AnnexB.3.3 hoisting by the scope collector.
     // Populated during FDI, checked in switch case codegen.
-    pub annexb_function_names: HashSet<Vec<u16>>,
+    pub annexb_function_names: HashSet<Utf16String>,
 
     // --- FFI context ---
     // These are set by the top-level compiler and passed through for
@@ -426,7 +425,7 @@ impl Generator {
         singleton_constant!(self, empty_constant, ConstantValue::Empty)
     }
 
-    pub fn add_constant_string(&mut self, value: Vec<u16>) -> ScopedOperand {
+    pub fn add_constant_string(&mut self, value: Utf16String) -> ScopedOperand {
         if let Some(op) = self.string_constants.get(&value) {
             return op.clone();
         }
@@ -452,19 +451,19 @@ impl Generator {
 
     pub fn intern_string(&mut self, s: &[u16]) -> StringTableIndex {
         let index = self.string_table.len() as u32;
-        self.string_table.push(s.to_vec());
+        self.string_table.push(Utf16String(s.to_vec()));
         StringTableIndex(index)
     }
 
     pub fn intern_identifier(&mut self, s: &[u16]) -> IdentifierTableIndex {
         let index = self.identifier_table.len() as u32;
-        self.identifier_table.push(s.to_vec());
+        self.identifier_table.push(Utf16String(s.to_vec()));
         IdentifierTableIndex(index)
     }
 
     pub fn intern_property_key(&mut self, s: &[u16]) -> PropertyKeyTableIndex {
         let index = self.property_key_table.len() as u32;
-        self.property_key_table.push(s.to_vec());
+        self.property_key_table.push(Utf16String(s.to_vec()));
         PropertyKeyTableIndex(index)
     }
 
@@ -679,7 +678,7 @@ impl Generator {
 
     // --- Break/continue scope management ---
 
-    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>, completion: Option<ScopedOperand>) {
+    pub fn begin_breakable_scope(&mut self, target: Label, label_set: Vec<Utf16String>, completion: Option<ScopedOperand>) {
         self.breakable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
@@ -693,7 +692,7 @@ impl Generator {
         self.breakable_scopes.pop();
     }
 
-    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Vec<u16>>, completion: Option<ScopedOperand>) {
+    pub fn begin_continuable_scope(&mut self, target: Label, label_set: Vec<Utf16String>, completion: Option<ScopedOperand>) {
         self.continuable_scopes.push(LabelableScope {
             bytecode_target: target,
             language_label_set: label_set,
@@ -884,7 +883,7 @@ impl Generator {
         let env_stack_len = self.lexical_environment_register_stack.len();
         let mut env_offset = env_stack_len;
 
-        let jumpable_scopes: Vec<(Label, Vec<Vec<u16>>, Option<ScopedOperand>)> = if is_break {
+        let jumpable_scopes: Vec<(Label, Vec<Utf16String>, Option<ScopedOperand>)> = if is_break {
             self.breakable_scopes
                 .iter()
                 .rev()
@@ -1343,7 +1342,7 @@ pub enum ConstantValue {
     Null,
     Undefined,
     Empty,
-    String(Vec<u16>),
+    String(Utf16String),
     BigInt(String),
 }
 

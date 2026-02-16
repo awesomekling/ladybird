@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("Unlabeled 'break' not allowed outside of a loop or switch statement");
         }
 
-        self.statement(start, StatementKind::Break { target_label: label })
+        self.statement(start, StatementKind::Break { target_label: label.map(Into::into) })
     }
 
     // https://tc39.es/ecma262/#sec-continue-statement
@@ -220,7 +220,7 @@ impl<'a> Parser<'a> {
 
         self.consume_or_insert_semicolon();
 
-        self.statement(start, StatementKind::Continue { target_label: label })
+        self.statement(start, StatementKind::Continue { target_label: label.map(Into::into) })
     }
 
     fn parse_debugger_statement(&mut self) -> Statement {
@@ -690,7 +690,7 @@ impl<'a> Parser<'a> {
             self.consume();
             let parameter = if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pattern = self.parse_binding_pattern();
-                let names_to_check: Vec<Vec<u16>> = self.pattern_bound_names.iter().map(|(n, _)| n.clone()).collect();
+                let names_to_check: Vec<Utf16String> = self.pattern_bound_names.iter().map(|(n, _)| n.clone()).collect();
                 for name in &names_to_check {
                     self.check_identifier_name_for_assignment_validity(name, false);
                 }
@@ -707,7 +707,7 @@ impl<'a> Parser<'a> {
                 let token = self.consume();
                 let value = self.token_value(&token).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
-                let id = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone()));
+                let id = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
                 self.scope_collector.register_identifier(id.clone(), &value, None);
                 self.scope_collector.add_catch_parameter_identifier(&value, id.clone());
                 CatchParameter::Identifier(id)
@@ -801,7 +801,7 @@ impl<'a> Parser<'a> {
         self.last_inner_label_is_iteration = is_iteration;
 
         Some(self.statement(start, StatementKind::Labelled {
-            label,
+            label: label.into(),
             item: Box::new(body),
         }))
     }

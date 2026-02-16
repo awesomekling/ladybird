@@ -38,7 +38,7 @@ use std::rc::Rc;
 
 use crate::ast::{
     BindingPattern, Expression, ExpressionKind, FunctionParameter, Identifier,
-    SourceRange, Statement, StatementKind, ScopeData, ProgramData,
+    SourceRange, Statement, StatementKind, ScopeData, ProgramData, Utf16String,
 };
 use crate::lexer::Lexer;
 use crate::scope_collector::{ScopeCollector, ScopeCollectorState};
@@ -64,7 +64,7 @@ pub struct ParsedParameters {
 
 /// Information about a single parameter name binding.
 pub struct ParamInfo {
-    pub name: Vec<u16>,
+    pub name: Utf16String,
     pub is_rest: bool,
     pub is_from_pattern: bool,
     pub identifier: Option<Rc<Identifier>>,
@@ -223,7 +223,7 @@ pub struct Parser<'a> {
     /// Caller drains this after calling parse_binding_pattern.
     /// Each entry is (name, identifier) — allows scope analysis to annotate
     /// binding pattern identifiers with local variable info.
-    pub(crate) pattern_bound_names: Vec<(Vec<u16>, Rc<Identifier>)>,
+    pub(crate) pattern_bound_names: Vec<(Utf16String, Rc<Identifier>)>,
 
     /// Set by parse_primary_expression when the result is a bare Identifier("eval").
     /// Read and cleared by parse_secondary_expression for the ParenOpen (call) case.
@@ -304,8 +304,8 @@ impl<'a> Parser<'a> {
         Statement::new(self.range_from(start), statement)
     }
 
-    pub(crate) fn make_identifier(&self, start: Position, name: Vec<u16>) -> Rc<Identifier> {
-        Rc::new(Identifier::new(self.range_from(start), name))
+    pub(crate) fn make_identifier(&self, start: Position, name: impl Into<Utf16String>) -> Rc<Identifier> {
+        Rc::new(Identifier::new(self.range_from(start), name.into()))
     }
 
     pub(crate) fn register_function_parameters_with_scope(
@@ -314,7 +314,7 @@ impl<'a> Parser<'a> {
         parameter_info: &[ParamInfo],
     ) {
         use crate::ast::FunctionParameterBinding;
-        let mut entries: Vec<(Vec<u16>, Option<Rc<Identifier>>, bool, bool)> = Vec::new();
+        let mut entries: Vec<(Utf16String, Option<Rc<Identifier>>, bool, bool)> = Vec::new();
         let mut info_index = 0;
         for parameter in parameters {
             match &parameter.binding {
@@ -642,7 +642,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             self.check_identifier_name_for_assignment_validity(name, force_strict);
-            if !seen_names.insert(name.as_slice()) {
+            if !seen_names.insert(&**name) {
                 let name_str = String::from_utf16_lossy(name);
                 self.syntax_error(&format!(
                     "Duplicate parameter '{}' not allowed in strict mode",

@@ -296,7 +296,7 @@ impl<'a> Parser<'a> {
                         self.flags.string_legacy_octal_escape_sequence_in_scope = true;
                     }
                 }
-                (self.expression(after_string, ExpressionKind::StringLiteral(value)), true)
+                (self.expression(after_string, ExpressionKind::StringLiteral(value.into())), true)
             }
 
             TokenType::NullLiteral => {
@@ -421,7 +421,7 @@ impl<'a> Parser<'a> {
                 let value = self.token_value(&token).to_vec();
                 (self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
                     range: self.range_from(start),
-                    name: value,
+                    name: value.into(),
                 })), true)
             }
 
@@ -442,7 +442,7 @@ impl<'a> Parser<'a> {
                 self.validate_regex_flags(&flags);
                 let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
                 (self.expression(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
-                    pattern, flags,
+                    pattern: pattern.into(), flags: flags.into(),
                     compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
                 })), true)
             }
@@ -466,7 +466,7 @@ impl<'a> Parser<'a> {
                 self.validate_regex_flags(&flags);
                 let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
                 (self.expression(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
-                    pattern, flags,
+                    pattern: pattern.into(), flags: flags.into(),
                     compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
                 })), true)
             }
@@ -631,7 +631,7 @@ impl<'a> Parser<'a> {
                     // C++ uses rule_start (period position) for property identifiers.
                     let property = self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
                         range: self.range_from(start),
-                        name: value,
+                        name: value.into(),
                     }));
                     (self.expression(start, ExpressionKind::Member {
                         object: Box::new(lhs),
@@ -944,7 +944,7 @@ impl<'a> Parser<'a> {
                         references.push(OptionalChainReference::PrivateMemberReference {
                             private_identifier: PrivateIdentifier {
                                 range: self.range_from(property_start),
-                                name: value,
+                                name: value.into(),
                             },
                             mode: OptionalChainMode::Optional,
                         });
@@ -991,7 +991,7 @@ impl<'a> Parser<'a> {
                     references.push(OptionalChainReference::PrivateMemberReference {
                         private_identifier: PrivateIdentifier {
                             range: self.range_from(property_start),
-                            name: value,
+                            name: value.into(),
                         },
                         mode: OptionalChainMode::NotOptional,
                     });
@@ -1317,7 +1317,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                (self.expression(after_string, ExpressionKind::StringLiteral(value.clone())), Some(value), is_proto, false)
+                (self.expression(after_string, ExpressionKind::StringLiteral(value.clone().into())), Some(value), is_proto, false)
             }
             TokenType::NumericLiteral => {
                 let token = self.consume_and_validate_numeric_literal();
@@ -1335,7 +1335,7 @@ impl<'a> Parser<'a> {
                 }
                 (self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
                     range: self.range_from(start),
-                    name: value.clone(),
+                    name: value.clone().into(),
                 })), Some(value), false, false)
             }
             _ => {
@@ -1345,12 +1345,12 @@ impl<'a> Parser<'a> {
                     let is_proto = value == proto_name;
                     // C++ uses the object expression start position for identifier-name keys.
                     let key_start = ident_pos_override.unwrap_or(start);
-                    let key = self.expression(key_start, ExpressionKind::StringLiteral(value.clone()));
+                    let key = self.expression(key_start, ExpressionKind::StringLiteral(value.clone().into()));
                     (key, Some(value), is_proto, false)
                 } else {
                     self.expected("property key");
                     self.consume();
-                    (self.expression(start, ExpressionKind::StringLiteral(Vec::new())), None, false, false)
+                    (self.expression(start, ExpressionKind::StringLiteral(Utf16String::new())), None, false, false)
                 }
             }
         }
@@ -1402,9 +1402,9 @@ impl<'a> Parser<'a> {
         let needs_leading_empty = !self.match_token(TokenType::TemplateLiteralString);
         if needs_leading_empty {
             if is_tagged {
-                raw_strings.push(Vec::new());
+                raw_strings.push(Utf16String::new());
             }
-            expressions.push(self.expression(start, ExpressionKind::StringLiteral(Vec::new())));
+            expressions.push(self.expression(start, ExpressionKind::StringLiteral(Utf16String::new())));
         }
 
         // For non-tagged templates, we collect parts as expressions (alternating
@@ -1421,9 +1421,9 @@ impl<'a> Parser<'a> {
                 let raw = self.token_value(&token).to_vec();
                 if is_tagged {
                     let raw_value = raw_template_value(&raw);
-                    raw_strings.push(raw_value);
+                    raw_strings.push(raw_value.into());
                     match self.process_template_escape_sequences(&raw) {
-                        Some(cooked) => expressions.push(self.expression(start, ExpressionKind::StringLiteral(cooked))),
+                        Some(cooked) => expressions.push(self.expression(start, ExpressionKind::StringLiteral(cooked.into()))),
                         None => expressions.push(self.expression(start, ExpressionKind::NullLiteral)),
                     }
                 } else {
@@ -1431,7 +1431,7 @@ impl<'a> Parser<'a> {
                     if has_octal {
                         self.syntax_error("Octal escape sequence not allowed in template literal");
                     }
-                    expressions.push(self.expression(start, ExpressionKind::StringLiteral(value)));
+                    expressions.push(self.expression(start, ExpressionKind::StringLiteral(value.into())));
                 }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
@@ -1440,9 +1440,9 @@ impl<'a> Parser<'a> {
                 self.consume_token(TokenType::TemplateLiteralExprEnd);
                 // After an expression, if no template string follows, insert empty.
                 if !self.match_token(TokenType::TemplateLiteralString) {
-                    expressions.push(self.expression(start, ExpressionKind::StringLiteral(Vec::new())));
+                    expressions.push(self.expression(start, ExpressionKind::StringLiteral(Utf16String::new())));
                     if is_tagged {
-                        raw_strings.push(Vec::new());
+                        raw_strings.push(Utf16String::new());
                     }
                 }
             } else if self.done() {
@@ -1772,7 +1772,7 @@ impl<'a> Parser<'a> {
                 if is_async && value == utf16!("await") {
                     self.syntax_error("'await' is a reserved identifier in async functions");
                 }
-                let binding = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone()));
+                let binding = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
                 parsed = ParsedParameters {
                     parameters: vec![FunctionParameter {
                         binding: FunctionParameterBinding::Identifier(binding.clone()),
@@ -1780,7 +1780,7 @@ impl<'a> Parser<'a> {
                         is_rest: false,
                     }],
                     function_length: 1,
-                    parameter_info: vec![ParamInfo { name: value, is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
+                    parameter_info: vec![ParamInfo { name: value.into(), is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
                     is_simple: true,
                 };
             } else {

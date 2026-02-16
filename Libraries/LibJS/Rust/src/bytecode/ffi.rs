@@ -9,6 +9,7 @@
 use std::ffi::c_void;
 
 use super::generator::{AssembledBytecode, ConstantValue, Generator};
+use crate::ast::Utf16String;
 
 /// Opaque pointer returned from rust_create_executable.
 pub type ExecutableHandle = *mut c_void;
@@ -437,10 +438,10 @@ pub unsafe fn create_executable(
 
 /// Convert a JS number to its UTF-16 string representation using the
 /// ECMA-262 Number::toString algorithm (via C++ runtime).
-pub fn js_number_to_utf16(value: f64) -> Vec<u16> {
+pub fn js_number_to_utf16(value: f64) -> Utf16String {
     let mut buffer = [0u16; 64];
     let len = unsafe { rust_number_to_utf16(value, buffer.as_mut_ptr(), buffer.len()) };
-    buffer[..len].to_vec()
+    Utf16String(buffer[..len].to_vec())
 }
 
 /// Compile a regex pattern+flags using the C++ regex engine.
