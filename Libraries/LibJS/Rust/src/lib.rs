@@ -251,12 +251,18 @@ pub unsafe extern "C" fn rust_compile_script(
     let program = parser.parse_program(false);
 
     if parser.has_errors() {
+        for msg in parser.error_messages() {
+            eprintln!("[rust_compile_script] parse error: {}", msg);
+        }
         return std::ptr::null_mut();
     }
 
     parser.scope_collector.analyze(false);
 
     if parser.scope_collector.has_errors() {
+        for err in parser.scope_collector.drain_errors() {
+            eprintln!("[rust_compile_script] scope error: {}", err.message);
+        }
         return std::ptr::null_mut();
     }
 
@@ -329,12 +335,18 @@ pub unsafe extern "C" fn rust_compile_eval(
     let program = parser.parse_program(starts_in_strict_mode);
 
     if parser.has_errors() {
+        for msg in parser.error_messages() {
+            eprintln!("[rust_compile_eval] parse error: {}", msg);
+        }
         return std::ptr::null_mut();
     }
 
     parser.scope_collector.analyze(true);
 
     if parser.scope_collector.has_errors() {
+        for err in parser.scope_collector.drain_errors() {
+            eprintln!("[rust_compile_eval] scope error: {}", err.message);
+        }
         return std::ptr::null_mut();
     }
 
@@ -748,16 +760,16 @@ fn for_each_bound_name(target: &ast::VariableDeclaratorTarget, f: &mut dyn FnMut
 fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnMut(&[u16])) {
     for entry in &pattern.entries {
         match &entry.alias {
-            ast::BindingEntryAlias::Empty => {
-                if let ast::BindingEntryName::Identifier(id) = &entry.name {
+            None => {
+                if let Some(ast::BindingEntryName::Identifier(id)) = &entry.name {
                     f(&id.name);
                 }
             }
-            ast::BindingEntryAlias::Identifier(id) => f(&id.name),
-            ast::BindingEntryAlias::BindingPattern(inner) => {
+            Some(ast::BindingEntryAlias::Identifier(id)) => f(&id.name),
+            Some(ast::BindingEntryAlias::BindingPattern(inner)) => {
                 for_each_bound_name_in_pattern(inner, f);
             }
-            ast::BindingEntryAlias::MemberExpression(_) => {}
+            Some(ast::BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
 }
