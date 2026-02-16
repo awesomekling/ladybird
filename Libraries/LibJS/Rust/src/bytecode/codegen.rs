@@ -474,7 +474,7 @@ pub fn generate_expression(
             };
 
             if *is_yield_from {
-                Some(generate_yield_from(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
+                Some(generate_yield_from(gen, value, &received_completion, &received_completion_type, &received_completion_value))
             } else {
                 // Match C++ YieldExpression::generate_bytecode: create continuation
                 // block, call generate_yield, then handle completion checking.
@@ -1065,7 +1065,6 @@ fn generate_yield_from(
     received_completion: &ScopedOperand,
     received_completion_type: &ScopedOperand,
     received_completion_value: &ScopedOperand,
-    preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
     let is_async = gen.is_in_async_generator_function();
 
@@ -1159,18 +1158,20 @@ fn generate_yield_from(
 
     // vi/vii. Yield IteratorValue(innerResult), receive new completion.
     gen.switch_to_basic_block(type_is_normal_not_done_block);
-    let current_value = gen.allocate_register();
-    emit_get_by_id(gen, &current_value, &inner_result, utf16!("value"), None);
+    {
+        let current_value = gen.allocate_register();
+        emit_get_by_id(gen, &current_value, &inner_result, utf16!("value"), None);
 
-    generate_yield(
-        gen,
-        Label(continuation_block as u32),
-        &current_value,
-        &received_completion,
-        &received_completion_type,
-        &received_completion_value,
-        false,
-    );
+        generate_yield(
+            gen,
+            Label(continuation_block as u32),
+            &current_value,
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+            false,
+        );
+    }
 
     // =========================================================================
     // b. Else if received.[[Type]] is throw, then
@@ -1252,17 +1253,19 @@ fn generate_yield_from(
 
     // 7/8. Yield IteratorValue(innerResult), receive new completion.
     gen.switch_to_basic_block(type_is_throw_not_done_block);
-    let yield_value = gen.allocate_register();
-    emit_get_by_id(gen, &yield_value, &inner_result, utf16!("value"), None);
-    generate_yield(
-        gen,
-        Label(continuation_block as u32),
-        &yield_value,
-        &received_completion,
-        &received_completion_type,
-        &received_completion_value,
-        false,
-    );
+    {
+        let yield_value = gen.allocate_register();
+        emit_get_by_id(gen, &yield_value, &inner_result, utf16!("value"), None);
+        generate_yield(
+            gen,
+            Label(continuation_block as u32),
+            &yield_value,
+            &received_completion,
+            &received_completion_type,
+            &received_completion_value,
+            false,
+        );
+    }
 
     // throw is undefined: close iterator, throw TypeError.
     gen.switch_to_basic_block(throw_method_undefined_block);
@@ -1447,9 +1450,7 @@ fn generate_yield_from(
     // Loop end: return the accumulated return_value.
     // =========================================================================
     gen.switch_to_basic_block(loop_end_block);
-    let dst = choose_dst(gen, preferred_dst);
-    gen.emit_mov(&dst, &return_value);
-    dst
+    return_value
 }
 
 /// Unified yield function matching C++ generate_yield().
