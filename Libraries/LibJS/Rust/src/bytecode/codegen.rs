@@ -4325,12 +4325,17 @@ fn generate_object_expression(
     // string/identifier keys that are not numeric indices). Simple literals can
     // benefit from shape caching. Numeric string keys like "0" are stored in
     // indexed storage rather than shape-based storage, so they can't use the fast path.
+    //
+    // NB: The C++ parser treats {["x"]: 1} identically to {"x": 1} at the AST level
+    // (both produce a StringLiteral key with is_computed=false). The Rust parser keeps
+    // is_computed=true for bracket-enclosed keys. We normalize here by treating
+    // StringLiteral keys as non-computed regardless of is_computed.
     let is_simple = !properties.is_empty() && properties.iter().all(|p| {
-        if p.property_type != ObjectPropertyType::KeyValue || p.is_computed {
+        if p.property_type != ObjectPropertyType::KeyValue {
             return false;
         }
         match &p.key.inner {
-            ExpressionKind::Identifier(_) => true,
+            ExpressionKind::Identifier(_) if !p.is_computed => true,
             ExpressionKind::StringLiteral(s) => !is_numeric_index_key(s),
             _ => false,
         }
@@ -4364,8 +4369,12 @@ fn generate_object_expression(
         // For non-string keys (computed, numeric, etc.), evaluate key before value
         // (spec evaluation order). C++ treats all non-StringLiteral keys the same:
         // generate key → ToPrimitiveWithStringHint → generate value → PutByValue.
-        let is_string_key = matches!(&property.key.inner, ExpressionKind::StringLiteral(_) | ExpressionKind::Identifier(_));
-        let computed_key = if property.is_computed || !is_string_key {
+        //
+        // NB: StringLiteral keys are always treated as non-computed (see is_simple comment).
+        let is_string_literal_key = matches!(&property.key.inner, ExpressionKind::StringLiteral(_));
+        let is_string_key = is_string_literal_key || matches!(&property.key.inner, ExpressionKind::Identifier(_));
+        let effectively_computed = property.is_computed && !is_string_literal_key;
+        let computed_key = if effectively_computed || !is_string_key {
             let key = generate_expression_or_undefined(&property.key, gen, None);
             gen.emit(Instruction::ToPrimitiveWithStringHint {
                 dst: key.operand(),
@@ -4378,7 +4387,7 @@ fn generate_object_expression(
 
         // Set pending LHS name for function name inference on non-computed properties.
         // ProtoSetter (__proto__) skips NamedEvaluation per spec.
-        if !property.is_computed && property.property_type != ObjectPropertyType::ProtoSetter {
+        if !effectively_computed && property.property_type != ObjectPropertyType::ProtoSetter {
             let base_name: Option<Utf16String> = match &property.key.inner {
                 ExpressionKind::StringLiteral(s) => Some(s.clone()),
                 ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
