@@ -6,6 +6,7 @@
 
 //! Declaration parsing: variables, functions, classes, imports, exports.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::ast::*;
@@ -166,12 +167,10 @@ impl<'a> Parser<'a> {
                 }
 
                 if kind != DeclarationKind::Var {
-                    let mut seen: Vec<&[u16]> = Vec::new();
+                    let mut seen: HashSet<&[u16]> = HashSet::new();
                     for (name, _) in &bound_names {
-                        if seen.contains(&name.as_slice()) {
+                        if !seen.insert(name.as_slice()) {
                             self.syntax_error("Duplicate parameter names in bindings");
-                        } else {
-                            seen.push(name);
                         }
                     }
                 }
@@ -916,6 +915,7 @@ impl<'a> Parser<'a> {
         let mut has_seen_default = false;
         let mut has_seen_rest = false;
         let mut parameter_info: Vec<ParamInfo> = Vec::new();
+        let mut seen_parameter_names: HashSet<Vec<u16>> = HashSet::new();
 
         // C++ uses the position at the start of parse_formal_parameters for all
         // parameter identifiers (i.e., the position of the first parameter).
@@ -933,27 +933,26 @@ impl<'a> Parser<'a> {
                 // It is a Syntax Error if IsSimpleParameterList is false and
                 // BoundNames of FormalParameters contains any duplicate elements.
                 // In strict mode, duplicates are always an error.
-                for previous in &parameter_info {
-                    if previous.name == value {
-                        if self.flags.strict_mode {
-                            let name_str = String::from_utf16_lossy(&value);
-                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
-                        } else if has_seen_default {
-                            let name_str = String::from_utf16_lossy(&value);
-                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with default parameter", name_str));
-                        } else if has_seen_rest {
-                            let name_str = String::from_utf16_lossy(&value);
-                            self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with rest parameter", name_str));
-                        }
-                        break;
+                if seen_parameter_names.contains(value.as_slice()) {
+                    if self.flags.strict_mode {
+                        let name_str = String::from_utf16_lossy(&value);
+                        self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
+                    } else if has_seen_default {
+                        let name_str = String::from_utf16_lossy(&value);
+                        self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with default parameter", name_str));
+                    } else if has_seen_rest {
+                        let name_str = String::from_utf16_lossy(&value);
+                        self.syntax_error(&format!("Duplicate parameter '{}' not allowed in function with rest parameter", name_str));
                     }
                 }
+                seen_parameter_names.insert(value.clone());
                 let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone().into()));
                 parameter_info.push(ParamInfo { name: value.into(), is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
                 for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
+                    seen_parameter_names.insert(n.0.clone());
                     parameter_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)

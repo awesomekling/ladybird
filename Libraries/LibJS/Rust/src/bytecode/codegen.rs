@@ -6940,6 +6940,7 @@ pub fn emit_function_declaration_instantiation(
 
     // Build parameter_names map and check for duplicates.
     let mut parameter_names: Vec<FdiParameterName> = Vec::new();
+    let mut seen_names: HashSet<Utf16String> = HashSet::new();
     let mut has_duplicates = false;
 
     for parameter in &function_data.parameters {
@@ -6947,15 +6948,14 @@ pub fn emit_function_declaration_instantiation(
             FunctionParameterBinding::Identifier(ident) => {
                 let name = ident.name.clone();
                 let is_local = ident.is_local();
-                let already_exists = parameter_names.iter().any(|p| p.name == name);
-                if already_exists {
+                if !seen_names.insert(name.clone()) {
                     has_duplicates = true;
                 } else {
                     parameter_names.push(FdiParameterName { name, is_local });
                 }
             }
             FunctionParameterBinding::BindingPattern(pattern) => {
-                collect_binding_pattern_names(pattern, &mut parameter_names, &mut has_duplicates);
+                collect_binding_pattern_names(pattern, &mut parameter_names, &mut seen_names, &mut has_duplicates);
             }
         }
     }
@@ -7416,6 +7416,7 @@ fn var_local_operand(gen: &mut Generator, local_type: LocalType, index: u32) -> 
 fn collect_binding_pattern_names(
     pattern: &BindingPattern,
     parameter_names: &mut Vec<FdiParameterName>,
+    seen_names: &mut HashSet<Utf16String>,
     has_duplicates: &mut bool,
 ) {
     for entry in &pattern.entries {
@@ -7424,21 +7425,21 @@ fn collect_binding_pattern_names(
             Some(BindingEntryAlias::Identifier(ident)) => {
                 let name = ident.name.clone();
                 let is_local = ident.is_local();
-                if parameter_names.iter().any(|p| p.name == name) {
+                if !seen_names.insert(name.clone()) {
                     *has_duplicates = true;
                 } else {
                     parameter_names.push(FdiParameterName { name, is_local });
                 }
             }
             Some(BindingEntryAlias::BindingPattern(sub_pattern)) => {
-                collect_binding_pattern_names(sub_pattern, parameter_names, has_duplicates);
+                collect_binding_pattern_names(sub_pattern, parameter_names, seen_names, has_duplicates);
             }
             None => {
                 // No alias — the name itself is the binding.
                 if let Some(BindingEntryName::Identifier(ident)) = &entry.name {
                     let name = ident.name.clone();
                     let is_local = ident.is_local();
-                    if parameter_names.iter().any(|p| p.name == name) {
+                    if !seen_names.insert(name.clone()) {
                         *has_duplicates = true;
                     } else {
                         parameter_names.push(FdiParameterName { name, is_local });
