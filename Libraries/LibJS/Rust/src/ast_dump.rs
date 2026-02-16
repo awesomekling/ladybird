@@ -270,14 +270,6 @@ fn declaration_kind_to_string(kind: DeclarationKind) -> &'static str {
     }
 }
 
-fn declaration_kind_to_ident_string(kind: DeclarationKind) -> &'static str {
-    match kind {
-        DeclarationKind::Var => "var",
-        DeclarationKind::Let => "let",
-        DeclarationKind::Const => "const",
-    }
-}
-
 fn class_method_kind_to_string(kind: ClassMethodKind) -> &'static str {
     match kind {
         ClassMethodKind::Method => "method",
@@ -1440,7 +1432,7 @@ fn dump_identifier(ident: &Identifier, range: &SourceRange, state: &DumpState) {
     if let Some(declaration_kind) = ident.declaration_kind.get() {
         desc.push_str(&format!(
             " {}",
-            color_op(state, declaration_kind_to_ident_string(declaration_kind))
+            color_op(state, declaration_kind_to_string(declaration_kind))
         ));
     }
     if ident.is_inside_scope_with_eval.get() {

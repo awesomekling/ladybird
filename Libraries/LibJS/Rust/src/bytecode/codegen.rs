@@ -931,7 +931,6 @@ enum ClassElementKind {
 
 /// Iterator hint (ABI-compatible).
 #[repr(u32)]
-#[allow(dead_code)]
 enum IteratorHint {
     Sync = 0,
     Async = 1,
@@ -1221,7 +1220,7 @@ fn generate_yield_from(
     let iterator = gen.allocate_register();
     let next_method = gen.allocate_register();
     let iterator_done_property = gen.allocate_register();
-    let hint: u32 = if is_async { 1 } else { 0 };
+    let hint = if is_async { IteratorHint::Async } else { IteratorHint::Sync } as u32;
     gen.emit(Instruction::GetIterator {
         dst_iterator_object: iterator.operand(),
         dst_iterator_next: next_method.operand(),
@@ -5662,7 +5661,7 @@ fn generate_for_of_statement_inner(
         dst_iterator_next: iterator_next_method.operand(),
         dst_iterator_done: iterator_done.operand(),
         iterable: object.operand(),
-        hint: if is_await { 1 } else { 0 },
+        hint: if is_await { IteratorHint::Async } else { IteratorHint::Sync } as u32,
     });
 
     // Drop `object` to free its register, matching C++ where the rhs ScopedOperand
@@ -6979,13 +6978,6 @@ pub fn emit_function_declaration_instantiation(
             arguments_object_needed = false;
         }
     }
-
-    // Check if arguments object needs an environment binding (not a local variable).
-    let _arguments_object_needs_binding = arguments_object_needed
-        && !gen
-            .local_variables
-            .iter()
-            .any(|lv| lv.name == utf16!("arguments") && !lv.is_lexically_declared);
 
     // --- Step 1: Parameter scope for parameter expressions ---
 
