@@ -1092,10 +1092,17 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
     if (!computed_values || !layout_node())
         return {};
 
-    // Create a temporary ComputedProperties from the stored ComputedValues
-    // so we can re-resolve inherited and pre-absolutized property values.
-    auto computed_properties = CSS::StyleComputer::create_computed_properties_from_computed_values(
-        *computed_values, m_animated_property_data.ptr());
+    auto& mutable_values = static_cast<CSS::MutableComputedValues&>(ensure_computed_values());
+
+    // Helper to get the effective value of a property, applying animation overlay.
+    auto effective_value = [&](CSS::PropertyID property_id) -> RefPtr<CSS::StyleValue const> {
+        if (m_animated_property_data
+            && (!mutable_values.is_property_important(property_id) || m_animated_property_data->is_result_of_transition(property_id))) {
+            if (auto animated_value = m_animated_property_data->values.get(property_id); animated_value.has_value())
+                return *animated_value.value();
+        }
+        return mutable_values.property_value(property_id);
+    };
 
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
@@ -1104,34 +1111,50 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
     // Re-resolve properties whose cascaded values depend on inherited style
     // (font-relative lengths, bolder/lighter, larger/smaller).
     for (auto const& [property_id, preabsolutized_value] : m_pre_absolutized_values) {
-        RefPtr old_value = computed_properties->property(property_id);
-        computed_properties->set_property_without_modifying_flags(property_id, preabsolutized_value);
+        RefPtr old_value = effective_value(property_id);
+        mutable_values.set_property_value(property_id, preabsolutized_value);
         property_values_affected_by_inherited_style.set(to_underlying(property_id), old_value);
     }
 
     for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
         auto property_id = static_cast<CSS::PropertyID>(i);
 
-        if (!computed_properties->is_property_inherited(property_id))
+        if (!mutable_values.is_property_inherited(property_id))
             continue;
 
-        RefPtr old_value = computed_properties->property(property_id);
+        RefPtr old_value = effective_value(property_id);
 
-        auto& animated_data = computed_properties->mutable_animated_property_data();
-        if (animated_data.is_inherited(property_id) || !animated_data.values.contains(property_id)) {
-            if (auto new_animated_value = CSS::StyleComputer::get_animated_inherit_value(property_id, { *this }); new_animated_value.has_value())
-                animated_data.set(property_id, new_animated_value->value, new_animated_value->is_result_of_transition, true);
-            else if (animated_data.values.contains(property_id))
-                animated_data.remove(property_id);
+        if (m_animated_property_data) {
+            if (m_animated_property_data->is_inherited(property_id) || !m_animated_property_data->values.contains(property_id)) {
+                if (auto new_animated_value = CSS::StyleComputer::get_animated_inherit_value(property_id, { *this }); new_animated_value.has_value())
+                    m_animated_property_data->set(property_id, new_animated_value->value, new_animated_value->is_result_of_transition, true);
+                else if (m_animated_property_data->values.contains(property_id))
+                    m_animated_property_data->remove(property_id);
+            }
         }
 
         RefPtr new_value = CSS::StyleComputer::get_non_animated_inherit_value(property_id, { *this });
-        computed_properties->set_property(property_id, *new_value, CSS::ComputedProperties::Inherited::Yes);
-        invalidation |= CSS::compute_property_invalidation(property_id, old_value, computed_properties->property(property_id));
+        mutable_values.set_property_value(property_id, *new_value);
+        mutable_values.set_property_inherited(property_id, true);
+        invalidation |= CSS::compute_property_invalidation(property_id, old_value, effective_value(property_id));
     }
 
     if (invalidation.is_none() && property_values_affected_by_inherited_style.is_empty())
         return invalidation;
+
+    // Build a temporary ComputedProperties from the updated property values
+    // so we can run property computation and populate typed fields.
+    auto computed_properties = adopt_ref(*new CSS::ComputedProperties);
+    for (auto i = to_underlying(CSS::first_longhand_property_id); i <= to_underlying(CSS::last_longhand_property_id); ++i) {
+        auto property_id = static_cast<CSS::PropertyID>(i);
+        if (auto value = mutable_values.property_value(property_id)) {
+            computed_properties->set_property(property_id, value.release_nonnull(),
+                mutable_values.is_property_inherited(property_id) ? CSS::ComputedProperties::Inherited::Yes : CSS::ComputedProperties::Inherited::No,
+                mutable_values.is_property_important(property_id) ? CSS::Important::Yes : CSS::Important::No);
+        }
+    }
+    if (m_animated_property_data)
+        computed_properties->set_external_animated_data(m_animated_property_data.ptr());
 
     AbstractElement abstract_element { *this };
 
@@ -1145,7 +1168,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_inherited_style()
     if (invalidation.is_none())
         return invalidation;
 
-    CSS::StyleComputer::populate_computed_values(static_cast<CSS::MutableComputedValues&>(ensure_computed_values()), *computed_properties, document());
+    CSS::StyleComputer::populate_computed_values(mutable_values, *computed_properties, document());
     layout_node()->apply_style();
     return invalidation;
 }
