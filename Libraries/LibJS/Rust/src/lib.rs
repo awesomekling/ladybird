@@ -93,6 +93,17 @@ use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 
+/// Create a UTF-16 slice from a raw pointer, returning None if the pointer is null.
+unsafe fn source_from_raw(source: *const u16, len: usize) -> Option<&'static [u16]> {
+    if source.is_null() {
+        if len > 0 {
+            eprintln!("source_from_raw: null pointer with non-zero length {len}");
+        }
+        return None;
+    }
+    Some(std::slice::from_raw_parts(source, len))
+}
+
 /// Log parser and scope collector errors, returning true if any were found.
 fn check_errors(parser: &mut Parser, context: &str) -> bool {
     if parser.has_errors() {
@@ -204,7 +215,9 @@ pub unsafe extern "C" fn rust_compile_program(
     allow_super_constructor_call: bool,
     in_class_field_initializer: bool,
 ) -> *mut c_void {
-    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let Some(source_slice) = source_from_raw(source, source_len) else {
+        return std::ptr::null_mut();
+    };
     let pt = match program_type {
         0 => ProgramType::Script,
         1 => ProgramType::Module,
@@ -266,7 +279,9 @@ pub unsafe extern "C" fn rust_compile_script(
     dump_ast: bool,
     use_color: bool,
 ) -> *mut c_void {
-    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let Some(source_slice) = source_from_raw(source, source_len) else {
+        return std::ptr::null_mut();
+    };
     let mut parser = Parser::new(source_slice, ProgramType::Script);
 
     let program = parser.parse_program(false);
@@ -328,7 +343,9 @@ pub unsafe extern "C" fn rust_compile_eval(
     allow_super_constructor_call: bool,
     in_class_field_initializer: bool,
 ) -> *mut c_void {
-    let source_slice = std::slice::from_raw_parts(source, source_len);
+    let Some(source_slice) = source_from_raw(source, source_len) else {
+        return std::ptr::null_mut();
+    };
     let mut parser = Parser::new(source_slice, ProgramType::Script);
     parser.initiated_by_eval = true;
     parser.in_eval_function_context = in_eval_function_context;
@@ -406,7 +423,9 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
             ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
         }
-        let parameters_slice = std::slice::from_raw_parts(parameters_source, parameters_source_len);
+        let Some(parameters_slice) = source_from_raw(parameters_source, parameters_source_len) else {
+            return std::ptr::null_mut();
+        };
         validate_src.extend_from_slice(parameters_slice);
         validate_src.extend_from_slice(utf16!(") {}"));
         let mut parser = Parser::new(&validate_src, ProgramType::Script);
@@ -425,7 +444,9 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test() {")),
             ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test() {")),
         }
-        let body_slice = std::slice::from_raw_parts(body_source, body_source_len);
+        let Some(body_slice) = source_from_raw(body_source, body_source_len) else {
+            return std::ptr::null_mut();
+        };
         validate_src.extend_from_slice(body_slice);
         validate_src.extend_from_slice(utf16!("}"));
         let mut parser = Parser::new(&validate_src, ProgramType::Script);
@@ -435,7 +456,9 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         }
     }
 
-    let full_slice = std::slice::from_raw_parts(full_source, full_source_len);
+    let Some(full_slice) = source_from_raw(full_source, full_source_len) else {
+        return std::ptr::null_mut();
+    };
     let mut parser = Parser::new(full_slice, ProgramType::Script);
     let program = parser.parse_program(false);
 
