@@ -461,6 +461,12 @@ pub fn generate_expression(
             argument,
             is_yield_from,
         } => {
+            // Match C++ YieldExpression::generate_bytecode which allocates
+            // completion registers BEFORE evaluating the argument.
+            let received_completion = gen.allocate_register();
+            let received_completion_type = gen.allocate_register();
+            let received_completion_value = gen.allocate_register();
+
             let value = if let Some(argument) = argument {
                 generate_expression_or_undefined(argument, gen, None)
             } else {
@@ -468,13 +474,13 @@ pub fn generate_expression(
             };
 
             if *is_yield_from {
-                Some(generate_yield_from(gen, value, preferred_dst))
+                Some(generate_yield_from(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
             } else if !gen.is_in_async_generator_function() {
                 // Regular generator: yield + completion protocol.
-                Some(generate_regular_yield(gen, value, preferred_dst))
+                Some(generate_regular_yield(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
             } else {
                 // Async generator: full yield protocol.
-                Some(generate_async_generator_yield(gen, value, preferred_dst))
+                Some(generate_async_generator_yield(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
             }
         }
 
@@ -1004,6 +1010,9 @@ fn generate_await_with_completions(
 fn generate_regular_yield(
     gen: &mut Generator,
     value: ScopedOperand,
+    received_completion: &ScopedOperand,
+    received_completion_type: &ScopedOperand,
+    received_completion_value: &ScopedOperand,
     _preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
     let continuation = gen.make_block();
@@ -1014,9 +1023,6 @@ fn generate_regular_yield(
     gen.switch_to_basic_block(continuation);
 
     // Save the accumulator (CompletionCell) and extract type + value.
-    let received_completion = gen.allocate_register();
-    let received_completion_type = gen.allocate_register();
-    let received_completion_value = gen.allocate_register();
     let acc = gen.accumulator();
     gen.emit_mov(&received_completion, &acc);
     gen.emit(Instruction::GetCompletionFields {
@@ -1064,7 +1070,7 @@ fn generate_regular_yield(
     // Return received_completion_value directly (matching C++) to avoid an
     // unnecessary register copy.
     gen.switch_to_basic_block(normal_block);
-    received_completion_value
+    received_completion_value.clone()
 }
 
 /// Full async generator yield protocol (AsyncGeneratorYield + UnwrapYieldResumption).
@@ -1079,11 +1085,11 @@ fn generate_regular_yield(
 fn generate_async_generator_yield(
     gen: &mut Generator,
     value: ScopedOperand,
+    received_completion: &ScopedOperand,
+    received_completion_type: &ScopedOperand,
+    received_completion_value: &ScopedOperand,
     preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
-    let received_completion = gen.allocate_register();
-    let received_completion_type = gen.allocate_register();
-    let received_completion_value = gen.allocate_register();
 
     // Step 1: Await the value before yielding.
     let awaited_value = generate_await_with_completions(
@@ -1208,13 +1214,12 @@ fn generate_async_generator_yield(
 fn generate_yield_from(
     gen: &mut Generator,
     value: ScopedOperand,
+    received_completion: &ScopedOperand,
+    received_completion_type: &ScopedOperand,
+    received_completion_value: &ScopedOperand,
     preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
     let is_async = gen.is_in_async_generator_function();
-
-    let received_completion = gen.allocate_register();
-    let received_completion_type = gen.allocate_register();
-    let received_completion_value = gen.allocate_register();
 
     // 4. Let iteratorRecord be ? GetIterator(value, generatorKind).
     let iterator = gen.allocate_register();
