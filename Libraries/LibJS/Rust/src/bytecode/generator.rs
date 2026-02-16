@@ -1001,8 +1001,32 @@ impl Generator {
         self.current_finally_context = saved_ctx;
     }
 
+    /// Walk the boundary stack and emit SetLexicalEnvironment instructions
+    /// for each LeaveLexicalEnvironment boundary, restoring the parent
+    /// environment. Stops at ReturnToFinally since the finally handler
+    /// takes care of further unwinding.
+    pub fn perform_needed_unwinds(&mut self) {
+        let mut env_stack_offset = self.lexical_environment_register_stack.len();
+        for i in (0..self.boundaries.len()).rev() {
+            match self.boundaries[i] {
+                BlockBoundaryType::LeaveLexicalEnvironment => {
+                    env_stack_offset -= 1;
+                    let parent_env = self.lexical_environment_register_stack[env_stack_offset - 1].clone();
+                    self.emit(Instruction::SetLexicalEnvironment {
+                        environment: parent_env.operand(),
+                    });
+                }
+                BlockBoundaryType::ReturnToFinally => {
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Generate a return, routing through FinallyContext if needed.
     pub fn generate_return(&mut self, value: &ScopedOperand) {
+        self.perform_needed_unwinds();
         if let Some(index) = self.current_finally_context {
             let ctx = &self.finally_contexts[index];
             let completion_value = ctx.completion_value.clone();

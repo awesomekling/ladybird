@@ -709,6 +709,7 @@ pub fn generate_statement(
         // === Throw ===
         StatementKind::Throw(expression) => {
             let val = generate_expression(expression, gen, None)?;
+            gen.perform_needed_unwinds();
             gen.emit(Instruction::Throw { src: val.operand() });
             None
         }
@@ -6836,14 +6837,9 @@ fn generate_try_statement(
     }
 
     // Switch to the next block for code after the try statement.
-    if let Some(nb) = next_block {
-        gen.switch_to_basic_block(nb);
-    } else {
-        // No next block means all paths through try are terminated (return/throw).
-        // Create a dead block to keep the generator pointing somewhere valid.
-        let dead = gen.make_block();
-        gen.switch_to_basic_block(dead);
-    }
+    // When next_block is None, all paths are terminated; switch back to
+    // saved_block (which is already terminated) so no dead block is emitted.
+    gen.switch_to_basic_block(next_block.unwrap_or(saved_block));
 
     if gen.must_propagate_completion
         && completion.is_none() {
