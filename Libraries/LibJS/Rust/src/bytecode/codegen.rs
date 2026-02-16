@@ -475,12 +475,65 @@ pub fn generate_expression(
 
             if *is_yield_from {
                 Some(generate_yield_from(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
-            } else if !gen.is_in_async_generator_function() {
-                // Regular generator: yield + completion protocol.
-                Some(generate_regular_yield(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
             } else {
-                // Async generator: full yield protocol.
-                Some(generate_async_generator_yield(gen, value, &received_completion, &received_completion_type, &received_completion_value, preferred_dst))
+                // Match C++ YieldExpression::generate_bytecode: create continuation
+                // block, call generate_yield, then handle completion checking.
+                let continuation_block = gen.make_block();
+
+                generate_yield(
+                    gen,
+                    Label(continuation_block as u32),
+                    &value,
+                    &received_completion,
+                    &received_completion_type,
+                    &received_completion_value,
+                    gen.is_in_async_generator_function(),
+                );
+
+                gen.switch_to_basic_block(continuation_block);
+
+                let acc = gen.accumulator();
+                gen.emit_mov(&received_completion, &acc);
+                gen.emit(Instruction::GetCompletionFields {
+                    type_dst: received_completion_type.operand(),
+                    value_dst: received_completion_value.operand(),
+                    completion: received_completion.operand(),
+                });
+
+                let normal_block = gen.make_block();
+                let throw_cont = gen.make_block();
+                let type_is_normal = gen.allocate_register();
+                let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
+                gen.emit(Instruction::StrictlyEquals {
+                    dst: type_is_normal.operand(),
+                    lhs: received_completion_type.operand(),
+                    rhs: normal_type.operand(),
+                });
+                gen.emit_jump_if(&type_is_normal, Label(normal_block as u32), Label(throw_cont as u32));
+
+                let throw_value_block = gen.make_block();
+                let return_value_block = gen.make_block();
+
+                gen.switch_to_basic_block(throw_cont);
+                let type_is_throw = gen.allocate_register();
+                let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
+                gen.emit(Instruction::StrictlyEquals {
+                    dst: type_is_throw.operand(),
+                    lhs: received_completion_type.operand(),
+                    rhs: throw_type.operand(),
+                });
+                gen.emit_jump_if(&type_is_throw, Label(throw_value_block as u32), Label(return_value_block as u32));
+
+                gen.switch_to_basic_block(throw_value_block);
+                gen.emit(Instruction::Throw {
+                    src: received_completion_value.operand(),
+                });
+
+                gen.switch_to_basic_block(return_value_block);
+                gen.generate_return(&received_completion_value);
+
+                gen.switch_to_basic_block(normal_block);
+                Some(received_completion_value)
             }
         }
 
@@ -1000,211 +1053,6 @@ fn generate_await_with_completions(
     received_completion_value.clone()
 }
 
-/// Regular generator yield with completion protocol.
-///
-/// After the yield resumes, the accumulator contains a CompletionCell.
-/// We extract the completion type and value, then branch:
-/// - Normal: continue with the extracted value
-/// - Throw: throw the value
-/// - Return: yield the value without continuation (done)
-fn generate_regular_yield(
-    gen: &mut Generator,
-    value: ScopedOperand,
-    received_completion: &ScopedOperand,
-    received_completion_type: &ScopedOperand,
-    received_completion_value: &ScopedOperand,
-    _preferred_dst: Option<&ScopedOperand>,
-) -> ScopedOperand {
-    let continuation = gen.make_block();
-    gen.emit(Instruction::Yield {
-        continuation_label: Some(Label(continuation as u32)),
-        value: value.operand(),
-    });
-    gen.switch_to_basic_block(continuation);
-
-    // Save the accumulator (CompletionCell) and extract type + value.
-    let acc = gen.accumulator();
-    gen.emit_mov(&received_completion, &acc);
-    gen.emit(Instruction::GetCompletionFields {
-        type_dst: received_completion_type.operand(),
-        value_dst: received_completion_value.operand(),
-        completion: received_completion.operand(),
-    });
-
-    // Check: type == Normal(1)?
-    let normal_block = gen.make_block();
-    let not_normal_block = gen.make_block();
-    let type_is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
-    gen.emit(Instruction::StrictlyEquals {
-        dst: type_is_normal.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: normal_type.operand(),
-    });
-    gen.emit_jump_if(&type_is_normal, Label(normal_block as u32), Label(not_normal_block as u32));
-
-    // Not normal: check Throw(5) vs Return(4).
-    gen.switch_to_basic_block(not_normal_block);
-    let throw_block = gen.make_block();
-    let return_block = gen.make_block();
-    let type_is_throw = gen.allocate_register();
-    let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
-    gen.emit(Instruction::StrictlyEquals {
-        dst: type_is_throw.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: throw_type.operand(),
-    });
-    gen.emit_jump_if(&type_is_throw, Label(throw_block as u32), Label(return_block as u32));
-
-    // Throw block: throw the value.
-    gen.switch_to_basic_block(throw_block);
-    gen.emit(Instruction::Throw {
-        src: received_completion_value.operand(),
-    });
-
-    // Return block: route through finally context if active, else yield done.
-    gen.switch_to_basic_block(return_block);
-    gen.generate_return(&received_completion_value);
-
-    // Normal block: the yield expression evaluates to the extracted value.
-    // Return received_completion_value directly (matching C++) to avoid an
-    // unnecessary register copy.
-    gen.switch_to_basic_block(normal_block);
-    received_completion_value.clone()
-}
-
-/// Full async generator yield protocol (AsyncGeneratorYield + UnwrapYieldResumption).
-///
-/// 1. Await the value before yielding
-/// 2. Yield the awaited value
-/// 3. On resume, handle AsyncGeneratorUnwrapYieldResumption:
-///    - If not return: jump to main continuation with the completion
-///    - If return: await the return value, then handle throw/normal
-/// 4. At main continuation, extract completion type/value
-/// 5. Normal → return value, Throw → throw, Return → yield-return
-fn generate_async_generator_yield(
-    gen: &mut Generator,
-    value: ScopedOperand,
-    received_completion: &ScopedOperand,
-    received_completion_type: &ScopedOperand,
-    received_completion_value: &ScopedOperand,
-    preferred_dst: Option<&ScopedOperand>,
-) -> ScopedOperand {
-
-    // Step 1: Await the value before yielding.
-    let awaited_value = generate_await_with_completions(
-        gen, &value,
-        &received_completion, &received_completion_type, &received_completion_value,
-    );
-
-    // Step 2: Yield the awaited value.
-    let unwrap_block = gen.make_block();
-    gen.emit(Instruction::Yield {
-        continuation_label: Some(Label(unwrap_block as u32)),
-        value: awaited_value.operand(),
-    });
-    gen.switch_to_basic_block(unwrap_block);
-
-    // Step 3: AsyncGeneratorUnwrapYieldResumption.
-    // Get the completion from the accumulator.
-    let acc = gen.accumulator();
-    gen.emit_mov(&received_completion, &acc);
-    gen.emit(Instruction::GetCompletionFields {
-        type_dst: received_completion_type.operand(),
-        value_dst: received_completion_value.operand(),
-        completion: received_completion.operand(),
-    });
-
-    // If resumptionValue.[[Type]] is not return, jump to main continuation.
-    let main_continuation = gen.make_block();
-    let return_block = gen.make_block();
-    let is_not_return = gen.allocate_register();
-    let return_type = gen.add_constant_number(CompletionType::Return.to_f64());
-    gen.emit(Instruction::StrictlyInequals {
-        dst: is_not_return.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: return_type.operand(),
-    });
-    gen.emit_jump_if(&is_not_return, Label(main_continuation as u32), Label(return_block as u32));
-
-    // Return path: Await(resumptionValue.[[Value]]).
-    gen.switch_to_basic_block(return_block);
-    generate_await_with_completions(
-        gen, &received_completion_value,
-        &received_completion, &received_completion_type, &received_completion_value,
-    );
-
-    // If awaited.[[Type]] is throw, jump to main continuation (which will handle it).
-    let awaited_normal_block = gen.make_block();
-    let is_throw = gen.allocate_register();
-    let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
-    gen.emit(Instruction::StrictlyEquals {
-        dst: is_throw.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: throw_type.operand(),
-    });
-    gen.emit_jump_if(&is_throw, Label(main_continuation as u32), Label(awaited_normal_block as u32));
-
-    // awaited.[[Type]] is normal: set type to Return and jump to main continuation.
-    gen.switch_to_basic_block(awaited_normal_block);
-    gen.emit(Instruction::SetCompletionType {
-        completion: received_completion.operand(),
-        completion_type: CompletionType::Return as u32,
-    });
-    gen.emit(Instruction::Jump {
-        target: Label(main_continuation as u32),
-    });
-
-    // Step 4: Main continuation.
-    gen.switch_to_basic_block(main_continuation);
-    gen.emit_mov(&received_completion, &acc);
-    gen.emit(Instruction::GetCompletionFields {
-        type_dst: received_completion_type.operand(),
-        value_dst: received_completion_value.operand(),
-        completion: received_completion.operand(),
-    });
-
-    // Step 5: Check completion type.
-    let normal_cont = gen.make_block();
-    let throw_cont = gen.make_block();
-    let is_normal = gen.allocate_register();
-    let normal_type = gen.add_constant_number(CompletionType::Normal.to_f64());
-    gen.emit(Instruction::StrictlyEquals {
-        dst: is_normal.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: normal_type.operand(),
-    });
-    gen.emit_jump_if(&is_normal, Label(normal_cont as u32), Label(throw_cont as u32));
-
-    // Throw/return path.
-    gen.switch_to_basic_block(throw_cont);
-    let return_value_block = gen.make_block();
-    let throw_value_block = gen.make_block();
-    let is_throw2 = gen.allocate_register();
-    gen.emit(Instruction::StrictlyEquals {
-        dst: is_throw2.operand(),
-        lhs: received_completion_type.operand(),
-        rhs: throw_type.operand(),
-    });
-    gen.emit_jump_if(&is_throw2, Label(throw_value_block as u32), Label(return_value_block as u32));
-
-    // Throw: re-throw the value.
-    gen.switch_to_basic_block(throw_value_block);
-    gen.emit(Instruction::Throw {
-        src: received_completion_value.operand(),
-    });
-
-    // Return: route through finally context if active, else yield done.
-    gen.switch_to_basic_block(return_value_block);
-    gen.generate_return(&received_completion_value);
-
-    // Normal: return the value.
-    gen.switch_to_basic_block(normal_cont);
-    let dst = choose_dst(gen, preferred_dst);
-    gen.emit_mov(&dst, &received_completion_value);
-    dst
-}
-
 /// Yield* (yield from) delegation.
 ///
 /// Implements the iterator delegation protocol from
@@ -1314,14 +1162,14 @@ fn generate_yield_from(
     let current_value = gen.allocate_register();
     emit_get_by_id(gen, &current_value, &inner_result, utf16!("value"), None);
 
-    generate_yield_for_yield_from(
+    generate_yield(
         gen,
         Label(continuation_block as u32),
         &current_value,
         &received_completion,
         &received_completion_type,
         &received_completion_value,
-        is_async,
+        false,
     );
 
     // =========================================================================
@@ -1406,14 +1254,14 @@ fn generate_yield_from(
     gen.switch_to_basic_block(type_is_throw_not_done_block);
     let yield_value = gen.allocate_register();
     emit_get_by_id(gen, &yield_value, &inner_result, utf16!("value"), None);
-    generate_yield_for_yield_from(
+    generate_yield(
         gen,
         Label(continuation_block as u32),
         &yield_value,
         &received_completion,
         &received_completion_type,
         &received_completion_value,
-        is_async,
+        false,
     );
 
     // throw is undefined: close iterator, throw TypeError.
@@ -1570,14 +1418,14 @@ fn generate_yield_from(
     gen.switch_to_basic_block(type_is_return_not_done_block);
     let received = gen.allocate_register();
     emit_get_by_id(gen, &received, &inner_return_result, utf16!("value"), None);
-    generate_yield_for_yield_from(
+    generate_yield(
         gen,
         Label(continuation_block as u32),
         &received,
         &received_completion,
         &received_completion_type,
         &received_completion_value,
-        is_async,
+        false,
     );
 
     // =========================================================================
@@ -1604,22 +1452,23 @@ fn generate_yield_from(
     dst
 }
 
-/// Yield within yield* delegation, handling both sync and async generators.
+/// Unified yield function matching C++ generate_yield().
 ///
-/// For sync generators: just emit Yield to the continuation label.
-/// For async generators: emit Yield, then handle AsyncGeneratorUnwrapYieldResumption
-/// (if type is return, await the value, adjust type accordingly).
-fn generate_yield_for_yield_from(
+/// For non-async generators: just emits a Yield instruction.
+/// For async generators: optionally awaits the argument first, then yields,
+/// then handles AsyncGeneratorUnwrapYieldResumption (check return type,
+/// await return value, re-classify).
+/// Jumps to continuation_label for the "not return" and "throw after await" paths.
+fn generate_yield(
     gen: &mut Generator,
     continuation_label: Label,
     argument: &ScopedOperand,
     received_completion: &ScopedOperand,
     received_completion_type: &ScopedOperand,
     received_completion_value: &ScopedOperand,
-    is_async: bool,
+    await_before_yield: bool,
 ) {
-    if !is_async {
-        // Sync generator: just yield directly.
+    if !gen.is_in_async_generator_function() {
         gen.emit(Instruction::Yield {
             continuation_label: Some(continuation_label),
             value: argument.operand(),
@@ -1627,7 +1476,16 @@ fn generate_yield_for_yield_from(
         return;
     }
 
-    // Async generator: Yield, then UnwrapYieldResumption.
+    let argument = if await_before_yield {
+        generate_await_with_completions(
+            gen, argument,
+            received_completion, received_completion_type, received_completion_value,
+        )
+    } else {
+        argument.clone()
+    };
+
+    // Yield, then UnwrapYieldResumption.
     let unwrap_block = gen.make_block();
     gen.emit(Instruction::Yield {
         continuation_label: Some(Label(unwrap_block as u32)),
@@ -1664,7 +1522,7 @@ fn generate_yield_for_yield_from(
         received_completion_value,
     );
 
-    // If awaited.[[Type]] is throw, jump to continuation (which will handle it).
+    // If awaited.[[Type]] is throw, jump to continuation.
     let awaited_normal_block = gen.make_block();
     let is_throw = gen.allocate_register();
     let throw_type = gen.add_constant_number(CompletionType::Throw.to_f64());
