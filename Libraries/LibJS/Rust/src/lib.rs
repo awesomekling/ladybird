@@ -170,8 +170,11 @@ pub unsafe extern "C" fn rust_compile_program(
     in_class_field_initializer: bool,
 ) -> *mut c_void {
     let source_slice = std::slice::from_raw_parts(source, source_len);
-    assert!(program_type <= 1, "invalid program_type: {program_type}");
-    let pt: ProgramType = std::mem::transmute(program_type);
+    let pt = match program_type {
+        0 => ProgramType::Script,
+        1 => ProgramType::Module,
+        _ => panic!("invalid program_type: {program_type}"),
+    };
     let mut parser = Parser::new(source_slice, pt);
     if initiated_by_eval {
         parser.initiated_by_eval = true;
@@ -384,8 +387,13 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     source_code_ptr: *const c_void,
     function_kind: u8,
 ) -> *mut c_void {
-    assert!(function_kind <= 3, "invalid function_kind: {function_kind}");
-    let kind: ast::FunctionKind = std::mem::transmute(function_kind);
+    let kind = match function_kind {
+        0 => ast::FunctionKind::Normal,
+        1 => ast::FunctionKind::Generator,
+        2 => ast::FunctionKind::Async,
+        3 => ast::FunctionKind::AsyncGenerator,
+        _ => panic!("invalid function_kind: {function_kind}"),
+    };
 
     // Validate parameters: wrap in the appropriate function kind and parse.
     {
