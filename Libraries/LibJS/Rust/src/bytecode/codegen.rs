@@ -1000,7 +1000,7 @@ fn generate_await_with_completions(
 fn generate_regular_yield(
     gen: &mut Generator,
     value: ScopedOperand,
-    preferred_dst: Option<&ScopedOperand>,
+    _preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
     let continuation = gen.make_block();
     gen.emit(Instruction::Yield {
@@ -1057,10 +1057,10 @@ fn generate_regular_yield(
     gen.generate_return(&received_completion_value);
 
     // Normal block: the yield expression evaluates to the extracted value.
+    // Return received_completion_value directly (matching C++) to avoid an
+    // unnecessary register copy.
     gen.switch_to_basic_block(normal_block);
-    let dst = choose_dst(gen, preferred_dst);
-    gen.emit_mov(&dst, &received_completion_value);
-    dst
+    received_completion_value
 }
 
 /// Full async generator yield protocol (AsyncGeneratorYield + UnwrapYieldResumption).
