@@ -70,6 +70,15 @@ pub struct ParamInfo {
     pub identifier: Option<Rc<Identifier>>,
 }
 
+/// Method kind for parse_method_definition.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MethodKind {
+    Normal,
+    Getter,
+    Setter,
+    Constructor,
+}
+
 /// Associativity for operator precedence.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Associativity {

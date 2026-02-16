@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, ParamInfo, ParsedParameters, Parser, Position};
+use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position};
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
@@ -1180,7 +1180,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.match_token(TokenType::ParenOpen) {
-            let function = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, false, start);
+            let method_kind = if is_getter { MethodKind::Getter } else if is_setter { MethodKind::Setter } else { MethodKind::Normal };
+            let function = self.parse_method_definition(is_async, is_generator, method_kind, start);
             let property_type = if is_getter { ObjectPropertyType::Getter } else if is_setter { ObjectPropertyType::Setter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
                 range: self.range_from(obj_start),
@@ -1198,7 +1199,8 @@ impl<'a> Parser<'a> {
         }
 
         if is_getter || is_setter {
-            let function = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
+            let method_kind = if is_getter { MethodKind::Getter } else { MethodKind::Setter };
+            let function = self.parse_method_definition(false, false, method_kind, start);
             let property_type = if is_getter { ObjectPropertyType::Getter } else { ObjectPropertyType::Setter };
             return ObjectProperty {
                 range: self.range_from(obj_start),
@@ -1867,7 +1869,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, function_start: Position) -> Expression {
+    pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, method_kind: MethodKind, function_start: Position) -> Expression {
         let start = function_start;
 
         let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
@@ -1887,10 +1889,10 @@ impl<'a> Parser<'a> {
 
         self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
-        if is_getter && !parsed.parameters.is_empty() {
+        if method_kind == MethodKind::Getter && !parsed.parameters.is_empty() {
             self.syntax_error("Getter function must have no arguments");
         }
-        if is_setter {
+        if method_kind == MethodKind::Setter {
             if parsed.parameters.is_empty() || parsed.parameters.len() > 1 {
                 self.syntax_error("Setter function must have one argument");
             } else if parsed.parameters[0].is_rest {
@@ -1902,7 +1904,7 @@ impl<'a> Parser<'a> {
         self.flags.await_expression_is_valid = await_before;
 
         let saved_allow_super_call = self.flags.allow_super_constructor_call;
-        if is_constructor && self.class_has_super_class {
+        if method_kind == MethodKind::Constructor && self.class_has_super_class {
             self.flags.allow_super_constructor_call = true;
         } else {
             self.flags.allow_super_constructor_call = false;
@@ -1923,7 +1925,7 @@ impl<'a> Parser<'a> {
         // Class constructors always need a function environment for `this` binding
         // management (super() binds this in derived constructors, and base constructors
         // need it for OrdinaryCallBindThis).
-        if is_constructor {
+        if method_kind == MethodKind::Constructor {
             insights.uses_this = true;
             insights.uses_this_from_environment = true;
         }

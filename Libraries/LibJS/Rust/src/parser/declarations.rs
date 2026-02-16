@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType};
+use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType};
 use crate::token::TokenType;
 
 fn expression_into_identifier(expression: Expression) -> Rc<Identifier> {
@@ -775,8 +775,9 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            let function = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
-            let method_kind = if is_getter {
+            let method_kind = if is_constructor { MethodKind::Constructor } else if is_getter { MethodKind::Getter } else if is_setter { MethodKind::Setter } else { MethodKind::Normal };
+            let function = self.parse_method_definition(is_async, is_generator, method_kind, function_start);
+            let class_method_kind = if is_getter {
                 ClassMethodKind::Getter
             } else if is_setter {
                 ClassMethodKind::Setter
@@ -791,7 +792,7 @@ impl<'a> Parser<'a> {
             return (Some(Node::new(self.range_from(class_start), ClassElement::Method {
                 key: Box::new(key),
                 function: Box::new(function),
-                kind: method_kind,
+                kind: class_method_kind,
                 is_static,
             })), None);
         }
