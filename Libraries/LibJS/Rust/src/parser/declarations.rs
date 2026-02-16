@@ -732,9 +732,19 @@ impl<'a> Parser<'a> {
             } else if value == utf16!("set") && self.match_property_key_ahead() {
                 is_setter = true;
                 self.consume();
-            } else if value == utf16!("async") && self.match_property_key_ahead() && !self.current_token.trivia_has_line_terminator {
-                is_async = true;
-                self.consume();
+            } else if value == utf16!("async") {
+                let next = self.next_token();
+                if !next.trivia_has_line_terminator
+                    && next.token_type != TokenType::ParenOpen
+                    && next.token_type != TokenType::Colon
+                    && next.token_type != TokenType::Comma
+                    && next.token_type != TokenType::CurlyClose
+                    && next.token_type != TokenType::Semicolon
+                    && next.token_type != TokenType::Equals
+                {
+                    is_async = true;
+                    self.consume();
+                }
             }
         }
 
