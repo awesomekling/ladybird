@@ -272,7 +272,7 @@ pub fn generate_expression(
                 });
                 gen.lexical_environment_register_stack.push(new_env);
 
-                let id = gen.intern_identifier(&data.name.as_ref().unwrap().name);
+                let id = gen.intern_identifier(&data.name.as_ref().expect("function declaration must have a name").name);
                 gen.emit(Instruction::CreateVariable {
                     identifier: id,
                     mode: EnvironmentMode::Lexical as u32,
@@ -304,7 +304,7 @@ pub fn generate_expression(
 
             if has_name {
                 gen.emit(Instruction::InitializeLexicalBinding {
-                    identifier: name_id.unwrap(),
+                    identifier: name_id.expect("has_name guarantees name_id is set"),
                     src: dst.operand(),
                     cache: EnvironmentCoordinate::empty(),
                 });
@@ -5086,7 +5086,7 @@ fn generate_class_expression(
                 // Keep literal string data alive until FFI call.
                 let (str_ptr, str_len) = if !literal_value_string.is_empty() {
                     literal_string_storage.push(literal_value_string);
-                    let s = literal_string_storage.last().unwrap();
+                    let s = literal_string_storage.last().expect("just pushed an element");
                     (s.as_ptr(), s.len())
                 } else {
                     (std::ptr::null(), 0)
@@ -7089,7 +7089,7 @@ pub fn emit_function_declaration_instantiation(
             });
 
             gen.switch_to_basic_block(if_undefined_block);
-            if let Some(value) = generate_expression(parameter.default_value.as_ref().unwrap(), gen, None) {
+            if let Some(value) = generate_expression(parameter.default_value.as_ref().expect("guarded by has_default_value check"), gen, None) {
                 gen.emit_mov_raw(Operand::argument(parameter_index), value.operand());
             }
             gen.emit(Instruction::Jump {

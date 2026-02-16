@@ -1574,7 +1574,7 @@ fn dump_function(
                     &color_label(state, "default"),
                 );
                 dump_expression(
-                    parameter.default_value.as_ref().unwrap(),
+                    parameter.default_value.as_ref().expect("guarded by is_some check"),
                     &child_state(&child_state(&parameter_state, true), true),
                 );
             }
@@ -1611,7 +1611,7 @@ fn dump_class(class_data: &ClassData, range: &SourceRange, state: &DumpState, ro
             &color_label(root_state, "super class"),
         );
         dump_expression(
-            class_data.super_class.as_ref().unwrap(),
+            class_data.super_class.as_ref().expect("guarded by has_super_class check"),
             &child_state(&child_state(state, false), true),
         );
     }
@@ -1817,7 +1817,7 @@ fn dump_binding_pattern(
                 &color_label(root_state, "initializer"),
             );
             dump_expression(
-                entry.initializer.as_ref().unwrap(),
+                entry.initializer.as_ref().expect("guarded by is_some check"),
                 &child_state(&child_state(&entry_state, true), true),
             );
         }
