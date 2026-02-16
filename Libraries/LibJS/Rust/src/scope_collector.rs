@@ -224,7 +224,6 @@ impl ScopeRecord {
         self.scope_level.is_top_level()
     }
 
-    /// Get or create a variable entry, only allocating the key when inserting.
     fn variable(&mut self, name: &[u16]) -> &mut ScopeVariable {
         self.variables.entry(name.to_vec()).or_default()
     }
@@ -307,7 +306,6 @@ impl ScopeCollector {
         self.current.is_some()
     }
 
-    /// Save scope collector state for speculative parsing.
     pub fn save_state(&self) -> ScopeCollectorState {
         ScopeCollectorState {
             records_len: self.records.len(),
@@ -316,7 +314,6 @@ impl ScopeCollector {
         }
     }
 
-    /// Restore scope collector state after failed speculative parse.
     pub fn load_state(&mut self, state: ScopeCollectorState) {
         let saved_len = state.records_len;
         self.records.truncate(saved_len);
@@ -926,7 +923,6 @@ impl ScopeCollector {
                 local_var_kind = None;
             }
 
-            // Function parameter handling.
             let mut is_function_parameter = false;
             if records[index].scope_type == ScopeType::Function {
                 if var_flags.intersects(VarFlags::PARAMETER_CANDIDATE)
@@ -1008,7 +1004,6 @@ impl ScopeCollector {
                     }
                 }
             } else {
-                // Not resolved here: propagate to parent.
                 if records[index].has_function_parameters
                     || records[index].scope_type == ScopeType::ClassField
                     || records[index].scope_type == ScopeType::ClassStaticInit
@@ -1062,7 +1057,6 @@ impl ScopeCollector {
         let has_argument_parameter = record.variables.get(utf16!("arguments") as &[u16])
             .is_some_and(|v| v.flags.intersects(VarFlags::FORBIDDEN_LEXICAL));
 
-        // Collect IS_VAR variables for FunctionScopeData.
         let mut vars_to_initialize = Vec::new();
         let mut var_names = Vec::new();
         let mut has_function_named_arguments = false;
@@ -1099,7 +1093,6 @@ impl ScopeCollector {
             let is_parameter = var.flags.intersects(VarFlags::FORBIDDEN_LEXICAL);
             let is_function_name = var.flags.intersects(VarFlags::BOUND);
 
-            // Check if this var has been optimized to a local
             let local_info = if let Some(ref ident) = var.var_identifier {
                 if ident.is_local() {
                     Some((ident.local_type.get(), ident.local_index.get()))
@@ -1130,12 +1123,10 @@ impl ScopeCollector {
         vars_to_initialize.sort_by(|a, b| a.name.cmp(&b.name));
         var_names.sort();
 
-        // Check if any function declaration is named "arguments".
         if seen_function_names.iter().any(|n| n == utf16!("arguments")) {
             has_function_named_arguments = true;
         }
 
-        // Check for lexically declared arguments
         if record.variables.get(utf16!("arguments") as &[u16])
             .is_some_and(|v| v.flags.intersects(VarFlags::LEXICAL))
         {

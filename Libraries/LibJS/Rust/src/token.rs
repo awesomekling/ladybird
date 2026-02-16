@@ -421,7 +421,6 @@ impl TokenType {
     }
 }
 
-/// Token produced by the lexer.
 #[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,

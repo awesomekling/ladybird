@@ -29,7 +29,6 @@ use std::rc::Rc;
 // Source location
 // =============================================================================
 
-/// UTF-16 encoded string.
 pub type Utf16String = Vec<u16>;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -56,10 +55,8 @@ pub struct Node<T> {
     pub inner: T,
 }
 
-/// Expression node: `Node<ExpressionKind>`.
 pub type Expression = Node<ExpressionKind>;
 
-/// Statement node: `Node<StatementKind>`.
 pub type Statement = Node<StatementKind>;
 
 impl<T> Node<T> {
@@ -248,7 +245,6 @@ impl Identifier {
     }
 }
 
-/// A private identifier (`#name`).
 #[derive(Clone)]
 pub struct PrivateIdentifier {
     pub range: SourceRange,
@@ -272,7 +268,6 @@ pub struct FunctionParsingInsights {
     pub might_need_arguments_object: bool,
 }
 
-/// A formal parameter in a function declaration/expression.
 #[derive(Clone)]
 pub struct FunctionParameter {
     pub binding: FunctionParameterBinding,
@@ -347,7 +342,6 @@ pub enum ClassMethodKind {
 // Binding pattern types
 // =============================================================================
 
-/// Destructuring pattern for array/object bindings.
 #[derive(Clone)]
 pub struct BindingPattern {
     pub kind: BindingPatternKind,
@@ -660,7 +654,6 @@ pub enum ForInOfLhs {
 // Assignment LHS
 // =============================================================================
 
-/// Left-hand side of an assignment expression.
 #[derive(Clone)]
 pub enum AssignmentLhs {
     Expression(Box<Expression>),

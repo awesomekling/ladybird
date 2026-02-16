@@ -186,12 +186,10 @@ fn is_identifier_continue_cp(cp: u32) -> bool {
     unicode_id_continue(cp)
 }
 
-/// Check if a code point has the Unicode ID_Start property.
 fn unicode_id_start(cp: u32) -> bool {
     char::from_u32(cp).is_some_and(unicode_ident::is_xid_start)
 }
 
-/// Check if a code point has the Unicode ID_Continue property.
 fn unicode_id_continue(cp: u32) -> bool {
     char::from_u32(cp).is_some_and(unicode_ident::is_xid_continue)
 }
@@ -487,7 +485,6 @@ impl<'a> Lexer<'a> {
         }
 
         if self.source[pos] == b'{' as u16 {
-            // u{ CodePoint }
             let mut cp: u32 = 0;
             let mut i = pos + 1;
             if i >= self.source_len() {
@@ -510,7 +507,6 @@ impl<'a> Lexer<'a> {
             let consumed = i + 1 - (self.position - 1);
             Some((cp, consumed))
         } else {
-            // u Hex4Digits
             if pos + 4 > self.source_len() {
                 return None;
             }
@@ -543,7 +539,6 @@ impl<'a> Lexer<'a> {
         let mut i = 0;
         while i < raw.len() {
             if raw[i] == b'\\' as u16 {
-                // Unicode escape: \uXXXX or \u{XXXX}
                 i += 1; // skip '\'
                 if i < raw.len() && raw[i] == b'u' as u16 {
                     i += 1; // skip 'u'
@@ -591,7 +586,6 @@ impl<'a> Lexer<'a> {
         }
 
         if is_identifier_start_cp(cp) {
-            // Count how many code units this code point takes
             let len = if cp > 0xFFFF { 2 } else { 1 };
             return Some((cp, len));
         }
@@ -789,7 +783,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Advance to the next token. Returns the token.
     pub fn next(&mut self) -> Token {
         let trivia_start = self.position;
         let in_template = !self.template_states.is_empty();
@@ -797,7 +790,6 @@ impl<'a> Lexer<'a> {
         let mut unterminated_comment = false;
 
         if !in_template || self.template_states.last().unwrap().in_expression {
-            // Consume whitespace and comments
             loop {
                 if self.is_line_terminator() {
                     line_has_token_yet = false;
@@ -936,7 +928,6 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 if has_escape {
-                    // Re-scan to build decoded value.
                     identifier_value = Some(self.build_identifier_value(value_start));
                 }
                 token_type = TokenType::PrivateIdentifier;
@@ -976,7 +967,6 @@ impl<'a> Lexer<'a> {
                 }
                 identifier_value = Some(decoded);
             } else {
-                // No escapes: use source slice directly for keyword check.
                 let source_slice = &self.source[value_start - 1 .. self.position - 1];
                 if let Some(kw) = keyword_from_str(source_slice) {
                     token_type = kw;
@@ -1030,7 +1020,6 @@ impl<'a> Lexer<'a> {
                     }
                 }
             } else {
-                // 1..9 or period
                 while is_ascii_digit(self.current_code_unit) || self.match_numeric_literal_separator_followed_by(is_ascii_digit) {
                     self.consume();
                 }
@@ -1094,7 +1083,6 @@ impl<'a> Lexer<'a> {
         } else {
             let mut found_token = false;
 
-            // Four-char operator: >>>=
             if self.match4(b'>' as u16, b'>' as u16, b'>' as u16, b'=' as u16) {
                 found_token = true;
                 token_type = TokenType::UnsignedShiftRightEquals;
@@ -1153,7 +1141,6 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Track template literal curly braces
         if !self.template_states.is_empty() && self.template_states.last().unwrap().in_expression {
             if token_type == TokenType::CurlyOpen {
                 self.template_states.last_mut().unwrap().open_bracket_count += 1;

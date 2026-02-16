@@ -73,7 +73,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a block statement `{ ... }`.
     pub(crate) fn parse_block_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
@@ -345,7 +344,6 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::ParenOpen);
 
-        // for (;;)
         if self.match_token(TokenType::Semicolon) && !is_await {
             self.consume();
             let result = self.parse_standard_for_loop(start, None);
@@ -588,7 +586,6 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::CurlyOpen);
 
-        // Open block scope for the switch body (all cases share one scope).
         self.scope_collector.open_block_scope(None);
 
         let break_before = self.flags.in_break_context;
@@ -692,7 +689,6 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Catch);
 
-        // Open catch scope (wraps parameter + body).
         self.scope_collector.open_catch_scope();
 
         let parameter = if self.match_token(TokenType::ParenOpen) {

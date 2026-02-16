@@ -48,7 +48,6 @@ mod declarations;
 mod expressions;
 mod statements;
 
-// Re-export ast types used throughout the parser submodules.
 pub use crate::ast::Position;
 pub use crate::ast::DeclarationKind;
 pub use crate::ast::FunctionKind;
@@ -145,7 +144,6 @@ impl ForbiddenTokens {
     }
 }
 
-/// Parser error collected during parsing.
 pub struct ParserError {
     pub message: String,
     pub line: u32,
@@ -186,18 +184,13 @@ struct SavedState {
 /// Produces a Rust AST. Parsing methods live in the `expressions`,
 /// `statements`, and `declarations` submodules (all `impl Parser`).
 pub struct Parser<'a> {
-    /// Tokenizer that feeds us tokens one at a time.
     lexer: Lexer<'a>,
-    /// The token currently being examined. `consume()` returns this
-    /// and advances to the next token.
+    /// `consume()` returns this and advances to the next token.
     current_token: Token,
-    /// Syntax errors accumulated during parsing.
     errors: Vec<ParserError>,
-    /// Stack of saved states for speculative parsing (backtracking).
     saved_states: Vec<SavedState>,
-    /// Whether we're parsing a Script or Module.
     program_type: ProgramType,
-    /// The original UTF-16 source text.
+    /// UTF-16 source text.
     source: &'a [u16],
 
     // --- Parser state flags (saved/restored during speculative parsing) ---
@@ -216,7 +209,6 @@ pub struct Parser<'a> {
     /// through nested labels (e.g., `a: b: for(...)`).
     last_inner_label_is_iteration: bool,
 
-    /// Last function declaration name, set by parse_function_declaration.
     last_function_name: Vec<u16>,
     last_function_kind: FunctionKind,
     last_class_name: Vec<u16>,
@@ -253,12 +245,10 @@ pub struct Parser<'a> {
     pub(crate) for_loop_declaration_has_init: bool,
     pub(crate) for_loop_declaration_is_var: bool,
 
-    /// Scope collector for scope analysis (variable resolution, local optimization).
     pub scope_collector: ScopeCollector,
 }
 
 impl<'a> Parser<'a> {
-    /// Create a new parser for the given UTF-16 source code.
     pub fn new(source: &'a [u16], program_type: ProgramType) -> Self {
         let mut lexer = Lexer::new(source, 1, 0);
         if program_type == ProgramType::Module {
@@ -312,7 +302,6 @@ impl<'a> Parser<'a> {
         Rc::new(Identifier::new(self.range_from(start), name))
     }
 
-    /// Register function parameters with the scope collector.
     pub(crate) fn register_function_parameters_with_scope(
         &mut self,
         parameters: &[FunctionParameter],
@@ -692,7 +681,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Extract the value of a token as a UTF-16 slice from the source.
     pub(crate) fn token_value<'b>(&'b self, token: &'b Token) -> &'b [u16] {
         if let Some(ref value) = token.identifier_value {
             return value;
@@ -749,7 +737,6 @@ impl<'a> Parser<'a> {
         Some(pattern)
     }
 
-    /// Check if a node is a valid simple assignment target.
     pub(crate) fn is_simple_assignment_target(expression: &Expression, allow_call_expression: bool) -> bool {
         matches!(&expression.inner,
             ExpressionKind::Identifier(_)

@@ -103,7 +103,6 @@ unsafe fn compile_program_body(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
 ) -> *mut c_void {
-    // Copy local variables from scope analysis into the generator.
     {
         let scope = scope_ref.borrow();
         gen.local_variables = scope
@@ -120,7 +119,6 @@ unsafe fn compile_program_body(
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
-    // Initialize the lexical environment register.
     {
         use bytecode::operand::{Operand, Register};
         let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
@@ -183,10 +181,8 @@ pub unsafe extern "C" fn rust_compile_program(
         parser.flags.in_class_field_initializer = in_class_field_initializer;
     }
 
-    // Parse
     let program = parser.parse_program(starts_in_strict_mode);
 
-    // Check for parse errors
     if parser.has_errors() {
         for msg in parser.error_messages() {
             eprintln!("[rust_compile_program] parse error: {}", msg);
@@ -194,7 +190,6 @@ pub unsafe extern "C" fn rust_compile_program(
         return std::ptr::null_mut();
     }
 
-    // Run scope analysis
     parser.scope_collector.analyze(initiated_by_eval);
 
     if parser.scope_collector.has_errors() {
@@ -250,15 +245,12 @@ pub unsafe extern "C" fn rust_compile_script(
     let source_slice = std::slice::from_raw_parts(source, source_len);
     let mut parser = Parser::new(source_slice, ProgramType::Script);
 
-    // Parse
     let program = parser.parse_program(false);
 
-    // Check for parse errors
     if parser.has_errors() {
         return std::ptr::null_mut();
     }
 
-    // Run scope analysis
     parser.scope_collector.analyze(false);
 
     if parser.scope_collector.has_errors() {
@@ -289,7 +281,6 @@ pub unsafe extern "C" fn rust_compile_script(
         return std::ptr::null_mut();
     }
 
-    // Extract GDI metadata and populate via callbacks.
     extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
 
     exec_ptr
@@ -332,15 +323,12 @@ pub unsafe extern "C" fn rust_compile_eval(
     parser.flags.allow_super_constructor_call = allow_super_constructor_call;
     parser.flags.in_class_field_initializer = in_class_field_initializer;
 
-    // Parse
     let program = parser.parse_program(starts_in_strict_mode);
 
-    // Check for parse errors
     if parser.has_errors() {
         return std::ptr::null_mut();
     }
 
-    // Run scope analysis
     parser.scope_collector.analyze(true);
 
     if parser.scope_collector.has_errors() {
@@ -366,13 +354,13 @@ pub unsafe extern "C" fn rust_compile_eval(
         return std::ptr::null_mut();
     }
 
-    // Extract EDI metadata and populate via callbacks.
     extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
 
     exec_ptr
 }
 
 /// Compile a dynamically-created function (new Function()).
+/// https://tc39.es/ecma262/#sec-createdynamicfunction
 ///
 /// Validates parameters and body separately per spec, then parses
 /// the full synthetic source to create a SharedFunctionInstanceData.
@@ -437,7 +425,6 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         }
     }
 
-    // Parse the full source.
     let full_slice = std::slice::from_raw_parts(full_source, full_source_len);
     let mut parser = Parser::new(full_slice, ProgramType::Script);
     let program = parser.parse_program(false);
@@ -489,10 +476,8 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     // path in FunctionConstructor::create_dynamic_function.
     function_data.parsing_insights.might_need_arguments_object = true;
 
-    // Determine strictness: the function itself may be strict.
     let is_strict = function_data.is_strict_mode;
 
-    // Create SFD via FFI.
     bytecode::ffi::create_sfd_for_gdi(&function_data, vm_ptr, source_code_ptr, is_strict)
 }
 
@@ -571,12 +556,10 @@ fn extract_gdi_common(
         collect_var_names_recursive(&child.inner, push_var_scoped_name);
     }
 
-    // Annex B candidate names
     for name in &scope.annexb_function_names {
         push_annex_b_name(name);
     }
 
-    // Lexical bindings (name + is_constant)
     for child in &scope.children {
         match &child.inner {
             StatementKind::VariableDeclaration { kind, declarations }
@@ -745,7 +728,6 @@ fn for_each_child_statement(statement: &ast::StatementKind, f: &mut dyn FnMut(&a
     }
 }
 
-/// Invoke a callback for each bound name in a variable declarator target.
 fn for_each_bound_name(target: &ast::VariableDeclaratorTarget, f: &mut dyn FnMut(&[u16])) {
     match target {
         ast::VariableDeclaratorTarget::Identifier(id) => f(&id.name),
@@ -755,7 +737,6 @@ fn for_each_bound_name(target: &ast::VariableDeclaratorTarget, f: &mut dyn FnMut
     }
 }
 
-/// Invoke a callback for each bound name in a binding pattern (recursively).
 fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnMut(&[u16])) {
     for entry in &pattern.entries {
         match &entry.alias {
@@ -809,7 +790,6 @@ pub unsafe extern "C" fn rust_compile_function(
 ) -> *mut c_void {
     let function_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
 
-    // Extract local variables from the function body's scope data.
     let body_scope = match &function_data.body.inner {
         StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         StatementKind::Block(ref scope) => Some(scope),
@@ -843,6 +823,7 @@ pub unsafe extern "C" fn rust_compile_function(
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
 
+    // https://tc39.es/ecma262/#sec-async-functions-abstract-operations-async-function-start
     // For async (non-generator) functions, emit the initial Yield BEFORE
     // GetLexicalEnvironment so that parameter evaluation errors are caught
     // by the async promise wrapper. This matches C++ ordering.
@@ -856,7 +837,6 @@ pub unsafe extern "C" fn rust_compile_function(
         gen.switch_to_basic_block(start_block);
     }
 
-    // Initialize the lexical environment register.
     {
         use bytecode::operand::{Operand, Register};
         let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
@@ -866,13 +846,13 @@ pub unsafe extern "C" fn rust_compile_function(
         gen.lexical_environment_register_stack.push(env_reg);
     }
 
-    // Emit FDI (FunctionDeclarationInstantiation) bytecode.
     if let Some(scope) = body_scope {
         bytecode::codegen::emit_function_declaration_instantiation(
             &mut gen, &function_data, &scope.borrow(),
         );
     }
 
+    // https://tc39.es/ecma262/#sec-generatorstart
     // For generator functions (including async generators), emit the initial Yield
     // AFTER FDI. Parameter evaluation happens synchronously before the generator starts.
     if gen.is_in_generator_function() {
@@ -885,7 +865,6 @@ pub unsafe extern "C" fn rust_compile_function(
         gen.switch_to_basic_block(start_block);
     }
 
-    // Generate bytecode for the function body.
     let result = bytecode::codegen::generate_statement(&function_data.body, &mut gen, None);
 
     if !gen.is_current_block_terminated() {
@@ -921,13 +900,10 @@ pub unsafe extern "C" fn rust_compile_function(
         }
     }
 
-    // Assemble
     let assembled = gen.assemble();
 
-    // Write precomputed FDI runtime metadata to the SFD.
     write_sfd_metadata(sfd_ptr, &sfd_metadata);
 
-    // Create C++ Executable via FFI
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
 }
 
@@ -1054,7 +1030,6 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
     let arguments_object_needs_binding =
         arguments_object_needed && !bsi.has_arguments_object_local;
 
-    // --- Compute environment binding counts ---
     let mut function_environment_bindings_count: usize = 0;
     let mut var_environment_bindings_count: usize = 0;
     let mut lex_environment_bindings_count: usize = 0;
@@ -1227,7 +1202,6 @@ fn count_non_local_names_in_binding_pattern(
     }
 }
 
-/// Iterate all identifiers bound by a binding pattern.
 fn for_each_binding_pattern_identifier(
     pattern: &ast::BindingPattern,
     callback: &mut dyn FnMut(&Rc<ast::Identifier>),

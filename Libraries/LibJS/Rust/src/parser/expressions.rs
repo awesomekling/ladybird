@@ -14,7 +14,6 @@ use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, ParamInfo, Par
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
-    /// Check whether the current token can start an expression.
     pub(crate) fn match_expression(&mut self) -> bool {
         match self.current_token_type() {
             TokenType::BoolLiteral
@@ -103,7 +102,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse an expression using precedence climbing.
     pub(crate) fn parse_expression(&mut self, min_precedence: i32, associativity: Associativity, forbidden: ForbiddenTokens) -> Expression {
         if self.match_unary_prefixed_expression() {
             let start = self.position();
@@ -269,7 +267,6 @@ impl<'a> Parser<'a> {
             TokenType::BigIntLiteral => {
                 let token = self.consume();
                 let value = self.token_value(&token);
-                // Strip trailing 'n' from the token value.
                 let digits = if value.last() == Some(&(b'n' as u16)) {
                     &value[..value.len() - 1]
                 } else {
@@ -503,7 +500,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a secondary (binary, postfix, member access, call, etc.) expression.
     fn parse_secondary_expression(&mut self, lhs_start: Position, lhs: Expression, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expression, ForbiddenTokens) {
         let callee_is_eval = self.last_parsed_identifier_is_eval;
         self.last_parsed_identifier_is_eval = false;
@@ -735,7 +731,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a unary prefix expression (`!`, `~`, `typeof`, `delete`, `++`, `--`, etc.).
     fn parse_unary_prefixed_expression(&mut self) -> Expression {
         let start = self.position();
         let tt = self.current_token_type();
@@ -1099,7 +1094,6 @@ impl<'a> Parser<'a> {
         self.expression(start, ExpressionKind::Await(Box::new(argument)))
     }
 
-    /// Parse an object literal expression `{ key: value, ... }`.
     fn parse_object_expression(&mut self) -> Expression {
         let start = self.position();
         self.consume_token(TokenType::CurlyOpen);
@@ -1177,6 +1171,7 @@ impl<'a> Parser<'a> {
 
         let (key, key_value, is_proto, is_computed) = self.parse_property_key(Some(obj_start));
 
+        // https://tc39.es/ecma262/#sec-object-initializer
         // Private names are not allowed in object literals.
         if let ExpressionKind::PrivateIdentifier(_) = key.inner {
             if self.class_scope_depth == 0 {
@@ -1184,7 +1179,6 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Method shorthand
         if self.match_token(TokenType::ParenOpen) {
             let function = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, false, start);
             let property_type = if is_getter { ObjectPropertyType::Getter } else if is_setter { ObjectPropertyType::Setter } else { ObjectPropertyType::KeyValue };
@@ -1203,7 +1197,6 @@ impl<'a> Parser<'a> {
             self.syntax_error("Expected function after async keyword");
         }
 
-        // Getter/setter
         if is_getter || is_setter {
             let function = self.parse_method_definition(false, false, is_getter, is_setter, false, start);
             let property_type = if is_getter { ObjectPropertyType::Getter } else { ObjectPropertyType::Setter };
@@ -1217,7 +1210,6 @@ impl<'a> Parser<'a> {
             };
         }
 
-        // key: value
         if self.match_token(TokenType::Colon) {
             self.consume();
             let value = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
@@ -1362,7 +1354,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse an array literal expression `[a, b, ...]`.
     fn parse_array_expression(&mut self) -> Expression {
         let start = self.position();
         self.consume_token(TokenType::BracketOpen);
@@ -1370,7 +1361,7 @@ impl<'a> Parser<'a> {
         let mut elements: Vec<Option<Expression>> = Vec::new();
         while !self.match_token(TokenType::BracketClose) && !self.done() {
             if self.match_token(TokenType::Comma) {
-                elements.push(None); // Hole
+                elements.push(None);
                 self.consume();
                 continue;
             }
@@ -1406,13 +1397,11 @@ impl<'a> Parser<'a> {
         let mut expressions = Vec::new();
         let mut raw_strings = Vec::new();
 
-        // Track whether we need to insert an empty string at the beginning.
         let needs_leading_empty = !self.match_token(TokenType::TemplateLiteralString);
         if needs_leading_empty {
             if is_tagged {
                 raw_strings.push(Vec::new());
             }
-            // Push empty cooked string for the leading position.
             expressions.push(self.expression(start, ExpressionKind::StringLiteral(Vec::new())));
         }
 
@@ -1812,8 +1801,6 @@ impl<'a> Parser<'a> {
 
         let ParsedParameters { parameters, function_length, parameter_info, is_simple } = parsed;
 
-        // Register parameters with scope collector (scope was opened before
-        // parameter parsing so default value expressions resolve correctly).
         self.register_function_parameters_with_scope(&parameters, &parameter_info);
 
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
@@ -1822,7 +1809,6 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);
 
-            // Close function scope.
             self.scope_collector.close_scope();
 
             if has_use_strict || fn_kind != FunctionKind::Normal {
@@ -1862,7 +1848,6 @@ impl<'a> Parser<'a> {
                 ..FunctionParsingInsights::default()
             };
 
-            // Close function scope.
             self.scope_collector.close_scope();
 
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
@@ -1882,7 +1867,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a method definition for object/class.
     pub(crate) fn parse_method_definition(&mut self, is_async: bool, is_generator: bool, is_getter: bool, is_setter: bool, is_constructor: bool, function_start: Position) -> Expression {
         let start = function_start;
 
@@ -1901,7 +1885,6 @@ impl<'a> Parser<'a> {
 
         let parsed = self.parse_formal_parameters();
 
-        // Register parameters with scope collector.
         self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
         if is_getter && !parsed.parameters.is_empty() {
@@ -1928,7 +1911,6 @@ impl<'a> Parser<'a> {
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;
 
-        // Close function scope.
         self.scope_collector.close_scope();
 
         if has_use_strict || fn_kind != FunctionKind::Normal {
