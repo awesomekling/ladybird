@@ -39,7 +39,7 @@ use crate::token::{Token, TokenType};
 /// State for tracking template literal nesting.
 #[derive(Clone)]
 struct TemplateState {
-    in_expr: bool,
+    in_expression: bool,
     open_bracket_count: u32,
 }
 
@@ -796,7 +796,7 @@ impl<'a> Lexer<'a> {
         let mut line_has_token_yet = self.line_column > 1;
         let mut unterminated_comment = false;
 
-        if !in_template || self.template_states.last().unwrap().in_expr {
+        if !in_template || self.template_states.last().unwrap().in_expression {
             // Consume whitespace and comments
             loop {
                 if self.is_line_terminator() {
@@ -871,12 +871,12 @@ impl<'a> Lexer<'a> {
             if !in_template {
                 token_type = TokenType::TemplateLiteralStart;
                 self.template_states.push(TemplateState {
-                    in_expr: false,
+                    in_expression: false,
                     open_bracket_count: 0,
                 });
-            } else if self.template_states.last().unwrap().in_expr {
+            } else if self.template_states.last().unwrap().in_expression {
                 self.template_states.push(TemplateState {
-                    in_expr: false,
+                    in_expression: false,
                     open_bracket_count: 0,
                 });
                 token_type = TokenType::TemplateLiteralStart;
@@ -885,14 +885,14 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralEnd;
             }
         } else if in_template
-            && self.template_states.last().unwrap().in_expr
+            && self.template_states.last().unwrap().in_expression
             && self.template_states.last().unwrap().open_bracket_count == 0
             && self.current_code_unit == b'}' as u16
         {
             self.consume();
             token_type = TokenType::TemplateLiteralExprEnd;
-            self.template_states.last_mut().unwrap().in_expr = false;
-        } else if in_template && !self.template_states.last().unwrap().in_expr {
+            self.template_states.last_mut().unwrap().in_expression = false;
+        } else if in_template && !self.template_states.last().unwrap().in_expression {
             if self.is_eof() {
                 token_type = TokenType::UnterminatedTemplateLiteral;
                 self.template_states.pop();
@@ -900,7 +900,7 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralExprStart;
                 self.consume();
                 self.consume();
-                self.template_states.last_mut().unwrap().in_expr = true;
+                self.template_states.last_mut().unwrap().in_expression = true;
             } else {
                 while !self.match2(b'$' as u16, b'{' as u16) && self.current_code_unit != b'`' as u16 && !self.is_eof() {
                     if self.match2(b'\\' as u16, b'$' as u16)
@@ -1154,7 +1154,7 @@ impl<'a> Lexer<'a> {
         }
 
         // Track template literal curly braces
-        if !self.template_states.is_empty() && self.template_states.last().unwrap().in_expr {
+        if !self.template_states.is_empty() && self.template_states.last().unwrap().in_expression {
             if token_type == TokenType::CurlyOpen {
                 self.template_states.last_mut().unwrap().open_bracket_count += 1;
             } else if token_type == TokenType::CurlyClose {
@@ -1285,12 +1285,12 @@ fn hex_value(cu: u16) -> u32 {
     }
 }
 
-fn encode_utf16(cp: u32, buf: &mut Vec<u16>) {
+fn encode_utf16(cp: u32, buffer: &mut Vec<u16>) {
     if cp <= 0xFFFF {
-        buf.push(cp as u16);
+        buffer.push(cp as u16);
     } else {
         let cp = cp - 0x10000;
-        buf.push(0xD800 + (cp >> 10) as u16);
-        buf.push(0xDC00 + (cp & 0x3FF) as u16);
+        buffer.push(0xD800 + (cp >> 10) as u16);
+        buffer.push(0xDC00 + (cp & 0x3FF) as u16);
     }
 }

@@ -13,34 +13,34 @@ use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKin
 use crate::token::TokenType;
 
 /// Extract an Identifier from an ExpressionKind::Identifier node.
-fn expr_into_identifier(expr: Expression) -> Rc<Identifier> {
-    match expr.inner {
+fn expression_into_identifier(expression: Expression) -> Rc<Identifier> {
+    match expression.inner {
         ExpressionKind::Identifier(id) => id,
         _ => unreachable!("expected Identifier expression"),
     }
 }
 
 /// Extract bound names from a declaration for export statements.
-fn get_declaration_export_names(stmt: &Statement) -> Vec<Vec<u16>> {
-    match &stmt.inner {
+fn get_declaration_export_names(statement: &Statement) -> Vec<Vec<u16>> {
+    match &statement.inner {
         StatementKind::VariableDeclaration { declarations, .. } => {
             let mut names = Vec::new();
-            for decl in declarations {
-                collect_declarator_names(&decl.target, &mut names);
+            for declaration in declarations {
+                collect_declarator_names(&declaration.target, &mut names);
             }
             names
         }
         StatementKind::UsingDeclaration { declarations } => {
             let mut names = Vec::new();
-            for decl in declarations {
-                if let VariableDeclaratorTarget::Identifier(id) = &decl.target {
+            for declaration in declarations {
+                if let VariableDeclaratorTarget::Identifier(id) = &declaration.target {
                     names.push(id.name.clone());
                 }
             }
             names
         }
-        StatementKind::FunctionDeclaration(func) => {
-            if let Some(ref name) = func.name {
+        StatementKind::FunctionDeclaration(function) => {
+            if let Some(ref name) = function.name {
                 vec![name.name.clone()]
             } else {
                 Vec::new()
@@ -102,7 +102,7 @@ impl<'a> Parser<'a> {
                 self.expected("declaration");
                 let start = self.position();
                 self.consume();
-                self.stmt(start, StatementKind::Empty)
+                self.statement(start, StatementKind::Empty)
             }
         }
     }
@@ -115,8 +115,8 @@ impl<'a> Parser<'a> {
     // while `let`/`const` are block-scoped (sec-declarations-and-the-variable-statement).
     pub(crate) fn parse_variable_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
-        let decl_line = self.current_token().line_number;
-        let decl_column = self.current_token().line_column;
+        let declaration_line = self.current_token().line_number;
+        let declaration_column = self.current_token().line_column;
 
         let kind = match self.current_token_type() {
             TokenType::Var => DeclarationKind::Var,
@@ -133,25 +133,25 @@ impl<'a> Parser<'a> {
         let mut any_init = false;
 
         loop {
-            let decl_start = self.position();
+            let declaration_start = self.position();
 
             let target = if self.match_identifier() {
-                let tok = self.consume();
-                let value = self.token_value(&tok).to_vec();
+                let token = self.consume();
+                let value = self.token_value(&token).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
-                let id = self.make_identifier(decl_start, value.clone());
+                let id = self.make_identifier(declaration_start, value.clone());
 
                 // Register with scope collector.
                 if kind == DeclarationKind::Var {
                     self.scope_collector.add_var_declaration(
                         &[(&value, Some(id.clone()))],
-                        decl_line, decl_column,
+                        declaration_line, declaration_column,
                         Some(DeclarationKind::Var),
                     );
                 } else {
                     self.scope_collector.add_lexical_declaration(
                         &[&value as &[u16]],
-                        decl_line, decl_column,
+                        declaration_line, declaration_column,
                     );
                     self.scope_collector.register_identifier(
                         id.clone(), &value, Some(kind),
@@ -186,10 +186,10 @@ impl<'a> Parser<'a> {
                         .collect();
                     // NOTE: Binding pattern identifiers don't get declaration_kind,
                     // matching C++ behavior where only simple identifiers do.
-                    self.scope_collector.add_var_declaration(&entries, decl_line, decl_column, None);
+                    self.scope_collector.add_var_declaration(&entries, declaration_line, declaration_column, None);
                 } else {
                     let refs: Vec<&[u16]> = bound_names.iter().map(|(n, _)| n.as_slice()).collect();
-                    self.scope_collector.add_lexical_declaration(&refs, decl_line, decl_column);
+                    self.scope_collector.add_lexical_declaration(&refs, declaration_line, declaration_column);
                     // Register each binding pattern identifier for scope analysis
                     // so they get is_local() annotations.
                     // NOTE: C++ does not pass declaration_kind for binding pattern identifiers,
@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
             } else {
                 self.expected("variable name");
                 self.consume();
-                let id = self.make_identifier(decl_start, Vec::new());
+                let id = self.make_identifier(declaration_start, Vec::new());
                 VariableDeclaratorTarget::Identifier(id)
             };
 
@@ -242,7 +242,7 @@ impl<'a> Parser<'a> {
             self.for_loop_declaration_is_var = kind == DeclarationKind::Var;
         }
 
-        self.stmt(start, StatementKind::VariableDeclaration {
+        self.statement(start, StatementKind::VariableDeclaration {
             kind,
             declarations: declarators,
         })
@@ -254,31 +254,31 @@ impl<'a> Parser<'a> {
     // the Symbol.dispose method when the enclosing scope exits.
     pub(crate) fn parse_using_declaration(&mut self, is_for_loop: bool) -> Statement {
         let start = self.position();
-        let decl_line = self.current_token().line_number;
-        let decl_column = self.current_token().line_column;
+        let declaration_line = self.current_token().line_number;
+        let declaration_column = self.current_token().line_column;
         self.consume(); // consume 'using'
 
         let mut declarators: Vec<VariableDeclarator> = Vec::new();
 
         loop {
-            let decl_start = self.position();
+            let declaration_start = self.position();
 
             if !self.match_identifier() {
                 self.expected("identifier");
                 break;
             }
-            let tok = self.consume();
-            let name = self.token_value(&tok).to_vec();
+            let token = self.consume();
+            let name = self.token_value(&token).to_vec();
 
             self.check_identifier_name_for_assignment_validity(&name, false);
             if name == utf16!("let") {
                 self.syntax_error("Lexical binding may not be called 'let'");
             }
 
-            let id = self.make_identifier(decl_start, name.clone());
+            let id = self.make_identifier(declaration_start, name.clone());
 
             // Register as lexical declaration.
-            self.scope_collector.add_lexical_declaration(&[&name as &[u16]], decl_line, decl_column);
+            self.scope_collector.add_lexical_declaration(&[&name as &[u16]], declaration_line, declaration_column);
             self.scope_collector.register_identifier(
                 id.clone(), &name, Some(DeclarationKind::Const),
             );
@@ -298,7 +298,7 @@ impl<'a> Parser<'a> {
             };
 
             declarators.push(VariableDeclarator {
-                range: self.range_from(decl_start),
+                range: self.range_from(declaration_start),
                 target: VariableDeclaratorTarget::Identifier(id),
                 init,
             });
@@ -314,7 +314,7 @@ impl<'a> Parser<'a> {
             self.consume_or_insert_semicolon();
         }
 
-        self.stmt(start, StatementKind::UsingDeclaration {
+        self.statement(start, StatementKind::UsingDeclaration {
             declarations: declarators,
         })
     }
@@ -325,8 +325,8 @@ impl<'a> Parser<'a> {
     // NB: The second form (without name) is only valid in `export default` context.
     pub(crate) fn parse_function_declaration(&mut self) -> Statement {
         let start = self.position();
-        let decl_line = self.current_token().line_number;
-        let decl_column = self.current_token().line_column;
+        let declaration_line = self.current_token().line_number;
+        let declaration_column = self.current_token().line_column;
 
         let saved_might_need_arguments = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = false;
@@ -343,8 +343,8 @@ impl<'a> Parser<'a> {
             self.last_function_name = default_name.clone();
             (Some(self.make_identifier(start, default_name.clone())), default_name)
         } else if self.match_identifier() {
-            let tok = self.consume();
-            let value = self.token_value(&tok).to_vec();
+            let token = self.consume();
+            let value = self.token_value(&token).to_vec();
             self.last_function_name = value.clone();
             (Some(self.make_identifier(start, value.clone())), value)
         } else {
@@ -356,7 +356,7 @@ impl<'a> Parser<'a> {
         // Register function declaration in parent scope (before opening function scope).
         self.scope_collector.add_function_declaration(
             &fn_name, name.clone(),
-            kind, self.flags.strict_mode, decl_line, decl_column,
+            kind, self.flags.strict_mode, declaration_line, declaration_column,
         );
 
         // Open function scope.
@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
         let parsed = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
-        self.register_function_params_with_scope(&parsed.params, &parsed.param_info);
+        self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
@@ -386,18 +386,18 @@ impl<'a> Parser<'a> {
             self.check_identifier_name_for_assignment_validity(&fn_name, has_use_strict);
         }
         if has_use_strict || kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
+            self.check_parameters_post_body(&parsed.parameter_info, has_use_strict, kind);
         }
 
         insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
-        self.stmt(start, StatementKind::FunctionDeclaration(Box::new(FunctionData {
+        self.statement(start, StatementKind::FunctionDeclaration(Box::new(FunctionData {
             name,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
-            parameters: parsed.params,
+            parameters: parsed.parameters,
             function_length: parsed.function_length,
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
@@ -426,8 +426,8 @@ impl<'a> Parser<'a> {
         // Optional name.
         let mut fn_name_value: Vec<u16> = Vec::new();
         let name = if self.match_identifier() {
-            let tok = self.consume();
-            fn_name_value = self.token_value(&tok).to_vec();
+            let token = self.consume();
+            fn_name_value = self.token_value(&token).to_vec();
             Some(self.make_identifier(start, fn_name_value.clone()))
         } else {
             None
@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
         let parsed = self.parse_formal_parameters();
 
         // Register function parameters with scope collector.
-        self.register_function_params_with_scope(&parsed.params, &parsed.param_info);
+        self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
@@ -459,18 +459,18 @@ impl<'a> Parser<'a> {
             self.check_identifier_name_for_assignment_validity(&fn_name_value, has_use_strict);
         }
         if has_use_strict || kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&parsed.param_info, has_use_strict, kind);
+            self.check_parameters_post_body(&parsed.parameter_info, has_use_strict, kind);
         }
 
         insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
-        self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
+        self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
             name,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
-            parameters: parsed.params,
+            parameters: parsed.parameters,
             function_length: parsed.function_length,
             kind,
             is_strict_mode: self.flags.strict_mode || has_use_strict,
@@ -497,8 +497,8 @@ impl<'a> Parser<'a> {
         // Optional name.
         let (name_id, name_value) = if expect_name || self.match_identifier() {
             if self.match_identifier() {
-                let tok = self.consume();
-                let value = self.token_value(&tok).to_vec();
+                let token = self.consume();
+                let value = self.token_value(&token).to_vec();
                 self.last_class_name = value.clone();
                 (Some(self.make_identifier(start, value.clone())), value)
             } else if expect_name {
@@ -552,8 +552,8 @@ impl<'a> Parser<'a> {
                     self.syntax_error("Classes may not have more than one constructor");
                 }
                 constructor = Some(ctor);
-            } else if let Some(elem) = element {
-                elements.push(elem);
+            } else if let Some(element) = element {
+                elements.push(element);
             }
         }
 
@@ -574,7 +574,7 @@ impl<'a> Parser<'a> {
 
         self.last_class_name = saved_class_name;
 
-        self.expr(start, ExpressionKind::Class(Box::new(ClassData {
+        self.expression(start, ExpressionKind::Class(Box::new(ClassData {
             name: name_id,
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
@@ -586,9 +586,9 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_class_declaration(&mut self) -> Statement {
         let start = self.position();
-        let class_expr = self.parse_class_expression(true);
+        let class_expression = self.parse_class_expression(true);
         // Convert the class expression into a class declaration by extracting ClassData.
-        match class_expr.inner {
+        match class_expression.inner {
             ExpressionKind::Class(data) => {
                 // Register class name as lexical declaration in the outer scope.
                 // The inner class scope (opened/closed inside parse_class_expression)
@@ -605,7 +605,7 @@ impl<'a> Parser<'a> {
                         None,
                     );
                 }
-                self.stmt(start, StatementKind::ClassDeclaration(data))
+                self.statement(start, StatementKind::ClassDeclaration(data))
             }
             _ => unreachable!("parse_class_expression must return ExpressionKind::Class"),
         }
@@ -614,7 +614,7 @@ impl<'a> Parser<'a> {
     // https://tc39.es/ecma262/#sec-runtime-semantics-classdefinitionevaluation
     // If no constructor is present in the ClassBody:
     //   - Base class: constructor() {}
-    //   - Derived class: constructor(...args) { super(...args); }
+    //   - Derived class: constructor(...arguments) { super(...arguments); }
     fn synthesize_default_constructor(&mut self, start: Position, class_name: &[u16], has_super: bool) -> Expression {
         let ctor_name = if !class_name.is_empty() {
             Some(self.make_identifier(start, class_name.to_vec()))
@@ -626,35 +626,35 @@ impl<'a> Parser<'a> {
         // is stored in the SFD and compiled lazily — scope analysis runs at that point.
 
         if has_super {
-            // Derived class: constructor(...args) { return super(...args); }
-            let args_name: Vec<u16> = "args".encode_utf16().collect();
+            // Derived class: constructor(...arguments) { return super(...arguments); }
+            let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
 
-            let args_ref = Rc::new(Identifier::new(self.range_from(start), args_name.clone()));
-            let args_expr = self.expr(start, ExpressionKind::Identifier(args_ref));
-            let spread_expr = self.expr(start, ExpressionKind::Spread(Box::new(args_expr)));
+            let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone()));
+            let arguments_expression = self.expression(start, ExpressionKind::Identifier(arguments_ref));
+            let spread_expression = self.expression(start, ExpressionKind::Spread(Box::new(arguments_expression)));
 
-            let super_call = self.expr(start, ExpressionKind::SuperCall(SuperCallData {
-                arguments: vec![CallArgument { value: spread_expr, is_spread: true }],
+            let super_call = self.expression(start, ExpressionKind::SuperCall(SuperCallData {
+                arguments: vec![CallArgument { value: spread_expression, is_spread: true }],
                 is_synthetic: true,
             }));
-            let return_stmt = self.stmt(start, StatementKind::Return(Some(Box::new(super_call))));
-            let body = self.stmt(start, StatementKind::Block(
-                ScopeData::shared_with_children(vec![return_stmt]),
+            let return_statement = self.statement(start, StatementKind::Return(Some(Box::new(super_call))));
+            let body = self.statement(start, StatementKind::Block(
+                ScopeData::shared_with_children(vec![return_statement]),
             ));
 
-            let args_binding = Rc::new(Identifier::new(self.range_from(start), args_name));
-            let params = vec![FunctionParameter {
-                binding: FunctionParameterBinding::Identifier(args_binding),
+            let arguments_binding = Rc::new(Identifier::new(self.range_from(start), arguments_name));
+            let parameters = vec![FunctionParameter {
+                binding: FunctionParameterBinding::Identifier(arguments_binding),
                 default_value: None,
                 is_rest: true,
             }];
 
-            self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
+            self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
                 body: Box::new(body),
-                parameters: params,
+                parameters: parameters,
                 function_length: 0,
                 kind: FunctionKind::Normal,
                 is_strict_mode: true,
@@ -668,11 +668,11 @@ impl<'a> Parser<'a> {
             })))
         } else {
             // Base class: empty constructor() {}
-            let body = self.stmt(start, StatementKind::Block(
+            let body = self.statement(start, StatementKind::Block(
                 ScopeData::shared_with_children(Vec::new()),
             ));
 
-            self.expr(start, ExpressionKind::Function(Box::new(FunctionData {
+            self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
@@ -723,7 +723,7 @@ impl<'a> Parser<'a> {
                 let scope = ScopeData::shared_with_children(children);
                 self.scope_collector.set_scope_node(scope.clone());
                 self.scope_collector.close_scope();
-                let body = self.stmt(start, StatementKind::FunctionBody {
+                let body = self.statement(start, StatementKind::FunctionBody {
                     scope,
                     in_strict_mode: self.flags.strict_mode,
                 });
@@ -794,7 +794,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            let func = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
+            let function = self.parse_method_definition(is_async, is_generator, is_getter, is_setter, is_constructor, function_start);
             let method_kind = if is_getter {
                 ClassMethodKind::Getter
             } else if is_setter {
@@ -804,12 +804,12 @@ impl<'a> Parser<'a> {
             };
 
             if is_constructor {
-                return (None, Some(func));
+                return (None, Some(function));
             }
 
             return (Some(Node::new(self.range_from(class_start), ClassElement::Method {
                 key: Box::new(key),
-                function: Box::new(func),
+                function: Box::new(function),
                 kind: method_kind,
                 is_static,
             })), None);
@@ -828,10 +828,10 @@ impl<'a> Parser<'a> {
             let saved_field_init = self.flags.in_class_field_initializer;
             self.flags.in_class_field_initializer = true;
             self.scope_collector.open_class_field_scope(None);
-            let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+            let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
             self.flags.in_class_field_initializer = saved_field_init;
-            Some(Box::new(expr))
+            Some(Box::new(expression))
         } else {
             None
         };
@@ -855,7 +855,7 @@ impl<'a> Parser<'a> {
         let in_function_before = self.flags.in_function_context;
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
-        let formal_param_before = self.flags.in_formal_parameter_context;
+        let formal_parameter_before = self.flags.in_formal_parameter_context;
         let old_labels = std::mem::take(&mut self.labels_in_scope);
         self.flags.in_function_context = true;
         self.flags.in_generator_function_context = is_generator;
@@ -879,7 +879,7 @@ impl<'a> Parser<'a> {
         self.flags.in_function_context = in_function_before;
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
-        self.flags.in_formal_parameter_context = formal_param_before;
+        self.flags.in_formal_parameter_context = formal_parameter_before;
         self.labels_in_scope = old_labels;
 
         // Read scope analysis flags before the function scope is closed.
@@ -895,7 +895,7 @@ impl<'a> Parser<'a> {
         let scope = ScopeData::shared_with_children(children);
         self.scope_collector.set_scope_node(scope.clone());
 
-        let body = self.stmt(start, StatementKind::FunctionBody {
+        let body = self.statement(start, StatementKind::FunctionBody {
             scope,
             in_strict_mode: body_is_strict,
         });
@@ -917,43 +917,43 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> ParsedParameters {
-        let saved_formal_param_ctx = self.flags.in_formal_parameter_context;
+        let saved_formal_parameter_ctx = self.flags.in_formal_parameter_context;
         self.flags.in_formal_parameter_context = true;
 
         if self.match_token(TokenType::ParenClose) {
-            self.flags.in_formal_parameter_context = saved_formal_param_ctx;
+            self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             return ParsedParameters {
-                params: Vec::new(),
+                parameters: Vec::new(),
                 function_length: 0,
-                param_info: Vec::new(),
+                parameter_info: Vec::new(),
                 is_simple: true,
             };
         }
 
-        let mut params: Vec<FunctionParameter> = Vec::new();
+        let mut parameters: Vec<FunctionParameter> = Vec::new();
         let mut function_length: i32 = 0;
         let mut has_seen_default = false;
         let mut has_seen_rest = false;
-        let mut param_info: Vec<ParamInfo> = Vec::new();
+        let mut parameter_info: Vec<ParamInfo> = Vec::new();
 
         // C++ uses the position at the start of parse_formal_parameters for all
         // parameter identifiers (i.e., the position of the first parameter).
-        let formal_params_start = self.position();
+        let formal_parameters_start = self.position();
 
         loop {
-            let param_start = self.position();
+            let parameter_start = self.position();
             let rest = self.eat(TokenType::TripleDot);
 
             let (binding, _is_pat) = if self.match_identifier() {
-                let tok = self.consume();
-                let value = self.token_value(&tok).to_vec();
+                let token = self.consume();
+                let value = self.token_value(&token).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
                 // https://tc39.es/ecma262/#sec-function-definitions-static-semantics-early-errors
                 // It is a Syntax Error if IsSimpleParameterList is false and
                 // BoundNames of FormalParameters contains any duplicate elements.
                 // In strict mode, duplicates are always an error.
-                for prev in &param_info {
-                    if prev.name == value {
+                for previous in &parameter_info {
+                    if previous.name == value {
                         if self.flags.strict_mode {
                             let name_str = String::from_utf16_lossy(&value);
                             self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
@@ -967,19 +967,19 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                let id = Rc::new(Identifier::new(self.range_from(formal_params_start), value.clone()));
-                param_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
+                let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone()));
+                parameter_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
                 for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
-                    param_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
+                    parameter_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)
             } else {
                 self.expected("parameter name");
                 self.consume();
-                let id = Rc::new(Identifier::new(self.range_from(param_start), Vec::new()));
+                let id = Rc::new(Identifier::new(self.range_from(parameter_start), Vec::new()));
                 (FunctionParameterBinding::Identifier(id), false)
             };
 
@@ -995,7 +995,7 @@ impl<'a> Parser<'a> {
                 function_length += 1;
             }
 
-            params.push(FunctionParameter {
+            parameters.push(FunctionParameter {
                 binding,
                 default_value,
                 is_rest: rest,
@@ -1015,10 +1015,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.flags.in_formal_parameter_context = saved_formal_param_ctx;
+        self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
 
-        let is_simple = !has_seen_default && !has_seen_rest && !params.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
-        ParsedParameters { params, function_length, param_info, is_simple }
+        let is_simple = !has_seen_default && !has_seen_rest && !parameters.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
+        ParsedParameters { parameters, function_length, parameter_info, is_simple }
     }
 
     // https://tc39.es/ecma262/#sec-destructuring-binding-patterns
@@ -1073,7 +1073,7 @@ impl<'a> Parser<'a> {
                     if Self::is_member_expression(&expression) {
                         entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
                     } else if Self::is_identifier(&expression) {
-                        entry_name = BindingEntryName::Identifier(expr_into_identifier(expression));
+                        entry_name = BindingEntryName::Identifier(expression_into_identifier(expression));
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
                         break;
@@ -1096,12 +1096,12 @@ impl<'a> Parser<'a> {
                             && !self.match_identifier();
 
                         if self.match_token(TokenType::StringLiteral) {
-                            let tok = self.consume();
-                            let (value, _has_octal) = self.parse_string_value(&tok);
+                            let token = self.consume();
+                            let (value, _has_octal) = self.parse_string_value(&token);
                             entry_name = BindingEntryName::Identifier(self.make_identifier(entry_start, value));
                         } else if self.match_token(TokenType::BigIntLiteral) {
-                            let tok = self.consume();
-                            let value = self.token_value(&tok).to_vec();
+                            let token = self.consume();
+                            let value = self.token_value(&token).to_vec();
                             let name_value = if value.last() == Some(&(b'n' as u16)) {
                                 value[..value.len() - 1].to_vec()
                             } else {
@@ -1109,8 +1109,8 @@ impl<'a> Parser<'a> {
                             };
                             entry_name = BindingEntryName::Identifier(self.make_identifier(entry_start, name_value));
                         } else {
-                            let tok = self.consume();
-                            let value = self.token_value(&tok).to_vec();
+                            let token = self.consume();
+                            let value = self.token_value(&token).to_vec();
                             entry_name_value = value.clone();
                             let id = self.make_identifier(entry_start, value);
                             // C++ calls parse_identifier() for binding pattern property
@@ -1120,8 +1120,8 @@ impl<'a> Parser<'a> {
                         }
                     } else if self.match_token(TokenType::BracketOpen) {
                         self.consume();
-                        let expr = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
-                        entry_name = BindingEntryName::Expression(Box::new(expr));
+                        let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
+                        entry_name = BindingEntryName::Expression(Box::new(expression));
                         self.consume_token(TokenType::BracketClose);
                     } else {
                         self.expected("identifier or computed property name");
@@ -1132,16 +1132,16 @@ impl<'a> Parser<'a> {
                     if !is_rest && self.match_token(TokenType::Colon) {
                         self.consume();
                         if self.allow_member_expressions {
-                            let expr_start = self.position();
+                            let expression_start = self.position();
                             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
-                                if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
+                                if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
                                     entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                                 }
                             } else if Self::is_member_expression(&expression) {
                                 entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
                             } else if Self::is_identifier(&expression) {
-                                entry_alias = BindingEntryAlias::Identifier(expr_into_identifier(expression));
+                                entry_alias = BindingEntryAlias::Identifier(expression_into_identifier(expression));
                             } else {
                                 self.syntax_error("Invalid destructuring assignment target");
                                 break;
@@ -1151,8 +1151,8 @@ impl<'a> Parser<'a> {
                             entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
                         } else if self.match_identifier_name() {
                             let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
-                            let tok = self.consume();
-                            let value = self.token_value(&tok).to_vec();
+                            let token = self.consume();
+                            let value = self.token_value(&token).to_vec();
                             let id = self.make_identifier(alias_start, value.clone());
                             self.pattern_bound_names.push((value, id.clone()));
                             entry_alias = BindingEntryAlias::Identifier(id);
@@ -1177,16 +1177,16 @@ impl<'a> Parser<'a> {
             } else {
                 // Array binding pattern entry.
                 if self.allow_member_expressions {
-                    let expr_start = self.position();
+                    let expression_start = self.position();
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
-                        if let Some(pattern) = self.synthesize_binding_pattern(expr_start) {
+                        if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
                             entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
                         }
                     } else if Self::is_member_expression(&expression) {
                         entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
                     } else if Self::is_identifier(&expression) {
-                        let id = expr_into_identifier(expression);
+                        let id = expression_into_identifier(expression);
                         self.pattern_bound_names.push((id.name.clone(), id.clone()));
                         entry_alias = BindingEntryAlias::Identifier(id);
                     } else {
@@ -1198,8 +1198,8 @@ impl<'a> Parser<'a> {
                     entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
                 } else if self.match_identifier_name() {
                     let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
-                    let tok = self.consume();
-                    let value = self.token_value(&tok).to_vec();
+                    let token = self.consume();
+                    let value = self.token_value(&token).to_vec();
                     let id = self.make_identifier(alias_start, value.clone());
                     self.pattern_bound_names.push((value, id.clone()));
                     entry_alias = BindingEntryAlias::Identifier(id);
@@ -1264,7 +1264,7 @@ impl<'a> Parser<'a> {
             let module_specifier = self.consume_module_specifier();
             let attributes = self.parse_with_clause();
             self.consume_or_insert_semicolon();
-            return self.stmt(start, StatementKind::Import(ImportStatementData {
+            return self.statement(start, StatementKind::Import(ImportStatementData {
                 module_request: ModuleRequest { module_specifier, attributes },
                 entries: Vec::new(),
             }));
@@ -1275,8 +1275,8 @@ impl<'a> Parser<'a> {
 
         // ImportedDefaultBinding.
         if self.match_imported_binding() {
-            let tok = self.consume();
-            let local_name = self.token_value(&tok).to_vec();
+            let token = self.consume();
+            let local_name = self.token_value(&token).to_vec();
             entries.push(ImportEntry {
                 import_name: Some(utf16!("default").to_vec()),
                 local_name,
@@ -1297,8 +1297,8 @@ impl<'a> Parser<'a> {
                 }
                 self.consume(); // consume 'as'
                 if self.match_imported_binding() {
-                    let tok = self.consume();
-                    let namespace_name = self.token_value(&tok).to_vec();
+                    let token = self.consume();
+                    let namespace_name = self.token_value(&token).to_vec();
                     entries.push(ImportEntry {
                         import_name: None,
                         local_name: namespace_name,
@@ -1313,13 +1313,13 @@ impl<'a> Parser<'a> {
                     if self.match_identifier_name() {
                         let require_as = !self.match_imported_binding();
                         let name_pos = self.position();
-                        let tok = self.consume();
-                        let name = self.token_value(&tok).to_vec();
+                        let token = self.consume();
+                        let name = self.token_value(&token).to_vec();
 
                         if self.match_as() {
                             self.consume(); // consume 'as'
-                            let alias_tok = self.consume_identifier();
-                            let alias = self.token_value(&alias_tok).to_vec();
+                            let alias_token = self.consume_identifier();
+                            let alias = self.token_value(&alias_token).to_vec();
                             self.check_identifier_name_for_assignment_validity(&alias, false);
                             entries.push(ImportEntry {
                                 import_name: Some(name),
@@ -1338,16 +1338,16 @@ impl<'a> Parser<'a> {
                             });
                         }
                     } else if self.match_token(TokenType::StringLiteral) {
-                        let tok = self.consume();
-                        let (name, _) = self.parse_string_value(&tok);
+                        let token = self.consume();
+                        let (name, _) = self.parse_string_value(&token);
 
                         if !self.match_as() {
                             self.expected("'as'");
                         }
                         self.consume(); // consume 'as'
 
-                        let alias_tok = self.consume_identifier();
-                        let alias = self.token_value(&alias_tok).to_vec();
+                        let alias_token = self.consume_identifier();
+                        let alias = self.token_value(&alias_token).to_vec();
                         self.check_identifier_name_for_assignment_validity(&alias, false);
                         entries.push(ImportEntry {
                             import_name: Some(name),
@@ -1379,7 +1379,7 @@ impl<'a> Parser<'a> {
         let attributes = self.parse_with_clause();
         self.consume_or_insert_semicolon();
 
-        self.stmt(start, StatementKind::Import(ImportStatementData {
+        self.statement(start, StatementKind::Import(ImportStatementData {
             module_request: ModuleRequest { module_specifier, attributes },
             entries,
         }))
@@ -1416,38 +1416,38 @@ impl<'a> Parser<'a> {
 
             if matches_function != MatchesFunctionDeclaration::No {
                 let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
-                let decl = self.parse_function_declaration_for_export(has_default_name);
+                let declaration = self.parse_function_declaration_for_export(has_default_name);
                 if !has_default_name {
-                    if let StatementKind::FunctionDeclaration(ref func) = decl.inner {
-                        if let Some(ref name_id) = func.name {
+                    if let StatementKind::FunctionDeclaration(ref function) = declaration.inner {
+                        if let Some(ref name_id) = function.name {
                             local_name = Some(name_id.name.clone());
                         }
                     }
                 }
-                statement = Some(Box::new(decl));
+                statement = Some(Box::new(declaration));
             } else if self.match_token(TokenType::Class) {
                 let next = self.next_token();
                 if next.token_type != TokenType::CurlyOpen && next.token_type != TokenType::Extends {
                     // Named class declaration.
-                    let decl = self.parse_class_declaration();
-                    if let StatementKind::ClassDeclaration(ref class) = decl.inner {
+                    let declaration = self.parse_class_declaration();
+                    if let StatementKind::ClassDeclaration(ref class) = declaration.inner {
                         if let Some(ref name_id) = class.name {
                             local_name = Some(name_id.name.clone());
                         }
                     }
-                    statement = Some(Box::new(decl));
+                    statement = Some(Box::new(declaration));
                 } else {
                     // Unnamed class expression.
-                    let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                    let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                     self.consume_or_insert_semicolon();
-                    let expr_range = expr.range;
-                    statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
+                    let expression_range = expression.range;
+                    statement = Some(Box::new(Statement::new(expression_range, StatementKind::Expression(Box::new(expression)))));
                 }
             } else if self.match_expression() {
-                let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.consume_or_insert_semicolon();
-                let expr_range = expr.range;
-                statement = Some(Box::new(Statement::new(expr_range, StatementKind::Expression(Box::new(expr)))));
+                let expression_range = expression.range;
+                statement = Some(Box::new(Statement::new(expression_range, StatementKind::Expression(Box::new(expression)))));
             } else {
                 self.expected("declaration or assignment expression");
             }
@@ -1496,8 +1496,8 @@ impl<'a> Parser<'a> {
                 }
                 statement = Some(Box::new(declaration));
             } else if self.match_token(TokenType::Var) {
-                let var_decl = self.parse_variable_declaration(false);
-                let names = get_declaration_export_names(&var_decl);
+                let var_declaration = self.parse_variable_declaration(false);
+                let names = get_declaration_export_names(&var_declaration);
                 for name in &names {
                     entries.push(ExportEntry {
                         kind: ExportEntryKind::NamedExport,
@@ -1505,7 +1505,7 @@ impl<'a> Parser<'a> {
                         local_or_import_name: Some(name.clone()),
                     });
                 }
-                statement = Some(Box::new(var_decl));
+                statement = Some(Box::new(var_declaration));
             } else if self.match_token(TokenType::CurlyOpen) {
                 self.consume();
                 check_for_from = FromSpecifier::Optional;
@@ -1570,7 +1570,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.stmt(start, StatementKind::Export(ExportStatementData {
+        self.statement(start, StatementKind::Export(ExportStatementData {
             statement,
             entries,
             is_default_export: is_default,
@@ -1595,18 +1595,18 @@ impl<'a> Parser<'a> {
             self.expected("module specifier (string)");
             return utf16!("!!invalid!!").to_vec();
         }
-        let tok = self.consume();
-        let (value, _) = self.parse_string_value(&tok);
+        let token = self.consume();
+        let (value, _) = self.parse_string_value(&token);
         value
     }
 
     fn parse_module_export_name(&mut self) -> (Vec<u16>, bool) {
         if self.match_identifier_name() {
-            let tok = self.consume();
-            (self.token_value(&tok).to_vec(), false)
+            let token = self.consume();
+            (self.token_value(&token).to_vec(), false)
         } else if self.match_token(TokenType::StringLiteral) {
-            let tok = self.consume();
-            let (value, _) = self.parse_string_value(&tok);
+            let token = self.consume();
+            let (value, _) = self.parse_string_value(&token);
             (value, true)
         } else {
             self.expected("export specifier (string or identifier)");
@@ -1627,12 +1627,12 @@ impl<'a> Parser<'a> {
         let mut attributes = Vec::new();
         while !self.done() && !self.match_token(TokenType::CurlyClose) {
             let key = if self.match_token(TokenType::StringLiteral) {
-                let tok = self.consume();
-                let (value, _) = self.parse_string_value(&tok);
+                let token = self.consume();
+                let (value, _) = self.parse_string_value(&token);
                 value
             } else if self.match_identifier_name() {
-                let tok = self.consume();
-                self.token_value(&tok).to_vec()
+                let token = self.consume();
+                self.token_value(&token).to_vec()
             } else {
                 self.expected("identifier or string as attribute key");
                 self.consume();
@@ -1642,8 +1642,8 @@ impl<'a> Parser<'a> {
             self.consume_token(TokenType::Colon);
 
             if self.match_token(TokenType::StringLiteral) {
-                let tok = self.consume();
-                let (value, _) = self.parse_string_value(&tok);
+                let token = self.consume();
+                let (value, _) = self.parse_string_value(&token);
                 attributes.push(ImportAttribute { key, value });
             } else {
                 self.expected("string as attribute value");

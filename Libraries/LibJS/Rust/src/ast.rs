@@ -371,7 +371,7 @@ pub struct BindingEntry {
 /// The "name" part of a binding entry.
 /// - `Empty`: elision in array patterns (`[, , x]`)
 /// - `Identifier`: object property shorthand (`{ x }`)
-/// - `Expression`: computed property key (`{ [expr]: x }`)
+/// - `Expression`: computed property key (`{ [expression]: x }`)
 #[derive(Clone)]
 pub enum BindingEntryName {
     Empty,
@@ -383,7 +383,7 @@ pub enum BindingEntryName {
 /// - `Empty`: name is the binding target (`{ x }` — x is both name and alias)
 /// - `Identifier`: simple binding (`{ x: y }`)
 /// - `BindingPattern`: nested destructuring (`{ x: { a, b } }`)
-/// - `MemberExpression`: assignment target (`{ x: obj.prop }`)
+/// - `MemberExpression`: assignment target (`{ x: obj.property }`)
 #[derive(Clone)]
 pub enum BindingEntryAlias {
     Empty,

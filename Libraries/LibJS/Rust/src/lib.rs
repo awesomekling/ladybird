@@ -130,7 +130,7 @@ unsafe fn compile_program_body(
         gen.lexical_environment_register_stack.push(env_reg);
     }
 
-    let result = bytecode::codegen::generate_stmt(program, gen, None);
+    let result = bytecode::codegen::generate_statement(program, gen, None);
 
     if !gen.is_current_block_terminated() {
         if let Some(value) = result {
@@ -388,8 +388,8 @@ pub unsafe extern "C" fn rust_compile_eval(
 pub unsafe extern "C" fn rust_compile_dynamic_function(
     full_source: *const u16,
     full_source_len: usize,
-    params_source: *const u16,
-    params_source_len: usize,
+    parameters_source: *const u16,
+    parameters_source_len: usize,
     body_source: *const u16,
     body_source_len: usize,
     vm_ptr: *mut c_void,
@@ -408,8 +408,8 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
             ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
         }
-        let params_slice = std::slice::from_raw_parts(params_source, params_source_len);
-        validate_src.extend_from_slice(params_slice);
+        let parameters_slice = std::slice::from_raw_parts(parameters_source, parameters_source_len);
+        validate_src.extend_from_slice(parameters_slice);
         validate_src.extend_from_slice(utf16!(") {}"));
         let mut parser = Parser::new(&validate_src, ProgramType::Script);
         parser.parse_program(false);
@@ -457,7 +457,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
 
     // Extract the FunctionExpression from the program.
     // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
-    let func_data = if let StatementKind::Program(ref data) = program.inner {
+    let function_data = if let StatementKind::Program(ref data) = program.inner {
         let scope = data.scope.borrow();
         let mut found: Option<ast::FunctionData> = None;
         for child in &scope.children {
@@ -466,8 +466,8 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
                     found = Some(fd.as_ref().clone());
                     break;
                 }
-                StatementKind::Expression(expr) => {
-                    if let ast::ExpressionKind::Function(fd) = &expr.inner {
+                StatementKind::Expression(expression) => {
+                    if let ast::ExpressionKind::Function(fd) = &expression.inner {
                         found = Some(fd.as_ref().clone());
                         break;
                     }
@@ -480,39 +480,39 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         None
     };
 
-    let mut func_data = match func_data {
+    let mut function_data = match function_data {
         Some(fd) => fd,
         None => return std::ptr::null_mut(),
     };
 
     // Dynamic functions always need an arguments object, matching the C++
     // path in FunctionConstructor::create_dynamic_function.
-    func_data.parsing_insights.might_need_arguments_object = true;
+    function_data.parsing_insights.might_need_arguments_object = true;
 
     // Determine strictness: the function itself may be strict.
-    let is_strict = func_data.is_strict_mode;
+    let is_strict = function_data.is_strict_mode;
 
     // Create SFD via FFI.
-    bytecode::ffi::create_sfd_for_gdi(&func_data, vm_ptr, source_code_ptr, is_strict)
+    bytecode::ffi::create_sfd_for_gdi(&function_data, vm_ptr, source_code_ptr, is_strict)
 }
 
 /// Recursively collect var-declared names from a statement and all nested
 /// statements, excluding function/class bodies (which create new var scopes).
 fn collect_var_names_recursive(
-    stmt: &ast::StatementKind,
+    statement: &ast::StatementKind,
     push_name: &mut dyn FnMut(&[u16]),
 ) {
-    match stmt {
+    match statement {
         ast::StatementKind::VariableDeclaration {
             kind: ast::DeclarationKind::Var,
             declarations,
         } => {
-            for decl in declarations {
-                for_each_bound_name(&decl.target, push_name);
+            for declaration in declarations {
+                for_each_bound_name(&declaration.target, push_name);
             }
         }
         _ => {
-            for_each_child_statement(stmt, &mut |child| {
+            for_each_child_statement(statement, &mut |child| {
                 collect_var_names_recursive(child, push_name);
             });
         }
@@ -540,8 +540,8 @@ fn extract_gdi_common(
     // Var names (var declarations at any nesting level + top-level function declarations)
     for child in &scope.children {
         collect_var_names_recursive(&child.inner, push_var_name);
-        if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
-            if let Some(ref name) = func_data.name {
+        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
+            if let Some(ref name) = function_data.name {
                 push_var_name(&name.name);
             }
         }
@@ -549,19 +549,19 @@ fn extract_gdi_common(
 
     // Functions to initialize (reverse order, deduplicated by name).
     let mut seen_names: HashSet<Vec<u16>> = HashSet::new();
-    let mut funcs_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
+    let mut functions_to_init: Vec<(&ast::FunctionData, Vec<u16>)> = Vec::new();
     for child in scope.children.iter().rev() {
-        if let StatementKind::FunctionDeclaration(func_data) = &child.inner {
-            if let Some(ref name_ident) = func_data.name {
+        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
+            if let Some(ref name_ident) = function_data.name {
                 if seen_names.insert(name_ident.name.clone()) {
-                    funcs_to_init.push((func_data, name_ident.name.clone()));
+                    functions_to_init.push((function_data, name_ident.name.clone()));
                 }
             }
         }
     }
-    for (func_data, name) in &funcs_to_init {
+    for (function_data, name) in &functions_to_init {
         let sfd_ptr = unsafe {
-            bytecode::ffi::create_sfd_for_gdi(func_data, vm_ptr, source_code_ptr, is_strict)
+            bytecode::ffi::create_sfd_for_gdi(function_data, vm_ptr, source_code_ptr, is_strict)
         };
         push_function(sfd_ptr, name);
     }
@@ -583,15 +583,15 @@ fn extract_gdi_common(
                 if *kind != DeclarationKind::Var =>
             {
                 let is_constant = *kind == DeclarationKind::Const;
-                for decl in declarations {
-                    for_each_bound_name(&decl.target, &mut |name| {
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
                         push_lexical_binding(name, is_constant);
                     });
                 }
             }
             StatementKind::UsingDeclaration { declarations } => {
-                for decl in declarations {
-                    for_each_bound_name(&decl.target, &mut |name| {
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
                         push_lexical_binding(name, false);
                     });
                 }
@@ -653,15 +653,15 @@ unsafe fn extract_script_gdi(
             StatementKind::VariableDeclaration { kind, declarations }
                 if *kind != DeclarationKind::Var =>
             {
-                for decl in declarations {
-                    for_each_bound_name(&decl.target, &mut |name| {
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
                         script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
                     });
                 }
             }
             StatementKind::UsingDeclaration { declarations } => {
-                for decl in declarations {
-                    for_each_bound_name(&decl.target, &mut |name| {
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
                         script_gdi_push_lexical_name(ctx, name.as_ptr(), name.len());
                     });
                 }
@@ -687,10 +687,10 @@ unsafe fn extract_script_gdi(
 
 /// Visit each child statement of a statement, excluding function/class bodies
 /// (which create new var scopes). This enables recursive var-declaration walking.
-fn for_each_child_statement(stmt: &ast::StatementKind, f: &mut dyn FnMut(&ast::StatementKind)) {
+fn for_each_child_statement(statement: &ast::StatementKind, f: &mut dyn FnMut(&ast::StatementKind)) {
     use ast::StatementKind;
 
-    match stmt {
+    match statement {
         StatementKind::Block(scope) => {
             for child in &scope.borrow().children {
                 f(&child.inner);
@@ -716,8 +716,8 @@ fn for_each_child_statement(stmt: &ast::StatementKind, f: &mut dyn FnMut(&ast::S
         StatementKind::ForIn { lhs, body, .. }
         | StatementKind::ForOf { lhs, body, .. }
         | StatementKind::ForAwaitOf { lhs, body, .. } => {
-            if let ast::ForInOfLhs::Declaration(decl) = lhs {
-                f(&decl.inner);
+            if let ast::ForInOfLhs::Declaration(declaration) = lhs {
+                f(&declaration.inner);
             }
             f(&body.inner);
         }
@@ -807,10 +807,10 @@ pub unsafe extern "C" fn rust_compile_function(
     sfd_ptr: *mut c_void,
     rust_function_ast: *mut c_void,
 ) -> *mut c_void {
-    let func_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
+    let function_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
 
     // Extract local variables from the function body's scope data.
-    let body_scope = match &func_data.body.inner {
+    let body_scope = match &function_data.body.inner {
         StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         StatementKind::Block(ref scope) => Some(scope),
         _ => None,
@@ -818,16 +818,16 @@ pub unsafe extern "C" fn rust_compile_function(
 
     // Compute SFD metadata before codegen so the generator can use
     // function_environment_needed to optimize `this` access.
-    let sfd_metadata = compute_sfd_metadata(&func_data);
+    let sfd_metadata = compute_sfd_metadata(&function_data);
 
     let mut gen = bytecode::generator::Generator::new();
-    gen.strict = func_data.is_strict_mode;
+    gen.strict = function_data.is_strict_mode;
     gen.function_environment_needed = sfd_metadata.function_environment_needed;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
     gen.source_len = source_len;
-    gen.enclosing_function_kind = func_data.kind;
+    gen.enclosing_function_kind = function_data.kind;
 
     if let Some(scope) = body_scope {
         let sd = scope.borrow();
@@ -869,7 +869,7 @@ pub unsafe extern "C" fn rust_compile_function(
     // Emit FDI (FunctionDeclarationInstantiation) bytecode.
     if let Some(scope) = body_scope {
         bytecode::codegen::emit_function_declaration_instantiation(
-            &mut gen, &func_data, &scope.borrow(),
+            &mut gen, &function_data, &scope.borrow(),
         );
     }
 
@@ -886,7 +886,7 @@ pub unsafe extern "C" fn rust_compile_function(
     }
 
     // Generate bytecode for the function body.
-    let result = bytecode::codegen::generate_stmt(&func_data.body, &mut gen, None);
+    let result = bytecode::codegen::generate_statement(&function_data.body, &mut gen, None);
 
     if !gen.is_current_block_terminated() {
         if gen.is_in_generator_or_async_function() {
@@ -949,7 +949,7 @@ struct BodyScopeInfo {
     has_function_named_arguments: bool,
     has_lexically_declared_arguments: bool,
     non_local_var_count: usize,
-    non_local_var_count_for_param_exprs: usize,
+    non_local_var_count_for_parameter_expressions: usize,
     var_names: Vec<Vec<u16>>,
     annexb_function_names: Vec<Vec<u16>>,
     has_arguments_object_local: bool,
@@ -957,43 +957,43 @@ struct BodyScopeInfo {
 
 /// Compute FDI runtime metadata matching the C++ SharedFunctionInstanceData
 /// constructor (ECMA-262 §10.2.11).
-fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
-    let body_scope = match &func_data.body.inner {
+fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
+    let body_scope = match &function_data.body.inner {
         ast::StatementKind::FunctionBody { ref scope, .. } => Some(scope),
         _ => None,
     };
 
-    let strict = func_data.is_strict_mode;
-    let is_arrow = func_data.is_arrow_function;
+    let strict = function_data.is_strict_mode;
+    let is_arrow = function_data.is_arrow_function;
 
     // Extract all scope analysis data in one borrow.
     let bsi = if let Some(scope) = &body_scope {
         let sd = scope.borrow();
         let fsd = sd.function_scope_data.as_ref();
         BodyScopeInfo {
-            uses_this: sd.uses_this || func_data.parsing_insights.uses_this,
+            uses_this: sd.uses_this || function_data.parsing_insights.uses_this,
             contains_eval: sd.contains_direct_call_to_eval,
             uses_this_from_env: sd.uses_this_from_environment
-                || func_data.parsing_insights.uses_this_from_environment,
-            might_need_arguments: func_data.parsing_insights.might_need_arguments_object,
+                || function_data.parsing_insights.uses_this_from_environment,
+            might_need_arguments: function_data.parsing_insights.might_need_arguments_object,
             has_function_named_arguments: fsd.map_or(false, |f| f.has_function_named_arguments),
             has_lexically_declared_arguments: fsd.map_or(false, |f| f.has_lexically_declared_arguments),
             non_local_var_count: fsd.map_or(0, |f| f.non_local_var_count),
-            non_local_var_count_for_param_exprs: fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
+            non_local_var_count_for_parameter_expressions: fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
             var_names: fsd.map(|f| &f.var_names).cloned().unwrap_or_default(),
             annexb_function_names: sd.annexb_function_names.clone(),
             has_arguments_object_local: sd.local_variables.iter().any(|lv| lv.kind == ast::LocalVarKind::ArgumentsObject),
         }
     } else {
         BodyScopeInfo {
-            uses_this: func_data.parsing_insights.uses_this,
-            contains_eval: func_data.parsing_insights.contains_direct_call_to_eval,
-            uses_this_from_env: func_data.parsing_insights.uses_this_from_environment,
-            might_need_arguments: func_data.parsing_insights.might_need_arguments_object,
+            uses_this: function_data.parsing_insights.uses_this,
+            contains_eval: function_data.parsing_insights.contains_direct_call_to_eval,
+            uses_this_from_env: function_data.parsing_insights.uses_this_from_environment,
+            might_need_arguments: function_data.parsing_insights.might_need_arguments_object,
             has_function_named_arguments: false,
             has_lexically_declared_arguments: false,
             non_local_var_count: 0,
-            non_local_var_count_for_param_exprs: 0,
+            non_local_var_count_for_parameter_expressions: 0,
             var_names: Vec::new(),
             annexb_function_names: Vec::new(),
             has_arguments_object_local: false,
@@ -1001,7 +1001,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     };
 
     // §10.2.11 step 4: check for parameter expressions.
-    let has_parameter_expressions = func_data.parameters.iter().any(|p| {
+    let has_parameter_expressions = function_data.parameters.iter().any(|p| {
         p.default_value.is_some()
             || matches!(p.binding, ast::FunctionParameterBinding::BindingPattern(_))
     });
@@ -1009,8 +1009,8 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
     // §10.2.11 steps 5-8: count non-local unique parameter names.
     let mut parameter_names: HashSet<Vec<u16>> = HashSet::new();
     let mut parameters_in_environment: usize = 0;
-    for param in &func_data.parameters {
-        match &param.binding {
+    for parameter in &function_data.parameters {
+        match &parameter.binding {
             ast::FunctionParameterBinding::Identifier(ident) => {
                 if parameter_names.insert(ident.name.clone()) {
                     if !ident.is_local() {
@@ -1098,7 +1098,7 @@ fn compute_sfd_metadata(func_data: &ast::FunctionData) -> SfdMetadata {
             }
         } else {
             // §10.2.11 step 28: separate var environment.
-            var_environment_bindings_count += bsi.non_local_var_count_for_param_exprs;
+            var_environment_bindings_count += bsi.non_local_var_count_for_parameter_expressions;
 
             if !strict {
                 for name in &bsi.annexb_function_names {
@@ -1165,14 +1165,14 @@ fn count_non_local_lex_declarations(scope: &Rc<RefCell<ast::ScopeData>>) -> usiz
             ast::StatementKind::VariableDeclaration { kind, declarations } => {
                 use parser::DeclarationKind;
                 if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
-                    for decl in declarations {
-                        count_non_local_names_in_target(&decl.target, &mut count);
+                    for declaration in declarations {
+                        count_non_local_names_in_target(&declaration.target, &mut count);
                     }
                 }
             }
             ast::StatementKind::UsingDeclaration { declarations } => {
-                for decl in declarations {
-                    count_non_local_names_in_target(&decl.target, &mut count);
+                for declaration in declarations {
+                    count_non_local_names_in_target(&declaration.target, &mut count);
                 }
             }
             ast::StatementKind::ClassDeclaration(class_data) => {

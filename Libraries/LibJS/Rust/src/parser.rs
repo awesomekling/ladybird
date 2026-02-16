@@ -57,9 +57,9 @@ pub use crate::ast::FunctionParsingInsights;
 
 /// Result of parsing a function's formal parameter list.
 pub struct ParsedParameters {
-    pub params: Vec<FunctionParameter>,
+    pub parameters: Vec<FunctionParameter>,
     pub function_length: i32,
-    pub param_info: Vec<ParamInfo>,
+    pub parameter_info: Vec<ParamInfo>,
     pub is_simple: bool,
 }
 
@@ -300,11 +300,11 @@ impl<'a> Parser<'a> {
         SourceRange { start, end: self.position() }
     }
 
-    pub(crate) fn expr(&self, start: Position, expression: ExpressionKind) -> Expression {
+    pub(crate) fn expression(&self, start: Position, expression: ExpressionKind) -> Expression {
         Expression::new(self.range_from(start), expression)
     }
 
-    pub(crate) fn stmt(&self, start: Position, statement: StatementKind) -> Statement {
+    pub(crate) fn statement(&self, start: Position, statement: StatementKind) -> Statement {
         Statement::new(self.range_from(start), statement)
     }
 
@@ -313,32 +313,32 @@ impl<'a> Parser<'a> {
     }
 
     /// Register function parameters with the scope collector.
-    pub(crate) fn register_function_params_with_scope(
+    pub(crate) fn register_function_parameters_with_scope(
         &mut self,
-        params: &[FunctionParameter],
-        param_info: &[ParamInfo],
+        parameters: &[FunctionParameter],
+        parameter_info: &[ParamInfo],
     ) {
         use crate::ast::FunctionParameterBinding;
         let mut entries: Vec<(Vec<u16>, Option<Rc<Identifier>>, bool, bool)> = Vec::new();
-        let mut info_idx = 0;
-        for param in params {
-            match &param.binding {
+        let mut info_index = 0;
+        for parameter in parameters {
+            match &parameter.binding {
                 FunctionParameterBinding::Identifier(id) => {
-                    let (name, is_rest, is_from_pattern) = if info_idx < param_info.len() {
-                        let pi = &param_info[info_idx];
-                        info_idx += 1;
+                    let (name, is_rest, is_from_pattern) = if info_index < parameter_info.len() {
+                        let pi = &parameter_info[info_index];
+                        info_index += 1;
                         (pi.name.clone(), pi.is_rest, pi.is_from_pattern)
                     } else {
-                        (id.name.clone(), param.is_rest, false)
+                        (id.name.clone(), parameter.is_rest, false)
                     };
                     entries.push((name, Some(id.clone()), is_rest, is_from_pattern));
                 }
                 FunctionParameterBinding::BindingPattern(_pat) => {
-                    // Pattern parameters have multiple bound names in param_info.
-                    while info_idx < param_info.len() && param_info[info_idx].is_from_pattern {
-                        let pi = &param_info[info_idx];
+                    // Pattern parameters have multiple bound names in parameter_info.
+                    while info_index < parameter_info.len() && parameter_info[info_index].is_from_pattern {
+                        let pi = &parameter_info[info_index];
                         entries.push((pi.name.clone(), pi.identifier.clone(), pi.is_rest, true));
-                        info_idx += 1;
+                        info_index += 1;
                     }
                 }
             }
@@ -446,11 +446,11 @@ impl<'a> Parser<'a> {
     // The source character immediately following a NumericLiteral must not be an
     // IdentifierStart or DecimalDigit.
     pub(crate) fn consume_and_validate_numeric_literal(&mut self) -> Token {
-        let tok = self.consume();
+        let token = self.consume();
         if self.flags.strict_mode {
             // https://tc39.es/ecma262/#sec-additional-syntax-numeric-literals
             // In strict mode, legacy octal literals (0-prefixed) are not permitted.
-            let value = self.token_value(&tok);
+            let value = self.token_value(&token);
             if value.len() > 1 && value[0] == b'0' as u16
                 && value[1] >= b'0' as u16 && value[1] <= b'9' as u16
             {
@@ -460,7 +460,7 @@ impl<'a> Parser<'a> {
         if self.match_identifier_name() && self.current_token.trivia_len == 0 {
             self.syntax_error("Numeric literal must not be immediately followed by identifier");
         }
-        tok
+        token
     }
 
     // https://tc39.es/ecma262/#sec-automatic-semicolon-insertion
@@ -671,12 +671,12 @@ impl<'a> Parser<'a> {
     /// body or the function is a generator/async.
     pub(crate) fn check_parameters_post_body(
         &mut self,
-        param_info: &[ParamInfo],
+        parameter_info: &[ParamInfo],
         force_strict: bool,
         _kind: FunctionKind,
     ) {
         let mut seen_names: HashSet<&[u16]> = HashSet::new();
-        for pi in param_info {
+        for pi in parameter_info {
             let name = &pi.name;
             if name.is_empty() {
                 continue;
@@ -750,31 +750,31 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if a node is a valid simple assignment target.
-    pub(crate) fn is_simple_assignment_target(expr: &Expression, allow_call_expression: bool) -> bool {
-        matches!(&expr.inner,
+    pub(crate) fn is_simple_assignment_target(expression: &Expression, allow_call_expression: bool) -> bool {
+        matches!(&expression.inner,
             ExpressionKind::Identifier(_)
             | ExpressionKind::Member { .. }
-        ) || (allow_call_expression && matches!(&expr.inner, ExpressionKind::Call(_)))
+        ) || (allow_call_expression && matches!(&expression.inner, ExpressionKind::Call(_)))
     }
 
-    fn is_object_expression(expr: &Expression) -> bool {
-        matches!(&expr.inner, ExpressionKind::Object(_))
+    fn is_object_expression(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Object(_))
     }
 
-    fn is_array_expression(expr: &Expression) -> bool {
-        matches!(&expr.inner, ExpressionKind::Array(_))
+    fn is_array_expression(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Array(_))
     }
 
-    fn is_identifier(expr: &Expression) -> bool {
-        matches!(&expr.inner, ExpressionKind::Identifier(_))
+    fn is_identifier(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Identifier(_))
     }
 
-    fn is_member_expression(expr: &Expression) -> bool {
-        matches!(&expr.inner, ExpressionKind::Member { .. })
+    fn is_member_expression(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Member { .. })
     }
 
-    fn is_call_expression(expr: &Expression) -> bool {
-        matches!(&expr.inner, ExpressionKind::Call(_))
+    fn is_call_expression(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Call(_))
     }
 
     // === Main entry point ===
@@ -789,7 +789,7 @@ impl<'a> Parser<'a> {
             // Now close it after children are set.
             self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
-            self.stmt(start, StatementKind::Program(ProgramData {
+            self.statement(start, StatementKind::Program(ProgramData {
                 scope,
                 program_type: ProgramType::Script,
                 is_strict_mode: is_strict,
@@ -800,7 +800,7 @@ impl<'a> Parser<'a> {
             let scope = ScopeData::shared_with_children(children);
             self.scope_collector.set_scope_node(scope.clone());
             self.scope_collector.close_scope();
-            self.stmt(start, StatementKind::Program(ProgramData {
+            self.statement(start, StatementKind::Program(ProgramData {
                 scope,
                 program_type: ProgramType::Module,
                 is_strict_mode: true,
@@ -880,11 +880,11 @@ impl<'a> Parser<'a> {
     // subsequent code to be interpreted in strict mode.
     pub(crate) fn parse_directive(&mut self) -> (bool, Vec<Statement>) {
         let mut found_use_strict = false;
-        let mut stmts = Vec::new();
+        let mut statements = Vec::new();
         while !self.done() && self.match_token(TokenType::StringLiteral) {
             let raw_value = self.token_original_value(&self.current_token);
             let statement = self.parse_statement(false);
-            stmts.push(statement);
+            statements.push(statement);
 
             if is_use_strict(raw_value) {
                 found_use_strict = true;
@@ -895,24 +895,24 @@ impl<'a> Parser<'a> {
             }
         }
         self.flags.string_legacy_octal_escape_sequence_in_scope = false;
-        (found_use_strict, stmts)
+        (found_use_strict, statements)
     }
 
     pub(crate) fn parse_statement_list(&mut self, allow_labelled_functions: bool) -> Vec<Statement> {
-        let mut stmts = Vec::new();
+        let mut statements = Vec::new();
         while !self.done() {
             if self.match_export_or_import() {
                 break;
             }
             if self.match_declaration() {
-                stmts.push(self.parse_declaration());
+                statements.push(self.parse_declaration());
             } else if self.match_statement() {
-                stmts.push(self.parse_statement(allow_labelled_functions));
+                statements.push(self.parse_statement(allow_labelled_functions));
             } else {
                 break;
             }
         }
-        stmts
+        statements
     }
 
     pub(crate) fn match_statement(&mut self) -> bool {

@@ -108,8 +108,8 @@ extern "C" {
         strict: bool,
         is_arrow: bool,
         has_simple_parameter_list: bool,
-        param_names: *const FFIUtf16Slice,
-        param_name_count: usize,
+        parameter_names: *const FFIUtf16Slice,
+        parameter_name_count: usize,
         source_text_offset: usize,
         source_text_len: usize,
         rust_function_ast: *mut c_void,
@@ -179,7 +179,7 @@ extern "C" {
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
 pub unsafe fn create_shared_function_data(
-    func_data: &crate::ast::FunctionData,
+    function_data: &crate::ast::FunctionData,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     is_strict: bool,
@@ -187,26 +187,26 @@ pub unsafe fn create_shared_function_data(
 ) -> *mut c_void {
     use crate::ast::FunctionParameterBinding;
 
-    let source_start = func_data.source_text_start as usize;
-    let source_end = func_data.source_text_end as usize;
+    let source_start = function_data.source_text_start as usize;
+    let source_end = function_data.source_text_end as usize;
     let source_text_len = source_end - source_start;
 
     let (name_ptr, name_len) = if let Some(name) = name_override {
         (name.as_ptr(), name.len())
-    } else if let Some(ref name_ident) = func_data.name {
+    } else if let Some(ref name_ident) = function_data.name {
         (name_ident.name.as_ptr(), name_ident.name.len())
     } else {
         (std::ptr::null(), 0)
     };
 
-    let has_simple_parameter_list = func_data.parameters.iter().all(|p| {
+    let has_simple_parameter_list = function_data.parameters.iter().all(|p| {
         !p.is_rest
             && p.default_value.is_none()
             && matches!(p.binding, FunctionParameterBinding::Identifier(_))
     });
 
-    let param_name_slices: Vec<FFIUtf16Slice> = if has_simple_parameter_list {
-        func_data
+    let parameter_name_slices: Vec<FFIUtf16Slice> = if has_simple_parameter_list {
+        function_data
             .parameters
             .iter()
             .map(|p| {
@@ -224,11 +224,11 @@ pub unsafe fn create_shared_function_data(
         Vec::new()
     };
 
-    let cloned = Box::new(func_data.clone());
+    let cloned = Box::new(function_data.clone());
     let rust_ast_ptr = Box::into_raw(cloned) as *mut c_void;
 
-    let function_kind = func_data.kind as u8;
-    let strict = func_data.is_strict_mode || is_strict;
+    let function_kind = function_data.kind as u8;
+    let strict = function_data.is_strict_mode || is_strict;
 
     let sfd_ptr = rust_create_sfd(
         vm_ptr,
@@ -236,18 +236,18 @@ pub unsafe fn create_shared_function_data(
         name_ptr,
         name_len,
         function_kind,
-        func_data.function_length,
-        func_data.parameters.len() as u32,
+        function_data.function_length,
+        function_data.parameters.len() as u32,
         strict,
-        func_data.is_arrow_function,
+        function_data.is_arrow_function,
         has_simple_parameter_list,
-        param_name_slices.as_ptr(),
-        param_name_slices.len(),
+        parameter_name_slices.as_ptr(),
+        parameter_name_slices.len(),
         source_start,
         source_text_len,
         rust_ast_ptr,
-        func_data.parsing_insights.uses_this,
-        func_data.parsing_insights.uses_this_from_environment,
+        function_data.parsing_insights.uses_this,
+        function_data.parsing_insights.uses_this_from_environment,
     );
 
     assert!(!sfd_ptr.is_null(), "create_shared_function_data: rust_create_sfd returned null");
@@ -259,45 +259,45 @@ pub unsafe fn create_shared_function_data(
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
 pub unsafe fn create_sfd_for_gdi(
-    func_data: &crate::ast::FunctionData,
+    function_data: &crate::ast::FunctionData,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     is_strict: bool,
 ) -> *mut c_void {
-    create_shared_function_data(func_data, vm_ptr, source_code_ptr, is_strict, None)
+    create_shared_function_data(function_data, vm_ptr, source_code_ptr, is_strict, None)
 }
 
 /// Encode constants into a tagged byte buffer for FFI.
 fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
-    let mut buf = Vec::new();
+    let mut buffer = Vec::new();
     for c in constants {
         match c {
             ConstantValue::Number(v) => {
-                buf.push(0); // CONSTANT_TAG_NUMBER
-                buf.extend_from_slice(&v.to_le_bytes());
+                buffer.push(0); // CONSTANT_TAG_NUMBER
+                buffer.extend_from_slice(&v.to_le_bytes());
             }
-            ConstantValue::Boolean(true) => buf.push(1),
-            ConstantValue::Boolean(false) => buf.push(2),
-            ConstantValue::Null => buf.push(3),
-            ConstantValue::Undefined => buf.push(4),
-            ConstantValue::Empty => buf.push(5),
+            ConstantValue::Boolean(true) => buffer.push(1),
+            ConstantValue::Boolean(false) => buffer.push(2),
+            ConstantValue::Null => buffer.push(3),
+            ConstantValue::Undefined => buffer.push(4),
+            ConstantValue::Empty => buffer.push(5),
             ConstantValue::String(s) => {
-                buf.push(6); // CONSTANT_TAG_STRING
+                buffer.push(6); // CONSTANT_TAG_STRING
                 let len = s.len() as u32;
-                buf.extend_from_slice(&len.to_le_bytes());
+                buffer.extend_from_slice(&len.to_le_bytes());
                 for &code_unit in s {
-                    buf.extend_from_slice(&code_unit.to_le_bytes());
+                    buffer.extend_from_slice(&code_unit.to_le_bytes());
                 }
             }
             ConstantValue::BigInt(s) => {
-                buf.push(7); // CONSTANT_TAG_BIGINT
+                buffer.push(7); // CONSTANT_TAG_BIGINT
                 let len = s.len() as u32;
-                buf.extend_from_slice(&len.to_le_bytes());
-                buf.extend_from_slice(s.as_bytes());
+                buffer.extend_from_slice(&len.to_le_bytes());
+                buffer.extend_from_slice(s.as_bytes());
             }
         }
     }
-    buf
+    buffer
 }
 
 /// Create a C++ Executable from the Rust generator's assembled output.
@@ -321,7 +321,7 @@ pub unsafe fn create_executable(
         })
         .collect();
 
-    let prop_key_slices: Vec<FFIUtf16Slice> = gen
+    let property_key_slices: Vec<FFIUtf16Slice> = gen
         .property_key_table
         .iter()
         .map(|s| FFIUtf16Slice {
@@ -340,7 +340,7 @@ pub unsafe fn create_executable(
         .collect();
 
     // Encode constants
-    let constants_buf = encode_constants(&gen.constants);
+    let constants_buffer = encode_constants(&gen.constants);
 
     // Build FFI exception handlers
     let ffi_handlers: Vec<FFIExceptionHandler> = assembled
@@ -391,12 +391,12 @@ pub unsafe fn create_executable(
         assembled.bytecode.len(),
         ident_slices.as_ptr(),
         ident_slices.len(),
-        prop_key_slices.as_ptr(),
-        prop_key_slices.len(),
+        property_key_slices.as_ptr(),
+        property_key_slices.len(),
         string_slices.as_ptr(),
         string_slices.len(),
-        constants_buf.as_ptr(),
-        constants_buf.len(),
+        constants_buffer.as_ptr(),
+        constants_buffer.len(),
         gen.constants.len(),
         ffi_handlers.as_ptr(),
         ffi_handlers.len(),

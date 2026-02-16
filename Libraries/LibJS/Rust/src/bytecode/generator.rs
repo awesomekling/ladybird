@@ -598,8 +598,8 @@ impl Generator {
             && std::rc::Rc::strong_count(&condition.inner) == 1
         {
             let block = &mut self.basic_blocks[self.current_block_index];
-            if let Some((last_inst, _)) = block.instructions.last() {
-                let fused = match last_inst {
+            if let Some((last_instruction, _)) = block.instructions.last() {
+                let fused = match last_instruction {
                     Instruction::LessThan { dst, lhs, rhs } if *dst == condition.operand() => {
                         Some(Instruction::JumpLessThan {
                             lhs: *lhs, rhs: *rhs,
@@ -650,10 +650,10 @@ impl Generator {
                     }
                     _ => None,
                 };
-                if let Some(fused_inst) = fused {
+                if let Some(fused_instruction) = fused {
                     // Remove the comparison instruction and emit the fused jump.
                     block.instructions.pop();
-                    self.emit(fused_inst);
+                    self.emit(fused_instruction);
                     return;
                 }
             }
@@ -787,8 +787,8 @@ impl Generator {
         });
         let completion_type = ctx.completion_type.clone();
         let finally_body = ctx.finally_body;
-        let idx_const = self.add_constant_i32(jump_index);
-        self.emit_mov(&completion_type, &idx_const);
+        let index_const = self.add_constant_i32(jump_index);
+        self.emit_mov(&completion_type, &index_const);
         self.emit(Instruction::Jump {
             target: finally_body,
         });
@@ -1060,8 +1060,8 @@ impl Generator {
 
         // Phase 1: Operand rewriting
         for block in &mut self.basic_blocks {
-            for (inst, _) in &mut block.instructions {
-                inst.visit_operands(&mut |op: &mut Operand| {
+            for (instruction, _) in &mut block.instructions {
+                instruction.visit_operands(&mut |op: &mut Operand| {
                     match op.operand_type() {
                         OperandType::Register => {} // stays as-is
                         OperandType::Local => op.offset_index_by(number_of_registers),
@@ -1085,7 +1085,7 @@ impl Generator {
         //   - Replace JumpIf-where-one-target-is-next-block with JumpTrue/JumpFalse
         let num_blocks = self.basic_blocks.len();
         let mut block_offsets: Vec<usize> = Vec::with_capacity(num_blocks);
-        // Per-instruction skip flags: skip_flags[block_idx][inst_idx] = replacement action
+        // Per-instruction skip flags: skip_flags[block_index][instruction_index] = replacement action
         #[derive(Clone, Copy)]
         enum InstAction {
             Emit,
@@ -1098,16 +1098,16 @@ impl Generator {
         let mut actions: Vec<Vec<InstAction>> = Vec::with_capacity(num_blocks);
         let mut offset: usize = 0;
 
-        for block_idx in 0..num_blocks {
+        for block_index in 0..num_blocks {
             block_offsets.push(offset);
-            let block = &self.basic_blocks[block_idx];
+            let block = &self.basic_blocks[block_index];
             let mut block_actions = Vec::with_capacity(block.instructions.len());
-            for (_inst_idx, (inst, _)) in block.instructions.iter().enumerate() {
-                match inst {
+            for (_instruction_index, (instruction, _)) in block.instructions.iter().enumerate() {
+                match instruction {
                     Instruction::Jump { target } => {
                         let target_block = target.0 as usize;
                         // OPTIMIZATION: Don't emit jumps that just jump to the next block.
-                        if target_block == block_idx + 1 {
+                        if target_block == block_index + 1 {
                             // If this block would become empty, we handle it by
                             // not advancing offset (matching C++ behavior of removing
                             // the block_start_offset entry and reusing it).
@@ -1135,14 +1135,14 @@ impl Generator {
                             }
                         }
                         block_actions.push(InstAction::Emit);
-                        offset += inst.encoded_size();
+                        offset += instruction.encoded_size();
                     }
                     Instruction::JumpIf { condition, true_target, false_target } => {
                         let true_block = true_target.0 as usize;
                         let false_block = false_target.0 as usize;
                         // OPTIMIZATION: Replace JumpIf where one target is next block
                         // with JumpTrue or JumpFalse.
-                        if true_block == block_idx + 1 {
+                        if true_block == block_index + 1 {
                             block_actions.push(InstAction::EmitJumpFalse {
                                 condition: *condition,
                                 target: *false_target,
@@ -1154,7 +1154,7 @@ impl Generator {
                             offset += replacement.encoded_size();
                             continue;
                         }
-                        if false_block == block_idx + 1 {
+                        if false_block == block_index + 1 {
                             block_actions.push(InstAction::EmitJumpTrue {
                                 condition: *condition,
                                 target: *true_target,
@@ -1167,11 +1167,11 @@ impl Generator {
                             continue;
                         }
                         block_actions.push(InstAction::Emit);
-                        offset += inst.encoded_size();
+                        offset += instruction.encoded_size();
                     }
                     _ => {
                         block_actions.push(InstAction::Emit);
-                        offset += inst.encoded_size();
+                        offset += instruction.encoded_size();
                     }
                 }
             }
@@ -1190,8 +1190,8 @@ impl Generator {
 
         // Phase 3: Patch labels (block index → byte offset)
         for block in &mut self.basic_blocks {
-            for (inst, _) in &mut block.instructions {
-                inst.visit_labels(&mut |label: &mut Label| {
+            for (instruction, _) in &mut block.instructions {
+                instruction.visit_labels(&mut |label: &mut Label| {
                     let block_index = label.0 as usize;
                     label.0 = block_offsets[block_index] as u32;
                 });
@@ -1206,14 +1206,14 @@ impl Generator {
         // of popping basic_block_start_offsets when a block becomes empty).
         let mut basic_block_start_offsets: Vec<usize> = Vec::with_capacity(num_blocks);
 
-        for (block_idx, block) in self.basic_blocks.iter().enumerate() {
+        for (block_index, block) in self.basic_blocks.iter().enumerate() {
             basic_block_start_offsets.push(bytecode.len());
             let block_start = bytecode.len();
             let handler = block.handler;
-            let block_actions = &actions[block_idx];
+            let block_actions = &actions[block_index];
 
-            for (inst_idx, (inst, sm)) in block.instructions.iter().enumerate() {
-                let action = block_actions[inst_idx];
+            for (instruction_index, (instruction, sm)) in block.instructions.iter().enumerate() {
+                let action = block_actions[instruction_index];
                 match action {
                     InstAction::Skip => {
                         // If this skip makes the block empty, remove it from
@@ -1223,18 +1223,18 @@ impl Generator {
                         }
                     }
                     InstAction::Emit => {
-                        let inst_offset = bytecode.len();
+                        let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: inst_offset as u32,
+                            bytecode_offset: instruction_offset as u32,
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
-                        inst.encode(self.strict, &mut bytecode);
+                        instruction.encode(self.strict, &mut bytecode);
                     }
                     InstAction::JumpToReturn(value) => {
-                        let inst_offset = bytecode.len();
+                        let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: inst_offset as u32,
+                            bytecode_offset: instruction_offset as u32,
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1242,9 +1242,9 @@ impl Generator {
                         replacement.encode(self.strict, &mut bytecode);
                     }
                     InstAction::JumpToEnd(value) => {
-                        let inst_offset = bytecode.len();
+                        let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: inst_offset as u32,
+                            bytecode_offset: instruction_offset as u32,
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1255,9 +1255,9 @@ impl Generator {
                         // Patch label for the target
                         let target_block = target.0 as usize;
                         target.0 = block_offsets[target_block] as u32;
-                        let inst_offset = bytecode.len();
+                        let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: inst_offset as u32,
+                            bytecode_offset: instruction_offset as u32,
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1267,9 +1267,9 @@ impl Generator {
                     InstAction::EmitJumpTrue { condition, mut target } => {
                         let target_block = target.0 as usize;
                         target.0 = block_offsets[target_block] as u32;
-                        let inst_offset = bytecode.len();
+                        let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: inst_offset as u32,
+                            bytecode_offset: instruction_offset as u32,
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1283,14 +1283,14 @@ impl Generator {
             if !block.terminated {
                 let mut undef_rewritten = undefined_constant_operand.unwrap();
                 undef_rewritten.offset_index_by(number_of_registers + number_of_locals);
-                let end_inst = Instruction::End { value: undef_rewritten };
-                let inst_offset = bytecode.len();
+                let end_instruction = Instruction::End { value: undef_rewritten };
+                let instruction_offset = bytecode.len();
                 source_map.push(SourceMapEntry {
-                    bytecode_offset: inst_offset as u32,
+                    bytecode_offset: instruction_offset as u32,
                     source_start: 0,
                     source_end: 0,
                 });
-                end_inst.encode(self.strict, &mut bytecode);
+                end_instruction.encode(self.strict, &mut bytecode);
             }
 
             // Close exception handler range

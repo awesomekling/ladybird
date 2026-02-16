@@ -323,8 +323,8 @@ impl ScopeCollector {
         self.current = state.current;
         self.errors.truncate(state.errors_len);
         // Remove any child indices that pointed to now-truncated records.
-        if let Some(current_idx) = self.current {
-            self.records[current_idx].children.retain(|&c| c < saved_len);
+        if let Some(current_index) = self.current {
+            self.records[current_index].children.retain(|&c| c < saved_len);
         }
     }
 
@@ -336,22 +336,22 @@ impl ScopeCollector {
         record.parent = self.current;
 
         if scope_type != ScopeType::Function && record.scope_data.is_none() {
-            if let Some(parent_idx) = self.current {
-                record.scope_data = self.records[parent_idx].scope_data.clone();
+            if let Some(parent_index) = self.current {
+                record.scope_data = self.records[parent_index].scope_data.clone();
             }
         }
 
         if scope_level == ScopeLevel::NotTopLevel {
-            if let Some(parent_idx) = self.current {
-                record.top_level = self.records[parent_idx].top_level;
+            if let Some(parent_index) = self.current {
+                record.top_level = self.records[parent_index].top_level;
             }
         } else {
             record.top_level = Some(index);
         }
 
         self.records.push(record);
-        if let Some(parent_idx) = self.current {
-            self.records[parent_idx].children.push(index);
+        if let Some(parent_index) = self.current {
+            self.records[parent_index].children.push(index);
         }
         self.current = Some(index);
     }
@@ -359,15 +359,15 @@ impl ScopeCollector {
     pub fn close_scope(&mut self) {
         let index = self.current.expect("close_scope with no current scope");
 
-        if let Some(parent_idx) = self.records[index].parent {
+        if let Some(parent_index) = self.records[index].parent {
             if !self.records[index].has_function_parameters {
                 let c = &self.records[index];
-                let args = c.contains_access_to_arguments_object_in_non_strict_mode;
+                let arguments = c.contains_access_to_arguments_object_in_non_strict_mode;
                 let eval = c.contains_direct_call_to_eval;
                 let aw = c.contains_await_expression;
-                self.records[parent_idx].contains_access_to_arguments_object_in_non_strict_mode |= args;
-                self.records[parent_idx].contains_direct_call_to_eval |= eval;
-                self.records[parent_idx].contains_await_expression |= aw;
+                self.records[parent_index].contains_access_to_arguments_object_in_non_strict_mode |= arguments;
+                self.records[parent_index].contains_direct_call_to_eval |= eval;
+                self.records[parent_index].contains_await_expression |= aw;
             }
         }
 
@@ -436,8 +436,8 @@ impl ScopeCollector {
     pub fn add_lexical_declaration(
         &mut self,
         bound_names: &[&[u16]],
-        decl_line: u32,
-        decl_column: u32,
+        declaration_line: u32,
+        declaration_column: u32,
     ) {
         let index = self.current.unwrap();
 
@@ -446,8 +446,8 @@ impl ScopeCollector {
             if var.flags.intersects(VarFlags::VAR | VarFlags::FORBIDDEN_LEXICAL | VarFlags::FUNCTION | VarFlags::LEXICAL) {
                 self.errors.push(ScopeError {
                     message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                    line: decl_line,
-                    column: decl_column,
+                    line: declaration_line,
+                    column: declaration_column,
                 });
             }
             var.flags |= VarFlags::LEXICAL;
@@ -462,8 +462,8 @@ impl ScopeCollector {
     pub fn add_var_declaration(
         &mut self,
         bound_names: &[(&[u16], Option<Rc<Identifier>>)],
-        decl_line: u32,
-        decl_column: u32,
+        declaration_line: u32,
+        declaration_column: u32,
         declaration_kind: Option<DeclarationKind>,
     ) {
         let index = self.current.unwrap();
@@ -474,22 +474,22 @@ impl ScopeCollector {
                 self.register_identifier(id.clone(), name, declaration_kind);
             }
 
-            let mut scope_idx = index;
+            let mut scope_index = index;
             loop {
-                let var = self.records[scope_idx].variable(name);
+                let var = self.records[scope_index].variable(name);
                 if var.flags.intersects(VarFlags::LEXICAL | VarFlags::FUNCTION | VarFlags::FORBIDDEN_VAR) {
                     self.errors.push(ScopeError {
                         message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                        line: decl_line,
-                        column: decl_column,
+                        line: declaration_line,
+                        column: declaration_column,
                     });
                 }
                 var.flags |= VarFlags::VAR;
                 var.var_identifier = identifier.clone();
-                if self.records[scope_idx].is_top_level() {
+                if self.records[scope_index].is_top_level() {
                     break;
                 }
-                scope_idx = self.records[scope_idx].parent.unwrap();
+                scope_index = self.records[scope_index].parent.unwrap();
             }
         }
     }
@@ -507,8 +507,8 @@ impl ScopeCollector {
         name_identifier: Option<Rc<Identifier>>,
         function_kind: FunctionKind,
         strict_mode: bool,
-        decl_line: u32,
-        decl_column: u32,
+        declaration_line: u32,
+        declaration_column: u32,
     ) {
         let index = self.current.unwrap();
         let scope_level = self.records[index].scope_level;
@@ -530,8 +530,8 @@ impl ScopeCollector {
             if existing_flags.intersects(VarFlags::VAR | VarFlags::LEXICAL) {
                 self.errors.push(ScopeError {
                     message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                    line: decl_line,
-                    column: decl_column,
+                    line: declaration_line,
+                    column: declaration_column,
                 });
             }
 
@@ -539,8 +539,8 @@ impl ScopeCollector {
                 if existing_flags.intersects(VarFlags::FUNCTION) {
                     self.errors.push(ScopeError {
                         message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                        line: decl_line,
-                        column: decl_column,
+                        line: declaration_line,
+                        column: declaration_column,
                     });
                 }
                 self.records[index].variable(name).flags |= VarFlags::LEXICAL;
@@ -603,19 +603,19 @@ impl ScopeCollector {
         let index = self.current.unwrap();
         self.records[index].has_function_parameters = true;
 
-        let mut prev_was_pattern = false;
+        let mut previous_was_pattern = false;
         for (name, identifier, is_rest, is_from_pattern) in entries {
             if *is_from_pattern {
-                if !prev_was_pattern {
+                if !previous_was_pattern {
                     // First bound name from a pattern parameter — push one
                     // empty placeholder so subsequent non-pattern parameters
                     // get the correct positional index.
                     self.records[index].parameter_names.push((Vec::new(), false));
                 }
-                prev_was_pattern = true;
+                previous_was_pattern = true;
             } else {
                 self.records[index].parameter_names.push((name.clone(), *is_rest));
-                prev_was_pattern = false;
+                previous_was_pattern = false;
             }
             if let Some(id) = identifier {
                 self.register_identifier(id.clone(), name, None);
@@ -632,9 +632,9 @@ impl ScopeCollector {
         self.records[index].scope_data = Some(scope_data.clone());
         // Update block_scope_data for any pending functions_to_hoist that
         // were registered before the ScopeData was created.
-        for func in &mut self.records[index].functions_to_hoist {
-            if func.block_scope_data.is_none() {
-                func.block_scope_data = Some(scope_data.clone());
+        for function in &mut self.records[index].functions_to_hoist {
+            if function.block_scope_data.is_none() {
+                function.block_scope_data = Some(scope_data.clone());
             }
         }
     }
@@ -670,27 +670,27 @@ impl ScopeCollector {
         let closest_fn = last_function_scope(index, &self.records);
         let this_from_env = closest_fn.is_some_and(|fi| self.records[fi].is_arrow_function);
 
-        let mut scope_idx = Some(index);
-        while let Some(si) = scope_idx {
+        let mut scope_index = Some(index);
+        while let Some(si) = scope_index {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
                 if this_from_env {
                     self.records[si].uses_this_from_environment = true;
                 }
             }
-            scope_idx = self.records[si].parent;
+            scope_index = self.records[si].parent;
         }
     }
 
     pub fn set_uses_new_target(&mut self) {
         let index = self.current.unwrap();
-        let mut scope_idx = Some(index);
-        while let Some(si) = scope_idx {
+        let mut scope_index = Some(index);
+        while let Some(si) = scope_index {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
                 self.records[si].uses_this_from_environment = true;
             }
-            scope_idx = self.records[si].parent;
+            scope_index = self.records[si].parent;
         }
     }
 
@@ -744,16 +744,16 @@ impl ScopeCollector {
         if let Some(index) = self.current {
             let fn_scope = last_function_scope(index, &self.records);
             let stop = fn_scope.and_then(|fi| self.records[fi].parent);
-            let mut scope_idx = Some(index);
-            while scope_idx != stop {
-                if let Some(si) = scope_idx {
+            let mut scope_index = Some(index);
+            while scope_index != stop {
+                if let Some(si) = scope_index {
                     if self.records[si].has_flag(name, VarFlags::LEXICAL | VarFlags::VAR | VarFlags::PARAMETER_CANDIDATE) {
                         return true;
                     }
                     if self.records[si].has_hoistable_function_named(name) {
                         return true;
                     }
-                    scope_idx = self.records[si].parent;
+                    scope_index = self.records[si].parent;
                 } else {
                     break;
                 }
@@ -788,8 +788,8 @@ impl ScopeCollector {
     fn analyze_recursive(&mut self, index: usize, initiated_by_eval: bool, suppress_globals: bool) {
         // Process children first (bottom-up traversal).
         let children = std::mem::take(&mut self.records[index].children);
-        for child_idx in children {
-            self.analyze_recursive(child_idx, initiated_by_eval, suppress_globals);
+        for child_index in children {
+            self.analyze_recursive(child_index, initiated_by_eval, suppress_globals);
         }
 
         // Steps 1-3 must run even for scopes without scope_data (e.g. catch
@@ -826,14 +826,14 @@ impl ScopeCollector {
     /// - `eval_in_current_function`: eval exists somewhere in the current
     ///   function (propagates through blocks but stops at function boundaries)
     fn propagate_eval_poisoning(records: &mut [ScopeRecord], index: usize) {
-        if let Some(parent_idx) = records[index].parent {
+        if let Some(parent_index) = records[index].parent {
             if records[index].contains_direct_call_to_eval || records[index].screwed_by_eval_in_scope_chain {
-                records[parent_idx].screwed_by_eval_in_scope_chain = true;
+                records[parent_index].screwed_by_eval_in_scope_chain = true;
             }
             // eval_in_current_function propagates upward through blocks but
             // stops at function boundaries (each function is independent).
             if records[index].eval_in_current_function && records[index].scope_type != ScopeType::Function {
-                records[parent_idx].eval_in_current_function = true;
+                records[parent_index].eval_in_current_function = true;
             }
         }
     }
@@ -975,8 +975,8 @@ impl ScopeCollector {
                             let mut sd = scope_data.borrow_mut();
 
                             if is_function_parameter {
-                                let arg_index = records[ls].get_parameter_index(&name);
-                                if let Some(ai) = arg_index {
+                                let argument_index = records[ls].get_parameter_index(&name);
+                                if let Some(ai) = argument_index {
                                     for id in &group.identifiers {
                                         id.local_index.set(ai);
                                         id.local_type.set(crate::ast::LocalType::Argument);
@@ -1030,9 +1030,9 @@ impl ScopeCollector {
             }
         }
 
-        if let Some(parent_idx) = records[index].parent {
+        if let Some(parent_index) = records[index].parent {
             for (name, group) in propagate_to_parent {
-                if let Some(parent_group) = records[parent_idx].identifier_groups.get_mut(&name) {
+                if let Some(parent_group) = records[parent_index].identifier_groups.get_mut(&name) {
                     parent_group.identifiers.extend(group.identifiers);
                     if group.captured_by_nested_function {
                         parent_group.captured_by_nested_function = true;
@@ -1041,7 +1041,7 @@ impl ScopeCollector {
                         parent_group.used_inside_with_statement = true;
                     }
                 } else {
-                    records[parent_idx].identifier_groups.insert(name, group);
+                    records[parent_index].identifier_groups.insert(name, group);
                 }
             }
         }
@@ -1077,8 +1077,8 @@ impl ScopeCollector {
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
-                if let crate::ast::StatementKind::FunctionDeclaration(ref func_data) = sd.children[i].inner {
-                    if let Some(ref name_ident) = func_data.name {
+                if let crate::ast::StatementKind::FunctionDeclaration(ref function_data) = sd.children[i].inner {
+                    if let Some(ref name_ident) = function_data.name {
                         if seen_function_names.insert(name_ident.name.clone()) {
                             functions_to_initialize.push(crate::ast::FunctionToInit {
                                 child_index: i,
@@ -1187,20 +1187,20 @@ impl ScopeCollector {
     fn hoist_functions(records: &mut [ScopeRecord], index: usize) {
         let functions = std::mem::take(&mut records[index].functions_to_hoist);
 
-        for func in functions {
+        for function in functions {
             // A let/const or forbidden var with the same name blocks hoisting.
-            if records[index].has_flag(&func.name, VarFlags::LEXICAL | VarFlags::FORBIDDEN_VAR) {
+            if records[index].has_flag(&function.name, VarFlags::LEXICAL | VarFlags::FORBIDDEN_VAR) {
                 continue;
             }
 
             if records[index].is_top_level() {
                 // AnnexB.3.3.1: Skip hoisting if the function name is a parameter name.
-                if records[index].has_flag(&func.name, VarFlags::FORBIDDEN_LEXICAL) {
+                if records[index].has_flag(&function.name, VarFlags::FORBIDDEN_LEXICAL) {
                     continue;
                 }
                 // AnnexB.3.3.1: Skip hoisting if the function name is "arguments"
                 // and the function needs an arguments object.
-                if func.name == utf16!("arguments")
+                if function.name == utf16!("arguments")
                     && records[index].contains_access_to_arguments_object_in_non_strict_mode
                     && !records[index].has_flag(utf16!("arguments"), VarFlags::FORBIDDEN_LEXICAL)
                 {
@@ -1209,28 +1209,28 @@ impl ScopeCollector {
                 // Reached function/program scope — register the hoisted function name.
                 if let Some(ref scope_data) = records[index].scope_data {
                     let mut sd = scope_data.borrow_mut();
-                    if !sd.annexb_function_names.contains(&func.name) {
-                        sd.annexb_function_names.push(func.name.clone());
+                    if !sd.annexb_function_names.contains(&function.name) {
+                        sd.annexb_function_names.push(function.name.clone());
                     }
                 }
                 // Mark all function declarations with this name in the block
                 // as hoisted, so they emit GetBinding + SetVariableBinding.
-                if let Some(ref block_scope) = func.block_scope_data {
+                if let Some(ref block_scope) = function.block_scope_data {
                     let mut bs = block_scope.borrow_mut();
                     for child in &mut bs.children {
                         if let crate::ast::StatementKind::FunctionDeclaration(ref mut fd)
                             = child.inner
                         {
-                            if fd.name.as_ref().is_some_and(|n| n.name == func.name) {
+                            if fd.name.as_ref().is_some_and(|n| n.name == function.name) {
                                 fd.is_hoisted = true;
                             }
                         }
                     }
                 }
-            } else if let Some(parent_idx) = records[index].parent {
+            } else if let Some(parent_index) = records[index].parent {
                 // Not yet at top level — keep propagating upward unless blocked.
-                if !records[parent_idx].has_flag(&func.name, VarFlags::LEXICAL | VarFlags::FUNCTION) {
-                    records[parent_idx].functions_to_hoist.push(func);
+                if !records[parent_index].has_flag(&function.name, VarFlags::LEXICAL | VarFlags::FUNCTION) {
+                    records[parent_index].functions_to_hoist.push(function);
                 }
             }
         }
