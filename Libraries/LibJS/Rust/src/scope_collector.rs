@@ -186,7 +186,7 @@ struct ScopeRecord {
     contains_access_to_arguments_object_in_non_strict_mode: bool,
     contains_direct_call_to_eval: bool,
     contains_await_expression: bool,
-    screwed_by_eval_in_scope_chain: bool,
+    poisoned_by_eval_in_scope_chain: bool,
     eval_in_current_function: bool,
     uses_this_from_environment: bool,
     uses_this: bool,
@@ -213,7 +213,7 @@ impl ScopeRecord {
             contains_access_to_arguments_object_in_non_strict_mode: false,
             contains_direct_call_to_eval: false,
             contains_await_expression: false,
-            screwed_by_eval_in_scope_chain: false,
+            poisoned_by_eval_in_scope_chain: false,
             eval_in_current_function: false,
             uses_this_from_environment: false,
             uses_this: false,
@@ -306,6 +306,14 @@ impl ScopeCollector {
 
     pub fn drain_errors(&mut self) -> Vec<ScopeError> {
         std::mem::take(&mut self.errors)
+    }
+
+    fn already_declared_error(&mut self, name: &[u16], line: u32, column: u32) {
+        self.errors.push(ScopeError {
+            message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
+            line,
+            column,
+        });
     }
 
     pub fn has_errors(&self) -> bool {
@@ -449,15 +457,11 @@ impl ScopeCollector {
         let index = self.current.expect("no current scope");
 
         for name in bound_names {
-            let var = self.records[index].variable(name);
-            if var.flags.intersects(VarFlags::VAR | VarFlags::FORBIDDEN_LEXICAL | VarFlags::FUNCTION | VarFlags::LEXICAL) {
-                self.errors.push(ScopeError {
-                    message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                    line: declaration_line,
-                    column: declaration_column,
-                });
+            let flags = self.records[index].variable(name).flags;
+            if flags.intersects(VarFlags::VAR | VarFlags::FORBIDDEN_LEXICAL | VarFlags::FUNCTION | VarFlags::LEXICAL) {
+                self.already_declared_error(name, declaration_line, declaration_column);
             }
-            var.flags |= VarFlags::LEXICAL;
+            self.records[index].variable(name).flags |= VarFlags::LEXICAL;
         }
     }
 
@@ -483,14 +487,11 @@ impl ScopeCollector {
 
             let mut scope_index = index;
             loop {
-                let var = self.records[scope_index].variable(name);
-                if var.flags.intersects(VarFlags::LEXICAL | VarFlags::FUNCTION | VarFlags::FORBIDDEN_VAR) {
-                    self.errors.push(ScopeError {
-                        message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                        line: declaration_line,
-                        column: declaration_column,
-                    });
+                let existing_flags = self.records[scope_index].variable(name).flags;
+                if existing_flags.intersects(VarFlags::LEXICAL | VarFlags::FUNCTION | VarFlags::FORBIDDEN_VAR) {
+                    self.already_declared_error(name, declaration_line, declaration_column);
                 }
+                let var = self.records[scope_index].variable(name);
                 var.flags |= VarFlags::VAR;
                 var.var_identifier = identifier.clone();
                 if self.records[scope_index].is_top_level() {
@@ -535,20 +536,12 @@ impl ScopeCollector {
             let existing_flags = self.records[index].variables.get(name).map_or(VarFlags::EMPTY, |v| v.flags);
 
             if existing_flags.intersects(VarFlags::VAR | VarFlags::LEXICAL) {
-                self.errors.push(ScopeError {
-                    message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                    line: declaration_line,
-                    column: declaration_column,
-                });
+                self.already_declared_error(name, declaration_line, declaration_column);
             }
 
             if function_kind != FunctionKind::Normal || strict_mode {
                 if existing_flags.intersects(VarFlags::FUNCTION) {
-                    self.errors.push(ScopeError {
-                        message: format!("Identifier '{}' already declared", String::from_utf16_lossy(name)),
-                        line: declaration_line,
-                        column: declaration_column,
-                    });
+                    self.already_declared_error(name, declaration_line, declaration_column);
                 }
                 self.records[index].variable(name).flags |= VarFlags::LEXICAL;
                 return;
@@ -655,7 +648,7 @@ impl ScopeCollector {
     pub fn set_contains_direct_call_to_eval(&mut self) {
         let index = self.current.expect("no current scope");
         self.records[index].contains_direct_call_to_eval = true;
-        self.records[index].screwed_by_eval_in_scope_chain = true;
+        self.records[index].poisoned_by_eval_in_scope_chain = true;
         self.records[index].eval_in_current_function = true;
     }
 
@@ -677,6 +670,8 @@ impl ScopeCollector {
         let closest_fn = last_function_scope(index, &self.records);
         let this_from_env = closest_fn.is_some_and(|fi| self.records[fi].is_arrow_function);
 
+        // NB: collect() is needed because ancestor_scopes borrows self.records
+        //     immutably, but the loop body needs mutable access.
         for si in ancestor_scopes(index, &self.records).collect::<Vec<_>>() {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
@@ -689,6 +684,7 @@ impl ScopeCollector {
 
     pub fn set_uses_new_target(&mut self) {
         let index = self.current.expect("no current scope");
+        // NB: collect() for the same reason as set_uses_this above.
         for si in ancestor_scopes(index, &self.records).collect::<Vec<_>>() {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
@@ -820,14 +816,14 @@ impl ScopeCollector {
     ///
     /// Three separate flags track eval impact:
     /// - `contains_direct_call_to_eval`: this scope itself has `eval()`
-    /// - `screwed_by_eval_in_scope_chain`: some descendant has eval, so
+    /// - `poisoned_by_eval_in_scope_chain`: some descendant has eval, so
     ///   this scope can't optimize away its environment record
     /// - `eval_in_current_function`: eval exists somewhere in the current
     ///   function (propagates through blocks but stops at function boundaries)
     fn propagate_eval_poisoning(records: &mut [ScopeRecord], index: usize) {
         if let Some(parent_index) = records[index].parent {
-            if records[index].contains_direct_call_to_eval || records[index].screwed_by_eval_in_scope_chain {
-                records[parent_index].screwed_by_eval_in_scope_chain = true;
+            if records[index].contains_direct_call_to_eval || records[index].poisoned_by_eval_in_scope_chain {
+                records[parent_index].poisoned_by_eval_in_scope_chain = true;
             }
             // eval_in_current_function propagates upward through blocks but
             // stops at function boundaries (each function is independent).
@@ -951,7 +947,7 @@ impl ScopeCollector {
                 }
 
                 if !group.captured_by_nested_function && !group.used_inside_with_statement {
-                    if records[index].screwed_by_eval_in_scope_chain {
+                    if records[index].poisoned_by_eval_in_scope_chain {
                         continue;
                     }
 
@@ -1153,7 +1149,7 @@ impl ScopeCollector {
             sd.uses_this = record.uses_this;
             sd.uses_this_from_environment = record.uses_this_from_environment;
             sd.contains_direct_call_to_eval = record.contains_direct_call_to_eval
-                || record.screwed_by_eval_in_scope_chain;
+                || record.poisoned_by_eval_in_scope_chain;
             sd.contains_access_to_arguments_object =
                 record.contains_access_to_arguments_object_in_non_strict_mode;
         }
