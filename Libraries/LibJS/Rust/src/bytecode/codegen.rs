@@ -4713,10 +4713,8 @@ fn generate_class_expression(
     let lhs_name = if data.name.is_none() { gen.pending_lhs_name.take() } else { None };
 
     // Step 2: Save parent environment, create class lexical environment.
-    // NB: class_env is allocated before dst to match C++ register ordering.
     let parent_env = gen.current_lexical_environment();
     let class_env = gen.allocate_register();
-    let dst = choose_dst(gen, preferred_dst);
     gen.emit(Instruction::CreateLexicalEnvironment {
         dst: class_env.operand(),
         parent: parent_env.operand(),
@@ -5081,6 +5079,9 @@ fn generate_class_expression(
     // Restore parent environment before emitting NewClass.
     gen.emit(Instruction::SetLexicalEnvironment { environment: parent_env.operand() });
     gen.lexical_environment_register_stack.pop();
+
+    // Allocate dst after element keys (matching C++ register ordering).
+    let dst = choose_dst(gen, preferred_dst);
 
     // Emit NewClass instruction
     gen.emit(Instruction::NewClass {
