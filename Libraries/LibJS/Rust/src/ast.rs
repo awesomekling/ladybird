@@ -569,8 +569,8 @@ pub struct TemplateLiteralData {
 // =============================================================================
 
 /// RAII wrapper for a compiled regex handle from C++.
-/// Takes ownership via `take()` and frees via FFI on drop.
-struct CompiledRegexInner(*mut c_void);
+/// Uses Cell for interior mutability so `take()` can transfer ownership.
+struct CompiledRegexInner(Cell<*mut c_void>);
 
 extern "C" {
     fn rust_free_compiled_regex(ptr: *mut c_void);
@@ -578,15 +578,16 @@ extern "C" {
 
 impl Drop for CompiledRegexInner {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { rust_free_compiled_regex(self.0) };
+        let ptr = self.0.get();
+        if !ptr.is_null() {
+            unsafe { rust_free_compiled_regex(ptr) };
         }
     }
 }
 
 impl fmt::Debug for CompiledRegexInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CompiledRegex({:p})", self.0)
+        write!(f, "CompiledRegex({:p})", self.0.get())
     }
 }
 
@@ -598,12 +599,13 @@ pub struct CompiledRegex(Rc<CompiledRegexInner>);
 
 impl CompiledRegex {
     pub fn new(ptr: *mut c_void) -> Self {
-        Self(Rc::new(CompiledRegexInner(ptr)))
+        Self(Rc::new(CompiledRegexInner(Cell::new(ptr))))
     }
 
-    /// Take the compiled regex handle. Only valid when this is the sole owner.
+    /// Take ownership of the compiled regex handle, leaving null behind
+    /// so the Rc destructor won't free it.
     pub fn take(&self) -> *mut c_void {
-        self.0.0
+        self.0.0.replace(std::ptr::null_mut())
     }
 }
 
