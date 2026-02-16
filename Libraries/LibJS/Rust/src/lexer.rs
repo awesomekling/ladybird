@@ -765,6 +765,13 @@ impl<'a> Lexer<'a> {
         true
     }
 
+    fn try_consume_bigint_suffix(&mut self, token_type: &mut TokenType) {
+        if self.current_code_unit == b'n' as u16 {
+            self.consume();
+            *token_type = TokenType::BigIntLiteral;
+        }
+    }
+
     fn consume_binary_number(&mut self) -> bool {
         self.consume();
         if !is_binary_digit(self.current_code_unit) {
@@ -985,25 +992,15 @@ impl<'a> Lexer<'a> {
                     is_invalid = !self.consume_exponent();
                 } else if self.current_code_unit == b'o' as u16 || self.current_code_unit == b'O' as u16 {
                     is_invalid = !self.consume_octal_number();
-                    if self.current_code_unit == b'n' as u16 {
-                        self.consume();
-                        token_type = TokenType::BigIntLiteral;
-                    }
+                    self.try_consume_bigint_suffix(&mut token_type);
                 } else if self.current_code_unit == b'b' as u16 || self.current_code_unit == b'B' as u16 {
                     is_invalid = !self.consume_binary_number();
-                    if self.current_code_unit == b'n' as u16 {
-                        self.consume();
-                        token_type = TokenType::BigIntLiteral;
-                    }
+                    self.try_consume_bigint_suffix(&mut token_type);
                 } else if self.current_code_unit == b'x' as u16 || self.current_code_unit == b'X' as u16 {
                     is_invalid = !self.consume_hexadecimal_number();
-                    if self.current_code_unit == b'n' as u16 {
-                        self.consume();
-                        token_type = TokenType::BigIntLiteral;
-                    }
+                    self.try_consume_bigint_suffix(&mut token_type);
                 } else if self.current_code_unit == b'n' as u16 {
-                    self.consume();
-                    token_type = TokenType::BigIntLiteral;
+                    self.try_consume_bigint_suffix(&mut token_type);
                 } else if is_ascii_digit(self.current_code_unit) {
                     // Legacy octal without 0o prefix
                     loop {
