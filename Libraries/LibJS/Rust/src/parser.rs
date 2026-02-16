@@ -152,7 +152,6 @@ pub struct ParserError {
 
 /// Boolean flags that are saved/restored during speculative parsing.
 #[derive(Clone, Copy, Default)]
-#[allow(dead_code)]
 pub(crate) struct ParserFlags {
     pub strict_mode: bool,
     pub allow_super_property_lookup: bool,
@@ -161,7 +160,6 @@ pub(crate) struct ParserFlags {
     pub in_formal_parameter_context: bool,
     pub in_generator_function_context: bool,
     pub await_expression_is_valid: bool,
-    pub in_arrow_function_context: bool,
     pub in_break_context: bool,
     pub in_continue_context: bool,
     pub string_legacy_octal_escape_sequence_in_scope: bool,
@@ -198,7 +196,6 @@ pub struct Parser<'a> {
 
     // --- Flags NOT saved/restored during speculative parsing ---
     pub(crate) initiated_by_eval: bool,
-    #[allow(dead_code)]
     pub(crate) in_eval_function_context: bool,
 
     /// Labels currently in scope. Value is Some(line, col) if a `continue`
@@ -398,32 +395,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn consume_identifier(&mut self) -> Token {
         if self.match_identifier() {
             return self.consume();
-        }
-        self.expected("identifier");
-        self.consume()
-    }
-
-    #[allow(dead_code)]
-    // https://tc39.es/ecma262/#sec-identifier-reference
-    // IdentifierReference[Yield, Await] :
-    //   Identifier
-    //   [~Yield] `yield`
-    //   [~Await] `await`
-    pub(crate) fn consume_identifier_reference(&mut self) -> Token {
-        if self.match_identifier() {
-            return self.consume();
-        }
-        if !self.flags.strict_mode {
-            if self.match_token(TokenType::Yield) && !self.flags.in_generator_function_context {
-                return self.consume();
-            }
-            if self.match_token(TokenType::Await) && !self.flags.await_expression_is_valid {
-                return self.consume();
-            }
         }
         self.expected("identifier");
         self.consume()
@@ -633,18 +607,6 @@ impl<'a> Parser<'a> {
         value != utf16!("let") && value != utf16!("static")
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn match_property_key(&self) -> bool {
-        matches!(
-            self.current_token_type(),
-            TokenType::BracketOpen
-                | TokenType::StringLiteral
-                | TokenType::NumericLiteral
-                | TokenType::BigIntLiteral
-                | TokenType::PrivateIdentifier
-        ) || self.match_identifier_name()
-    }
-
     pub(crate) fn check_identifier_name_for_assignment_validity(&mut self, name: &[u16], force_strict: bool) {
         if self.flags.strict_mode || force_strict {
             if name == utf16!("arguments") || name == utf16!("eval") {
@@ -687,17 +649,6 @@ impl<'a> Parser<'a> {
         }
         let start = token.value_start as usize;
         let end = start + token.value_len as usize;
-        if end <= self.source.len() {
-            &self.source[start..end]
-        } else {
-            &[]
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn token_trivia(&self, token: &Token) -> &[u16] {
-        let start = token.trivia_start as usize;
-        let end = start + token.trivia_len as usize;
         if end <= self.source.len() {
             &self.source[start..end]
         } else {
