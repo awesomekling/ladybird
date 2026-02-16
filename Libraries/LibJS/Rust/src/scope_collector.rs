@@ -54,7 +54,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{
-    FunctionScopeData, Identifier, LocalVarKind,
+    FunctionScopeData, Identifier, LocalBinding, LocalVarKind,
     LocalVariable, ScopeData, VarToInit,
 };
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
@@ -164,6 +164,11 @@ struct HoistableFunction {
     block_scope_data: Option<Rc<RefCell<ScopeData>>>,
 }
 
+struct ParameterName {
+    name: Vec<u16>,
+    is_rest: bool,
+}
+
 struct ScopeRecord {
     scope_type: ScopeType,
     scope_level: ScopeLevel,
@@ -175,7 +180,7 @@ struct ScopeRecord {
 
     // Parameter tracking
     has_function_parameters: bool,
-    parameter_names: Vec<(Vec<u16>, bool)>, // (name, is_rest)
+    parameter_names: Vec<ParameterName>,
 
     // Flags
     contains_access_to_arguments_object_in_non_strict_mode: bool,
@@ -235,8 +240,8 @@ impl ScopeRecord {
     fn get_parameter_index(&self, name: &[u16]) -> Option<u32> {
         // Iterate backwards to return the last parameter with the same name,
         // matching the semantics of duplicate parameter names in non-strict mode.
-        for (i, (pname, _is_rest)) in self.parameter_names.iter().enumerate().rev() {
-            if pname == name {
+        for (i, param) in self.parameter_names.iter().enumerate().rev() {
+            if param.name == name {
                 return Some(i as u32);
             }
         }
@@ -244,7 +249,7 @@ impl ScopeRecord {
     }
 
     fn has_rest_parameter_with_name(&self, name: &[u16]) -> bool {
-        self.parameter_names.iter().any(|(pname, is_rest)| *is_rest && pname == name)
+        self.parameter_names.iter().any(|param| param.is_rest && param.name == name)
     }
 
     fn has_hoistable_function_named(&self, name: &[u16]) -> bool {
@@ -607,11 +612,11 @@ impl ScopeCollector {
                     // First bound name from a pattern parameter — push one
                     // empty placeholder so subsequent non-pattern parameters
                     // get the correct positional index.
-                    self.records[index].parameter_names.push((Vec::new(), false));
+                    self.records[index].parameter_names.push(ParameterName { name: Vec::new(), is_rest: false });
                 }
                 previous_was_pattern = true;
             } else {
-                self.records[index].parameter_names.push((name.clone(), *is_rest));
+                self.records[index].parameter_names.push(ParameterName { name: name.clone(), is_rest: *is_rest });
                 previous_was_pattern = false;
             }
             if let Some(id) = identifier {
@@ -1090,7 +1095,10 @@ impl ScopeCollector {
 
             let local_info = if let Some(ref ident) = var.var_identifier {
                 if ident.is_local() {
-                    Some((ident.local_type.get().expect("is_local() implies local_type is Some"), ident.local_index.get()))
+                    Some(LocalBinding {
+                        local_type: ident.local_type.get().expect("is_local() implies local_type is Some"),
+                        index: ident.local_index.get(),
+                    })
                 } else {
                     None
                 }

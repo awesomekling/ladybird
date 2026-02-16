@@ -6965,7 +6965,7 @@ pub fn emit_function_declaration_instantiation(
     });
 
     // Build parameter_names map and check for duplicates.
-    let mut parameter_names: Vec<(Vec<u16>, bool)> = Vec::new(); // (name, is_local)
+    let mut parameter_names: Vec<FdiParameterName> = Vec::new();
     let mut has_duplicates = false;
 
     for parameter in &function_data.parameters {
@@ -6973,11 +6973,11 @@ pub fn emit_function_declaration_instantiation(
             FunctionParameterBinding::Identifier(ident) => {
                 let name = ident.name.clone();
                 let is_local = ident.is_local();
-                let already_exists = parameter_names.iter().any(|(n, _)| *n == name);
+                let already_exists = parameter_names.iter().any(|p| p.name == name);
                 if already_exists {
                     has_duplicates = true;
                 } else {
-                    parameter_names.push((name, is_local));
+                    parameter_names.push(FdiParameterName { name, is_local });
                 }
             }
             FunctionParameterBinding::BindingPattern(pattern) => {
@@ -6991,7 +6991,7 @@ pub fn emit_function_declaration_instantiation(
 
     if is_arrow {
         arguments_object_needed = false;
-    } else if parameter_names.iter().any(|(n, _)| *n == utf16!("arguments")) {
+    } else if parameter_names.iter().any(|p| p.name == utf16!("arguments")) {
         arguments_object_needed = false;
     }
 
@@ -7017,7 +7017,7 @@ pub fn emit_function_declaration_instantiation(
     // --- Step 1: Parameter scope for parameter expressions ---
 
     if has_parameter_expressions {
-        let has_non_local_parameters = parameter_names.iter().any(|(_, is_local)| !is_local);
+        let has_non_local_parameters = parameter_names.iter().any(|p| !p.is_local);
         if has_non_local_parameters {
             let parent = gen.current_lexical_environment();
             let new_env = gen.allocate_register();
@@ -7032,9 +7032,9 @@ pub fn emit_function_declaration_instantiation(
 
     // --- Step 2: Create bindings for non-local parameters ---
 
-    for (name, is_local) in &parameter_names {
-        if !is_local {
-            let id = gen.intern_identifier(&name);
+    for param in &parameter_names {
+        if !param.is_local {
+            let id = gen.intern_identifier(&param.name);
             gen.emit(Instruction::CreateVariable {
                 identifier: id,
                 mode: EnvironmentMode::Lexical as u32,
@@ -7167,9 +7167,9 @@ pub fn emit_function_declaration_instantiation(
                     continue;
                 }
 
-                if let Some((local_type, index)) = var.local {
+                if let Some(local_binding) = var.local {
                     let undef = gen.add_constant_undefined();
-                    let local = var_local_operand(gen, local_type, index);
+                    let local = var_local_operand(gen, local_binding.local_type, local_binding.index);
                     gen.emit_mov(&local, &undef);
                 } else {
                     let id = gen.intern_identifier(&var.name);
@@ -7214,8 +7214,8 @@ pub fn emit_function_declaration_instantiation(
 
                 let initial_value = if !is_in_parameter_bindings || var.is_function_name {
                     gen.add_constant_undefined()
-                } else if let Some((local_type, index)) = var.local {
-                    let local = var_local_operand(gen, local_type, index);
+                } else if let Some(local_binding) = var.local {
+                    let local = var_local_operand(gen, local_binding.local_type, local_binding.index);
                     let value = gen.allocate_register();
                     gen.emit_mov(&value, &local);
                     value
@@ -7230,8 +7230,8 @@ pub fn emit_function_declaration_instantiation(
                     value
                 };
 
-                if let Some((local_type, index)) = var.local {
-                    let local = var_local_operand(gen, local_type, index);
+                if let Some(local_binding) = var.local {
+                    let local = var_local_operand(gen, local_binding.local_type, local_binding.index);
                     gen.emit_mov(&local, &initial_value);
                 } else {
                     let id = gen.intern_identifier(&var.name);
@@ -7452,7 +7452,7 @@ fn var_local_operand(gen: &mut Generator, local_type: LocalType, index: u32) -> 
 /// Collect bound names from a binding pattern into the parameter_names list.
 fn collect_binding_pattern_names(
     pattern: &BindingPattern,
-    parameter_names: &mut Vec<(Vec<u16>, bool)>,
+    parameter_names: &mut Vec<FdiParameterName>,
     has_duplicates: &mut bool,
 ) {
     for entry in &pattern.entries {
@@ -7461,10 +7461,10 @@ fn collect_binding_pattern_names(
             Some(BindingEntryAlias::Identifier(ident)) => {
                 let name = ident.name.clone();
                 let is_local = ident.is_local();
-                if parameter_names.iter().any(|(n, _)| *n == name) {
+                if parameter_names.iter().any(|p| p.name == name) {
                     *has_duplicates = true;
                 } else {
-                    parameter_names.push((name, is_local));
+                    parameter_names.push(FdiParameterName { name, is_local });
                 }
             }
             Some(BindingEntryAlias::BindingPattern(sub_pattern)) => {
@@ -7475,16 +7475,22 @@ fn collect_binding_pattern_names(
                 if let Some(BindingEntryName::Identifier(ident)) = &entry.name {
                     let name = ident.name.clone();
                     let is_local = ident.is_local();
-                    if parameter_names.iter().any(|(n, _)| *n == name) {
+                    if parameter_names.iter().any(|p| p.name == name) {
                         *has_duplicates = true;
                     } else {
-                        parameter_names.push((name, is_local));
+                        parameter_names.push(FdiParameterName { name, is_local });
                     }
                 }
             }
             Some(BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
+}
+
+/// A parameter name with its locality (used during FDI).
+struct FdiParameterName {
+    name: Vec<u16>,
+    is_local: bool,
 }
 
 /// Detect known builtin methods from a callee expression (e.g. Math.abs).

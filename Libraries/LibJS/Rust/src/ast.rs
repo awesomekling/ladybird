@@ -723,14 +723,21 @@ pub struct FunctionToInit {
     pub child_index: usize,
 }
 
+/// A resolved local binding: the operand type and index assigned by scope analysis.
+#[derive(Clone, Copy, Debug)]
+pub struct LocalBinding {
+    pub local_type: LocalType,
+    pub index: u32,
+}
+
 /// A `var` binding that needs initialization during function entry.
 #[derive(Clone)]
 pub struct VarToInit {
     pub name: Utf16String,
     pub is_parameter: bool,
     pub is_function_name: bool,
-    /// If the scope analysis optimized this var to a local, stores the operand type and index.
-    pub local: Option<(LocalType, u32)>,
+    /// If the scope analysis optimized this var to a local, stores the binding info.
+    pub local: Option<LocalBinding>,
 }
 
 // =============================================================================
