@@ -334,9 +334,9 @@ impl<'a> Parser<'a> {
 
         // Parse function name.
         let (name, fn_name) = if self.has_default_export_name && !self.match_identifier() {
-            let default_name = utf16!("*default*").to_vec();
-            self.last_function_name = default_name.clone();
-            (Some(self.make_identifier(start, default_name.clone())), default_name)
+            let default_name = utf16!("*default*");
+            self.last_function_name = default_name.to_vec();
+            (Some(self.make_identifier(start, default_name)), default_name.to_vec())
         } else if self.match_identifier() {
             let token = self.consume();
             let value = self.token_value(&token).to_vec();
@@ -1247,9 +1247,9 @@ impl<'a> Parser<'a> {
 
         if self.match_imported_binding() {
             let token = self.consume();
-            let local_name: Utf16String = self.token_value(&token).to_vec().into();
+            let local_name: Utf16String = self.token_value(&token).into();
             entries.push(ImportEntry {
-                import_name: Some(utf16!("default").to_vec().into()),
+                import_name: Some(utf16!("default").into()),
                 local_name,
             });
             if self.match_token(TokenType::Comma) {
@@ -1269,7 +1269,7 @@ impl<'a> Parser<'a> {
                 self.consume(); // consume 'as'
                 if self.match_imported_binding() {
                     let token = self.consume();
-                    let namespace_name: Utf16String = self.token_value(&token).to_vec().into();
+                    let namespace_name: Utf16String = self.token_value(&token).into();
                     entries.push(ImportEntry {
                         import_name: None,
                         local_name: namespace_name,
@@ -1422,12 +1422,12 @@ impl<'a> Parser<'a> {
             }
 
             if local_name.is_none() {
-                local_name = Some(utf16!("*default*").to_vec().into());
+                local_name = Some(utf16!("*default*").into());
             }
 
             entries.push(ExportEntry {
                 kind: ExportEntryKind::NamedExport,
-                export_name: Some(utf16!("default").to_vec().into()),
+                export_name: Some(utf16!("default").into()),
                 local_or_import_name: local_name,
             });
         } else {
@@ -1562,7 +1562,7 @@ impl<'a> Parser<'a> {
     fn consume_module_specifier(&mut self) -> Utf16String {
         if !self.match_token(TokenType::StringLiteral) {
             self.expected("module specifier (string)");
-            return utf16!("!!invalid!!").to_vec().into();
+            return utf16!("!!invalid!!").into();
         }
         let token = self.consume();
         let (value, _) = self.parse_string_value(&token);
@@ -1572,7 +1572,7 @@ impl<'a> Parser<'a> {
     fn parse_module_export_name(&mut self) -> (Utf16String, bool) {
         if self.match_identifier_name() {
             let token = self.consume();
-            (self.token_value(&token).to_vec().into(), false)
+            (self.token_value(&token).into(), false)
         } else if self.match_token(TokenType::StringLiteral) {
             let token = self.consume();
             let (value, _) = self.parse_string_value(&token);
@@ -1601,7 +1601,7 @@ impl<'a> Parser<'a> {
                 value.into()
             } else if self.match_identifier_name() {
                 let token = self.consume();
-                self.token_value(&token).to_vec().into()
+                self.token_value(&token).into()
             } else {
                 self.expected("identifier or string as attribute key");
                 self.consume();
