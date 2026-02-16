@@ -680,6 +680,12 @@ pub struct LocalVariable {
 
 /// Data shared by all scope-bearing nodes (Program, BlockStatement,
 /// FunctionBody, SwitchStatement, SwitchCase).
+///
+/// Wrapped in `Rc<RefCell<...>>` for interior mutability during the
+/// scope collector's analysis phase. Borrow safety: the scope
+/// collector's two-phase design (build tree during parsing, then
+/// analyze bottom-up) ensures borrows never overlap — the analysis
+/// phase only borrows one scope at a time in a bottom-up traversal.
 #[derive(Clone, Default)]
 pub struct ScopeData {
     pub children: Vec<Statement>,
