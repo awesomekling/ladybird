@@ -66,12 +66,12 @@ fn collect_declarator_names(target: &VariableDeclaratorTarget, names: &mut Vec<V
 fn collect_pattern_names(pat: &BindingPattern, names: &mut Vec<Vec<u16>>) {
     for entry in &pat.entries {
         match &entry.alias {
-            BindingEntryAlias::Identifier(id) => names.push(id.name.clone()),
-            BindingEntryAlias::BindingPattern(nested) => collect_pattern_names(nested, names),
+            Some(BindingEntryAlias::Identifier(id)) => names.push(id.name.clone()),
+            Some(BindingEntryAlias::BindingPattern(nested)) => collect_pattern_names(nested, names),
             _ => {}
         }
-        if matches!(&entry.alias, BindingEntryAlias::Empty) {
-            if let BindingEntryName::Identifier(id) = &entry.name {
+        if entry.alias.is_none() {
+            if let Some(BindingEntryName::Identifier(id)) = &entry.name {
                 names.push(id.name.clone());
             }
         }
@@ -1033,8 +1033,8 @@ impl<'a> Parser<'a> {
             if !is_object && self.match_token(TokenType::Comma) {
                 self.consume();
                 entries.push(BindingEntry {
-                    name: BindingEntryName::Empty,
-                    alias: BindingEntryAlias::Empty,
+                    name: None,
+                    alias: None,
                     initializer: None,
                     is_rest: false,
                 });
@@ -1043,17 +1043,17 @@ impl<'a> Parser<'a> {
 
             let is_rest = self.eat(TokenType::TripleDot);
 
-            let mut entry_name = BindingEntryName::Empty;
-            let mut entry_alias = BindingEntryAlias::Empty;
+            let mut entry_name = None;
+            let mut entry_alias = None;
 
             if is_object {
                 if self.allow_member_expressions && is_rest {
                     // Destructuring assignment: rest target can be MemberExpression or Identifier.
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_member_expression(&expression) {
-                        entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
+                        entry_alias = Some(BindingEntryAlias::MemberExpression(Box::new(expression)));
                     } else if Self::is_identifier(&expression) {
-                        entry_name = BindingEntryName::Identifier(expression_into_identifier(expression));
+                        entry_name = Some(BindingEntryName::Identifier(expression_into_identifier(expression)));
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
                         break;
@@ -1077,7 +1077,7 @@ impl<'a> Parser<'a> {
                         if self.match_token(TokenType::StringLiteral) {
                             let token = self.consume();
                             let (value, _has_octal) = self.parse_string_value(&token);
-                            entry_name = BindingEntryName::Identifier(self.make_identifier(entry_start, value));
+                            entry_name = Some(BindingEntryName::Identifier(self.make_identifier(entry_start, value)));
                         } else if self.match_token(TokenType::BigIntLiteral) {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
@@ -1086,7 +1086,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 value
                             };
-                            entry_name = BindingEntryName::Identifier(self.make_identifier(entry_start, name_value));
+                            entry_name = Some(BindingEntryName::Identifier(self.make_identifier(entry_start, name_value)));
                         } else {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
@@ -1095,12 +1095,12 @@ impl<'a> Parser<'a> {
                             // C++ calls parse_identifier() for binding pattern property
                             // keys, which registers them. Do the same here.
                             self.scope_collector.register_identifier(id.clone(), &id.name, None);
-                            entry_name = BindingEntryName::Identifier(id);
+                            entry_name = Some(BindingEntryName::Identifier(id));
                         }
                     } else if self.match_token(TokenType::BracketOpen) {
                         self.consume();
                         let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
-                        entry_name = BindingEntryName::Expression(Box::new(expression));
+                        entry_name = Some(BindingEntryName::Expression(Box::new(expression)));
                         self.consume_token(TokenType::BracketClose);
                     } else {
                         self.expected("identifier or computed property name");
@@ -1114,26 +1114,26 @@ impl<'a> Parser<'a> {
                             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                                 if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
-                                    entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
+                                    entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(pattern)));
                                 }
                             } else if Self::is_member_expression(&expression) {
-                                entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
+                                entry_alias = Some(BindingEntryAlias::MemberExpression(Box::new(expression)));
                             } else if Self::is_identifier(&expression) {
-                                entry_alias = BindingEntryAlias::Identifier(expression_into_identifier(expression));
+                                entry_alias = Some(BindingEntryAlias::Identifier(expression_into_identifier(expression)));
                             } else {
                                 self.syntax_error("Invalid destructuring assignment target");
                                 break;
                             }
                         } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                             let nested = self.parse_binding_pattern();
-                            entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
+                            entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(nested)));
                         } else if self.match_identifier_name() {
                             let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
                             let id = self.make_identifier(alias_start, value.clone());
                             self.pattern_bound_names.push((value, id.clone()));
-                            entry_alias = BindingEntryAlias::Identifier(id);
+                            entry_alias = Some(BindingEntryAlias::Identifier(id));
                         } else {
                             self.expected("identifier or binding pattern");
                             break;
@@ -1146,7 +1146,7 @@ impl<'a> Parser<'a> {
                         if entry_is_keyword {
                             self.syntax_error("Binding pattern target may not be a reserved word");
                         }
-                        if let BindingEntryName::Identifier(ref id) = entry_name {
+                        if let Some(BindingEntryName::Identifier(ref id)) = entry_name {
                             self.pattern_bound_names.push((entry_name_value, id.clone()));
                         }
                     }
@@ -1157,28 +1157,28 @@ impl<'a> Parser<'a> {
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                         if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
-                            entry_alias = BindingEntryAlias::BindingPattern(Box::new(pattern));
+                            entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(pattern)));
                         }
                     } else if Self::is_member_expression(&expression) {
-                        entry_alias = BindingEntryAlias::MemberExpression(Box::new(expression));
+                        entry_alias = Some(BindingEntryAlias::MemberExpression(Box::new(expression)));
                     } else if Self::is_identifier(&expression) {
                         let id = expression_into_identifier(expression);
                         self.pattern_bound_names.push((id.name.clone(), id.clone()));
-                        entry_alias = BindingEntryAlias::Identifier(id);
+                        entry_alias = Some(BindingEntryAlias::Identifier(id));
                     } else {
                         self.syntax_error("Invalid destructuring assignment target");
                         break;
                     }
                 } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                     let nested = self.parse_binding_pattern();
-                    entry_alias = BindingEntryAlias::BindingPattern(Box::new(nested));
+                    entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(nested)));
                 } else if self.match_identifier_name() {
                     let alias_start = self.binding_pattern_start.unwrap_or_else(|| self.position());
                     let token = self.consume();
                     let value = self.token_value(&token).to_vec();
                     let id = self.make_identifier(alias_start, value.clone());
                     self.pattern_bound_names.push((value, id.clone()));
-                    entry_alias = BindingEntryAlias::Identifier(id);
+                    entry_alias = Some(BindingEntryAlias::Identifier(id));
                 } else {
                     self.expected("identifier or binding pattern");
                     break;

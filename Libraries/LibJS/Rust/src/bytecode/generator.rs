@@ -722,7 +722,7 @@ impl Generator {
     }
 
     pub fn set_current_breakable_scope_completion_register(&mut self, completion: ScopedOperand) {
-        self.breakable_scopes.last_mut().unwrap().completion_register = Some(completion);
+        self.breakable_scopes.last_mut().expect("no active breakable scope").completion_register = Some(completion);
     }
 
     pub fn find_breakable_scope(&self, label: Option<&[u16]>) -> Option<&LabelableScope> {
@@ -777,7 +777,7 @@ impl Generator {
     /// Register a jump target with the current FinallyContext.
     /// Assigns a unique completion_type index and emits code to set it and jump to finally.
     pub fn register_jump_in_finally_context(&mut self, target: Label) {
-        let index = self.current_finally_context.unwrap();
+        let index = self.current_finally_context.expect("no active finally context");
         let ctx = &mut self.finally_contexts[index];
         let jump_index = ctx.next_jump_index;
         ctx.next_jump_index += 1;
@@ -800,7 +800,7 @@ impl Generator {
         self.register_jump_in_finally_context(Label(trampoline_block as u32));
         self.switch_to_basic_block(trampoline_block);
         // Pop to the parent FinallyContext (simulating the inner finally completing).
-        let index = self.current_finally_context.unwrap();
+        let index = self.current_finally_context.expect("no active finally context");
         self.current_finally_context = self.finally_contexts[index].parent_index;
     }
 
@@ -834,7 +834,7 @@ impl Generator {
             let boundary = self.boundaries[i];
             match boundary {
                 BlockBoundaryType::Break if is_break => {
-                    let target_scope = self.breakable_scopes.last().unwrap();
+                    let target_scope = self.breakable_scopes.last().expect("no active breakable scope");
                     let target = target_scope.bytecode_target;
                     let completion = target_scope.completion_register.clone();
                     if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion) {
@@ -847,7 +847,7 @@ impl Generator {
                     return;
                 }
                 BlockBoundaryType::Continue if !is_break => {
-                    let target_scope = self.continuable_scopes.last().unwrap();
+                    let target_scope = self.continuable_scopes.last().expect("no active continuable scope");
                     let target = target_scope.bytecode_target;
                     let completion = target_scope.completion_register.clone();
                     if let (Some(cur), Some(tgt)) = (self.current_completion_register.clone(), completion) {
@@ -869,9 +869,9 @@ impl Generator {
                 BlockBoundaryType::ReturnToFinally => {
                     if !self.has_outer_finally_before_target(is_break, i + 1) {
                         let target_scope = if is_break {
-                            self.breakable_scopes.last().unwrap()
+                            self.breakable_scopes.last().expect("no active breakable scope")
                         } else {
-                            self.continuable_scopes.last().unwrap()
+                            self.continuable_scopes.last().expect("no active continuable scope")
                         };
                         let target = target_scope.bytecode_target;
                         let completion = target_scope.completion_register.clone();
@@ -1281,7 +1281,7 @@ impl Generator {
 
             // Unterminated blocks get an implicit End(undefined).
             if !block.terminated {
-                let mut undef_rewritten = undefined_constant_operand.unwrap();
+                let mut undef_rewritten = undefined_constant_operand.expect("undefined constant must exist");
                 undef_rewritten.offset_index_by(number_of_registers + number_of_locals);
                 let end_instruction = Instruction::End { value: undef_rewritten };
                 let instruction_offset = bytecode.len();

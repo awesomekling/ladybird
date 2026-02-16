@@ -255,7 +255,7 @@ impl<'a> Parser<'a> {
         };
 
         self.statement(start, StatementKind::If {
-            predicate: Box::new(predicate),
+            test: Box::new(predicate),
             consequent: Box::new(consequent),
             alternate,
         })

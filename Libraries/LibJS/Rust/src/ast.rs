@@ -196,19 +196,8 @@ pub enum MetaPropertyType {
 /// Scope analysis result: how this identifier is resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalType {
-    None,
     Argument,
     Variable,
-}
-
-/// Declaration kind as seen from an identifier reference.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum IdentDeclarationKind {
-    None = 0,
-    Var = 1,
-    Let = 2,
-    Const = 3,
 }
 
 /// An identifier reference or binding name.
@@ -220,11 +209,11 @@ pub struct Identifier {
     pub range: SourceRange,
     pub name: Utf16String,
     // Scope analysis results — set by scope collector after parsing.
-    pub local_type: Cell<LocalType>,
+    pub local_type: Cell<Option<LocalType>>,
     pub local_index: Cell<u32>,
     pub is_global: Cell<bool>,
     pub is_inside_scope_with_eval: Cell<bool>,
-    pub declaration_kind: Cell<IdentDeclarationKind>,
+    pub declaration_kind: Cell<Option<DeclarationKind>>,
 }
 
 impl Identifier {
@@ -232,16 +221,16 @@ impl Identifier {
         Self {
             range,
             name,
-            local_type: Cell::new(LocalType::None),
+            local_type: Cell::new(None),
             local_index: Cell::new(0),
             is_global: Cell::new(false),
             is_inside_scope_with_eval: Cell::new(false),
-            declaration_kind: Cell::new(IdentDeclarationKind::None),
+            declaration_kind: Cell::new(None),
         }
     }
 
     pub fn is_local(&self) -> bool {
-        self.local_type.get() != LocalType::None
+        self.local_type.get().is_some()
     }
 }
 
@@ -356,31 +345,29 @@ pub enum BindingPatternKind {
 
 #[derive(Clone)]
 pub struct BindingEntry {
-    pub name: BindingEntryName,
-    pub alias: BindingEntryAlias,
+    pub name: Option<BindingEntryName>,
+    pub alias: Option<BindingEntryAlias>,
     pub initializer: Option<Expression>,
     pub is_rest: bool,
 }
 
 /// The "name" part of a binding entry.
-/// - `Empty`: elision in array patterns (`[, , x]`)
+/// - `None`: elision in array patterns (`[, , x]`)
 /// - `Identifier`: object property shorthand (`{ x }`)
 /// - `Expression`: computed property key (`{ [expression]: x }`)
 #[derive(Clone)]
 pub enum BindingEntryName {
-    Empty,
     Identifier(Rc<Identifier>),
     Expression(Box<Expression>),
 }
 
 /// The "alias" (target) of a binding entry.
-/// - `Empty`: name is the binding target (`{ x }` — x is both name and alias)
+/// - `None`: name is the binding target (`{ x }` — x is both name and alias)
 /// - `Identifier`: simple binding (`{ x: y }`)
 /// - `BindingPattern`: nested destructuring (`{ x: { a, b } }`)
 /// - `MemberExpression`: assignment target (`{ x: obj.property }`)
 #[derive(Clone)]
 pub enum BindingEntryAlias {
-    Empty,
     Identifier(Rc<Identifier>),
     BindingPattern(Box<BindingPattern>),
     MemberExpression(Box<Expression>),
@@ -876,7 +863,7 @@ pub enum StatementKind {
 
     // Control flow
     If {
-        predicate: Box<Expression>,
+        test: Box<Expression>,
         consequent: Box<Statement>,
         alternate: Option<Box<Statement>>,
     },

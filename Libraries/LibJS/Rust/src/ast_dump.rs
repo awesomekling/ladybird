@@ -270,12 +270,11 @@ fn declaration_kind_to_string(kind: DeclarationKind) -> &'static str {
     }
 }
 
-fn ident_declaration_kind_to_string(kind: IdentDeclarationKind) -> &'static str {
+fn declaration_kind_to_ident_string(kind: DeclarationKind) -> &'static str {
     match kind {
-        IdentDeclarationKind::None => "",
-        IdentDeclarationKind::Var => "var",
-        IdentDeclarationKind::Let => "let",
-        IdentDeclarationKind::Const => "const",
+        DeclarationKind::Var => "var",
+        DeclarationKind::Let => "let",
+        DeclarationKind::Const => "const",
     }
 }
 
@@ -396,7 +395,7 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
         }
 
         StatementKind::If {
-            predicate,
+            test,
             consequent,
             alternate,
         } => {
@@ -415,7 +414,7 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                 &color_label(state, "test"),
             );
             dump_expression(
-                predicate,
+                test,
                 &child_state(&child_state(state, false), true),
             );
 
@@ -1479,7 +1478,7 @@ fn dump_identifier(ident: &Identifier, range: &SourceRange, state: &DumpState) {
     let mut desc = color_node_name(state, "Identifier");
     desc.push_str(&format!(" {}", color_string_utf16(state, &ident.name)));
     if ident.is_local() {
-        let kind = if ident.local_type.get() == LocalType::Argument {
+        let kind = if ident.local_type.get() == Some(LocalType::Argument) {
             "argument"
         } else {
             "variable"
@@ -1488,11 +1487,10 @@ fn dump_identifier(ident: &Identifier, range: &SourceRange, state: &DumpState) {
     } else if ident.is_global.get() {
         desc.push_str(&format!(" {}", color_global(state)));
     }
-    let declaration_kind = ident.declaration_kind.get();
-    if declaration_kind != IdentDeclarationKind::None {
+    if let Some(declaration_kind) = ident.declaration_kind.get() {
         desc.push_str(&format!(
             " {}",
-            color_op(state, ident_declaration_kind_to_string(declaration_kind))
+            color_op(state, declaration_kind_to_ident_string(declaration_kind))
         ));
     }
     if ident.is_inside_scope_with_eval.get() {
@@ -1788,17 +1786,12 @@ fn dump_binding_pattern(
         }
         print_node(&entry_state, &color_label(root_state, &label));
 
-        let has_alias = matches!(
-            entry.alias,
-            BindingEntryAlias::Identifier(_)
-                | BindingEntryAlias::BindingPattern(_)
-                | BindingEntryAlias::MemberExpression(_)
-        );
+        let has_alias = entry.alias.is_some();
         let has_initializer = entry.initializer.is_some();
 
         if pattern.kind == BindingPatternKind::Object {
             match &entry.name {
-                BindingEntryName::Identifier(ident) => {
+                Some(BindingEntryName::Identifier(ident)) => {
                     print_node(
                         &child_state(&entry_state, !has_alias && !has_initializer),
                         &color_label(root_state, "name"),
@@ -1812,7 +1805,7 @@ fn dump_binding_pattern(
                         ),
                     );
                 }
-                BindingEntryName::Expression(expression) => {
+                Some(BindingEntryName::Expression(expression)) => {
                     print_node(
                         &child_state(&entry_state, !has_alias && !has_initializer),
                         &color_label(root_state, "name (computed)"),
@@ -1825,16 +1818,16 @@ fn dump_binding_pattern(
                         ),
                     );
                 }
-                BindingEntryName::Empty => {}
+                None => {}
             }
         }
 
-        if has_alias {
+        if let Some(ref alias) = entry.alias {
             print_node(
                 &child_state(&entry_state, !has_initializer),
                 &color_label(root_state, "alias"),
             );
-            match &entry.alias {
+            match alias {
                 BindingEntryAlias::Identifier(ident) => {
                     dump_identifier(
                         ident,
@@ -1864,7 +1857,6 @@ fn dump_binding_pattern(
                         ),
                     );
                 }
-                BindingEntryAlias::Empty => {}
             }
         }
 
@@ -1882,8 +1874,8 @@ fn dump_binding_pattern(
 }
 
 fn is_elision(entry: &BindingEntry) -> bool {
-    matches!(entry.name, BindingEntryName::Empty)
-        && matches!(entry.alias, BindingEntryAlias::Empty)
+    entry.name.is_none()
+        && entry.alias.is_none()
         && entry.initializer.is_none()
         && !entry.is_rest
 }

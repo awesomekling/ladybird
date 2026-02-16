@@ -36,14 +36,14 @@ pub struct FFIUtf16Slice {
 
 #[repr(C)]
 pub struct FFIClassElement {
-    pub kind: u8, // 0=Method, 1=Getter, 2=Setter, 3=Field, 4=StaticInitializer
+    pub kind: u8, // ClassElementKind
     pub is_static: bool,
     pub is_private: bool,
     pub private_identifier: *const u16,
     pub private_identifier_len: usize,
     pub shared_function_data_index: i32, // -1 for none
     pub has_initializer: bool,
-    pub literal_value_kind: u8, // 0=none, 1=number, 2=boolean_true, 3=boolean_false, 4=null, 5=string
+    pub literal_value_kind: u8, // LiteralValueKind
     pub literal_value_number: f64,
     pub literal_value_string: *const u16,
     pub literal_value_string_len: usize,
@@ -267,22 +267,35 @@ pub unsafe fn create_sfd_for_gdi(
     create_shared_function_data(function_data, vm_ptr, source_code_ptr, is_strict, None)
 }
 
+/// Constant tags for the FFI constant buffer (ABI-compatible with BytecodeFactory).
+#[repr(u8)]
+enum ConstantTag {
+    Number = 0,
+    BooleanTrue = 1,
+    BooleanFalse = 2,
+    Null = 3,
+    Undefined = 4,
+    Empty = 5,
+    String = 6,
+    BigInt = 7,
+}
+
 /// Encode constants into a tagged byte buffer for FFI.
 fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
     let mut buffer = Vec::new();
     for c in constants {
         match c {
             ConstantValue::Number(v) => {
-                buffer.push(0); // CONSTANT_TAG_NUMBER
+                buffer.push(ConstantTag::Number as u8);
                 buffer.extend_from_slice(&v.to_le_bytes());
             }
-            ConstantValue::Boolean(true) => buffer.push(1),
-            ConstantValue::Boolean(false) => buffer.push(2),
-            ConstantValue::Null => buffer.push(3),
-            ConstantValue::Undefined => buffer.push(4),
-            ConstantValue::Empty => buffer.push(5),
+            ConstantValue::Boolean(true) => buffer.push(ConstantTag::BooleanTrue as u8),
+            ConstantValue::Boolean(false) => buffer.push(ConstantTag::BooleanFalse as u8),
+            ConstantValue::Null => buffer.push(ConstantTag::Null as u8),
+            ConstantValue::Undefined => buffer.push(ConstantTag::Undefined as u8),
+            ConstantValue::Empty => buffer.push(ConstantTag::Empty as u8),
             ConstantValue::String(s) => {
-                buffer.push(6); // CONSTANT_TAG_STRING
+                buffer.push(ConstantTag::String as u8);
                 let len = s.len() as u32;
                 buffer.extend_from_slice(&len.to_le_bytes());
                 for &code_unit in s {
@@ -290,7 +303,7 @@ fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
                 }
             }
             ConstantValue::BigInt(s) => {
-                buffer.push(7); // CONSTANT_TAG_BIGINT
+                buffer.push(ConstantTag::BigInt as u8);
                 let len = s.len() as u32;
                 buffer.extend_from_slice(&len.to_le_bytes());
                 buffer.extend_from_slice(s.as_bytes());

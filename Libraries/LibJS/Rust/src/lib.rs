@@ -808,6 +808,9 @@ pub unsafe extern "C" fn rust_compile_function(
     sfd_ptr: *mut c_void,
     rust_function_ast: *mut c_void,
 ) -> *mut c_void {
+    if rust_function_ast.is_null() {
+        return std::ptr::null_mut();
+    }
     let function_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
 
     let body_scope = match &function_data.body.inner {
@@ -1081,7 +1084,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
 
             // §10.2.11 step 30: lexical environment.
             let non_local_lex_count =
-                count_non_local_lex_declarations(body_scope.unwrap());
+                count_non_local_lex_declarations(body_scope.expect("function must have a body scope"));
             if strict {
                 // Lex env == var env == function env.
                 function_environment_bindings_count += non_local_lex_count;
@@ -1104,7 +1107,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
             }
 
             let non_local_lex_count =
-                count_non_local_lex_declarations(body_scope.unwrap());
+                count_non_local_lex_declarations(body_scope.expect("function must have a body scope"));
             if strict {
                 // Lex env == var env.
                 var_environment_bindings_count += non_local_lex_count;
@@ -1202,22 +1205,22 @@ fn count_non_local_names_in_binding_pattern(
 ) {
     for entry in &pattern.entries {
         match &entry.alias {
-            ast::BindingEntryAlias::Identifier(ident) => {
+            Some(ast::BindingEntryAlias::Identifier(ident)) => {
                 if !ident.is_local() {
                     *count += 1;
                 }
             }
-            ast::BindingEntryAlias::BindingPattern(sub) => {
+            Some(ast::BindingEntryAlias::BindingPattern(sub)) => {
                 count_non_local_names_in_binding_pattern(sub, count);
             }
-            ast::BindingEntryAlias::Empty => {
-                if let ast::BindingEntryName::Identifier(ident) = &entry.name {
+            None => {
+                if let Some(ast::BindingEntryName::Identifier(ident)) = &entry.name {
                     if !ident.is_local() {
                         *count += 1;
                     }
                 }
             }
-            ast::BindingEntryAlias::MemberExpression(_) => {}
+            Some(ast::BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
 }
@@ -1228,16 +1231,16 @@ fn for_each_binding_pattern_identifier(
 ) {
     for entry in &pattern.entries {
         match &entry.alias {
-            ast::BindingEntryAlias::Identifier(ident) => callback(ident),
-            ast::BindingEntryAlias::BindingPattern(sub) => {
+            Some(ast::BindingEntryAlias::Identifier(ident)) => callback(ident),
+            Some(ast::BindingEntryAlias::BindingPattern(sub)) => {
                 for_each_binding_pattern_identifier(sub, callback);
             }
-            ast::BindingEntryAlias::Empty => {
-                if let ast::BindingEntryName::Identifier(ident) = &entry.name {
+            None => {
+                if let Some(ast::BindingEntryName::Identifier(ident)) = &entry.name {
                     callback(ident);
                 }
             }
-            ast::BindingEntryAlias::MemberExpression(_) => {}
+            Some(ast::BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
 }

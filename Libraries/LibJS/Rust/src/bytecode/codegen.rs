@@ -275,7 +275,7 @@ pub fn generate_expression(
                 let id = gen.intern_identifier(&data.name.as_ref().unwrap().name);
                 gen.emit(Instruction::CreateVariable {
                     identifier: id,
-                    mode: 0, // Lexical
+                    mode: EnvironmentMode::Lexical as u32,
                     is_immutable: true,
                     is_global: false,
                     is_strict: false,
@@ -674,10 +674,10 @@ pub fn generate_statement(
 
         // === If ===
         StatementKind::If {
-            predicate,
+            test,
             consequent,
             alternate,
-        } => generate_if_statement(gen, predicate, consequent, alternate.as_deref(), preferred_dst),
+        } => generate_if_statement(gen, test, consequent, alternate.as_deref(), preferred_dst),
 
         // === While ===
         StatementKind::While { test, body } => {
@@ -841,9 +841,9 @@ pub fn generate_statement(
                 if name_ident.is_local() {
                     let local_index = name_ident.local_index.get();
                     let local = match name_ident.local_type.get() {
-                        LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-                        LocalType::Variable => gen.local(local_index),
-                        LocalType::None => unreachable!(),
+                        Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+                        Some(LocalType::Variable) => gen.local(local_index),
+                        None => unreachable!(),
                     };
                     gen.emit_mov(&local, &val);
                 } else {
@@ -926,6 +926,36 @@ enum EnvironmentMode {
 enum ArgumentsKind {
     Mapped = 0,
     Unmapped = 1,
+}
+
+/// Class element kind (ABI-compatible with ClassBlueprint::Element::Kind).
+#[repr(u8)]
+enum ClassElementKind {
+    Method = 0,
+    Getter = 1,
+    Setter = 2,
+    Field = 3,
+    StaticInitializer = 4,
+}
+
+/// Iterator hint (ABI-compatible).
+#[repr(u32)]
+#[allow(dead_code)]
+enum IteratorHint {
+    Sync = 0,
+    Async = 1,
+}
+
+/// Literal value kind for class field initializers
+/// (ABI-compatible with BytecodeFactory).
+#[repr(u8)]
+enum LiteralValueKind {
+    None = 0,
+    Number = 1,
+    BooleanTrue = 2,
+    BooleanFalse = 3,
+    Null = 4,
+    String = 5,
 }
 
 /// Like generate_await but uses caller-provided completion registers.
@@ -1123,7 +1153,7 @@ fn generate_async_generator_yield(
     gen.switch_to_basic_block(awaited_normal_block);
     gen.emit(Instruction::SetCompletionType {
         completion: received_completion.operand(),
-        completion_type: 4, // Completion::Type::Return
+        completion_type: CompletionType::Return as u32,
     });
     gen.emit(Instruction::Jump {
         target: Label(main_continuation as u32),
@@ -1673,21 +1703,21 @@ fn generate_identifier(
     if ident.is_local() {
         let local_index = ident.local_index.get();
         let local = match ident.local_type.get() {
-            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-            LocalType::Variable => gen.local(local_index),
-            LocalType::None => unreachable!(),
+            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+            Some(LocalType::Variable) => gen.local(local_index),
+            None => unreachable!(),
         };
         // Check TDZ for uninitialized bindings.
         // Arguments may need TDZ during default parameter evaluation;
         // for variable-type locals, only lexically-declared (let/const) need TDZ.
         // Matching C++ Identifier::generate_bytecode.
-        let needs_tdz_check = if ident.local_type.get() == LocalType::Argument {
+        let needs_tdz_check = if ident.local_type.get() == Some(LocalType::Argument) {
             !gen.is_argument_initialized(local_index)
         } else {
             gen.is_local_lexically_declared(local_index) && !gen.is_local_initialized(local_index)
         };
         if needs_tdz_check {
-            if ident.local_type.get() == LocalType::Argument {
+            if ident.local_type.get() == Some(LocalType::Argument) {
                 // Arguments are initialized to undefined by default, so we
                 // need to replace the value with the empty sentinel to
                 // trigger the TDZ check.
@@ -1717,7 +1747,7 @@ fn generate_identifier(
             identifier: id,
             cache_index: cache,
         });
-    } else if ident.declaration_kind.get() == IdentDeclarationKind::Var {
+    } else if ident.declaration_kind.get() == Some(DeclarationKind::Var) {
         let id = gen.intern_identifier(&ident.name);
         gen.emit(Instruction::GetInitializedBinding {
             dst: dst.operand(),
@@ -1911,12 +1941,12 @@ fn generate_conditional(
 
 fn generate_if_statement(
     gen: &mut Generator,
-    predicate: &Expression,
+    test: &Expression,
     consequent: &Statement,
     alternate: Option<&Statement>,
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let pred = generate_expression_or_undefined(predicate, gen, None);
+    let pred = generate_expression_or_undefined(test, gen, None);
 
     let completion = if gen.must_propagate_completion {
         let reg = choose_dst(gen, preferred_dst);
@@ -2577,7 +2607,7 @@ fn generate_variable_declaration(
         // preferred_dst could be used as input in the initializer.
         let init_dst = if kind != DeclarationKind::Var {
             if let VariableDeclaratorTarget::Identifier(ident) = &declaration.target {
-                if ident.is_local() && ident.local_type.get() == LocalType::Variable {
+                if ident.is_local() && ident.local_type.get() == Some(LocalType::Variable) {
                     Some(gen.local(ident.local_index.get()))
                 } else {
                     None
@@ -2610,9 +2640,9 @@ fn generate_variable_declaration(
                 if ident.is_local() {
                     let local_index = ident.local_index.get();
                     let local = match ident.local_type.get() {
-                        LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-                        LocalType::Variable => gen.local(local_index),
-                        LocalType::None => unreachable!(),
+                        Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+                        Some(LocalType::Variable) => gen.local(local_index),
+                        None => unreachable!(),
                     };
                     gen.emit_mov(&local, &value);
                     gen.mark_local_initialized(local_index);
@@ -2729,12 +2759,12 @@ fn generate_call_expression(
             ExpressionKind::Identifier(ident) if ident.is_local() => {
                 // Local identifier: use the local directly, with ThrowIfTDZ
                 // if not yet initialized (matching C++ CallExpression codegen).
-                let local = if ident.local_type.get() == LocalType::Argument {
+                let local = if ident.local_type.get() == Some(LocalType::Argument) {
                     gen.scoped_operand(Operand::argument(ident.local_index.get()))
                 } else {
                     gen.local(ident.local_index.get())
                 };
-                let needs_tdz = if ident.local_type.get() == LocalType::Argument {
+                let needs_tdz = if ident.local_type.get() == Some(LocalType::Argument) {
                     !gen.is_argument_initialized(ident.local_index.get())
                 } else {
                     gen.is_local_lexically_declared(ident.local_index.get()) && !gen.is_local_initialized(ident.local_index.get())
@@ -3188,7 +3218,7 @@ fn generate_assignment_expression(
                             None
                         };
                         let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
-                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &rhs_val, computed_key.as_ref());
+                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &rhs_val, computed_key.as_ref());
                         return Some(rhs_val);
                     }
                     // For computed properties, evaluate the key BEFORE the RHS
@@ -3222,7 +3252,7 @@ fn generate_assignment_expression(
 
                 if is_super {
                     let old_val = gen.allocate_register();
-                    let computed_key = emit_super_get(gen, &old_val, &base, property, *computed, super_this.as_ref().unwrap());
+                    let computed_key = emit_super_get(gen, &old_val, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"));
                     if is_logical {
                         let rhs_block = gen.make_block();
                         let lhs_block = gen.make_block();
@@ -3232,7 +3262,7 @@ fn generate_assignment_expression(
                         gen.switch_to_basic_block(rhs_block);
                         let rhs_val = generate_expression(rhs, gen, None)?;
                         gen.emit_mov(&dst, &rhs_val);
-                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &dst, computed_key.as_ref());
+                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &dst, computed_key.as_ref());
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
@@ -3243,7 +3273,7 @@ fn generate_assignment_expression(
                     let rhs_val = generate_expression(rhs, gen, None)?;
                     let dst = choose_dst(gen, preferred_dst);
                     emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
-                    emit_super_put(gen, &base, property, *computed, super_this.as_ref().unwrap(), &dst, computed_key.as_ref());
+                    emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &dst, computed_key.as_ref());
                     return Some(dst);
                 }
 
@@ -3533,15 +3563,15 @@ fn emit_get_by_id(
 
 fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
     if ident.is_local() {
-        if ident.declaration_kind.get() == IdentDeclarationKind::Const {
+        if ident.declaration_kind.get() == Some(DeclarationKind::Const) {
             gen.emit(Instruction::ThrowConstAssignment {});
             return;
         }
         let local_index = ident.local_index.get();
         let local = match ident.local_type.get() {
-            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-            LocalType::Variable => gen.local(local_index),
-            LocalType::None => unreachable!(),
+            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+            Some(LocalType::Variable) => gen.local(local_index),
+            None => unreachable!(),
         };
         // TDZ check: throw ReferenceError if assigning to an uninitialized let/const binding.
         // Matching C++ AssignmentExpression: check is_lexically_declared && !is_initialized.
@@ -3554,7 +3584,7 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
         }
         // Match C++ emit_set_variable: only skip self-move for variable locals,
         // not for arguments. C++ checks is_local() && is_variable() && same index.
-        let is_variable_self_move = ident.local_type.get() == LocalType::Variable
+        let is_variable_self_move = ident.local_type.get() == Some(LocalType::Variable)
             && value.operand().is_local()
             && value.operand().index() == local_index;
         if !is_variable_self_move {
@@ -4820,7 +4850,7 @@ fn generate_class_expression(
         let name_id = gen.intern_identifier(&name);
         gen.emit(Instruction::CreateVariable {
             identifier: name_id,
-            mode: 0, // Lexical
+            mode: EnvironmentMode::Lexical as u32,
             is_immutable: true,
             is_global: false,
             is_strict: false,
@@ -4886,9 +4916,9 @@ fn generate_class_expression(
                 is_static,
             } => {
                 let ffi_kind = match kind {
-                    ClassMethodKind::Method => 0u8,
-                    ClassMethodKind::Getter => 1u8,
-                    ClassMethodKind::Setter => 2u8,
+                    ClassMethodKind::Method => ClassElementKind::Method as u8,
+                    ClassMethodKind::Getter => ClassElementKind::Getter as u8,
+                    ClassMethodKind::Setter => ClassElementKind::Setter as u8,
                 };
 
                 // Create SFD for the method function.
@@ -4927,7 +4957,7 @@ fn generate_class_expression(
                     private_identifier_len: priv_len,
                     shared_function_data_index: sfd_index,
                     has_initializer: false,
-                    literal_value_kind: 0,
+                    literal_value_kind: LiteralValueKind::None as u8,
                     literal_value_number: 0.0,
                     literal_value_string: std::ptr::null(),
                     literal_value_string_len: 0,
@@ -4941,7 +4971,7 @@ fn generate_class_expression(
                 // Detect literal initializers and store the value directly,
                 // avoiding function creation for simple cases like x = 0.
                 // This matches C++ ASTCodegen.cpp behavior.
-                let mut literal_value_kind: u8 = 0;
+                let mut literal_value_kind = LiteralValueKind::None as u8;
                 let mut literal_value_number: f64 = 0.0;
                 let mut literal_value_string: Vec<u16> = Vec::new();
                 let mut sfd_index: i32 = -1;
@@ -4949,26 +4979,30 @@ fn generate_class_expression(
                 if let Some(init_expression) = initializer {
                     let is_literal = match &init_expression.inner {
                         ExpressionKind::NumericLiteral(n) => {
-                            literal_value_kind = 1;
+                            literal_value_kind = LiteralValueKind::Number as u8;
                             literal_value_number = *n;
                             true
                         }
                         ExpressionKind::BooleanLiteral(b) => {
-                            literal_value_kind = if *b { 2 } else { 3 };
+                            literal_value_kind = if *b {
+                                LiteralValueKind::BooleanTrue as u8
+                            } else {
+                                LiteralValueKind::BooleanFalse as u8
+                            };
                             true
                         }
                         ExpressionKind::NullLiteral => {
-                            literal_value_kind = 4;
+                            literal_value_kind = LiteralValueKind::Null as u8;
                             true
                         }
                         ExpressionKind::StringLiteral(s) => {
-                            literal_value_kind = 5;
+                            literal_value_kind = LiteralValueKind::String as u8;
                             literal_value_string = s.clone();
                             true
                         }
                         ExpressionKind::Unary { op, operand } if *op == UnaryOp::Minus => {
                             if let ExpressionKind::NumericLiteral(n) = &operand.inner {
-                                literal_value_kind = 1;
+                                literal_value_kind = LiteralValueKind::Number as u8;
                                 literal_value_number = -n;
                                 true
                             } else {
@@ -5069,7 +5103,7 @@ fn generate_class_expression(
                 };
 
                 ffi_elements.push(super::ffi::FFIClassElement {
-                    kind: 3u8, // Field
+                    kind: ClassElementKind::Field as u8,
                     is_static: *is_static,
                     is_private,
                     private_identifier: priv_ptr,
@@ -5106,14 +5140,14 @@ fn generate_class_expression(
 
                 element_keys.push(None);
                 ffi_elements.push(super::ffi::FFIClassElement {
-                    kind: 4u8, // StaticInitializer
+                    kind: ClassElementKind::StaticInitializer as u8,
                     is_static: true,
                     is_private: false,
                     private_identifier: std::ptr::null(),
                     private_identifier_len: 0,
                     shared_function_data_index: sfd_index,
                     has_initializer: false,
-                    literal_value_kind: 0,
+                    literal_value_kind: LiteralValueKind::None as u8,
                     literal_value_number: 0.0,
                     literal_value_string: std::ptr::null(),
                     literal_value_string_len: 0,
@@ -5259,22 +5293,22 @@ fn collect_target_names(target: &VariableDeclaratorTarget, names: &mut Vec<(Vec<
 fn collect_pattern_binding_names(pattern: &BindingPattern, names: &mut Vec<(Vec<u16>, bool)>) {
     for entry in &pattern.entries {
         match &entry.alias {
-            BindingEntryAlias::Identifier(ident) => {
+            Some(BindingEntryAlias::Identifier(ident)) => {
                 if !ident.is_local() {
                     names.push((ident.name.clone(), false));
                 }
             }
-            BindingEntryAlias::BindingPattern(sub) => {
+            Some(BindingEntryAlias::BindingPattern(sub)) => {
                 collect_pattern_binding_names(sub, names);
             }
-            BindingEntryAlias::Empty => {
-                if let BindingEntryName::Identifier(ident) = &entry.name {
+            None => {
+                if let Some(BindingEntryName::Identifier(ident)) = &entry.name {
                     if !ident.is_local() {
                         names.push((ident.name.clone(), false));
                     }
                 }
             }
-            BindingEntryAlias::MemberExpression(_) => {}
+            Some(BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
 }
@@ -5501,7 +5535,7 @@ fn generate_for_in_statement(
     gen.end_continuable_scope();
 
     if needs_lexical_env {
-        let parent = parent_env.as_ref().unwrap();
+        let parent = parent_env.as_ref().expect("parent_env must be set when restoring lexical environment");
         if !gen.is_current_block_terminated() {
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
             gen.emit(Instruction::Jump { target: Label(update_block as u32) });
@@ -5781,7 +5815,7 @@ fn generate_for_of_statement_inner(
     gen.end_breakable_scope();
 
     // Pop the FinallyContext.
-    let finally_ctx_index = gen.current_finally_context.unwrap();
+    let finally_ctx_index = gen.current_finally_context.expect("no active finally context");
     gen.current_finally_context = gen.finally_contexts[finally_ctx_index].parent_index;
 
     // Restore unwind handler
@@ -5789,7 +5823,7 @@ fn generate_for_of_statement_inner(
 
     if !gen.is_current_block_terminated() {
         if needs_lexical_env {
-            let parent = parent_env.as_ref().unwrap();
+            let parent = parent_env.as_ref().expect("parent_env must be set when restoring lexical environment");
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
         gen.emit(Instruction::Jump { target: Label(update_block as u32) });
@@ -5875,7 +5909,7 @@ fn generate_for_of_statement_inner(
             iterator_object: iterator_object.operand(),
             iterator_next: iterator_next_method.operand(),
             iterator_done: iterator_done.operand(),
-            completion_type: 1, // Completion::Type::Normal
+            completion_type: CompletionType::Normal as u32,
             completion_value: undef.operand(),
         });
     }
@@ -6008,7 +6042,7 @@ fn generate_for_of_statement_inner(
             iterator_object: iterator_object.operand(),
             iterator_next: iterator_next_method.operand(),
             iterator_done: iterator_done.operand(),
-            completion_type: 5, // Completion::Type::Throw
+            completion_type: CompletionType::Throw as u32,
             completion_value: close_completion_value.operand(),
         });
         if !gen.is_current_block_terminated() {
@@ -6093,9 +6127,9 @@ enum BindingMode {
 
 fn set_pending_lhs_name_for_entry(gen: &mut Generator, entry: &BindingEntry) {
     let name = match &entry.alias {
-        BindingEntryAlias::Identifier(id) => Some(&id.name),
-        BindingEntryAlias::Empty => {
-            if let BindingEntryName::Identifier(id) = &entry.name {
+        Some(BindingEntryAlias::Identifier(id)) => Some(&id.name),
+        None => {
+            if let Some(BindingEntryName::Identifier(id)) = &entry.name {
                 Some(&id.name)
             } else {
                 None
@@ -6133,9 +6167,9 @@ fn emit_set_variable_with_mode(
     if ident.is_local() {
         let local_index = ident.local_index.get();
         let local = match ident.local_type.get() {
-            LocalType::Argument => gen.scoped_operand(Operand::argument(local_index)),
-            LocalType::Variable => gen.local(local_index),
-            LocalType::None => unreachable!(),
+            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+            Some(LocalType::Variable) => gen.local(local_index),
+            None => unreachable!(),
         };
         gen.emit_mov(&local, value);
     } else {
@@ -6175,19 +6209,19 @@ fn assign_binding_entry_alias(
     mode: BindingMode,
 ) {
     match &entry.alias {
-        BindingEntryAlias::Empty => {
+        None => {
             // Name IS the binding target (e.g., `{ x }` or array element).
-            if let BindingEntryName::Identifier(ident) = &entry.name {
+            if let Some(BindingEntryName::Identifier(ident)) = &entry.name {
                 emit_set_variable_with_mode(gen, ident, value, mode);
             }
         }
-        BindingEntryAlias::Identifier(ident) => {
+        Some(BindingEntryAlias::Identifier(ident)) => {
             emit_set_variable_with_mode(gen, ident, value, mode);
         }
-        BindingEntryAlias::BindingPattern(sub_pattern) => {
+        Some(BindingEntryAlias::BindingPattern(sub_pattern)) => {
             generate_binding_pattern_bytecode(gen, sub_pattern, mode, value);
         }
-        BindingEntryAlias::MemberExpression(expression) => {
+        Some(BindingEntryAlias::MemberExpression(expression)) => {
             emit_store_to_reference(gen, expression, value);
         }
     }
@@ -6211,7 +6245,7 @@ fn generate_array_binding_pattern(
         dst_iterator_next: iterator_next.operand(),
         dst_iterator_done: iterator_done.operand(),
         iterable: input_array.operand(),
-        hint: 0, // Sync
+        hint: IteratorHint::Sync as u32,
     });
 
     let mut first = true;
@@ -6219,7 +6253,7 @@ fn generate_array_binding_pattern(
         if entry.is_rest {
             // 13.15.5.3 AssignmentRestElement: ... DestructuringAssignmentTarget
             // Step 1: Evaluate the reference BEFORE iterating remaining elements.
-            let evaluated_ref = if let BindingEntryAlias::MemberExpression(expression) = &entry.alias {
+            let evaluated_ref = if let Some(BindingEntryAlias::MemberExpression(expression)) = &entry.alias {
                 Some(emit_evaluate_member_reference(gen, expression))
             } else {
                 None
@@ -6275,16 +6309,15 @@ fn generate_array_binding_pattern(
 
         // 13.15.5.5 AssignmentElement: DestructuringAssignmentTarget Initializer(opt)
         // Step 1: Evaluate the reference BEFORE calling IteratorStepValue.
-        let evaluated_ref = if let BindingEntryAlias::MemberExpression(expression) = &entry.alias {
+        let evaluated_ref = if let Some(BindingEntryAlias::MemberExpression(expression)) = &entry.alias {
             Some(emit_evaluate_member_reference(gen, expression))
         } else {
             None
         };
 
-        // For elisions (BindingEntryName::Empty), we still advance the iterator
+        // For elisions (name is None), we still advance the iterator
         // but don't bind anything.
-        let is_elision = matches!(entry.name, BindingEntryName::Empty)
-            && matches!(entry.alias, BindingEntryAlias::Empty);
+        let is_elision = entry.name.is_none() && entry.alias.is_none();
 
         let exhausted_block = gen.make_block();
 
@@ -6406,14 +6439,14 @@ fn generate_object_binding_pattern(
         let value = gen.allocate_register();
 
         match &entry.name {
-            BindingEntryName::Identifier(ident) => {
+            Some(BindingEntryName::Identifier(ident)) => {
                 emit_get_by_id(gen, &value, object, &ident.name, None);
                 if has_rest {
                     let name_val = gen.add_constant_string(ident.name.clone());
                     excluded_names.push(name_val);
                 }
             }
-            BindingEntryName::Expression(expression) => {
+            Some(BindingEntryName::Expression(expression)) => {
                 let property_name = generate_expression_or_undefined(expression, gen, None);
                 if has_rest {
                     let excluded_name = gen.allocate_register();
@@ -6427,7 +6460,7 @@ fn generate_object_binding_pattern(
                     base_identifier: None,
                 });
             }
-            BindingEntryName::Empty => {
+            None => {
                 // Should not happen for object patterns
                 continue;
             }
@@ -6502,7 +6535,7 @@ fn generate_try_statement(
         //   completion_type = THROW
         //   Jump → finally_body
         gen.switch_to_basic_block(exception_preamble_block);
-        let ctx_index = gen.current_finally_context.unwrap();
+        let ctx_index = gen.current_finally_context.expect("no active finally context");
         let cv = gen.finally_contexts[ctx_index].completion_value.clone();
         let ct = gen.finally_contexts[ctx_index].completion_type.clone();
         gen.emit(Instruction::Catch { dst: cv.operand() });
@@ -6639,7 +6672,7 @@ fn generate_try_statement(
         if !gen.is_current_block_terminated() {
             if has_finally {
                 // Normal exit from catch → completion_type = NORMAL, jump to finally.
-                let ctx_index = gen.current_finally_context.unwrap();
+                let ctx_index = gen.current_finally_context.expect("no active finally context");
                 let ct = gen.finally_contexts[ctx_index].completion_type.clone();
                 let fb = gen.finally_contexts[ctx_index].finally_body;
                 let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
@@ -6650,7 +6683,7 @@ fn generate_try_statement(
                     next_block = Some(gen.make_block());
                 }
                 gen.emit(Instruction::Jump {
-                    target: Label(next_block.unwrap() as u32),
+                    target: Label(next_block.expect("next_block must be set") as u32),
                 });
             }
         }
@@ -6719,7 +6752,7 @@ fn generate_try_statement(
     if !gen.is_current_block_terminated() {
         if has_finally {
             // Normal exit from try → completion_type = NORMAL, jump to finally.
-            let ctx_index = gen.current_finally_context.unwrap();
+            let ctx_index = gen.current_finally_context.expect("no active finally context");
             let ct = gen.finally_contexts[ctx_index].completion_type.clone();
             let fb = gen.finally_contexts[ctx_index].finally_body;
             let normal_const = gen.add_constant_i32(FinallyContext::NORMAL);
@@ -6731,7 +6764,7 @@ fn generate_try_statement(
                 next_block = Some(gen.make_block());
             }
             gen.emit(Instruction::Jump {
-                target: Label(next_block.unwrap() as u32),
+                target: Label(next_block.expect("next_block must be set") as u32),
             });
         }
     }
@@ -6746,7 +6779,7 @@ fn generate_try_statement(
     // --- Generate finally body and after-finally dispatch ---
     if let Some(fb_block) = finally_body_block {
         // Pop FinallyContext.
-        let ctx_index = gen.current_finally_context.unwrap();
+        let ctx_index = gen.current_finally_context.expect("no active finally context");
         gen.current_finally_context = gen.finally_contexts[ctx_index].parent_index;
 
         // Extract fields needed for dispatch (to avoid borrow conflicts).
@@ -6777,7 +6810,7 @@ fn generate_try_statement(
             if next_block.is_none() {
                 next_block = Some(gen.make_block());
             }
-            let nb = next_block.unwrap();
+            let nb = next_block.expect("next_block must be set");
 
             // After-finally dispatch chain:
             // 1. NORMAL → next block
@@ -7088,9 +7121,9 @@ pub fn emit_function_declaration_instantiation(
                 if ident.is_local() {
                     let local_index = ident.local_index.get();
                     match ident.local_type.get() {
-                        LocalType::Variable => gen.mark_local_initialized(local_index),
-                        LocalType::Argument => gen.mark_argument_initialized(local_index),
-                        _ => {}
+                        Some(LocalType::Variable) => gen.mark_local_initialized(local_index),
+                        Some(LocalType::Argument) => gen.mark_argument_initialized(local_index),
+                        None => {}
                     }
                 } else {
                     let id = gen.intern_identifier(&ident.name);
@@ -7413,7 +7446,6 @@ fn var_local_operand(gen: &mut Generator, local_type: LocalType, index: u32) -> 
     match local_type {
         LocalType::Variable => gen.local(index),
         LocalType::Argument => gen.scoped_operand(Operand::argument(index)),
-        LocalType::None => unreachable!("var_local_operand called with LocalType::None"),
     }
 }
 
@@ -7426,7 +7458,7 @@ fn collect_binding_pattern_names(
     for entry in &pattern.entries {
         // The bound name can be in the alias (for object patterns) or name (for array patterns).
         match &entry.alias {
-            BindingEntryAlias::Identifier(ident) => {
+            Some(BindingEntryAlias::Identifier(ident)) => {
                 let name = ident.name.clone();
                 let is_local = ident.is_local();
                 if parameter_names.iter().any(|(n, _)| *n == name) {
@@ -7435,12 +7467,12 @@ fn collect_binding_pattern_names(
                     parameter_names.push((name, is_local));
                 }
             }
-            BindingEntryAlias::BindingPattern(sub_pattern) => {
+            Some(BindingEntryAlias::BindingPattern(sub_pattern)) => {
                 collect_binding_pattern_names(sub_pattern, parameter_names, has_duplicates);
             }
-            BindingEntryAlias::Empty => {
+            None => {
                 // No alias — the name itself is the binding.
-                if let BindingEntryName::Identifier(ident) = &entry.name {
+                if let Some(BindingEntryName::Identifier(ident)) = &entry.name {
                     let name = ident.name.clone();
                     let is_local = ident.is_local();
                     if parameter_names.iter().any(|(n, _)| *n == name) {
@@ -7450,7 +7482,7 @@ fn collect_binding_pattern_names(
                     }
                 }
             }
-            BindingEntryAlias::MemberExpression(_) => {}
+            Some(BindingEntryAlias::MemberExpression(_)) => {}
         }
     }
 }

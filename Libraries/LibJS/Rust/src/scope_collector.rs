@@ -54,7 +54,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{
-    FunctionScopeData, Identifier, IdentDeclarationKind, LocalVarKind,
+    FunctionScopeData, Identifier, LocalVarKind,
     LocalVariable, ScopeData, VarToInit,
 };
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
@@ -383,7 +383,7 @@ impl ScopeCollector {
     pub fn open_function_scope(&mut self, function_name: Option<&[u16]>) {
         self.open_scope(ScopeType::Function, None, ScopeLevel::FunctionTopLevel);
         if let Some(name) = function_name {
-            let index = self.current.unwrap();
+            let index = self.current.expect("no current scope");
             self.records[index].variable(name).flags |= VarFlags::BOUND;
         }
     }
@@ -419,7 +419,7 @@ impl ScopeCollector {
     pub fn open_class_declaration_scope(&mut self, class_name: Option<&[u16]>) {
         self.open_scope(ScopeType::ClassDeclaration, None, ScopeLevel::NotTopLevel);
         if let Some(name) = class_name {
-            let index = self.current.unwrap();
+            let index = self.current.expect("no current scope");
             self.records[index].variable(name).flags |= VarFlags::BOUND;
         }
     }
@@ -436,7 +436,7 @@ impl ScopeCollector {
         declaration_line: u32,
         declaration_column: u32,
     ) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
 
         for name in bound_names {
             let var = self.records[index].variable(name);
@@ -463,7 +463,7 @@ impl ScopeCollector {
         declaration_column: u32,
         declaration_kind: Option<DeclarationKind>,
     ) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
 
         for (name, identifier) in bound_names {
             // Register the declaration identifier so it participates in scope analysis.
@@ -486,7 +486,7 @@ impl ScopeCollector {
                 if self.records[scope_index].is_top_level() {
                     break;
                 }
-                scope_index = self.records[scope_index].parent.unwrap();
+                scope_index = self.records[scope_index].parent.expect("scope has no parent");
             }
         }
     }
@@ -507,7 +507,7 @@ impl ScopeCollector {
         declaration_line: u32,
         declaration_column: u32,
     ) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         let scope_level = self.records[index].scope_level;
 
         // Register the name identifier so it participates in scope analysis.
@@ -562,7 +562,7 @@ impl ScopeCollector {
     // catch pattern forbid `var` declarations with the same name in the
     // catch block (unlike regular block-scoped variables).
     pub fn add_catch_parameter_pattern(&mut self, bound_names: &[&[u16]]) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         for name in bound_names {
             let var = self.records[index].variable(name);
             var.flags |= VarFlags::FORBIDDEN_VAR | VarFlags::BOUND | VarFlags::CATCH_PARAMETER;
@@ -570,7 +570,7 @@ impl ScopeCollector {
     }
 
     pub fn add_catch_parameter_identifier(&mut self, name: &[u16], identifier: Rc<Identifier>) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         let var = self.records[index].variable(name);
         var.flags |= VarFlags::VAR | VarFlags::BOUND | VarFlags::CATCH_PARAMETER;
         var.var_identifier = Some(identifier);
@@ -579,7 +579,7 @@ impl ScopeCollector {
     // === Identifier registration ===
 
     pub fn register_identifier(&mut self, id: Rc<Identifier>, name: &[u16], declaration_kind: Option<DeclarationKind>) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].identifier_groups
             .entry(name.to_vec())
             .and_modify(|group| group.identifiers.push(id.clone()))
@@ -597,7 +597,7 @@ impl ScopeCollector {
         &mut self,
         entries: &[(Vec<u16>, Option<Rc<Identifier>>, bool, bool)],
     ) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].has_function_parameters = true;
 
         let mut previous_was_pattern = false;
@@ -625,7 +625,7 @@ impl ScopeCollector {
     // === Scope node ===
 
     pub fn set_scope_node(&mut self, scope_data: Rc<RefCell<ScopeData>>) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].scope_data = Some(scope_data.clone());
         // Update block_scope_data for any pending functions_to_hoist that
         // were registered before the ScopeData was created.
@@ -643,19 +643,19 @@ impl ScopeCollector {
     // bindings at runtime, so the entire scope chain must retain its environment
     // records (no local variable optimization through eval-poisoned scopes).
     pub fn set_contains_direct_call_to_eval(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].contains_direct_call_to_eval = true;
         self.records[index].screwed_by_eval_in_scope_chain = true;
         self.records[index].eval_in_current_function = true;
     }
 
     pub fn set_contains_access_to_arguments_object_in_non_strict_mode(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].contains_access_to_arguments_object_in_non_strict_mode = true;
     }
 
     pub fn set_contains_await_expression(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].contains_await_expression = true;
     }
 
@@ -663,7 +663,7 @@ impl ScopeCollector {
     // Arrow functions don't have their own `this`; they inherit it from the
     // enclosing lexical environment (uses_this_from_environment).
     pub fn set_uses_this(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         let closest_fn = last_function_scope(index, &self.records);
         let this_from_env = closest_fn.is_some_and(|fi| self.records[fi].is_arrow_function);
 
@@ -680,7 +680,7 @@ impl ScopeCollector {
     }
 
     pub fn set_uses_new_target(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         let mut scope_index = Some(index);
         while let Some(si) = scope_index {
             if self.records[si].scope_type == ScopeType::Function {
@@ -692,12 +692,12 @@ impl ScopeCollector {
     }
 
     pub fn set_is_arrow_function(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].is_arrow_function = true;
     }
 
     pub fn set_is_function_declaration(&mut self) {
-        let index = self.current.unwrap();
+        let index = self.current.expect("no current scope");
         self.records[index].is_function_declaration = true;
     }
 
@@ -858,13 +858,8 @@ impl ScopeCollector {
             // Annotate each Identifier AST node with its declaration kind,
             // so the bytecode generator knows how to handle TDZ checks, etc.
             if let Some(dk) = group.declaration_kind {
-                let kind = match dk {
-                    DeclarationKind::Var => IdentDeclarationKind::Var,
-                    DeclarationKind::Let => IdentDeclarationKind::Let,
-                    DeclarationKind::Const => IdentDeclarationKind::Const,
-                };
                 for id in &group.identifiers {
-                    id.declaration_kind.set(kind);
+                    id.declaration_kind.set(Some(dk));
                 }
             }
 
@@ -975,7 +970,7 @@ impl ScopeCollector {
                                 if let Some(ai) = argument_index {
                                     for id in &group.identifiers {
                                         id.local_index.set(ai);
-                                        id.local_type.set(crate::ast::LocalType::Argument);
+                                        id.local_type.set(Some(crate::ast::LocalType::Argument));
                                     }
                                 } else {
                                     let lvi = sd.local_variables.len() as u32;
@@ -985,11 +980,11 @@ impl ScopeCollector {
                                     });
                                     for id in &group.identifiers {
                                         id.local_index.set(lvi);
-                                        id.local_type.set(crate::ast::LocalType::Variable);
+                                        id.local_type.set(Some(crate::ast::LocalType::Variable));
                                     }
                                 }
                             } else {
-                                let kind = local_var_kind.unwrap();
+                                let kind = local_var_kind.expect("local_var_kind must be set for local variables");
                                 let lvi = sd.local_variables.len() as u32;
                                 sd.local_variables.push(LocalVariable {
                                     name: name.clone(),
@@ -997,7 +992,7 @@ impl ScopeCollector {
                                 });
                                 for id in &group.identifiers {
                                     id.local_index.set(lvi);
-                                    id.local_type.set(crate::ast::LocalType::Variable);
+                                    id.local_type.set(Some(crate::ast::LocalType::Variable));
                                 }
                             }
                         }
@@ -1095,7 +1090,7 @@ impl ScopeCollector {
 
             let local_info = if let Some(ref ident) = var.var_identifier {
                 if ident.is_local() {
-                    Some((ident.local_type.get(), ident.local_index.get()))
+                    Some((ident.local_type.get().expect("is_local() implies local_type is Some"), ident.local_index.get()))
                 } else {
                     None
                 }

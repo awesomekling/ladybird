@@ -531,6 +531,30 @@ impl<'a> Lexer<'a> {
         len == 2
     }
 
+    /// Scan an identifier body (after the start character has been matched).
+    /// Consumes identifier-continue characters and detects unicode escapes.
+    /// Returns true if the identifier contains escape sequences.
+    fn scan_identifier_body(&mut self, initial_len: usize) -> bool {
+        let mut has_escape = false;
+        let mut ident_len = initial_len;
+        loop {
+            let is_pair = self.is_surrogate_pair(ident_len);
+            has_escape |= ident_len > 1 && !is_pair;
+            // consume() already advances past both code units of a
+            // surrogate pair, so only call it once in that case.
+            let consume_count = if is_pair { 1 } else { ident_len };
+            for _ in 0..consume_count {
+                self.consume();
+            }
+            if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
+                ident_len = next_len;
+            } else {
+                break;
+            }
+        }
+        has_escape
+    }
+
     /// Re-scan the source from `scan_start` (1-based position) to `self.position`
     /// and build a decoded identifier value. Only called when escapes are present.
     fn build_identifier_value(&self, scan_start: usize) -> Vec<u16> {
@@ -789,7 +813,7 @@ impl<'a> Lexer<'a> {
         let mut line_has_token_yet = self.line_column > 1;
         let mut unterminated_comment = false;
 
-        if !in_template || self.template_states.last().unwrap().in_expression {
+        if !in_template || self.template_states.last().expect("template_states must not be empty").in_expression {
             loop {
                 if self.is_line_terminator() {
                     line_has_token_yet = false;
@@ -866,7 +890,7 @@ impl<'a> Lexer<'a> {
                     in_expression: false,
                     open_bracket_count: 0,
                 });
-            } else if self.template_states.last().unwrap().in_expression {
+            } else if self.template_states.last().expect("template_states must not be empty").in_expression {
                 self.template_states.push(TemplateState {
                     in_expression: false,
                     open_bracket_count: 0,
@@ -877,14 +901,14 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralEnd;
             }
         } else if in_template
-            && self.template_states.last().unwrap().in_expression
-            && self.template_states.last().unwrap().open_bracket_count == 0
+            && self.template_states.last().expect("template_states must not be empty").in_expression
+            && self.template_states.last().expect("template_states must not be empty").open_bracket_count == 0
             && self.current_code_unit == b'}' as u16
         {
             self.consume();
             token_type = TokenType::TemplateLiteralExprEnd;
-            self.template_states.last_mut().unwrap().in_expression = false;
-        } else if in_template && !self.template_states.last().unwrap().in_expression {
+            self.template_states.last_mut().expect("template_states must not be empty").in_expression = false;
+        } else if in_template && !self.template_states.last().expect("template_states must not be empty").in_expression {
             if self.is_eof() {
                 token_type = TokenType::UnterminatedTemplateLiteral;
                 self.template_states.pop();
@@ -892,7 +916,7 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralExprStart;
                 self.consume();
                 self.consume();
-                self.template_states.last_mut().unwrap().in_expression = true;
+                self.template_states.last_mut().expect("template_states must not be empty").in_expression = true;
             } else {
                 while !self.match2(b'$' as u16, b'{' as u16) && self.current_code_unit != b'`' as u16 && !self.is_eof() {
                     if self.match2(b'\\' as u16, b'$' as u16)
@@ -912,21 +936,7 @@ impl<'a> Lexer<'a> {
         } else if self.current_code_unit == b'#' as u16 {
             self.consume();
             if let Some((_cp, len)) = self.is_identifier_start() {
-                let mut has_escape = false;
-                let mut ident_len = len;
-                loop {
-                    let is_pair = self.is_surrogate_pair(ident_len);
-                    has_escape |= ident_len > 1 && !is_pair;
-                    let consume_count = if is_pair { 1 } else { ident_len };
-                    for _ in 0..consume_count {
-                        self.consume();
-                    }
-                    if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
-                        ident_len = next_len;
-                    } else {
-                        break;
-                    }
-                }
+                let has_escape = self.scan_identifier_body(len);
                 if has_escape {
                     identifier_value = Some(self.build_identifier_value(value_start));
                 }
@@ -936,23 +946,7 @@ impl<'a> Lexer<'a> {
                 // token_message = StartOfPrivateNameNotFollowedByValidIdentifier
             }
         } else if let Some((_cp, len)) = self.is_identifier_start() {
-            let mut has_escape = false;
-            let mut ident_len = len;
-            loop {
-                let is_pair = self.is_surrogate_pair(ident_len);
-                has_escape |= ident_len > 1 && !is_pair;
-                // consume() already advances past both code units of a
-                // surrogate pair, so only call it once in that case.
-                let consume_count = if is_pair { 1 } else { ident_len };
-                for _ in 0..consume_count {
-                    self.consume();
-                }
-                if let Some((_next_cp, next_len)) = self.is_identifier_middle() {
-                    ident_len = next_len;
-                } else {
-                    break;
-                }
-            }
+            let has_escape = self.scan_identifier_body(len);
 
             if has_escape {
                 // https://tc39.es/ecma262/#sec-identifier-names-static-semantics-early-errors
@@ -1141,11 +1135,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if !self.template_states.is_empty() && self.template_states.last().unwrap().in_expression {
+        if !self.template_states.is_empty() && self.template_states.last().expect("template_states must not be empty").in_expression {
             if token_type == TokenType::CurlyOpen {
-                self.template_states.last_mut().unwrap().open_bracket_count += 1;
+                self.template_states.last_mut().expect("template_states must not be empty").open_bracket_count += 1;
             } else if token_type == TokenType::CurlyClose {
-                self.template_states.last_mut().unwrap().open_bracket_count -= 1;
+                self.template_states.last_mut().expect("template_states must not be empty").open_bracket_count -= 1;
             }
         }
 
