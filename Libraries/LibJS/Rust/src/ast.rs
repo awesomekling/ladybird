@@ -628,13 +628,12 @@ pub struct TryStatementData {
 #[derive(Clone, Debug)]
 pub struct CatchClause {
     pub range: SourceRange,
-    pub parameter: CatchParameter,
+    pub parameter: Option<CatchBinding>,
     pub body: Box<Statement>,
 }
 
 #[derive(Clone, Debug)]
-pub enum CatchParameter {
-    None,
+pub enum CatchBinding {
     Identifier(Rc<Identifier>),
     BindingPattern(BindingPattern),
 }

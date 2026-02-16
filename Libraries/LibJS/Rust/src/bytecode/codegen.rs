@@ -6549,55 +6549,25 @@ fn generate_try_statement(
 
         // Bind the catch parameter.
         let mut created_catch_scope = false;
-        match &catch.parameter {
-            CatchParameter::Identifier(ident) => {
-                if ident.is_local() {
-                    let local = gen.local(ident.local_index.get());
-                    gen.emit_mov(&local, &caught_value);
-                    gen.mark_local_initialized(ident.local_index.get());
-                } else {
-                    let parent = gen.current_lexical_environment();
-                    let new_env = gen.allocate_register();
-                    gen.emit(Instruction::CreateLexicalEnvironment {
-                        dst: new_env.operand(),
-                        parent: parent.operand(),
-                        capacity: 0,
-                    });
-                    gen.lexical_environment_register_stack.push(new_env);
-                    created_catch_scope = true;
+        if let Some(parameter) = &catch.parameter {
+            match parameter {
+                CatchBinding::Identifier(ident) => {
+                    if ident.is_local() {
+                        let local = gen.local(ident.local_index.get());
+                        gen.emit_mov(&local, &caught_value);
+                        gen.mark_local_initialized(ident.local_index.get());
+                    } else {
+                        let parent = gen.current_lexical_environment();
+                        let new_env = gen.allocate_register();
+                        gen.emit(Instruction::CreateLexicalEnvironment {
+                            dst: new_env.operand(),
+                            parent: parent.operand(),
+                            capacity: 0,
+                        });
+                        gen.lexical_environment_register_stack.push(new_env);
+                        created_catch_scope = true;
 
-                    let id = gen.intern_identifier(&ident.name);
-                    gen.emit(Instruction::CreateVariable {
-                        identifier: id,
-                        mode: EnvironmentMode::Lexical as u32,
-                        is_immutable: false,
-                        is_global: false,
-                        is_strict: false,
-                    });
-                    gen.emit(Instruction::InitializeLexicalBinding {
-                        identifier: id,
-                        src: caught_value.operand(),
-                        cache: EnvironmentCoordinate::empty(),
-                    });
-                }
-            }
-            CatchParameter::BindingPattern(pattern) => {
-                let mut names: Vec<(Utf16String, bool)> = Vec::new();
-                collect_pattern_binding_names(pattern, &mut names);
-
-                if !names.is_empty() {
-                    let parent = gen.current_lexical_environment();
-                    let new_env = gen.allocate_register();
-                    gen.emit(Instruction::CreateLexicalEnvironment {
-                        dst: new_env.operand(),
-                        parent: parent.operand(),
-                        capacity: 0,
-                    });
-                    gen.lexical_environment_register_stack.push(new_env);
-                    created_catch_scope = true;
-
-                    for (name, _) in &names {
-                        let id = gen.intern_identifier(name);
+                        let id = gen.intern_identifier(&ident.name);
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
                             mode: EnvironmentMode::Lexical as u32,
@@ -6605,12 +6575,43 @@ fn generate_try_statement(
                             is_global: false,
                             is_strict: false,
                         });
+                        gen.emit(Instruction::InitializeLexicalBinding {
+                            identifier: id,
+                            src: caught_value.operand(),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
                     }
                 }
+                CatchBinding::BindingPattern(pattern) => {
+                    let mut names: Vec<(Utf16String, bool)> = Vec::new();
+                    collect_pattern_binding_names(pattern, &mut names);
 
-                generate_binding_pattern_bytecode(gen, pattern, BindingMode::InitializeLexical, &caught_value);
+                    if !names.is_empty() {
+                        let parent = gen.current_lexical_environment();
+                        let new_env = gen.allocate_register();
+                        gen.emit(Instruction::CreateLexicalEnvironment {
+                            dst: new_env.operand(),
+                            parent: parent.operand(),
+                            capacity: 0,
+                        });
+                        gen.lexical_environment_register_stack.push(new_env);
+                        created_catch_scope = true;
+
+                        for (name, _) in &names {
+                            let id = gen.intern_identifier(name);
+                            gen.emit(Instruction::CreateVariable {
+                                identifier: id,
+                                mode: EnvironmentMode::Lexical as u32,
+                                is_immutable: false,
+                                is_global: false,
+                                is_strict: false,
+                            });
+                        }
+                    }
+
+                    generate_binding_pattern_bytecode(gen, pattern, BindingMode::InitializeLexical, &caught_value);
+                }
             }
-            CatchParameter::None => {}
         }
 
         // Catch body gets its own completion register to prevent

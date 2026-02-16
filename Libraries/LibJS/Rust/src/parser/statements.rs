@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
                 for (name, id) in &self.pattern_bound_names {
                     self.scope_collector.register_identifier(id.clone(), name, None);
                 }
-                CatchParameter::BindingPattern(pattern)
+                Some(CatchBinding::BindingPattern(pattern))
             } else if self.match_identifier() {
                 let parameter_start = self.position();
                 let token = self.consume();
@@ -710,15 +710,15 @@ impl<'a> Parser<'a> {
                 let id = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
                 self.scope_collector.register_identifier(id.clone(), &value, None);
                 self.scope_collector.add_catch_parameter_identifier(&value, id.clone());
-                CatchParameter::Identifier(id)
+                Some(CatchBinding::Identifier(id))
             } else {
                 self.expected("catch parameter");
-                CatchParameter::None
+                None
             };
             self.consume_token(TokenType::ParenClose);
             parameter
         } else {
-            CatchParameter::None
+            None
         };
 
         let body = self.parse_block_statement();

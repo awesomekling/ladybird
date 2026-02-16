@@ -1896,10 +1896,9 @@ fn dump_catch_clause(
             format_position(root_state, &clause.range)
         ),
     );
-    let has_parameter = !matches!(clause.parameter, CatchParameter::None);
-    if has_parameter {
-        match &clause.parameter {
-            CatchParameter::Identifier(ident) => {
+    if let Some(parameter) = &clause.parameter {
+        match parameter {
+            CatchBinding::Identifier(ident) => {
                 print_node(
                     &child_state(state, false),
                     &color_label(root_state, "parameter"),
@@ -1910,7 +1909,7 @@ fn dump_catch_clause(
                     &child_state(&child_state(state, false), true),
                 );
             }
-            CatchParameter::BindingPattern(pattern) => {
+            CatchBinding::BindingPattern(pattern) => {
                 print_node(
                     &child_state(state, false),
                     &color_label(root_state, "parameter"),
@@ -1921,7 +1920,6 @@ fn dump_catch_clause(
                     root_state,
                 );
             }
-            CatchParameter::None => {}
         }
     }
     dump_statement(&clause.body, &child_state(state, true));
