@@ -1805,10 +1805,13 @@ impl<'a> Parser<'a> {
         self.flags.await_expression_is_valid = await_before;
 
         let saved_allow_super_call = self.flags.allow_super_constructor_call;
+        let saved_allow_super_lookup = self.flags.allow_super_property_lookup;
         self.flags.allow_super_constructor_call = method_kind == MethodKind::Constructor && self.class_has_super_class;
+        self.flags.allow_super_property_lookup = true;
 
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;
+        self.flags.allow_super_property_lookup = saved_allow_super_lookup;
 
         self.scope_collector.close_scope();
 
