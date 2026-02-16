@@ -257,16 +257,15 @@ impl ScopeRecord {
     }
 }
 
+/// Walk ancestor scopes starting from `start` (inclusive), following parent links.
+fn ancestor_scopes(start: usize, records: &[ScopeRecord]) -> impl Iterator<Item = usize> + '_ {
+    std::iter::successors(Some(start), move |&i| records[i].parent)
+}
+
 fn last_function_scope(index: usize, records: &[ScopeRecord]) -> Option<usize> {
-    let mut current = Some(index);
-    while let Some(i) = current {
-        let scope_type = records[i].scope_type;
-        if scope_type == ScopeType::Function || scope_type == ScopeType::ClassStaticInit {
-            return Some(i);
-        }
-        current = records[i].parent;
-    }
-    None
+    ancestor_scopes(index, records).find(|&i| {
+        records[i].scope_type == ScopeType::Function || records[i].scope_type == ScopeType::ClassStaticInit
+    })
 }
 
 // === ScopeCollector ===
@@ -672,27 +671,23 @@ impl ScopeCollector {
         let closest_fn = last_function_scope(index, &self.records);
         let this_from_env = closest_fn.is_some_and(|fi| self.records[fi].is_arrow_function);
 
-        let mut scope_index = Some(index);
-        while let Some(si) = scope_index {
+        for si in ancestor_scopes(index, &self.records).collect::<Vec<_>>() {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
                 if this_from_env {
                     self.records[si].uses_this_from_environment = true;
                 }
             }
-            scope_index = self.records[si].parent;
         }
     }
 
     pub fn set_uses_new_target(&mut self) {
         let index = self.current.expect("no current scope");
-        let mut scope_index = Some(index);
-        while let Some(si) = scope_index {
+        for si in ancestor_scopes(index, &self.records).collect::<Vec<_>>() {
             if self.records[si].scope_type == ScopeType::Function {
                 self.records[si].uses_this = true;
                 self.records[si].uses_this_from_environment = true;
             }
-            scope_index = self.records[si].parent;
         }
     }
 
@@ -743,22 +738,18 @@ impl ScopeCollector {
     }
 
     pub fn has_declaration_in_current_function(&self, name: &[u16]) -> bool {
-        if let Some(index) = self.current {
-            let fn_scope = last_function_scope(index, &self.records);
-            let stop = fn_scope.and_then(|fi| self.records[fi].parent);
-            let mut scope_index = Some(index);
-            while scope_index != stop {
-                if let Some(si) = scope_index {
-                    if self.records[si].has_flag(name, VarFlags::LEXICAL | VarFlags::VAR | VarFlags::PARAMETER_CANDIDATE) {
-                        return true;
-                    }
-                    if self.records[si].has_hoistable_function_named(name) {
-                        return true;
-                    }
-                    scope_index = self.records[si].parent;
-                } else {
-                    break;
-                }
+        let Some(index) = self.current else { return false };
+        let fn_scope = last_function_scope(index, &self.records);
+        let stop = fn_scope.and_then(|fi| self.records[fi].parent);
+        for si in ancestor_scopes(index, &self.records) {
+            if Some(si) == stop {
+                break;
+            }
+            if self.records[si].has_flag(name, VarFlags::LEXICAL | VarFlags::VAR | VarFlags::PARAMETER_CANDIDATE) {
+                return true;
+            }
+            if self.records[si].has_hoistable_function_named(name) {
+                return true;
             }
         }
         false
