@@ -481,7 +481,18 @@ pub fn generate_expression(
         // === Await ===
         ExpressionKind::Await(inner) => {
             let value = generate_expression_or_undefined(inner, gen, None);
-            Some(generate_await(gen, value))
+            // Match C++ AwaitExpression::generate_bytecode which allocates
+            // received_completion registers and saves the accumulator to
+            // received_completion before the await.
+            let received_completion = gen.allocate_register();
+            let received_completion_type = gen.allocate_register();
+            let received_completion_value = gen.allocate_register();
+            let acc = gen.accumulator();
+            gen.emit_mov(&received_completion, &acc);
+            Some(generate_await_with_completions(
+                gen, &value,
+                &received_completion, &received_completion_type, &received_completion_value,
+            ))
         }
 
         // === MetaProperty ===
@@ -699,8 +710,16 @@ pub fn generate_statement(
                 None => gen.add_constant_undefined(),
             };
             // Async functions implicitly await the return value.
+            // Match C++ ReturnStatement::generate_bytecode which allocates
+            // completion registers here (not inside generate_await).
             if gen.is_in_async_function() {
-                val = generate_await(gen, val);
+                let received_completion = gen.allocate_register();
+                let received_completion_type = gen.allocate_register();
+                let received_completion_value = gen.allocate_register();
+                val = generate_await_with_completions(
+                    gen, &val,
+                    &received_completion, &received_completion_type, &received_completion_value,
+                );
             }
             gen.generate_return(&val);
             None
@@ -881,7 +900,7 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
     let received_completion_type = gen.allocate_register();
     let received_completion_value = gen.allocate_register();
     generate_await_with_completions(
-        gen, argument,
+        gen, &argument,
         &received_completion, &received_completion_type, &received_completion_value,
     )
 }
@@ -950,7 +969,7 @@ enum LiteralValueKind {
 /// Emits a Throw on the throw path.
 fn generate_await_with_completions(
     gen: &mut Generator,
-    argument: ScopedOperand,
+    argument: &ScopedOperand,
     received_completion: &ScopedOperand,
     received_completion_type: &ScopedOperand,
     received_completion_value: &ScopedOperand,
@@ -1083,7 +1102,7 @@ fn generate_async_generator_yield(
 
     // Step 1: Await the value before yielding.
     let awaited_value = generate_await_with_completions(
-        gen, value,
+        gen, &value,
         &received_completion, &received_completion_type, &received_completion_value,
     );
 
@@ -1120,7 +1139,7 @@ fn generate_async_generator_yield(
     // Return path: Await(resumptionValue.[[Value]]).
     gen.switch_to_basic_block(return_block);
     generate_await_with_completions(
-        gen, received_completion_value.clone(),
+        gen, &received_completion_value,
         &received_completion, &received_completion_type, &received_completion_value,
     );
 
@@ -1271,7 +1290,7 @@ fn generate_yield_from(
     if is_async {
         let awaited = generate_await_with_completions(
             gen,
-            inner_result.clone(),
+            &inner_result,
             &received_completion,
             &received_completion_type,
             &received_completion_value,
@@ -1366,7 +1385,7 @@ fn generate_yield_from(
     if is_async {
         let awaited = generate_await_with_completions(
             gen,
-            inner_result.clone(),
+            &inner_result,
             &received_completion,
             &received_completion_type,
             &received_completion_value,
@@ -1441,7 +1460,7 @@ fn generate_yield_from(
 
         let awaited = generate_await_with_completions(
             gen,
-            close_result,
+            &close_result,
             &received_completion,
             &received_completion_type,
             &received_completion_value,
@@ -1505,7 +1524,7 @@ fn generate_yield_from(
     if is_async {
         generate_await_with_completions(
             gen,
-            received_completion_value.clone(),
+            &received_completion_value,
             &received_completion,
             &received_completion_type,
             &received_completion_value,
@@ -1531,7 +1550,7 @@ fn generate_yield_from(
     if is_async {
         let awaited = generate_await_with_completions(
             gen,
-            inner_return_result.clone(),
+            &inner_return_result,
             &received_completion,
             &received_completion_type,
             &received_completion_value,
@@ -1649,7 +1668,7 @@ fn generate_yield_for_yield_from(
     gen.switch_to_basic_block(return_block);
     generate_await_with_completions(
         gen,
-        received_completion_value.clone(),
+        &received_completion_value,
         received_completion,
         received_completion_type,
         received_completion_value,
@@ -5714,7 +5733,7 @@ fn generate_for_of_statement_inner(
         let acc = gen.accumulator();
         gen.emit_mov(&received_completion, &acc);
         let awaited = generate_await_with_completions(
-            gen, next_result.clone(),
+            gen, &next_result,
             &received_completion, &received_completion_type, &received_completion_value,
         );
         gen.emit_mov(&next_result, &awaited);
@@ -5873,7 +5892,7 @@ fn generate_for_of_statement_inner(
         let rct = gen.allocate_register();
         let rcv = gen.allocate_register();
         let awaited = generate_await_with_completions(
-            gen, inner_result.clone(), &rc, &rct, &rcv,
+            gen, &inner_result, &rc, &rct, &rcv,
         );
         gen.emit(Instruction::ThrowIfNotObject { src: awaited.operand() });
         gen.emit(Instruction::Jump { target: Label(after_close as u32) });
@@ -5989,7 +6008,7 @@ fn generate_for_of_statement_inner(
         let rc = gen.allocate_register();
         let rct = gen.allocate_register();
         let rcv = gen.allocate_register();
-        generate_await_with_completions(gen, inner_result.clone(), &rc, &rct, &rcv);
+        generate_await_with_completions(gen, &inner_result, &rc, &rct, &rcv);
 
         // Even if close succeeded, rethrow original (spec step 5).
         gen.emit(Instruction::Jump { target: Label(rethrow_block as u32) });
