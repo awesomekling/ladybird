@@ -523,20 +523,24 @@ impl Drop for CompiledRegex {
     }
 }
 
-impl Clone for CompiledRegex {
-    /// Clone transfers ownership (original becomes null).
-    /// This supports the SFD path where the AST is cloned for lazy
-    /// compilation — the clone needs the handle.
-    fn clone(&self) -> Self {
-        Self(Cell::new(self.take()))
-    }
-}
-
-#[derive(Clone)]
 pub struct RegExpLiteralData {
     pub pattern: Utf16String,
     pub flags: Utf16String,
     pub compiled_regex: CompiledRegex,
+}
+
+impl Clone for RegExpLiteralData {
+    /// Clone transfers ownership of the compiled regex handle from the
+    /// original to the clone (leaving the original's handle null). This
+    /// supports the SFD lazy compilation path where the AST is cloned and
+    /// the clone is the one that will actually be compiled later.
+    fn clone(&self) -> Self {
+        Self {
+            pattern: self.pattern.clone(),
+            flags: self.flags.clone(),
+            compiled_regex: CompiledRegex::new(self.compiled_regex.take()),
+        }
+    }
 }
 
 // =============================================================================
