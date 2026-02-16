@@ -97,7 +97,6 @@ impl<'a> Parser<'a> {
             | TokenType::AmpersandEquals | TokenType::CaretEquals | TokenType::PipeEquals
             | TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals
             | TokenType::DoubleQuestionMarkEquals => true,
-            TokenType::TemplateLiteralStart => true,
             _ => false,
         }
     }
@@ -139,16 +138,7 @@ impl<'a> Parser<'a> {
             return expression;
         }
 
-        let expression = if self.match_token(TokenType::TemplateLiteralStart) {
-            let tag_start = self.position();
-            let template = self.parse_template_literal(true);
-            self.expression(tag_start, ExpressionKind::TaggedTemplateLiteral {
-                tag: Box::new(expression),
-                template_literal: Box::new(template),
-            })
-        } else {
-            expression
-        };
+        let expression = self.parse_tagged_template_literals(lhs_start, expression);
 
         self.continue_parse_expression(lhs_start, expression, min_precedence, associativity, forbidden)
     }
@@ -173,6 +163,13 @@ impl<'a> Parser<'a> {
             let result = self.parse_secondary_expression(lhs_start, expression, new_precedence, forbidden);
             expression = result.0;
             forbidden = forbidden.merge(result.1);
+
+            // Tagged template literals bind tighter than any operator, so we
+            // consume them eagerly after each secondary expression — but NOT
+            // after update expressions (x++`template` is not valid).
+            if !Self::is_update_expression(&expression) {
+                expression = self.parse_tagged_template_literals(lhs_start, expression);
+            }
         }
 
         if min_precedence <= 1 && self.match_token(TokenType::Comma) && forbidden.allows(TokenType::Comma) {
@@ -712,15 +709,6 @@ impl<'a> Parser<'a> {
                     op: UpdateOp::Decrement,
                     argument: Box::new(lhs),
                     prefixed: false,
-                }), ForbiddenTokens::none())
-            }
-
-            // === Tagged template literal ===
-            TokenType::TemplateLiteralStart => {
-                let template = self.parse_template_literal(true);
-                (self.expression(start, ExpressionKind::TaggedTemplateLiteral {
-                    tag: Box::new(lhs),
-                    template_literal: Box::new(template),
                 }), ForbiddenTokens::none())
             }
 
@@ -1396,6 +1384,20 @@ impl<'a> Parser<'a> {
     // SubstitutionTemplate : TemplateHead Expression TemplateSpans
     // NB: In tagged templates, invalid escape sequences produce `undefined` for the
     // cooked value instead of a syntax error (sec-template-literals-static-semantics-early-errors).
+    /// Consume any tagged template literals following an expression.
+    /// Tagged templates bind tighter than any binary operator, so they
+    /// are handled outside the normal precedence loop.
+    fn parse_tagged_template_literals(&mut self, tag_start: Position, mut expression: Expression) -> Expression {
+        while self.match_token(TokenType::TemplateLiteralStart) {
+            let template = self.parse_template_literal(true);
+            expression = self.expression(tag_start, ExpressionKind::TaggedTemplateLiteral {
+                tag: Box::new(expression),
+                template_literal: Box::new(template),
+            });
+        }
+        expression
+    }
+
     pub(crate) fn parse_template_literal(&mut self, is_tagged: bool) -> Expression {
         let start = self.position();
         self.consume_token(TokenType::TemplateLiteralStart);

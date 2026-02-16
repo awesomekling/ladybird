@@ -741,6 +741,10 @@ impl<'a> Parser<'a> {
         matches!(&expression.inner, ExpressionKind::Call(_))
     }
 
+    fn is_update_expression(expression: &Expression) -> bool {
+        matches!(&expression.inner, ExpressionKind::Update { .. })
+    }
+
     // === Main entry point ===
 
     pub fn parse_program(&mut self, starts_in_strict_mode: bool) -> Statement {
