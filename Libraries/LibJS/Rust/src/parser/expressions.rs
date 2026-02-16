@@ -1482,60 +1482,14 @@ impl<'a> Parser<'a> {
                         return None;
                     }
                     c if c == b'x' as u16 => {
-                        if i + 2 < raw.len() {
-                            let hi = hex_digit(raw[i + 1]);
-                            let lo = hex_digit(raw[i + 2]);
-                            if let (Some(h), Some(l)) = (hi, lo) {
-                                result.push(h * 16 + l);
-                                i += 2;
-                            } else {
-                                return None;
-                            }
-                        } else {
-                            return None;
-                        }
+                        let (advance, ch) = parse_hex_escape(raw, i)?;
+                        result.push(ch);
+                        i += advance;
                     }
                     c if c == b'u' as u16 => {
-                        if i + 1 < raw.len() && raw[i + 1] == b'{' as u16 {
-                            i += 2;
-                            let mut code_point: u32 = 0;
-                            let mut found_close = false;
-                            while i < raw.len() {
-                                if raw[i] == b'}' as u16 {
-                                    found_close = true;
-                                    break;
-                                }
-                                if let Some(d) = hex_digit(raw[i]) {
-                                    code_point = code_point.saturating_mul(16).saturating_add(d as u32);
-                                } else {
-                                    return None;
-                                }
-                                i += 1;
-                            }
-                            if !found_close || code_point > 0x10FFFF {
-                                return None;
-                            }
-                            if code_point <= 0xFFFF {
-                                result.push(code_point as u16);
-                            } else {
-                                let cp = code_point - 0x10000;
-                                result.push((0xD800 + (cp >> 10)) as u16);
-                                result.push((0xDC00 + (cp & 0x3FF)) as u16);
-                            }
-                        } else if i + 4 < raw.len() {
-                            let mut code_point: u16 = 0;
-                            for j in 1..=4 {
-                                if let Some(d) = hex_digit(raw[i + j]) {
-                                    code_point = code_point * 16 + d;
-                                } else {
-                                    return None;
-                                }
-                            }
-                            result.push(code_point);
-                            i += 4;
-                        } else {
-                            return None;
-                        }
+                        let (advance, code_point) = parse_unicode_escape(raw, i)?;
+                        push_code_point(&mut result, code_point);
+                        i += advance;
                     }
                     c if c == b'\n' as u16 => { /* line continuation */ }
                     c if c == b'\r' as u16 => {
@@ -1591,7 +1545,6 @@ impl<'a> Parser<'a> {
                             result.push(val);
                             i += consumed;
                         } else if i + 1 < inner.len() && (inner[i + 1] == b'8' as u16 || inner[i + 1] == b'9' as u16) {
-                            // \08 and \09 are NonOctalDecimalEscapeSequences
                             has_legacy_octal = true;
                             result.push(0);
                         } else {
@@ -1609,70 +1562,18 @@ impl<'a> Parser<'a> {
                         result.push(c);
                     }
                     c if c == b'x' as u16 => {
-                        if i + 2 < inner.len() {
-                            let hi = hex_digit(inner[i + 1]);
-                            let lo = hex_digit(inner[i + 2]);
-                            if let (Some(h), Some(l)) = (hi, lo) {
-                                result.push(h * 16 + l);
-                                i += 2;
-                            } else {
-                                self.syntax_error("Malformed hexadecimal escape sequence");
-                                result.push(inner[i]);
-                            }
+                        if let Some((advance, ch)) = parse_hex_escape(inner, i) {
+                            result.push(ch);
+                            i += advance;
                         } else {
                             self.syntax_error("Malformed hexadecimal escape sequence");
                             result.push(inner[i]);
                         }
                     }
                     c if c == b'u' as u16 => {
-                        if i + 1 < inner.len() && inner[i + 1] == b'{' as u16 {
-                            i += 2;
-                            let mut code_point: u32 = 0;
-                            let mut found_close = false;
-                            let mut has_digits = false;
-                            while i < inner.len() {
-                                if inner[i] == b'}' as u16 {
-                                    found_close = true;
-                                    break;
-                                }
-                                if let Some(d) = hex_digit(inner[i]) {
-                                    code_point = code_point.saturating_mul(16).saturating_add(d as u32);
-                                    has_digits = true;
-                                } else {
-                                    self.syntax_error("Malformed unicode escape sequence");
-                                    break;
-                                }
-                                i += 1;
-                            }
-                            if !found_close || !has_digits {
-                                self.syntax_error("Malformed unicode escape sequence");
-                            } else if code_point > 0x10FFFF {
-                                self.syntax_error("Unicode code_point must not be greater than 0x10ffff in escape sequence");
-                            } else if code_point <= 0xFFFF {
-                                result.push(code_point as u16);
-                            } else {
-                                let cp = code_point - 0x10000;
-                                result.push((0xD800 + (cp >> 10)) as u16);
-                                result.push((0xDC00 + (cp & 0x3FF)) as u16);
-                            }
-                        } else if i + 4 < inner.len() {
-                            let mut code_point: u16 = 0;
-                            let mut valid = true;
-                            for j in 1..=4 {
-                                if let Some(d) = hex_digit(inner[i + j]) {
-                                    code_point = code_point * 16 + d;
-                                } else {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            if valid {
-                                result.push(code_point);
-                                i += 4;
-                            } else {
-                                self.syntax_error("Malformed unicode escape sequence");
-                                result.push(inner[i]);
-                            }
+                        if let Some((advance, code_point)) = parse_unicode_escape(inner, i) {
+                            push_code_point(&mut result, code_point);
+                            i += advance;
                         } else {
                             self.syntax_error("Malformed unicode escape sequence");
                             result.push(inner[i]);
@@ -1966,6 +1867,58 @@ fn parse_octal_escape(inner: &[u16], i: usize) -> (u16, usize) {
         }
     }
     (value as u16, consumed)
+}
+
+fn parse_hex_escape(raw: &[u16], i: usize) -> Option<(usize, u16)> {
+    if i + 2 >= raw.len() {
+        return None;
+    }
+    let high = hex_digit(raw[i + 1])?;
+    let low = hex_digit(raw[i + 2])?;
+    Some((2, high * 16 + low))
+}
+
+fn parse_unicode_escape(raw: &[u16], i: usize) -> Option<(usize, u32)> {
+    if i + 1 >= raw.len() {
+        return None;
+    }
+    if raw[i + 1] == b'{' as u16 {
+        let mut j = i + 2;
+        let mut value: u32 = 0;
+        let mut digits = 0;
+        while j < raw.len() && raw[j] != b'}' as u16 {
+            let d = hex_digit(raw[j])? as u32;
+            value = value * 16 + d;
+            if value > 0x10FFFF {
+                return None;
+            }
+            digits += 1;
+            j += 1;
+        }
+        if j >= raw.len() || digits == 0 {
+            return None;
+        }
+        Some((j - i, value))
+    } else {
+        if i + 4 >= raw.len() {
+            return None;
+        }
+        let d0 = hex_digit(raw[i + 1])? as u32;
+        let d1 = hex_digit(raw[i + 2])? as u32;
+        let d2 = hex_digit(raw[i + 3])? as u32;
+        let d3 = hex_digit(raw[i + 4])? as u32;
+        Some((4, (d0 << 12) | (d1 << 8) | (d2 << 4) | d3))
+    }
+}
+
+fn push_code_point(result: &mut Vec<u16>, code_point: u32) {
+    if code_point > 0xFFFF {
+        let adjusted = code_point - 0x10000;
+        result.push((0xD800 | ((adjusted >> 10) & 0x3FF)) as u16);
+        result.push((0xDC00 | (adjusted & 0x3FF)) as u16);
+    } else {
+        result.push(code_point as u16);
+    }
 }
 
 fn raw_template_value(raw: &[u16]) -> Vec<u16> {
