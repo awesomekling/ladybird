@@ -140,10 +140,13 @@ pub struct Generator {
     int32_constants: HashMap<i32, ScopedOperand>,
     string_constants: HashMap<Utf16String, ScopedOperand>,
 
-    // --- String/identifier/property tables ---
+    // --- String/identifier/property tables (with deduplication) ---
     pub string_table: Vec<Utf16String>,
+    string_table_index: HashMap<Utf16String, StringTableIndex>,
     pub identifier_table: Vec<Utf16String>,
+    identifier_table_index: HashMap<Utf16String, IdentifierTableIndex>,
     pub property_key_table: Vec<Utf16String>,
+    property_key_table_index: HashMap<Utf16String, PropertyKeyTableIndex>,
     pub compiled_regexes: Vec<*mut std::ffi::c_void>,
 
     // --- Scope/unwind state ---
@@ -265,8 +268,11 @@ impl Generator {
             int32_constants: HashMap::new(),
             string_constants: HashMap::new(),
             string_table: Vec::new(),
+            string_table_index: HashMap::new(),
             identifier_table: Vec::new(),
+            identifier_table_index: HashMap::new(),
             property_key_table: Vec::new(),
+            property_key_table_index: HashMap::new(),
             compiled_regexes: Vec::new(),
             boundaries: Vec::new(),
             continuable_scopes: Vec::new(),
@@ -456,21 +462,36 @@ impl Generator {
     // --- Table interning ---
 
     pub fn intern_string(&mut self, s: &[u16]) -> StringTableIndex {
-        let index = self.string_table.len() as u32;
-        self.string_table.push(Utf16String(s.to_vec()));
-        StringTableIndex(index)
+        if let Some(&index) = self.string_table_index.get(s) {
+            return index;
+        }
+        let index = StringTableIndex(self.string_table.len() as u32);
+        let key = Utf16String(s.to_vec());
+        self.string_table.push(key.clone());
+        self.string_table_index.insert(key, index);
+        index
     }
 
     pub fn intern_identifier(&mut self, s: &[u16]) -> IdentifierTableIndex {
-        let index = self.identifier_table.len() as u32;
-        self.identifier_table.push(Utf16String(s.to_vec()));
-        IdentifierTableIndex(index)
+        if let Some(&index) = self.identifier_table_index.get(s) {
+            return index;
+        }
+        let index = IdentifierTableIndex(self.identifier_table.len() as u32);
+        let key = Utf16String(s.to_vec());
+        self.identifier_table.push(key.clone());
+        self.identifier_table_index.insert(key, index);
+        index
     }
 
     pub fn intern_property_key(&mut self, s: &[u16]) -> PropertyKeyTableIndex {
-        let index = self.property_key_table.len() as u32;
-        self.property_key_table.push(Utf16String(s.to_vec()));
-        PropertyKeyTableIndex(index)
+        if let Some(&index) = self.property_key_table_index.get(s) {
+            return index;
+        }
+        let index = PropertyKeyTableIndex(self.property_key_table.len() as u32);
+        let key = Utf16String(s.to_vec());
+        self.property_key_table.push(key.clone());
+        self.property_key_table_index.insert(key, index);
+        index
     }
 
     /// Register a SharedFunctionInstanceData (opaque pointer) and return its index.
