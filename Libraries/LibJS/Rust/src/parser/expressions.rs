@@ -1175,7 +1175,7 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let (key, key_value, is_proto, is_computed) = self.parse_property_key_with_override(Some(obj_start));
+        let (key, key_value, is_proto, is_computed) = self.parse_property_key(Some(obj_start));
 
         // Private names are not allowed in object literals.
         if let ExpressionKind::PrivateIdentifier(_) = key.inner {
@@ -1299,11 +1299,7 @@ impl<'a> Parser<'a> {
         ) || next.token_type.is_identifier_name()
     }
 
-    pub(crate) fn parse_property_key(&mut self) -> (Expression, Option<Vec<u16>>, bool, bool) {
-        self.parse_property_key_with_override(None)
-    }
-
-    pub(crate) fn parse_property_key_with_override(&mut self, ident_pos_override: Option<Position>) -> (Expression, Option<Vec<u16>>, bool, bool) {
+    pub(crate) fn parse_property_key(&mut self, ident_pos_override: Option<Position>) -> (Expression, Option<Vec<u16>>, bool, bool) {
         let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {

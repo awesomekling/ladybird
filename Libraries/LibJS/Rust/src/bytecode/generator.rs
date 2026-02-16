@@ -28,7 +28,7 @@ pub struct ScopedOperand {
     pub(crate) inner: std::rc::Rc<ScopedOperandInner>,
 }
 
-struct ScopedOperandInner {
+pub(crate) struct ScopedOperandInner {
     operand: Operand,
     free_register_pool: Rc<RefCell<Vec<Register>>>,
 }
@@ -1102,7 +1102,7 @@ impl Generator {
             block_offsets.push(offset);
             let block = &self.basic_blocks[block_idx];
             let mut block_actions = Vec::with_capacity(block.instructions.len());
-            for (inst_idx, (inst, _)) in block.instructions.iter().enumerate() {
+            for (_inst_idx, (inst, _)) in block.instructions.iter().enumerate() {
                 match inst {
                     Instruction::Jump { target } => {
                         let target_block = target.0 as usize;
