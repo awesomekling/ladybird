@@ -345,8 +345,8 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
             let s = scope.borrow();
             // The Rust parser wraps for-loops in a Block for scope. The C++
             // parser does not, so skip the wrapper and dump the child directly.
-            if s.children.len() == 1 {
-                if matches!(
+            if s.children.len() == 1
+                && matches!(
                     s.children[0].inner,
                     StatementKind::For { .. }
                         | StatementKind::ForInOf { .. }
@@ -354,7 +354,6 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                     dump_statement(&s.children[0], state);
                     return;
                 }
-            }
             dump_scope_node("BlockStatement", &s, &statement.range, state);
         }
 

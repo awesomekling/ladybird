@@ -513,6 +513,7 @@ fn collect_var_names_recursive(
 ///
 /// Shared by both script and eval GDI extraction. All unsafe FFI calls are
 /// confined to the closures passed in by the caller.
+#[allow(clippy::too_many_arguments)]
 fn extract_gdi_common(
     scope: &ast::ScopeData,
     vm_ptr: *mut c_void,
@@ -957,8 +958,8 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
             uses_this_from_env: sd.uses_this_from_environment
                 || function_data.parsing_insights.uses_this_from_environment,
             might_need_arguments: function_data.parsing_insights.might_need_arguments_object,
-            has_function_named_arguments: fsd.map_or(false, |f| f.has_function_named_arguments),
-            has_lexically_declared_arguments: fsd.map_or(false, |f| f.has_lexically_declared_arguments),
+            has_function_named_arguments: fsd.is_some_and(|f| f.has_function_named_arguments),
+            has_lexically_declared_arguments: fsd.is_some_and(|f| f.has_lexically_declared_arguments),
             non_local_var_count: fsd.map_or(0, |f| f.non_local_var_count),
             non_local_var_count_for_parameter_expressions: fsd.map_or(0, |f| f.non_local_var_count_for_parameter_expressions),
             var_names: fsd.map(|f| &f.var_names).cloned().unwrap_or_default(),
@@ -993,19 +994,17 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
     for parameter in &function_data.parameters {
         match &parameter.binding {
             ast::FunctionParameterBinding::Identifier(ident) => {
-                if parameter_names.insert(ident.name.clone()) {
-                    if !ident.is_local() {
+                if parameter_names.insert(ident.name.clone())
+                    && !ident.is_local() {
                         parameters_in_environment += 1;
                     }
-                }
             }
             ast::FunctionParameterBinding::BindingPattern(pattern) => {
                 for_each_binding_pattern_identifier(pattern, &mut |ident| {
-                    if parameter_names.insert(ident.name.clone()) {
-                        if !ident.is_local() {
+                    if parameter_names.insert(ident.name.clone())
+                        && !ident.is_local() {
                             parameters_in_environment += 1;
                         }
-                    }
                 });
             }
         }
@@ -1013,9 +1012,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
 
     // §10.2.11 steps 15-18: determine if arguments object is needed.
     let mut arguments_object_needed = bsi.might_need_arguments;
-    if is_arrow {
-        arguments_object_needed = false;
-    } else if parameter_names.contains(utf16!("arguments")) {
+    if is_arrow || parameter_names.contains(utf16!("arguments")) {
         arguments_object_needed = false;
     }
     if body_scope.is_none() {
@@ -1050,7 +1047,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
         function_environment_bindings_count += 1;
     }
 
-    if body_scope.is_some() {
+    if let Some(body_scope) = body_scope {
         if !has_parameter_expressions {
             // §10.2.11 step 27: var env shares function env.
             function_environment_bindings_count += bsi.non_local_var_count;
@@ -1065,8 +1062,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
             }
 
             // §10.2.11 step 30: lexical environment.
-            let non_local_lex_count =
-                count_non_local_lex_declarations(body_scope.expect("function must have a body scope"));
+            let non_local_lex_count = count_non_local_lex_declarations(body_scope);
             if strict {
                 // Lex env == var env == function env.
                 function_environment_bindings_count += non_local_lex_count;
@@ -1088,8 +1084,7 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
                 }
             }
 
-            let non_local_lex_count =
-                count_non_local_lex_declarations(body_scope.expect("function must have a body scope"));
+            let non_local_lex_count = count_non_local_lex_declarations(body_scope);
             if strict {
                 // Lex env == var env.
                 var_environment_bindings_count += non_local_lex_count;

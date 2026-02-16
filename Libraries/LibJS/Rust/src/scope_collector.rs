@@ -289,6 +289,12 @@ pub struct ScopeCollector {
     errors: Vec<ScopeError>,
 }
 
+impl Default for ScopeCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScopeCollector {
     pub fn new() -> Self {
         Self {
@@ -931,7 +937,7 @@ impl ScopeCollector {
             }
 
             if records[index].scope_type == ScopeType::Program {
-                let can_use_global = !suppress_globals && !(group.used_inside_with_statement || initiated_by_eval);
+                let can_use_global = !(suppress_globals || group.used_inside_with_statement || initiated_by_eval);
                 if can_use_global {
                     for id in &group.identifiers {
                         if !id.is_inside_scope_with_eval.get() {

@@ -83,7 +83,7 @@ fn is_ascii(cu: u16) -> bool {
 }
 
 fn is_ascii_alpha(cp: u32) -> bool {
-    matches!(cp as u8, b'A'..=b'Z' | b'a'..=b'z') && cp < 128
+    (cp as u8).is_ascii_alphabetic() && cp < 128
 }
 
 fn is_ascii_digit(cu: u16) -> bool {
@@ -814,6 +814,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Token {
         let trivia_start = self.position;
         let in_template = !self.template_states.is_empty();

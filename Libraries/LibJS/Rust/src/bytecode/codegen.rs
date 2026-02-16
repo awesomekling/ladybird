@@ -835,7 +835,7 @@ pub fn generate_statement(
                         Some(LocalType::Variable) => gen.local(local_index),
                         None => unreachable!(),
                     };
-                    gen.emit_mov(&local, &val);
+                    gen.emit_mov(&local, val);
                 } else {
                     let id = gen.intern_identifier(&name_ident.name);
                     gen.emit(Instruction::InitializeLexicalBinding {
@@ -855,7 +855,7 @@ pub fn generate_statement(
         // === ClassFieldInitializer ===
         StatementKind::ClassFieldInitializer { expression, field_name } => {
             if !field_name.is_empty() {
-                gen.pending_lhs_name = Some(gen.intern_identifier(&field_name));
+                gen.pending_lhs_name = Some(gen.intern_identifier(field_name));
             }
             let value = generate_expression_or_undefined(expression, gen, None);
             gen.pending_lhs_name = None;
@@ -891,6 +891,7 @@ fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand
 }
 
 /// Completion::Type values (ABI-compatible).
+#[derive(Clone, Copy)]
 #[repr(u32)]
 enum CompletionType {
     Normal = 1,
@@ -2209,7 +2210,7 @@ fn generate_for_statement(
                     gen.lexical_environment_register_stack.push(new_env);
 
                     for (name, _) in &non_local_names {
-                        let id = gen.intern_identifier(&name);
+                        let id = gen.intern_identifier(name);
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
                             mode: EnvironmentMode::Lexical as u32,
@@ -2350,7 +2351,7 @@ fn emit_per_iteration_bindings(gen: &mut Generator, bindings: &[Utf16String]) {
     // Save current values into registers.
     let mut saved: Vec<(ScopedOperand, IdentifierTableIndex)> = Vec::with_capacity(bindings.len());
     for name in bindings {
-        let id = gen.intern_identifier(&name);
+        let id = gen.intern_identifier(name);
         let reg = gen.allocate_register();
         gen.emit(Instruction::GetBinding {
             dst: reg.operand(),
@@ -2471,7 +2472,7 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, environment: &Scop
                         let mut names = Vec::new();
                         collect_target_names(&declaration.target, &mut names);
                         for (name, _) in &names {
-                            let id = gen.intern_identifier(&name);
+                            let id = gen.intern_identifier(name);
                             if is_constant {
                                 gen.emit(Instruction::CreateImmutableBinding {
                                     environment: environment.operand(),
@@ -2873,7 +2874,7 @@ fn generate_call_expression(
                 callee: callee.operand(),
                 argument_count: arguments.len() as u32,
                 expression_string,
-                arguments: arguments,
+                arguments,
             });
         } else if is_direct_eval {
             gen.emit(Instruction::CallDirectEval {
@@ -2882,7 +2883,7 @@ fn generate_call_expression(
                 this_value: this_value.operand(),
                 argument_count: arguments.len() as u32,
                 expression_string,
-                arguments: arguments,
+                arguments,
             });
         } else if let Some(b) = builtin {
             if builtin_argument_count(b) == arguments.len() {
@@ -2893,7 +2894,7 @@ fn generate_call_expression(
                     argument_count: arguments.len() as u32,
                     builtin: b,
                     expression_string,
-                    arguments: arguments,
+                    arguments,
                 });
             } else {
                 gen.emit(Instruction::Call {
@@ -2902,7 +2903,7 @@ fn generate_call_expression(
                     this_value: this_value.operand(),
                     argument_count: arguments.len() as u32,
                     expression_string,
-                    arguments: arguments,
+                    arguments,
                 });
             }
         } else {
@@ -2912,7 +2913,7 @@ fn generate_call_expression(
                 this_value: this_value.operand(),
                 argument_count: arguments.len() as u32,
                 expression_string,
-                arguments: arguments,
+                arguments,
             });
         }
     }
@@ -3317,38 +3318,18 @@ fn generate_assignment_expression(
                     drop(old_val);
                     drop(saved_property);
                     return Some(dst);
-                } else {
-                    if let ExpressionKind::Identifier(ident) = &property.inner {
-                        let old_val = gen.allocate_register();
-                        emit_get_by_id(gen, &old_val, &base, &ident.name, base_id);
-                        if is_logical {
-                            let rhs_block = gen.make_block();
-                            let lhs_block = gen.make_block();
-                            let end_block = gen.make_block();
-                            let dst = choose_dst(gen, preferred_dst);
-                            emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
-                            gen.switch_to_basic_block(rhs_block);
-                            let rhs_val = generate_expression(rhs, gen, None)?;
-                            gen.emit_mov(&dst, &rhs_val);
-                            let key = gen.intern_property_key(&ident.name);
-                            let cache2 = gen.next_property_lookup_cache();
-                            gen.emit(Instruction::PutNormalById {
-                                base: base.operand(),
-                                property: key,
-                                src: dst.operand(),
-                                cache_index: cache2,
-                                base_identifier: None,
-                            });
-                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                            gen.switch_to_basic_block(lhs_block);
-                            gen.emit_mov(&dst, &old_val);
-                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                            gen.switch_to_basic_block(end_block);
-                            return Some(dst);
-                        }
-                        let rhs_val = generate_expression(rhs, gen, None)?;
+                } else if let ExpressionKind::Identifier(ident) = &property.inner {
+                    let old_val = gen.allocate_register();
+                    emit_get_by_id(gen, &old_val, &base, &ident.name, base_id);
+                    if is_logical {
+                        let rhs_block = gen.make_block();
+                        let lhs_block = gen.make_block();
+                        let end_block = gen.make_block();
                         let dst = choose_dst(gen, preferred_dst);
-                        emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                        gen.switch_to_basic_block(rhs_block);
+                        let rhs_val = generate_expression(rhs, gen, None)?;
+                        gen.emit_mov(&dst, &rhs_val);
                         let key = gen.intern_property_key(&ident.name);
                         let cache2 = gen.next_property_lookup_cache();
                         gen.emit(Instruction::PutNormalById {
@@ -3358,48 +3339,66 @@ fn generate_assignment_expression(
                             cache_index: cache2,
                             base_identifier: None,
                         });
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(lhs_block);
+                        gen.emit_mov(&dst, &old_val);
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(end_block);
                         return Some(dst);
-                    } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
-                        let old_val = gen.allocate_register();
-                        let id = gen.intern_identifier(&priv_ident.name);
-                        gen.emit(Instruction::GetPrivateById {
-                            dst: old_val.operand(),
-                            base: base.operand(),
-                            property: id,
-                        });
-                        if is_logical {
-                            let rhs_block = gen.make_block();
-                            let lhs_block = gen.make_block();
-                            let end_block = gen.make_block();
-                            let dst = choose_dst(gen, preferred_dst);
-                            emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
-                            gen.switch_to_basic_block(rhs_block);
-                            let rhs_val = generate_expression(rhs, gen, None)?;
-                            gen.emit_mov(&dst, &rhs_val);
-                            let id2 = gen.intern_identifier(&priv_ident.name);
-                            gen.emit(Instruction::PutPrivateById {
-                                base: base.operand(),
-                                property: id2,
-                                src: dst.operand(),
-                            });
-                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                            gen.switch_to_basic_block(lhs_block);
-                            gen.emit_mov(&dst, &old_val);
-                            gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                            gen.switch_to_basic_block(end_block);
-                            return Some(dst);
-                        }
-                        let rhs_val = generate_expression(rhs, gen, None)?;
+                    }
+                    let rhs_val = generate_expression(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                    let key = gen.intern_property_key(&ident.name);
+                    let cache2 = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::PutNormalById {
+                        base: base.operand(),
+                        property: key,
+                        src: dst.operand(),
+                        cache_index: cache2,
+                        base_identifier: None,
+                    });
+                    return Some(dst);
+                } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
+                    let old_val = gen.allocate_register();
+                    let id = gen.intern_identifier(&priv_ident.name);
+                    gen.emit(Instruction::GetPrivateById {
+                        dst: old_val.operand(),
+                        base: base.operand(),
+                        property: id,
+                    });
+                    if is_logical {
+                        let rhs_block = gen.make_block();
+                        let lhs_block = gen.make_block();
+                        let end_block = gen.make_block();
                         let dst = choose_dst(gen, preferred_dst);
-                        emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                        gen.switch_to_basic_block(rhs_block);
+                        let rhs_val = generate_expression(rhs, gen, None)?;
+                        gen.emit_mov(&dst, &rhs_val);
                         let id2 = gen.intern_identifier(&priv_ident.name);
                         gen.emit(Instruction::PutPrivateById {
                             base: base.operand(),
                             property: id2,
                             src: dst.operand(),
                         });
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(lhs_block);
+                        gen.emit_mov(&dst, &old_val);
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(end_block);
                         return Some(dst);
                     }
+                    let rhs_val = generate_expression(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                    let id2 = gen.intern_identifier(&priv_ident.name);
+                    gen.emit(Instruction::PutPrivateById {
+                        base: base.operand(),
+                        property: id2,
+                        src: dst.operand(),
+                    });
+                    return Some(dst);
                 }
             }
             // LHS is not an identifier or member expression (e.g. a function call).
@@ -3853,10 +3852,10 @@ fn emit_store_to_reference(
 fn emit_logical_jump(gen: &mut Generator, op: AssignmentOp, condition: &ScopedOperand, rhs_block: usize, lhs_block: usize) {
     match op {
         AssignmentOp::AndAssignment => {
-            gen.emit_jump_if(&condition, Label(rhs_block as u32), Label(lhs_block as u32));
+            gen.emit_jump_if(condition, Label(rhs_block as u32), Label(lhs_block as u32));
         }
         AssignmentOp::OrAssignment => {
-            gen.emit_jump_if(&condition, Label(lhs_block as u32), Label(rhs_block as u32));
+            gen.emit_jump_if(condition, Label(lhs_block as u32), Label(rhs_block as u32));
         }
         AssignmentOp::NullishAssignment => {
             gen.emit(Instruction::JumpNullish {
@@ -4063,7 +4062,7 @@ fn generate_tagged_template_literal(
         this_value: this_op.operand(),
         argument_count: arguments.len() as u32,
         expression_string: None,
-        arguments: arguments,
+        arguments,
     });
 
     Some(dst)
@@ -4528,7 +4527,7 @@ fn emit_object_property_set_by_key(
             });
         }
         ExpressionKind::StringLiteral(s) => {
-            let property_key = gen.intern_property_key(&s);
+            let property_key = gen.intern_property_key(s);
             gen.emit(Instruction::InitObjectLiteralProperty {
                 object: object.operand(),
                 property: property_key,
@@ -5210,9 +5209,9 @@ fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
     // - Base class: "constructor() {}"
     // - Derived class: "constructor(...arguments) { super(...arguments); }"
     let source: &[u16] = if has_super {
-        &utf16!("constructor(...arguments) { super(...arguments); }")[..]
+        utf16!("constructor(...arguments) { super(...arguments); }")
     } else {
-        &utf16!("constructor() {}")[..]
+        utf16!("constructor() {}")
     };
 
     let sfd_ptr = unsafe {
@@ -5330,7 +5329,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
 
     // Create variable bindings in the new environment.
     for (name, _) in &binding_names {
-        let id = gen.intern_identifier(&name);
+        let id = gen.intern_identifier(name);
         gen.emit(Instruction::CreateVariable {
             identifier: id,
             mode: EnvironmentMode::Lexical as u32,
@@ -5343,7 +5342,6 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
     parent
 }
 
-/// Check if a key is a "static" key (identifier or string literal — not computed).
 // =============================================================================
 // For-in statement
 // =============================================================================
@@ -5368,7 +5366,7 @@ fn enter_for_in_of_head_tdz(gen: &mut Generator, lhs: &ForInOfLhs) -> bool {
                     });
                     gen.lexical_environment_register_stack.push(new_env);
                     for (name, _) in &names {
-                        let id = gen.intern_identifier(&name);
+                        let id = gen.intern_identifier(name);
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
                             mode: EnvironmentMode::Lexical as u32,
@@ -5556,10 +5554,8 @@ fn generate_for_in_statement(
         gen.switch_to_basic_block(continue_target);
         gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-    } else {
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-        }
+    } else if !gen.is_current_block_terminated() {
+        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
     }
 
     gen.switch_to_basic_block(end_block);
@@ -6121,7 +6117,7 @@ fn set_pending_lhs_name_for_entry(gen: &mut Generator, entry: &BindingEntry) {
         _ => None,
     };
     if let Some(name) = name {
-        gen.pending_lhs_name = Some(gen.intern_identifier(&name));
+        gen.pending_lhs_name = Some(gen.intern_identifier(name));
     }
 }
 
@@ -6602,7 +6598,7 @@ fn generate_try_statement(
                     created_catch_scope = true;
 
                     for (name, _) in &names {
-                        let id = gen.intern_identifier(&name);
+                        let id = gen.intern_identifier(name);
                         gen.emit(Instruction::CreateVariable {
                             identifier: id,
                             mode: EnvironmentMode::Lexical as u32,
@@ -6721,15 +6717,14 @@ fn generate_try_statement(
         generate_statement(&data.block, gen, None);
         gen.current_completion_register = saved_completion;
 
-        if !gen.is_current_block_terminated() {
-            if gen.must_propagate_completion {
+        if !gen.is_current_block_terminated()
+            && gen.must_propagate_completion {
                 if let Some(ref tc) = try_completion {
                     let reg = gen.allocate_register();
                     gen.emit_mov(&reg, tc);
                     completion = Some(reg);
                 }
             }
-        }
     }
 
     if !gen.is_current_block_terminated() {
@@ -6842,17 +6837,15 @@ fn generate_try_statement(
                 gen.emit_mov(&outer_ct, &ctx_ct);
                 gen.emit_mov(&outer_cv, &ctx_cv);
                 gen.emit(Instruction::Jump { target: outer_fb });
+            } else if gen.is_in_generator_function() {
+                gen.emit(Instruction::Yield {
+                    continuation_label: None,
+                    value: ctx_cv.operand(),
+                });
             } else {
-                if gen.is_in_generator_function() {
-                    gen.emit(Instruction::Yield {
-                        continuation_label: None,
-                        value: ctx_cv.operand(),
-                    });
-                } else {
-                    gen.emit(Instruction::Return {
-                        value: ctx_cv.operand(),
-                    });
-                }
+                gen.emit(Instruction::Return {
+                    value: ctx_cv.operand(),
+                });
             }
 
             // 4. Default → rethrow the exception.
@@ -6885,11 +6878,10 @@ fn generate_try_statement(
         gen.switch_to_basic_block(dead);
     }
 
-    if gen.must_propagate_completion {
-        if completion.is_none() {
+    if gen.must_propagate_completion
+        && completion.is_none() {
             return Some(gen.add_constant_undefined());
         }
-    }
     completion
 }
 
@@ -6972,9 +6964,7 @@ pub fn emit_function_declaration_instantiation(
     // Determine if arguments object is needed (from parsing insights).
     let mut arguments_object_needed = function_data.parsing_insights.might_need_arguments_object;
 
-    if is_arrow {
-        arguments_object_needed = false;
-    } else if parameter_names.iter().any(|p| p.name == utf16!("arguments")) {
+    if is_arrow || parameter_names.iter().any(|p| p.name == utf16!("arguments")) {
         arguments_object_needed = false;
     }
 
@@ -7239,7 +7229,7 @@ pub fn emit_function_declaration_instantiation(
     if !strict {
         for name in &body_scope.annexb_function_names {
             gen.annexb_function_names.insert(name.clone());
-            let id = gen.intern_identifier(&name);
+            let id = gen.intern_identifier(name);
             gen.emit(Instruction::CreateVariable {
                 identifier: id,
                 mode: EnvironmentMode::Var as u32,

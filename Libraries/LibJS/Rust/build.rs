@@ -48,7 +48,7 @@ fn parse_bytecode_def(path: &std::path::Path) -> Vec<OpDef> {
         if stripped.starts_with("op ") {
             assert!(!in_op, "Nested op blocks");
             in_op = true;
-            let rest = stripped["op ".len()..].trim();
+            let rest = stripped.strip_prefix("op ").unwrap().trim();
             let name = if let Some(idx) = rest.find('<') {
                 rest[..idx].trim().to_string()
             } else {
@@ -133,8 +133,8 @@ fn field_type_info(ty: &str) -> (&'static str, usize, usize, &'static str) {
 
 fn rust_field_name(name: &str) -> String {
     // Strip m_ prefix
-    if name.starts_with("m_") {
-        name[2..].to_string()
+    if let Some(stripped) = name.strip_prefix("m_") {
+        stripped.to_string()
     } else {
         name.to_string()
     }

@@ -270,7 +270,7 @@ impl<'a> Parser<'a> {
                 let digits = if value.last() == Some(&(b'n' as u16)) {
                     &value[..value.len() - 1]
                 } else {
-                    &value[..]
+                    value
                 };
                 let value_utf8: String = digits.iter().map(|&c| c as u8 as char).collect();
                 (self.expression(start, ExpressionKind::BigIntLiteral(value_utf8)), true)
@@ -414,7 +414,7 @@ impl<'a> Parser<'a> {
 
             TokenType::PrivateIdentifier => {
                 if self.class_scope_depth == 0 {
-                    let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                    let name = String::from_utf16_lossy(self.token_value(&self.current_token));
                     self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                 }
                 let token = self.consume();
@@ -623,7 +623,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
                     if self.class_scope_depth == 0 {
-                        let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                        let name = String::from_utf16_lossy(self.token_value(&self.current_token));
                         self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                     }
                     let token = self.consume();
@@ -935,7 +935,7 @@ impl<'a> Parser<'a> {
                     }
                     TokenType::PrivateIdentifier => {
                         if self.class_scope_depth == 0 {
-                            let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                            let name = String::from_utf16_lossy(self.token_value(&self.current_token));
                             self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                         }
                         let property_start = self.position();
@@ -982,7 +982,7 @@ impl<'a> Parser<'a> {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
                     if self.class_scope_depth == 0 {
-                        let name = String::from_utf16_lossy(&self.token_value(&self.current_token).to_vec());
+                        let name = String::from_utf16_lossy(self.token_value(&self.current_token));
                         self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                     }
                     let property_start = self.position();
@@ -1185,7 +1185,7 @@ impl<'a> Parser<'a> {
             let property_type = if is_getter { ObjectPropertyType::Getter } else if is_setter { ObjectPropertyType::Setter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
                 range: self.range_from(obj_start),
-                property_type: property_type,
+                property_type,
                 key: Box::new(key),
                 value: Some(Box::new(function)),
                 is_method: true,
@@ -1204,7 +1204,7 @@ impl<'a> Parser<'a> {
             let property_type = if is_getter { ObjectPropertyType::Getter } else { ObjectPropertyType::Setter };
             return ObjectProperty {
                 range: self.range_from(obj_start),
-                property_type: property_type,
+                property_type,
                 key: Box::new(key),
                 value: Some(Box::new(function)),
                 is_method: true,
@@ -1218,7 +1218,7 @@ impl<'a> Parser<'a> {
             let property_type = if is_proto { ObjectPropertyType::ProtoSetter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
                 range: self.range_from(obj_start),
-                property_type: property_type,
+                property_type,
                 key: Box::new(key),
                 value: Some(Box::new(value)),
                 is_method: false,
@@ -1764,30 +1764,28 @@ impl<'a> Parser<'a> {
                 return None;
             }
             self.consume(); // consume ')'
-        } else {
-            if self.match_identifier() || self.match_token(TokenType::Await) {
-                let parameter_start = self.position();
-                let token = self.consume();
-                let value = self.token_value(&token).to_vec();
-                if is_async && value == utf16!("await") {
-                    self.syntax_error("'await' is a reserved identifier in async functions");
-                }
-                let binding = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
-                parsed = ParsedParameters {
-                    parameters: vec![FunctionParameter {
-                        binding: FunctionParameterBinding::Identifier(binding.clone()),
-                        default_value: None,
-                        is_rest: false,
-                    }],
-                    function_length: 1,
-                    parameter_info: vec![ParamInfo { name: value.into(), is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
-                    is_simple: true,
-                };
-            } else {
-                self.flags.await_expression_is_valid = saved_await;
-                self.load_state();
-                return None;
+        } else if self.match_identifier() || self.match_token(TokenType::Await) {
+            let parameter_start = self.position();
+            let token = self.consume();
+            let value = self.token_value(&token).to_vec();
+            if is_async && value == utf16!("await") {
+                self.syntax_error("'await' is a reserved identifier in async functions");
             }
+            let binding = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
+            parsed = ParsedParameters {
+                parameters: vec![FunctionParameter {
+                    binding: FunctionParameterBinding::Identifier(binding.clone()),
+                    default_value: None,
+                    is_rest: false,
+                }],
+                function_length: 1,
+                parameter_info: vec![ParamInfo { name: value.into(), is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
+                is_simple: true,
+            };
+        } else {
+            self.flags.await_expression_is_valid = saved_await;
+            self.load_state();
+            return None;
         }
 
         self.flags.await_expression_is_valid = saved_await;
@@ -1823,7 +1821,7 @@ impl<'a> Parser<'a> {
                 source_text_start: src_start,
                 source_text_end: self.source_text_end_offset(),
                 body: Box::new(body),
-                parameters: parameters,
+                parameters,
                 function_length,
                 kind: fn_kind,
                 is_strict_mode: self.flags.strict_mode || has_use_strict,
@@ -1858,7 +1856,7 @@ impl<'a> Parser<'a> {
                 source_text_start: src_start,
                 source_text_end: self.source_text_end_offset(),
                 body: Box::new(body),
-                parameters: parameters,
+                parameters,
                 function_length,
                 kind: fn_kind,
                 is_strict_mode: self.flags.strict_mode,
@@ -1892,23 +1890,17 @@ impl<'a> Parser<'a> {
         if method_kind == MethodKind::Getter && !parsed.parameters.is_empty() {
             self.syntax_error("Getter function must have no arguments");
         }
-        if method_kind == MethodKind::Setter {
-            if parsed.parameters.is_empty() || parsed.parameters.len() > 1 {
-                self.syntax_error("Setter function must have one argument");
-            } else if parsed.parameters[0].is_rest {
-                self.syntax_error("Setter function must have one argument");
-            }
+        if method_kind == MethodKind::Setter
+            && (parsed.parameters.len() != 1 || parsed.parameters.first().is_some_and(|p| p.is_rest))
+        {
+            self.syntax_error("Setter function must have one argument");
         }
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
 
         let saved_allow_super_call = self.flags.allow_super_constructor_call;
-        if method_kind == MethodKind::Constructor && self.class_has_super_class {
-            self.flags.allow_super_constructor_call = true;
-        } else {
-            self.flags.allow_super_constructor_call = false;
-        }
+        self.flags.allow_super_constructor_call = method_kind == MethodKind::Constructor && self.class_has_super_class;
 
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;
@@ -2054,7 +2046,7 @@ pub(crate) fn parse_numeric_value(value: &[u16]) -> f64 {
         parse_integer_with_radix(&s[2..], 2)
     } else if s.starts_with('0') && s.len() > 1 && s.as_bytes()[1].is_ascii_digit() {
         let digits = &s[1..];
-        if digits.bytes().all(|b| b >= b'0' && b <= b'7') {
+        if digits.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
             parse_integer_with_radix(digits, 8)
         } else {
             s.parse::<f64>().unwrap_or(f64::NAN)
