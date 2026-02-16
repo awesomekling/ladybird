@@ -420,7 +420,8 @@ impl<'a> Parser<'a> {
                     }
                 }
             };
-            let result = self.statement(forin_start, StatementKind::ForIn {
+            let result = self.statement(forin_start, StatementKind::ForInOf {
+                kind: ForInOfKind::ForIn,
                 lhs,
                 rhs: Box::new(rhs),
                 body: Box::new(body),
@@ -477,15 +478,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                 };
-                if is_await {
-                    let result = self.statement(forof_start, StatementKind::ForAwaitOf {
-                        lhs,
-                        rhs: Box::new(rhs),
-                        body: Box::new(body),
-                    });
-                    return self.close_for_loop_scope(start, result);
-                }
-                let result = self.statement(forof_start, StatementKind::ForOf {
+                let for_of_kind = if is_await { ForInOfKind::ForAwaitOf } else { ForInOfKind::ForOf };
+                let result = self.statement(forof_start, StatementKind::ForInOf {
+                    kind: for_of_kind,
                     lhs,
                     rhs: Box::new(rhs),
                     body: Box::new(body),

@@ -700,9 +700,7 @@ fn for_each_child_statement(statement: &ast::StatementKind, f: &mut dyn FnMut(&a
             }
             f(&body.inner);
         }
-        StatementKind::ForIn { lhs, body, .. }
-        | StatementKind::ForOf { lhs, body, .. }
-        | StatementKind::ForAwaitOf { lhs, body, .. } => {
+        StatementKind::ForInOf { lhs, body, .. } => {
             if let ast::ForInOfLhs::Declaration(declaration) = lhs {
                 f(&declaration.inner);
             }

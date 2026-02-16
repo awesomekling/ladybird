@@ -349,9 +349,7 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                 if matches!(
                     s.children[0].inner,
                     StatementKind::For { .. }
-                        | StatementKind::ForIn { .. }
-                        | StatementKind::ForOf { .. }
-                        | StatementKind::ForAwaitOf { .. }
+                        | StatementKind::ForInOf { .. }
                 ) {
                     dump_statement(&s.children[0], state);
                     return;
@@ -520,64 +518,17 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
             dump_statement(body, &child_state(&child_state(state, true), true));
         }
 
-        StatementKind::ForIn { lhs, rhs, body } => {
+        StatementKind::ForInOf { kind, lhs, rhs, body } => {
+            let name = match kind {
+                ForInOfKind::ForIn => "ForInStatement",
+                ForInOfKind::ForOf => "ForOfStatement",
+                ForInOfKind::ForAwaitOf => "ForAwaitOfStatement",
+            };
             print_node(
                 state,
                 &format!(
                     "{}{}",
-                    color_node_name(state, "ForInStatement"),
-                    format_position(state, &statement.range)
-                ),
-            );
-            print_node(
-                &child_state(state, false),
-                &color_label(state, "lhs"),
-            );
-            dump_for_in_of_lhs(lhs, &child_state(&child_state(state, false), true));
-            print_node(
-                &child_state(state, false),
-                &color_label(state, "rhs"),
-            );
-            dump_expression(rhs, &child_state(&child_state(state, false), true));
-            print_node(
-                &child_state(state, true),
-                &color_label(state, "body"),
-            );
-            dump_statement(body, &child_state(&child_state(state, true), true));
-        }
-
-        StatementKind::ForOf { lhs, rhs, body } => {
-            print_node(
-                state,
-                &format!(
-                    "{}{}",
-                    color_node_name(state, "ForOfStatement"),
-                    format_position(state, &statement.range)
-                ),
-            );
-            print_node(
-                &child_state(state, false),
-                &color_label(state, "lhs"),
-            );
-            dump_for_in_of_lhs(lhs, &child_state(&child_state(state, false), true));
-            print_node(
-                &child_state(state, false),
-                &color_label(state, "rhs"),
-            );
-            dump_expression(rhs, &child_state(&child_state(state, false), true));
-            print_node(
-                &child_state(state, true),
-                &color_label(state, "body"),
-            );
-            dump_statement(body, &child_state(&child_state(state, true), true));
-        }
-
-        StatementKind::ForAwaitOf { lhs, rhs, body } => {
-            print_node(
-                state,
-                &format!(
-                    "{}{}",
-                    color_node_name(state, "ForAwaitOfStatement"),
+                    color_node_name(state, name),
                     format_position(state, &statement.range)
                 ),
             );

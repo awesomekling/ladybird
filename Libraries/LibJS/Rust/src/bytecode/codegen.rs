@@ -799,19 +799,9 @@ pub fn generate_statement(
             Some(result.unwrap_or_else(|| gen.add_constant_undefined()))
         }
 
-        // === ForIn ===
-        StatementKind::ForIn { lhs, rhs, body } => {
-            generate_for_in_statement(gen, lhs, rhs, body, preferred_dst)
-        }
-
-        // === ForOf ===
-        StatementKind::ForOf { lhs, rhs, body } => {
-            generate_for_of_statement(gen, lhs, rhs, body, preferred_dst)
-        }
-
-        // === ForAwaitOf ===
-        StatementKind::ForAwaitOf { lhs, rhs, body } => {
-            generate_for_await_of_statement(gen, lhs, rhs, body, preferred_dst)
+        // === ForIn / ForOf / ForAwaitOf ===
+        StatementKind::ForInOf { kind, lhs, rhs, body } => {
+            generate_for_in_of_statement(gen, *kind, lhs, rhs, body, preferred_dst)
         }
 
         // === UsingDeclaration ===
@@ -5404,6 +5394,21 @@ fn leave_for_in_of_head_tdz(gen: &mut Generator) {
     }
 }
 
+fn generate_for_in_of_statement(
+    gen: &mut Generator,
+    kind: ForInOfKind,
+    lhs: &ForInOfLhs,
+    rhs: &Expression,
+    body: &Statement,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    match kind {
+        ForInOfKind::ForIn => generate_for_in_statement(gen, lhs, rhs, body, preferred_dst),
+        ForInOfKind::ForOf => generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, false),
+        ForInOfKind::ForAwaitOf => generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, true),
+    }
+}
+
 fn generate_for_in_statement(
     gen: &mut Generator,
     lhs: &ForInOfLhs,
@@ -5597,9 +5602,7 @@ fn generate_labelled_statement(
     let is_iteration_or_switch = matches!(
         &effective_inner.inner,
         StatementKind::For { .. }
-            | StatementKind::ForOf { .. }
-            | StatementKind::ForIn { .. }
-            | StatementKind::ForAwaitOf { .. }
+            | StatementKind::ForInOf { .. }
             | StatementKind::While { .. }
             | StatementKind::DoWhile { .. }
             | StatementKind::Switch(_)
@@ -5629,16 +5632,6 @@ fn generate_labelled_statement(
 // =============================================================================
 // For-of statement
 // =============================================================================
-
-fn generate_for_of_statement(
-    gen: &mut Generator,
-    lhs: &ForInOfLhs,
-    rhs: &Expression,
-    body: &Statement,
-    preferred_dst: Option<&ScopedOperand>,
-) -> Option<ScopedOperand> {
-    generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, false)
-}
 
 /// Shared implementation for for-of and for-await-of with iterator close.
 fn generate_for_of_statement_inner(
@@ -6062,16 +6055,6 @@ fn generate_for_of_statement_inner(
 
     gen.switch_to_basic_block(end_block);
     completion
-}
-
-fn generate_for_await_of_statement(
-    gen: &mut Generator,
-    lhs: &ForInOfLhs,
-    rhs: &Expression,
-    body: &Statement,
-    preferred_dst: Option<&ScopedOperand>,
-) -> Option<ScopedOperand> {
-    generate_for_of_statement_inner(gen, lhs, rhs, body, preferred_dst, true)
 }
 
 fn assign_to_for_in_of_lhs(
@@ -7377,9 +7360,7 @@ fn is_for_loop(statement: &Statement) -> bool {
     matches!(
         statement.inner,
         StatementKind::For { .. }
-            | StatementKind::ForIn { .. }
-            | StatementKind::ForOf { .. }
-            | StatementKind::ForAwaitOf { .. }
+            | StatementKind::ForInOf { .. }
     )
 }
 

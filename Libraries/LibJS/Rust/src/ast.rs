@@ -630,6 +630,13 @@ pub struct ExportStatementData {
 // For-in/of LHS
 // =============================================================================
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForInOfKind {
+    ForIn,
+    ForOf,
+    ForAwaitOf,
+}
+
 /// Left-hand side of for-in, for-of, for-await-of.
 #[derive(Clone)]
 pub enum ForInOfLhs {
@@ -888,17 +895,8 @@ pub enum StatementKind {
         update: Option<Box<Expression>>,
         body: Box<Statement>,
     },
-    ForIn {
-        lhs: ForInOfLhs,
-        rhs: Box<Expression>,
-        body: Box<Statement>,
-    },
-    ForOf {
-        lhs: ForInOfLhs,
-        rhs: Box<Expression>,
-        body: Box<Statement>,
-    },
-    ForAwaitOf {
+    ForInOf {
+        kind: ForInOfKind,
         lhs: ForInOfLhs,
         rhs: Box<Expression>,
         body: Box<Statement>,
