@@ -692,6 +692,17 @@ impl Generator {
             .unwrap_or_else(|| self.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)))
     }
 
+    pub fn allocate_completion_register(&mut self) -> Option<ScopedOperand> {
+        if self.must_propagate_completion {
+            let reg = self.allocate_register();
+            let undef = self.add_constant_undefined();
+            self.emit_mov(&reg, &undef);
+            Some(reg)
+        } else {
+            None
+        }
+    }
+
     pub fn push_new_lexical_environment(&mut self, capacity: u32) -> ScopedOperand {
         let parent = self.current_lexical_environment();
         let new_env = self.allocate_register();

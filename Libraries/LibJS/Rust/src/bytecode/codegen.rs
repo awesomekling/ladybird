@@ -2039,14 +2039,7 @@ fn generate_while_statement(
 ) -> Option<ScopedOperand> {
     let test_block = gen.make_block();
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
         target: Label(test_block as u32),
@@ -2111,14 +2104,7 @@ fn generate_do_while_statement(
     let load_result_and_jump_to_end_block = gen.make_block();
     let end_block = gen.make_block();
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
         target: Label(body_block as u32),
@@ -2235,14 +2221,7 @@ fn generate_for_statement(
     let test_block = if test.is_some() { gen.make_block() } else { body_block };
     let end_block = gen.make_block();
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
         target: Label(test_block as u32),
@@ -4056,14 +4035,7 @@ fn generate_switch_statement(
     data: &SwitchStatementData,
     _preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     let discriminant = generate_expression(&data.discriminant, gen, None)?;
 
@@ -5432,14 +5404,7 @@ fn generate_for_in_statement(
     drop(object);
 
     // Body evaluation: completion, then jump to update block.
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
         target: Label(update_block as u32),
@@ -5628,14 +5593,7 @@ fn generate_for_of_statement_inner(
     // goes out of scope when for_in_of_head_evaluation returns.
     drop(object);
 
-    let completion = if gen.must_propagate_completion {
-        let reg = gen.allocate_register();
-        let undef = gen.add_constant_undefined();
-        gen.emit_mov(&reg, &undef);
-        Some(reg)
-    } else {
-        None
-    };
+    let completion = gen.allocate_completion_register();
 
     // Set up iterator close via synthetic FinallyContext.
     let close_completion_type = gen.allocate_register();
