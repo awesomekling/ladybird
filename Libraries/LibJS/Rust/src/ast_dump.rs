@@ -270,6 +270,13 @@ fn declaration_kind_to_string(kind: DeclarationKind) -> &'static str {
     }
 }
 
+fn optional_mode_str(mode: &OptionalChainMode) -> &'static str {
+    match mode {
+        OptionalChainMode::Optional => "optional",
+        OptionalChainMode::NotOptional => "not optional",
+    }
+}
+
 fn class_method_kind_to_string(kind: ClassMethodKind) -> &'static str {
     match kind {
         ClassMethodKind::Method => "method",
@@ -1099,11 +1106,7 @@ fn dump_expression(expression: &Expression, state: &DumpState) {
                 let ref_state = child_state(state, i == references.len() - 1);
                 match reference {
                     OptionalChainReference::Call { arguments, mode } => {
-                        let mode_str = match mode {
-                            OptionalChainMode::Optional => "optional",
-                            OptionalChainMode::NotOptional => "not optional",
-                        };
-                        print_node(&ref_state, &format!("Call({})", mode_str));
+                        print_node(&ref_state, &format!("Call({})", optional_mode_str(mode)));
                         for (j, argument) in arguments.iter().enumerate() {
                             dump_expression(
                                 &argument.value,
@@ -1112,24 +1115,16 @@ fn dump_expression(expression: &Expression, state: &DumpState) {
                         }
                     }
                     OptionalChainReference::ComputedReference { expression, mode } => {
-                        let mode_str = match mode {
-                            OptionalChainMode::Optional => "optional",
-                            OptionalChainMode::NotOptional => "not optional",
-                        };
                         print_node(
                             &ref_state,
-                            &format!("ComputedReference({})", mode_str),
+                            &format!("ComputedReference({})", optional_mode_str(mode)),
                         );
                         dump_expression(expression, &child_state(&ref_state, true));
                     }
                     OptionalChainReference::MemberReference { identifier, mode } => {
-                        let mode_str = match mode {
-                            OptionalChainMode::Optional => "optional",
-                            OptionalChainMode::NotOptional => "not optional",
-                        };
                         print_node(
                             &ref_state,
-                            &format!("MemberReference({})", mode_str),
+                            &format!("MemberReference({})", optional_mode_str(mode)),
                         );
                         dump_identifier(identifier, &identifier.range, &child_state(&ref_state, true));
                     }
@@ -1137,13 +1132,9 @@ fn dump_expression(expression: &Expression, state: &DumpState) {
                         private_identifier,
                         mode,
                     } => {
-                        let mode_str = match mode {
-                            OptionalChainMode::Optional => "optional",
-                            OptionalChainMode::NotOptional => "not optional",
-                        };
                         print_node(
                             &ref_state,
-                            &format!("PrivateMemberReference({})", mode_str),
+                            &format!("PrivateMemberReference({})", optional_mode_str(mode)),
                         );
                         print_node(
                             &child_state(&ref_state, true),
