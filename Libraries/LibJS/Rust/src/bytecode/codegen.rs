@@ -422,12 +422,7 @@ pub fn generate_expression(
             if *computed {
                 let property = generate_expression(property, gen, None)?;
                 let dst = choose_dst(gen, preferred_dst);
-                gen.emit(Instruction::GetByValue {
-                    dst: dst.operand(),
-                    base: obj.operand(),
-                    property: property.operand(),
-                    base_identifier: base_id,
-                });
+                emit_get_by_value(gen, &dst, &obj, &property, base_id);
                 return Some(dst);
             }
             // Non-computed: property must be an Identifier
@@ -2680,12 +2675,7 @@ fn generate_call_expression(
                 let method = gen.allocate_register();
                 if *computed {
                     let property = generate_expression_or_undefined(property, gen, None);
-                    gen.emit(Instruction::GetByValue {
-                        dst: method.operand(),
-                        base: obj.operand(),
-                        property: property.operand(),
-                        base_identifier: None,
-                    });
+                    emit_get_by_value(gen, &method, &obj, &property, None);
                 } else if let ExpressionKind::Identifier(ident) = &property.inner {
                     emit_get_by_id(gen, &method, &obj, &ident.name, base_id);
                 } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
@@ -2953,12 +2943,7 @@ fn generate_update_expression(
                 }
             } else if *computed {
                 let property = generate_expression(property, gen, None)?;
-                gen.emit(Instruction::GetByValue {
-                    dst: value.operand(),
-                    base: base.operand(),
-                    property: property.operand(),
-                    base_identifier: base_id,
-                });
+                emit_get_by_value(gen, &value, &base, &property, base_id);
                 // Save property for store-back (matching C++ emit_load_from_reference).
                 let saved_property = gen.allocate_register();
                 gen.emit_mov(&saved_property, &property);
@@ -2967,12 +2952,7 @@ fn generate_update_expression(
                         UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
                         UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
                     }
-                    gen.emit(Instruction::PutNormalByValue {
-                        base: base.operand(),
-                        property: saved_property.operand(),
-                        src: value.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
                     Some(value)
                 } else {
                     let dst = choose_dst(gen, preferred_dst);
@@ -2986,12 +2966,7 @@ fn generate_update_expression(
                             src: value.operand(),
                         }),
                     }
-                    gen.emit(Instruction::PutNormalByValue {
-                        base: base.operand(),
-                        property: saved_property.operand(),
-                        src: value.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
                     // Match C++ ReferenceOperands destruction order: loaded_value
                     // (value) is freed before referenced_name (saved_property).
                     drop(value);
@@ -3181,12 +3156,7 @@ fn generate_assignment_expression(
                     let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
                     if let Some(key) = precomputed_key {
                         let base_id = intern_base_identifier(gen, object);
-                        gen.emit(Instruction::PutNormalByValue {
-                            base: base.operand(),
-                            property: key.operand(),
-                            src: rhs_val.operand(),
-                            base_identifier: base_id,
-                        });
+                        emit_put_normal_by_value(gen, &base, &key, &rhs_val, base_id);
                     } else {
                         emit_put_to_member(gen, &base, property, false, &rhs_val, Some(object));
                     }
@@ -3229,12 +3199,7 @@ fn generate_assignment_expression(
                 if *computed {
                     let property = generate_expression(property, gen, None)?;
                     let old_val = gen.allocate_register();
-                    gen.emit(Instruction::GetByValue {
-                        dst: old_val.operand(),
-                        base: base.operand(),
-                        property: property.operand(),
-                        base_identifier: base_id,
-                    });
+                    emit_get_by_value(gen, &old_val, &base, &property, base_id);
                     // Save property for store-back (matching C++ emit_load_from_reference).
                     let saved_property = gen.allocate_register();
                     gen.emit_mov(&saved_property, &property);
@@ -3248,12 +3213,7 @@ fn generate_assignment_expression(
                         gen.switch_to_basic_block(rhs_block);
                         let rhs_val = generate_expression(rhs, gen, None)?;
                         gen.emit_mov(&dst, &rhs_val);
-                        gen.emit(Instruction::PutNormalByValue {
-                            base: base.operand(),
-                            property: saved_property.operand(),
-                            src: dst.operand(),
-                            base_identifier: None,
-                        });
+                        emit_put_normal_by_value(gen, &base, &saved_property, &dst, None);
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
@@ -3264,12 +3224,7 @@ fn generate_assignment_expression(
                     let rhs_val = generate_expression(rhs, gen, None)?;
                     let dst = choose_dst(gen, preferred_dst);
                     emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
-                    gen.emit(Instruction::PutNormalByValue {
-                        base: base.operand(),
-                        property: saved_property.operand(),
-                        src: dst.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_normal_by_value(gen, &base, &saved_property, &dst, None);
                     // Match C++ destruction order: rhs drops first, then
                     // reference_operands (loaded_value before referenced_name).
                     drop(rhs_val);
@@ -3418,12 +3373,7 @@ fn emit_super_get(
 ) -> Option<ScopedOperand> {
     if computed {
         let property = generate_expression_or_undefined(property, gen, None);
-        gen.emit(Instruction::GetByValueWithThis {
-            dst: dst.operand(),
-            base: base.operand(),
-            property: property.operand(),
-            this_value: this_value.operand(),
-        });
+        emit_get_by_value_with_this(gen, dst, base, &property, this_value);
         Some(property)
     } else if let ExpressionKind::Identifier(ident) = &property.inner {
         let key = gen.intern_property_key(&ident.name);
@@ -3459,12 +3409,7 @@ fn emit_super_put(
             Some(k) => k.clone(),
             None => generate_expression_or_undefined(property, gen, None),
         };
-        gen.emit(Instruction::PutNormalByValueWithThis {
-            base: base.operand(),
-            property: property.operand(),
-            this_value: this_value.operand(),
-            src: value.operand(),
-        });
+        emit_put_normal_by_value_with_this(gen, base, &property, this_value, value);
     } else if let ExpressionKind::Identifier(ident) = &property.inner {
         let key = gen.intern_property_key(&ident.name);
         let cache = gen.next_property_lookup_cache();
@@ -3506,6 +3451,143 @@ fn emit_get_by_id(
             cache_index: cache,
         });
     }
+}
+
+/// Check if a UTF-16 string is a canonical array index (non-negative integer < 2^32 - 1).
+/// Matches the behavior of C++ to_property_key: these strings become integer PropertyKeys,
+/// not string PropertyKeys, so they must NOT be optimized to GetById/PutById.
+fn is_array_index(s: &[u16]) -> bool {
+    if s.is_empty() || s.len() > 10 {
+        return false;
+    }
+    // Must not have leading zeros (except "0" itself)
+    if s.len() > 1 && s[0] == b'0' as u16 {
+        return false;
+    }
+    let mut value: u64 = 0;
+    for &ch in s {
+        if ch < b'0' as u16 || ch > b'9' as u16 {
+            return false;
+        }
+        value = value * 10 + (ch - b'0' as u16) as u64;
+    }
+    value <= 0xFFFF_FFFE
+}
+
+/// Emit a property read by value, optimizing constant string properties to GetById.
+fn emit_get_by_value(
+    gen: &mut Generator,
+    dst: &ScopedOperand,
+    base: &ScopedOperand,
+    property: &ScopedOperand,
+    base_identifier: Option<IdentifierTableIndex>,
+) {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            let s = s.0.clone();
+            emit_get_by_id(gen, dst, base, &s, base_identifier);
+            return;
+        }
+    }
+    gen.emit(Instruction::GetByValue {
+        dst: dst.operand(),
+        base: base.operand(),
+        property: property.operand(),
+        base_identifier,
+    });
+}
+
+/// Emit a property read by value with explicit this, optimizing constant string properties.
+fn emit_get_by_value_with_this(
+    gen: &mut Generator,
+    dst: &ScopedOperand,
+    base: &ScopedOperand,
+    property: &ScopedOperand,
+    this_value: &ScopedOperand,
+) {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            let s = s.0.clone();
+            let key = gen.intern_property_key(&s);
+            let cache = gen.next_property_lookup_cache();
+            gen.emit(Instruction::GetByIdWithThis {
+                dst: dst.operand(),
+                base: base.operand(),
+                property: key,
+                this_value: this_value.operand(),
+                cache_index: cache,
+            });
+            return;
+        }
+    }
+    gen.emit(Instruction::GetByValueWithThis {
+        dst: dst.operand(),
+        base: base.operand(),
+        property: property.operand(),
+        this_value: this_value.operand(),
+    });
+}
+
+/// Emit a normal property write by value, optimizing constant string properties to PutNormalById.
+fn emit_put_normal_by_value(
+    gen: &mut Generator,
+    base: &ScopedOperand,
+    property: &ScopedOperand,
+    src: &ScopedOperand,
+    base_identifier: Option<IdentifierTableIndex>,
+) {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            let s = s.0.clone();
+            let key = gen.intern_property_key(&s);
+            let cache = gen.next_property_lookup_cache();
+            gen.emit(Instruction::PutNormalById {
+                base: base.operand(),
+                property: key,
+                src: src.operand(),
+                cache_index: cache,
+                base_identifier,
+            });
+            return;
+        }
+    }
+    gen.emit(Instruction::PutNormalByValue {
+        base: base.operand(),
+        property: property.operand(),
+        src: src.operand(),
+        base_identifier,
+    });
+}
+
+/// Emit a normal property write by value with explicit this, optimizing constant string properties.
+fn emit_put_normal_by_value_with_this(
+    gen: &mut Generator,
+    base: &ScopedOperand,
+    property: &ScopedOperand,
+    this_value: &ScopedOperand,
+    src: &ScopedOperand,
+) {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            let s = s.0.clone();
+            let key = gen.intern_property_key(&s);
+            let cache = gen.next_property_lookup_cache();
+            gen.emit(Instruction::PutNormalByIdWithThis {
+                base: base.operand(),
+                this_value: this_value.operand(),
+                property: key,
+                src: src.operand(),
+                cache_index: cache,
+            });
+            return;
+        }
+    }
+    gen.emit(Instruction::PutNormalByValueWithThis {
+        base: base.operand(),
+        property: property.operand(),
+        this_value: this_value.operand(),
+        src: src.operand(),
+    });
 }
 
 fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
@@ -3571,12 +3653,7 @@ fn emit_put_to_member(
     let base_id = base_object.and_then(|obj| intern_base_identifier(gen, obj));
     if computed {
         let property = generate_expression_or_undefined(property, gen, None);
-        gen.emit(Instruction::PutNormalByValue {
-            base: base.operand(),
-            property: property.operand(),
-            src: value.operand(),
-            base_identifier: base_id,
-        });
+        emit_put_normal_by_value(gen, base, &property, value, base_id);
     } else if let ExpressionKind::Identifier(ident) = &property.inner {
         let key = gen.intern_property_key(&ident.name);
         let cache = gen.next_property_lookup_cache();
@@ -3728,12 +3805,7 @@ fn emit_evaluate_member_reference(gen: &mut Generator, target: &Expression) -> E
 fn emit_store_to_evaluated_reference(gen: &mut Generator, reference: &EvaluatedReference, value: &ScopedOperand) {
     match reference {
         EvaluatedReference::Member { base, property, base_identifier } => {
-            gen.emit(Instruction::PutNormalByValue {
-                base: base.operand(),
-                property: property.operand(),
-                src: value.operand(),
-                base_identifier: *base_identifier,
-            });
+            emit_put_normal_by_value(gen, base, property, value, *base_identifier);
         }
         EvaluatedReference::MemberId { base, property, cache, base_identifier } => {
             gen.emit(Instruction::PutNormalById {
@@ -3752,12 +3824,7 @@ fn emit_store_to_evaluated_reference(gen: &mut Generator, reference: &EvaluatedR
             });
         }
         EvaluatedReference::SuperMember { base, property, this_value } => {
-            gen.emit(Instruction::PutNormalByValueWithThis {
-                base: base.operand(),
-                property: property.operand(),
-                this_value: this_value.operand(),
-                src: value.operand(),
-            });
+            emit_put_normal_by_value_with_this(gen, base, property, this_value, value);
         }
         EvaluatedReference::SuperMemberId { base, property, cache, this_value } => {
             gen.emit(Instruction::PutNormalByIdWithThis {
@@ -3934,12 +4001,7 @@ fn generate_tagged_template_literal(
             let method = gen.allocate_register();
             if *computed {
                 let property = generate_expression_or_undefined(property, gen, None);
-                gen.emit(Instruction::GetByValue {
-                    dst: method.operand(),
-                    base: obj.operand(),
-                    property: property.operand(),
-                    base_identifier: None,
-                });
+                emit_get_by_value(gen, &method, &obj, &property, None);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 emit_get_by_id(gen, &method, &obj, &ident.name, None);
             }
@@ -4591,12 +4653,7 @@ fn generate_optional_chain(
             let val = gen.allocate_register();
             if *computed {
                 let property = generate_expression(property, gen, None)?;
-                gen.emit(Instruction::GetByValue {
-                    dst: val.operand(),
-                    base: obj.operand(),
-                    property: property.operand(),
-                    base_identifier: None,
-                });
+                emit_get_by_value(gen, &val, &obj, &property, None);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 emit_get_by_id(gen, &val, &obj, &ident.name, None);
             } else if let ExpressionKind::PrivateIdentifier(name) = &property.inner {
@@ -4608,12 +4665,7 @@ fn generate_optional_chain(
                 });
             } else {
                 let property = generate_expression(property, gen, None)?;
-                gen.emit(Instruction::GetByValue {
-                    dst: val.operand(),
-                    base: obj.operand(),
-                    property: property.operand(),
-                    base_identifier: None,
-                });
+                emit_get_by_value(gen, &val, &obj, &property, None);
             }
             val
         }
@@ -4662,12 +4714,7 @@ fn generate_optional_chain(
                 gen.emit_mov(&this_value, &current);
                 let next = gen.allocate_register();
                 let property = generate_expression(expression, gen, None)?;
-                gen.emit(Instruction::GetByValue {
-                    dst: next.operand(),
-                    base: current.operand(),
-                    property: property.operand(),
-                    base_identifier: None,
-                });
+                emit_get_by_value(gen, &next, &current, &property, None);
                 current = next;
             }
             OptionalChainReference::Call { arguments, .. } => {
@@ -6349,12 +6396,7 @@ fn generate_object_binding_pattern(
                     gen.emit_mov(&excluded_name, &property_name);
                     excluded_names.push(excluded_name);
                 }
-                gen.emit(Instruction::GetByValue {
-                    dst: value.operand(),
-                    base: object.operand(),
-                    property: property_name.operand(),
-                    base_identifier: None,
-                });
+                emit_get_by_value(gen, &value, object, &property_name, None);
             }
             None => {
                 // Should not happen for object patterns
