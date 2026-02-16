@@ -569,50 +569,42 @@ pub struct TemplateLiteralData {
 
 /// RAII wrapper for a compiled regex handle from C++.
 /// Takes ownership via `take()` and frees via FFI on drop.
-pub struct CompiledRegex(Cell<*mut c_void>);
+struct CompiledRegexInner(*mut c_void);
 
 extern "C" {
     fn rust_free_compiled_regex(ptr: *mut c_void);
 }
 
-impl CompiledRegex {
-    pub fn new(ptr: *mut c_void) -> Self {
-        Self(Cell::new(ptr))
-    }
-
-    /// Take ownership of the compiled regex handle, leaving null behind.
-    pub fn take(&self) -> *mut c_void {
-        self.0.replace(std::ptr::null_mut())
-    }
-}
-
-impl Drop for CompiledRegex {
+impl Drop for CompiledRegexInner {
     fn drop(&mut self) {
-        let ptr = self.0.get();
-        if !ptr.is_null() {
-            unsafe { rust_free_compiled_regex(ptr) };
+        if !self.0.is_null() {
+            unsafe { rust_free_compiled_regex(self.0) };
         }
     }
 }
 
+/// Shared handle to a compiled regex from C++. Cloning shares ownership
+/// via reference counting; the underlying handle is freed when the last
+/// clone is dropped.
+#[derive(Clone)]
+pub struct CompiledRegex(Rc<CompiledRegexInner>);
+
+impl CompiledRegex {
+    pub fn new(ptr: *mut c_void) -> Self {
+        Self(Rc::new(CompiledRegexInner(ptr)))
+    }
+
+    /// Take the compiled regex handle. Only valid when this is the sole owner.
+    pub fn take(&self) -> *mut c_void {
+        self.0.0
+    }
+}
+
+#[derive(Clone)]
 pub struct RegExpLiteralData {
     pub pattern: Utf16String,
     pub flags: Utf16String,
     pub compiled_regex: CompiledRegex,
-}
-
-impl Clone for RegExpLiteralData {
-    /// Clone transfers ownership of the compiled regex handle from the
-    /// original to the clone (leaving the original's handle null). This
-    /// supports the SFD lazy compilation path where the AST is cloned and
-    /// the clone is the one that will actually be compiled later.
-    fn clone(&self) -> Self {
-        Self {
-            pattern: self.pattern.clone(),
-            flags: self.flags.clone(),
-            compiled_regex: CompiledRegex::new(self.compiled_regex.take()),
-        }
-    }
 }
 
 // =============================================================================
