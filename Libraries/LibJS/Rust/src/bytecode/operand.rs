@@ -101,7 +101,7 @@ impl Operand {
     /// Used during operand rewriting in the assembler.
     pub fn offset_index_by(&mut self, offset: u32) {
         self.0 &= Self::INDEX_MASK;
-        self.0 += offset;
+        self.0 = self.0.checked_add(offset).expect("operand index overflow");
     }
 }
 
