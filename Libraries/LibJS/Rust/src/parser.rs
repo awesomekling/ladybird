@@ -76,6 +76,7 @@ pub(crate) struct PropertyKey {
     pub name: Option<Vec<u16>>,
     pub is_proto: bool,
     pub is_computed: bool,
+    pub is_identifier: bool,
 }
 
 /// Method kind for parse_method_definition.
