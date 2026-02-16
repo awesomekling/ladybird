@@ -251,7 +251,9 @@ pub unsafe fn create_shared_function_data(
         function_data.parsing_insights.uses_this_from_environment,
     );
 
-    assert!(!sfd_ptr.is_null(), "create_shared_function_data: rust_create_sfd returned null");
+    if sfd_ptr.is_null() {
+        eprintln!("create_shared_function_data: rust_create_sfd returned null");
+    }
     sfd_ptr
 }
 

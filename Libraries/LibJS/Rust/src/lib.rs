@@ -208,7 +208,10 @@ pub unsafe extern "C" fn rust_compile_program(
     let pt = match program_type {
         0 => ProgramType::Script,
         1 => ProgramType::Module,
-        _ => panic!("invalid program_type: {program_type}"),
+        _ => {
+            eprintln!("rust_compile_program: invalid program_type: {program_type}");
+            return std::ptr::null_mut();
+        }
     };
     let mut parser = Parser::new(source_slice, pt);
     if initiated_by_eval {
@@ -388,7 +391,10 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         1 => ast::FunctionKind::Generator,
         2 => ast::FunctionKind::Async,
         3 => ast::FunctionKind::AsyncGenerator,
-        _ => panic!("invalid function_kind: {function_kind}"),
+        _ => {
+            eprintln!("rust_compile_dynamic_function: invalid function_kind: {function_kind}");
+            return std::ptr::null_mut();
+        }
     };
 
     // Validate parameters: wrap in the appropriate function kind and parse.
