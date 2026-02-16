@@ -372,8 +372,16 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn consume(&mut self) -> Token {
         let old = std::mem::replace(&mut self.current_token, self.lexer.next());
-        self.check_arguments_or_eval(&old);
         self.flags.previous_token_was_period = old.token_type == TokenType::Period;
+        old
+    }
+
+    /// Consume and check for `arguments`/`eval` references.
+    /// Only call this when consuming a token used as an identifier reference,
+    /// not a property name or keyword.
+    pub(crate) fn consume_and_check_identifier(&mut self) -> Token {
+        let old = self.consume();
+        self.check_arguments_or_eval(&old);
         old
     }
 
@@ -415,7 +423,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn consume_identifier(&mut self) -> Token {
         if self.match_identifier() {
-            return self.consume();
+            return self.consume_and_check_identifier();
         }
         self.expected("identifier");
         self.consume()

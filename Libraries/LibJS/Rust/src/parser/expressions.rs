@@ -332,7 +332,7 @@ impl<'a> Parser<'a> {
                 if let Some(arrow) = self.try_parse_arrow_function_expression(next.token_type == TokenType::ParenOpen, true) {
                     return (arrow, false);
                 }
-                let token = self.consume();
+                let token = self.consume_and_check_identifier();
                 let value = self.token_value(&token).to_vec();
                 let id = self.make_identifier(start, value.clone());
                 self.scope_collector.register_identifier(id.clone(), &value, None);
@@ -476,7 +476,7 @@ impl<'a> Parser<'a> {
                     if let Some(arrow) = self.try_parse_arrow_function_expression(false, false) {
                         return (arrow, false);
                     }
-                    let token = self.consume();
+                    let token = self.consume_and_check_identifier();
                     let value = self.token_value(&token).to_vec();
                     if value == utf16!("eval") {
                         self.last_parsed_identifier_is_eval = true;
@@ -486,7 +486,7 @@ impl<'a> Parser<'a> {
                     (self.expression(start, ExpressionKind::Identifier(id)), true)
                 } else if self.match_token(TokenType::EscapedKeyword) {
                     self.syntax_error("Keyword must not contain escaped characters");
-                    let token = self.consume();
+                    let token = self.consume_and_check_identifier();
                     let value = self.token_value(&token).to_vec();
                     let id = self.make_identifier(start, value.clone());
                     self.scope_collector.register_identifier(id.clone(), &value, None);
