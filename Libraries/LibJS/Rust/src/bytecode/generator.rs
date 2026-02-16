@@ -221,6 +221,17 @@ pub struct Generator {
     pub source_len: usize,
 }
 
+macro_rules! singleton_constant {
+    ($self:expr, $field:ident, $value:expr) => {{
+        if let Some(op) = &$self.$field {
+            return op.clone();
+        }
+        let op = $self.append_constant($value);
+        $self.$field = Some(op.clone());
+        op
+    }};
+}
+
 macro_rules! next_cache_method {
     ($method:ident, $field:ident) => {
         pub fn $method(&mut self) -> u32 {
@@ -397,47 +408,22 @@ impl Generator {
 
     pub fn add_constant_boolean(&mut self, value: bool) -> ScopedOperand {
         if value {
-            if let Some(op) = &self.true_constant {
-                return op.clone();
-            }
-            let op = self.append_constant(ConstantValue::Boolean(true));
-            self.true_constant = Some(op.clone());
-            op
+            singleton_constant!(self, true_constant, ConstantValue::Boolean(true))
         } else {
-            if let Some(op) = &self.false_constant {
-                return op.clone();
-            }
-            let op = self.append_constant(ConstantValue::Boolean(false));
-            self.false_constant = Some(op.clone());
-            op
+            singleton_constant!(self, false_constant, ConstantValue::Boolean(false))
         }
     }
 
     pub fn add_constant_null(&mut self) -> ScopedOperand {
-        if let Some(op) = &self.null_constant {
-            return op.clone();
-        }
-        let op = self.append_constant(ConstantValue::Null);
-        self.null_constant = Some(op.clone());
-        op
+        singleton_constant!(self, null_constant, ConstantValue::Null)
     }
 
     pub fn add_constant_undefined(&mut self) -> ScopedOperand {
-        if let Some(op) = &self.undefined_constant {
-            return op.clone();
-        }
-        let op = self.append_constant(ConstantValue::Undefined);
-        self.undefined_constant = Some(op.clone());
-        op
+        singleton_constant!(self, undefined_constant, ConstantValue::Undefined)
     }
 
     pub fn add_constant_empty(&mut self) -> ScopedOperand {
-        if let Some(op) = &self.empty_constant {
-            return op.clone();
-        }
-        let op = self.append_constant(ConstantValue::Empty);
-        self.empty_constant = Some(op.clone());
-        op
+        singleton_constant!(self, empty_constant, ConstantValue::Empty)
     }
 
     pub fn add_constant_string(&mut self, value: Vec<u16>) -> ScopedOperand {
