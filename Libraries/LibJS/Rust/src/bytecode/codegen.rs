@@ -890,21 +890,6 @@ pub fn generate_statement(
 // Await helper
 // =============================================================================
 
-/// Emit an Await instruction and handle the received completion.
-///
-/// After the await resumes, checks the completion type:
-/// - Normal: continue with the received value
-/// - Throw: re-throw the received value
-fn generate_await(gen: &mut Generator, argument: ScopedOperand) -> ScopedOperand {
-    let received_completion = gen.allocate_register();
-    let received_completion_type = gen.allocate_register();
-    let received_completion_value = gen.allocate_register();
-    generate_await_with_completions(
-        gen, &argument,
-        &received_completion, &received_completion_type, &received_completion_value,
-    )
-}
-
 /// Completion::Type values (ABI-compatible).
 #[derive(Clone, Copy)]
 #[repr(u32)]
