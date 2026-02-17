@@ -585,7 +585,12 @@ impl ScopeCollector {
         let index = self.current.expect("no current scope");
         self.records[index].identifier_groups
             .entry(name.to_vec())
-            .and_modify(|group| group.identifiers.push(id.clone()))
+            .and_modify(|group| {
+                group.identifiers.push(id.clone());
+                if declaration_kind.is_some() && group.declaration_kind.is_none() {
+                    group.declaration_kind = declaration_kind;
+                }
+            })
             .or_insert_with(|| IdentifierGroup {
                 captured_by_nested_function: false,
                 used_inside_with_statement: false,
