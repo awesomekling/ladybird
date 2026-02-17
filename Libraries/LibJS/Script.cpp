@@ -24,6 +24,7 @@ bool g_dump_ast_use_color = false;
 
 GC_DEFINE_ALLOCATOR(Script);
 
+#ifdef ENABLE_RUST_PARSER
 // Builder populated by Rust via callbacks during rust_compile_script.
 struct ScriptGdiBuilder {
     GC::Ptr<Bytecode::Executable> executable;
@@ -36,8 +37,11 @@ struct ScriptGdiBuilder {
     Vector<Utf16FlyString> annex_b_candidate_names;
     Vector<Script::LexicalBinding> lexical_bindings;
 };
+#endif
 
 }
+
+#ifdef ENABLE_RUST_PARSER
 
 static Utf16FlyString utf16_fly_from(uint16_t const* data, size_t len)
 {
@@ -87,11 +91,14 @@ static void collect_rust_parse_error(void* ctx, char const* message, size_t mess
     });
 }
 
+#endif // ENABLE_RUST_PARSER
+
 namespace JS {
 
 // 16.1.5 ParseScript ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parse-script
 Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_text, Realm& realm, StringView filename, HostDefined* host_defined, size_t line_number_offset)
 {
+#ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
     if (use_rust_codegen) {
@@ -127,6 +134,7 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
         auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
         return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);
     }
+#endif
 
     // 1. Let script be ParseText(sourceText, Script).
     auto parser = Parser(Lexer(SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text)), line_number_offset));
@@ -198,6 +206,7 @@ Script::Script(Realm& realm, StringView filename, RefPtr<Program> parse_node, Ho
     }));
 }
 
+#ifdef ENABLE_RUST_PARSER
 Script::Script(Realm& realm, StringView filename, ScriptGdiBuilder&& builder, Bytecode::Executable& executable, HostDefined* host_defined)
     : m_realm(realm)
     , m_executable(&executable)
@@ -213,6 +222,7 @@ Script::Script(Realm& realm, StringView filename, ScriptGdiBuilder&& builder, By
     , m_host_defined(host_defined)
 {
 }
+#endif
 
 // 16.1.7 GlobalDeclarationInstantiation ( script, env ), https://tc39.es/ecma262/#sec-globaldeclarationinstantiation
 ThrowCompletionOr<void> Script::global_declaration_instantiation(VM& vm, GlobalEnvironment& global_environment)

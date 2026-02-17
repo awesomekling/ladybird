@@ -9,7 +9,9 @@
 #include <AK/Function.h>
 #include <AK/Optional.h>
 #include <AK/Utf16View.h>
+#include <LibGC/DeferGC.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/BytecodeFactory.h>
 #include <LibJS/ModuleLoading.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -39,11 +41,13 @@
 #include <LibJS/Runtime/SuppressedError.h>
 #include <LibJS/Runtime/Temporal/AbstractOperations.h>
 #include <LibJS/Runtime/ValueInlines.h>
-#include <LibJS/BytecodeFactory.h>
 #include <LibJS/SourceCode.h>
-#include <LibGC/DeferGC.h>
 
-namespace JS { }
+namespace JS {
+
+}
+
+#ifdef ENABLE_RUST_PARSER
 
 static Utf16FlyString utf16_fly_from(uint16_t const* data, size_t len)
 {
@@ -83,6 +87,8 @@ extern "C" void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, s
 {
     static_cast<JS::EvalGdiBuilder*>(ctx)->lexical_bindings.append({ utf16_fly_from(name, len), is_constant });
 }
+
+#endif // ENABLE_RUST_PARSER
 
 namespace JS {
 
@@ -696,11 +702,12 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     //     g. If inDerivedConstructor is false, and body Contains SuperCall, throw a SyntaxError exception.
     //     h. If inClassFieldInitializer is true, and ContainsArguments of body is true, throw a SyntaxError exception.
 
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-
     GC::Ptr<Bytecode::Executable> executable;
     bool strict_eval = false;
     EvalDeclarationData eval_declaration_data;
+
+#ifdef ENABLE_RUST_PARSER
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
     if (use_rust_codegen) {
         auto source_code = SourceCode::create({}, code_string->utf16_string());
@@ -748,6 +755,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
 
         // Fall through to C++ parser on Rust failure.
     }
+#endif
 
     RefPtr<Program> cpp_program;
 

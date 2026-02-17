@@ -305,17 +305,21 @@ void SharedFunctionInstanceData::visit_edges(Visitor& visitor)
     m_class_field_initializer_name.visit([&](PropertyKey const& key) { key.visit_edges(visitor); }, [](auto&) {});
 }
 
+#ifdef ENABLE_RUST_PARSER
 extern "C" void rust_free_function_ast(void*);
+#endif
 
 SharedFunctionInstanceData::~SharedFunctionInstanceData() = default;
 
 void SharedFunctionInstanceData::finalize()
 {
     Base::finalize();
+#ifdef ENABLE_RUST_PARSER
     if (m_rust_function_ast) {
         rust_free_function_ast(m_rust_function_ast);
         m_rust_function_ast = nullptr;
     }
+#endif
 }
 
 SharedFunctionInstanceData::SharedFunctionInstanceData(
@@ -383,10 +387,12 @@ void SharedFunctionInstanceData::clear_compile_inputs()
     m_functions_to_initialize.clear();
     m_var_names_to_initialize_binding.clear();
     m_lexical_bindings.clear();
+#ifdef ENABLE_RUST_PARSER
     if (m_rust_function_ast) {
         rust_free_function_ast(m_rust_function_ast);
         m_rust_function_ast = nullptr;
     }
+#endif
 }
 
 }

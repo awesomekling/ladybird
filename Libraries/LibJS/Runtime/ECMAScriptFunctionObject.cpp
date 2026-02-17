@@ -214,12 +214,15 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
+#ifdef ENABLE_RUST_PARSER
 extern "C" void* rust_compile_function(void* vm_ptr, void const* source_code_ptr, uint16_t const* source, size_t source_len, void* sfd_ptr, void* rust_function_ast);
+#endif
 
 void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals_count, size_t& constants_count, size_t& argument_count)
 {
     auto& executable = shared_data().m_executable;
     if (!executable) {
+#ifdef ENABLE_RUST_PARSER
         if (m_shared_data->m_use_rust_compilation) {
             VERIFY(m_shared_data->m_rust_function_ast);
             GC::DeferGC defer_gc(heap());
@@ -239,7 +242,9 @@ void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals
             executable->name = m_shared_data->m_name;
             if (Bytecode::g_dump_bytecode)
                 executable->dump();
-        } else if (is_module_wrapper()) {
+        } else
+#endif
+            if (is_module_wrapper()) {
             executable = Bytecode::compile(vm(), ecmascript_code(), kind(), name());
         } else {
             executable = Bytecode::compile(vm(), shared_data(), Bytecode::BuiltinAbstractOperationsEnabled::No);

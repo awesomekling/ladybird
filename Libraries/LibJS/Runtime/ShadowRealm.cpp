@@ -11,7 +11,6 @@
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
-#include <LibJS/SourceCode.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/ModuleNamespaceObject.h>
@@ -20,6 +19,7 @@
 #include <LibJS/Runtime/PromiseConstructor.h>
 #include <LibJS/Runtime/ShadowRealm.h>
 #include <LibJS/Runtime/WrappedFunction.h>
+#include <LibJS/SourceCode.h>
 
 namespace JS {
 
@@ -125,50 +125,54 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
 
     // 2. Perform the following substeps in an implementation-defined order, possibly interleaving parsing and error detection:
 
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-
     GC::Ptr<Bytecode::Executable> executable;
     bool strict_eval = false;
     EvalDeclarationData eval_declaration_data;
 
-    if (use_rust_codegen) {
-        auto source_code = SourceCode::create({}, source_text->utf16_string());
-        auto const& code_view = source_code->code_view();
-        auto length = code_view.length_in_code_units();
+#ifdef ENABLE_RUST_PARSER
+    {
+        static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
-        GC::DeferGC defer_gc(vm.heap());
-        EvalGdiBuilder builder;
+        if (use_rust_codegen) {
+            auto source_code = SourceCode::create({}, source_text->utf16_string());
+            auto const& code_view = source_code->code_view();
+            auto length = code_view.length_in_code_units();
 
-        void* exec_ptr;
-        if (code_view.has_ascii_storage()) {
-            auto ascii = code_view.ascii_span();
-            Vector<u16> utf16_buf;
-            utf16_buf.ensure_capacity(length);
-            for (size_t i = 0; i < length; ++i)
-                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
-                false, false, false, false, false);
-        } else {
-            auto utf16 = code_view.utf16_span();
-            exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
-                false, false, false, false, false);
+            GC::DeferGC defer_gc(vm.heap());
+            EvalGdiBuilder builder;
+
+            void* exec_ptr;
+            if (code_view.has_ascii_storage()) {
+                auto ascii = code_view.ascii_span();
+                Vector<u16> utf16_buf;
+                utf16_buf.ensure_capacity(length);
+                for (size_t i = 0; i < length; ++i)
+                    utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+                exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
+                    false, false, false, false, false);
+            } else {
+                auto utf16 = code_view.utf16_span();
+                exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
+                    false, false, false, false, false);
+            }
+
+            if (exec_ptr) {
+                executable = static_cast<Bytecode::Executable*>(exec_ptr);
+                executable->name = "ShadowRealmEval"_utf16_fly_string;
+                strict_eval = builder.is_strict_mode;
+
+                eval_declaration_data.var_names = move(builder.var_names);
+                eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
+                eval_declaration_data.declared_function_names = move(builder.declared_function_names);
+                eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
+                eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
+                eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
+            }
+
+            // Fall through to C++ parser on Rust failure.
         }
-
-        if (exec_ptr) {
-            executable = static_cast<Bytecode::Executable*>(exec_ptr);
-            executable->name = "ShadowRealmEval"_utf16_fly_string;
-            strict_eval = builder.is_strict_mode;
-
-            eval_declaration_data.var_names = move(builder.var_names);
-            eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
-            eval_declaration_data.declared_function_names = move(builder.declared_function_names);
-            eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
-            eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
-            eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
-        }
-
-        // Fall through to C++ parser on Rust failure.
     }
+#endif
 
     if (!executable) {
         // a. Let script be ParseText(StringToCodePoints(sourceText), Script).

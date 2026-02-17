@@ -9,7 +9,6 @@
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
-#include <LibJS/SourceCode.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/FunctionConstructor.h>
@@ -18,6 +17,7 @@
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Realm.h>
+#include <LibJS/SourceCode.h>
 
 namespace JS {
 
@@ -151,9 +151,10 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
     // 16. Perform ? HostEnsureCanCompileStrings(currentRealm, parameterStrings, bodyString, sourceString, FUNCTION, parameterArgs, bodyArg).
     TRY(vm.host_ensure_can_compile_strings(realm, parameter_strings, body_string, source_text, CompilationType::Function, parameter_args, body_arg));
 
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-
     GC::Ptr<SharedFunctionInstanceData> function_data;
+
+#ifdef ENABLE_RUST_PARSER
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
 
     if (use_rust_codegen) {
         auto source_code = SourceCode::create({}, Utf16String::from_utf8(source_text));
@@ -196,6 +197,7 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
 
         // Fall through to C++ parser on Rust failure.
     }
+#endif
 
     if (!function_data) {
         u8 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName;

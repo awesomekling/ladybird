@@ -6,8 +6,10 @@
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
+#ifdef ENABLE_RUST_PARSER
+
+#    include <stddef.h>
+#    include <stdint.h>
 
 // FFI types for creating a Bytecode::Executable from Rust.
 //
@@ -16,14 +18,14 @@
 // that data.
 
 // Constant value tags (matches Rust ConstantValue enum discriminants)
-#define CONSTANT_TAG_NUMBER 0
-#define CONSTANT_TAG_BOOLEAN_TRUE 1
-#define CONSTANT_TAG_BOOLEAN_FALSE 2
-#define CONSTANT_TAG_NULL 3
-#define CONSTANT_TAG_UNDEFINED 4
-#define CONSTANT_TAG_EMPTY 5
-#define CONSTANT_TAG_STRING 6
-#define CONSTANT_TAG_BIGINT 7
+#    define CONSTANT_TAG_NUMBER 0
+#    define CONSTANT_TAG_BOOLEAN_TRUE 1
+#    define CONSTANT_TAG_BOOLEAN_FALSE 2
+#    define CONSTANT_TAG_NULL 3
+#    define CONSTANT_TAG_UNDEFINED 4
+#    define CONSTANT_TAG_EMPTY 5
+#    define CONSTANT_TAG_STRING 6
+#    define CONSTANT_TAG_BIGINT 7
 
 struct FFIExceptionHandler {
     uint32_t start_offset;
@@ -59,9 +61,9 @@ struct FFIClassElement {
     size_t literal_value_string_len;
 };
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 extern "C" {
-#endif
+#    endif
 
 // Callback for reporting parse errors from Rust.
 // message is UTF-8, line and column are 1-based.
@@ -318,9 +320,7 @@ void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, 
 // Successful results must be freed with rust_free_compiled_regex or
 // passed to rust_create_executable (which takes ownership).
 void* rust_compile_regex(
-    uint16_t const* pattern_data, size_t pattern_len,
-    uint16_t const* flags_data, size_t flags_len,
-    char const** error_out);
+    uint16_t const* pattern_data, size_t pattern_len, uint16_t const* flags_data, size_t flags_len, char const** error_out);
 void rust_free_compiled_regex(void* ptr);
 void rust_free_error_string(char const* str);
 
@@ -329,6 +329,8 @@ void rust_free_error_string(char const* str);
 // units into buffer and returns the actual length.
 size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len);
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 }
-#endif
+#    endif
+
+#endif // ENABLE_RUST_PARSER
