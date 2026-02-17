@@ -163,13 +163,37 @@ fn color_flag(state: &DumpState, flag: &str) -> String {
     format!("{}[{}]{}", DIM, flag, RESET)
 }
 
+/// Convert UTF-16 to a string, preserving lone surrogates as CESU-8 bytes
+/// to match C++ output (which uses WTF-8 encoding for surrogates).
 fn utf16_to_string(s: &[u16]) -> String {
-    String::from_utf16_lossy(s)
+    let mut buf = String::with_capacity(s.len());
+    for result in char::decode_utf16(s.iter().copied()) {
+        match result {
+            Ok(c) => buf.push(c),
+            Err(err) => {
+                // Lone surrogate: encode as CESU-8 (3 bytes) to match C++.
+                let surr = err.unpaired_surrogate() as u32;
+                let bytes = [
+                    0xE0 | (surr >> 12) as u8,
+                    0x80 | ((surr >> 6) & 0x3F) as u8,
+                    0x80 | (surr & 0x3F) as u8,
+                ];
+                // SAFETY: CESU-8 surrogates are technically invalid UTF-8 but
+                // match C++ WTF-8 output exactly. Only used for AST dump text.
+                unsafe { buf.as_mut_vec().extend_from_slice(&bytes); }
+            }
+        }
+    }
+    buf
 }
 
+/// Format f64 matching ECMAScript Number::toString(x, 10).
 fn format_f64(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
+    }
+    if value == 0.0 {
+        return "0".to_string();
     }
     if value.is_infinite() {
         return if value > 0.0 {
@@ -178,13 +202,123 @@ fn format_f64(value: f64) -> String {
             "-Infinity".to_string()
         };
     }
-    // Match C++ formatting: if it's an integer, print without decimal point.
-    if value == value.trunc() && value.abs() < 1e15 && value != -0.0 {
-        format!("{}", value as i64)
-    } else {
-        // Use default float formatting which should match C++.
-        format!("{}", value)
+
+    let negative = value < 0.0;
+    let abs_value = value.abs();
+
+    // Get shortest decimal representation using Rust's built-in ryu.
+    // format!("{:e}") gives e.g. "8.99e307", "1e20", "1e-7"
+    let sci = format!("{:e}", abs_value);
+
+    // Parse into mantissa digits and exponent.
+    let (mantissa_part, exp_part) = sci.split_once('e').unwrap();
+    let exp: i32 = exp_part.parse().unwrap();
+
+    // Extract mantissa digits (remove the decimal point).
+    let mut digits_str = String::new();
+    for c in mantissa_part.chars() {
+        if c != '.' {
+            digits_str.push(c);
+        }
     }
+
+    // Fix tie-breaking: Rust's ryu rounds up on ties (e.g. 75.407867431640625 → ...63)
+    // but C++ rounds to even (→ ...62). Only decrement the last digit when the actual
+    // float64 value is exactly at the midpoint between two decimal representations
+    // (i.e., the next digit after the shortest representation is exactly '5').
+    let num_sig_digits = digits_str.len();
+    if num_sig_digits > 0 {
+        let last_byte = digits_str.as_bytes()[num_sig_digits - 1];
+        if last_byte > b'0' {
+            // Get one more digit of precision to check if it's a midpoint tie.
+            let prec = num_sig_digits;
+            let more_precise = format!("{:.*e}", prec, abs_value);
+            let (mp_mantissa, _) = more_precise.split_once('e').unwrap();
+            let extra_digit = mp_mantissa.replace('.', "").as_bytes().get(num_sig_digits).copied();
+            if extra_digit == Some(b'5') {
+                // Check that remaining digits are all zero (true midpoint).
+                let full_check = format!("{:.*e}", prec + 3, abs_value);
+                let (fc_mantissa, _) = full_check.split_once('e').unwrap();
+                let fc_digits: Vec<u8> = fc_mantissa.replace('.', "").bytes().collect();
+                let all_zero_after = fc_digits[num_sig_digits + 1..].iter().all(|&b| b == b'0');
+                if all_zero_after {
+                    let mut digits_bytes: Vec<u8> = digits_str.bytes().collect();
+                    digits_bytes[num_sig_digits - 1] -= 1;
+                    let test_mantissa = String::from_utf8(digits_bytes).unwrap();
+                    let test_str = if test_mantissa.len() == 1 {
+                        format!("{}e{}", test_mantissa, exp)
+                    } else {
+                        format!("{}.{}e{}", &test_mantissa[..1], &test_mantissa[1..], exp)
+                    };
+                    if test_str.parse::<f64>().unwrap_or(f64::NAN) == abs_value {
+                        digits_str = test_mantissa;
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove trailing zeros from mantissa (shortest representation).
+    let trimmed = digits_str.trim_end_matches('0');
+    let digits: Vec<char> = if trimmed.is_empty() {
+        vec!['0']
+    } else {
+        trimmed.chars().collect()
+    };
+
+    let k = digits.len() as i32; // Number of significant digits.
+    let n = exp + 1; // Position of decimal point.
+
+    let mut result = String::new();
+    if negative {
+        result.push('-');
+    }
+
+    // ES2024 7.1.12.1 steps 6-12
+    if n >= 1 && n <= 21 {
+        if n >= k {
+            // Integer: digits followed by zeros.
+            for &d in &digits {
+                result.push(d);
+            }
+            for _ in 0..(n - k) {
+                result.push('0');
+            }
+        } else {
+            // Fixed decimal: digits with decimal point.
+            for (i, &d) in digits.iter().enumerate() {
+                if i as i32 == n {
+                    result.push('.');
+                }
+                result.push(d);
+            }
+        }
+    } else if n >= -5 && n <= 0 {
+        // 0.000...digits
+        result.push_str("0.");
+        for _ in 0..(-n) {
+            result.push('0');
+        }
+        for &d in &digits {
+            result.push(d);
+        }
+    } else {
+        // Scientific notation.
+        result.push(digits[0]);
+        if k > 1 {
+            result.push('.');
+            for &d in &digits[1..] {
+                result.push(d);
+            }
+        }
+        result.push('e');
+        if n - 1 >= 0 {
+            result.push('+');
+        }
+        result.push_str(&(n - 1).to_string());
+    }
+
+    result
 }
 
 fn binary_op_to_string(op: BinaryOp) -> &'static str {
@@ -357,14 +491,8 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
         }
 
         StatementKind::FunctionBody { scope, .. } => {
-            // C++ uses the first child's position for FunctionBody.
             let s = scope.borrow();
-            let pos_range = if let Some(first) = s.children.first() {
-                &first.range
-            } else {
-                &statement.range
-            };
-            dump_scope_node("FunctionBody", &s, pos_range, state);
+            dump_scope_node("FunctionBody", &s, &statement.range, state);
         }
 
         StatementKind::Program(data) => {
@@ -493,7 +621,14 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                     &child_state(state, false),
                     &color_label(state, "init"),
                 );
-                dump_statement(init, &child_state(&child_state(state, false), true));
+                match init {
+                    ForInit::Expression(expr) => {
+                        dump_expression(expr, &child_state(&child_state(state, false), true));
+                    }
+                    ForInit::Declaration(decl) => {
+                        dump_statement(decl, &child_state(&child_state(state, false), true));
+                    }
+                }
             }
             if let Some(test) = test {
                 print_node(
