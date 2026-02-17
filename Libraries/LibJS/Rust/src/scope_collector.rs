@@ -1089,7 +1089,7 @@ impl ScopeCollector {
             var_names.push(name.clone().into());
 
             let is_parameter = var.flags.intersects(VarFlags::FORBIDDEN_LEXICAL);
-            let is_function_name = var.flags.intersects(VarFlags::BOUND);
+            let is_function_name = seen_function_names.contains(name);
 
             let local_info = if let Some(ref ident) = var.var_identifier {
                 if ident.is_local() {

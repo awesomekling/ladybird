@@ -110,7 +110,7 @@ pub fn generate_expression(
                 return Some(dst);
             }
             if *op == UnaryOp::Delete {
-                return Some(emit_delete_reference(gen, operand, preferred_dst));
+                return Some(emit_delete_reference(gen, operand));
             }
 
             // Not needs dst allocated before operand to match C++ register order.
@@ -3663,14 +3663,13 @@ fn emit_put_to_member(
 fn emit_delete_reference(
     gen: &mut Generator,
     operand: &Expression,
-    preferred_dst: Option<&ScopedOperand>,
 ) -> ScopedOperand {
     match &operand.inner {
         ExpressionKind::Identifier(ident) => {
             if ident.is_local() {
                 return gen.add_constant_boolean(false);
             }
-            let dst = choose_dst(gen, preferred_dst);
+            let dst = gen.allocate_register();
             let id = gen.intern_identifier(&ident.name);
             gen.emit(Instruction::DeleteVariable {
                 dst: dst.operand(),
@@ -3703,7 +3702,7 @@ fn emit_delete_reference(
                 return gen.add_constant_undefined();
             }
             let base = generate_expression_or_undefined(object, gen, None);
-            let dst = choose_dst(gen, preferred_dst);
+            let dst = gen.allocate_register();
             if *computed {
                 let key = generate_expression_or_undefined(property, gen, None);
                 gen.emit(Instruction::DeleteByValue {
@@ -7186,7 +7185,10 @@ pub fn emit_function_declaration_instantiation(
                     || (arguments_object_needed && var.name == utf16!("arguments"));
 
                 let initial_value = if !is_in_parameter_bindings || var.is_function_name {
-                    gen.add_constant_undefined()
+                    let value = gen.allocate_register();
+                    let undef = gen.add_constant_undefined();
+                    gen.emit_mov(&value, &undef);
+                    value
                 } else if let Some(local_binding) = var.local {
                     let local = var_local_operand(gen, local_binding.local_type, local_binding.index);
                     let value = gen.allocate_register();
