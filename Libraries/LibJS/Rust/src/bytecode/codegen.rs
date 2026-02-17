@@ -4946,6 +4946,11 @@ fn generate_class_expression(
                             ExpressionKind::Identifier(ident) => ident.name.clone(),
                             ExpressionKind::StringLiteral(s) => s.clone(),
                             ExpressionKind::PrivateIdentifier(p) => p.name.clone(),
+                            ExpressionKind::NumericLiteral(n) => super::ffi::js_number_to_utf16(*n),
+                            ExpressionKind::BigIntLiteral(s) => {
+                                let digits = s.strip_suffix('n').unwrap_or(s);
+                                Utf16String(digits.encode_utf16().collect())
+                            }
                             _ => Utf16String::new(),
                         };
 
