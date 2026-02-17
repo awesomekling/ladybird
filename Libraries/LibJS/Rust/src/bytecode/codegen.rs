@@ -415,14 +415,38 @@ pub fn generate_expression(
             computed,
         } => {
             let is_super = matches!(object.inner, ExpressionKind::Super);
-            let obj = generate_expression(object, gen, None)?;
-            let base_id = intern_base_identifier(gen, object);
             if is_super {
-                let dst = choose_dst(gen, preferred_dst);
+                // Per spec, evaluation order for super property access is:
+                // 1. Resolve this binding
+                // 2. Evaluate computed property (if any)
+                // 3. Resolve super base
+                // 4. Property lookup with this
                 let this_value = emit_resolve_this_binding(gen);
-                emit_super_get(gen, &dst, &obj, property, *computed, &this_value);
+                let computed_key = if *computed {
+                    Some(generate_expression(property, gen, None)?)
+                } else {
+                    None
+                };
+                let super_base = gen.allocate_register();
+                gen.emit(Instruction::ResolveSuperBase { dst: super_base.operand() });
+                let dst = choose_dst(gen, preferred_dst);
+                if let Some(key) = computed_key {
+                    emit_get_by_value_with_this(gen, &dst, &super_base, &key, &this_value);
+                } else if let ExpressionKind::Identifier(ident) = &property.inner {
+                    let key = gen.intern_property_key(&ident.name);
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::GetByIdWithThis {
+                        dst: dst.operand(),
+                        base: super_base.operand(),
+                        property: key,
+                        this_value: this_value.operand(),
+                        cache_index: cache,
+                    });
+                }
                 return Some(dst);
             }
+            let obj = generate_expression(object, gen, None)?;
+            let base_id = intern_base_identifier(gen, object);
             if *computed {
                 let property = generate_expression(property, gen, None)?;
                 let dst = choose_dst(gen, preferred_dst);
