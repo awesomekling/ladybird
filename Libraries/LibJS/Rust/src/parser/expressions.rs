@@ -867,6 +867,10 @@ impl<'a> Parser<'a> {
             return self.expression(start, ExpressionKind::MetaProperty(MetaPropertyType::NewTarget));
         }
 
+        if self.match_token(TokenType::Import) {
+            self.syntax_error("Cannot call new on dynamic import");
+        }
+
         let callee = if self.match_token(TokenType::New) {
             self.parse_new_expression()
         } else {
