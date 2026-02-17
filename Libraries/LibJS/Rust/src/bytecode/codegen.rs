@@ -944,9 +944,7 @@ pub fn generate_statement(
 
         // === ClassFieldInitializer ===
         StatementKind::ClassFieldInitializer { expression, field_name } => {
-            if !field_name.is_empty() {
-                gen.pending_lhs_name = Some(gen.intern_identifier(field_name));
-            }
+            gen.pending_lhs_name = Some(gen.intern_identifier(field_name));
             let value = generate_expression_or_undefined(expression, gen, None);
             gen.pending_lhs_name = None;
             gen.emit(Instruction::Return {
