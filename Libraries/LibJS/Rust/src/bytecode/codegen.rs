@@ -6647,14 +6647,8 @@ fn generate_try_statement(
             gen.current_completion_register = saved_completion;
         }
 
-        if created_catch_scope {
-            gen.lexical_environment_register_stack.pop();
-            if !gen.is_current_block_terminated() {
-                let parent = gen.current_lexical_environment();
-                gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-            }
-        }
-
+        // Match C++ ordering: save catch completion BEFORE restoring
+        // the lexical environment from the catch scope.
         if gen.must_propagate_completion {
             if let Some(ref cc) = catch_completion {
                 if !gen.is_current_block_terminated() {
@@ -6662,6 +6656,14 @@ fn generate_try_statement(
                     gen.emit_mov(&reg, cc);
                     completion = Some(reg);
                 }
+            }
+        }
+
+        if created_catch_scope {
+            gen.lexical_environment_register_stack.pop();
+            if !gen.is_current_block_terminated() {
+                let parent = gen.current_lexical_environment();
+                gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
             }
         }
 
