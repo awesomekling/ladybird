@@ -1323,6 +1323,18 @@ impl<'a> Parser<'a> {
                 let expression = self.expression(start, ExpressionKind::NumericLiteral(value));
                 PropertyKey { expression, name: None, is_proto: false, is_computed: false, is_identifier: false }
             }
+            TokenType::BigIntLiteral => {
+                let token = self.consume();
+                let value = self.token_value(&token);
+                let digits = if value.last() == Some(&(b'n' as u16)) {
+                    &value[..value.len() - 1]
+                } else {
+                    value
+                };
+                let value_utf8: String = digits.iter().map(|&c| c as u8 as char).collect();
+                let expression = self.expression(start, ExpressionKind::BigIntLiteral(value_utf8));
+                PropertyKey { expression, name: None, is_proto: false, is_computed: false, is_identifier: false }
+            }
             // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
             // It is a Syntax Error if the StringValue of PrivateIdentifier is "#constructor".
             TokenType::PrivateIdentifier => {
