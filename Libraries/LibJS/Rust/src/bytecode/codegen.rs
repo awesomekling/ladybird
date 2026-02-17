@@ -7539,6 +7539,10 @@ fn try_constant_fold_unary(
             Some(gen.add_constant_number(n))
         }
         UnaryOp::BitwiseNot => {
+            if let ConstantValue::BigInt(s) = constant {
+                let n = parse_bigint(&s.clone())?;
+                return Some(gen.add_constant_bigint((-(n + 1)).to_string()));
+            }
             let n = constant_to_number(constant)?;
             Some(gen.add_constant_number((!to_int32(n)) as f64))
         }
@@ -7570,6 +7574,212 @@ fn try_constant_fold_to_boolean(
         _ => return None,
     };
     Some(gen.add_constant_boolean(as_bool))
+}
+
+/// Implement IsLooselyEqual for constant values.
+/// https://tc39.es/ecma262/#sec-islooselyequal
+fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Option<bool> {
+    // Same type: use strict equality rules.
+    match (lhs, rhs) {
+        (ConstantValue::Null, ConstantValue::Null)
+        | (ConstantValue::Null, ConstantValue::Undefined)
+        | (ConstantValue::Undefined, ConstantValue::Null)
+        | (ConstantValue::Undefined, ConstantValue::Undefined) => return Some(true),
+        (ConstantValue::Null, _) | (ConstantValue::Undefined, _)
+        | (_, ConstantValue::Null) | (_, ConstantValue::Undefined) => return Some(false),
+        (ConstantValue::Number(a), ConstantValue::Number(b)) => return Some(a == b),
+        (ConstantValue::String(a), ConstantValue::String(b)) => return Some(a == b),
+        (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => return Some(a == b),
+        (ConstantValue::BigInt(a), ConstantValue::BigInt(b)) => return Some(a == b),
+        _ => {}
+    }
+    // Cross-type comparisons: both sides get coerced to numbers.
+    // Boolean → Number first, then retry.
+    let lhs_num = match lhs {
+        ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
+        _ => lhs,
+    };
+    let rhs_num = match rhs {
+        ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
+        _ => rhs,
+    };
+    // If Boolean conversion changed something, retry.
+    if !std::ptr::eq(lhs_num, lhs) || !std::ptr::eq(rhs_num, rhs) {
+        return try_constant_loosely_equals(lhs_num, rhs_num);
+    }
+    // Number == String → compare ToNumber(string) to number.
+    // String == Number → compare number to ToNumber(string).
+    match (lhs, rhs) {
+        (ConstantValue::Number(n), ConstantValue::String(s))
+        | (ConstantValue::String(s), ConstantValue::Number(n)) => {
+            return Some(*n == string_to_number(s));
+        }
+        // BigInt == Number or Number == BigInt: compare mathematical values.
+        (ConstantValue::BigInt(b), ConstantValue::Number(n))
+        | (ConstantValue::Number(n), ConstantValue::BigInt(b)) => {
+            if n.is_nan() || n.is_infinite() {
+                return Some(false);
+            }
+            if n.fract() != 0.0 {
+                return Some(false);
+            }
+            let bi = parse_bigint(b)?;
+            return Some(bi as f64 == *n && *n as i128 == bi);
+        }
+        // BigInt == String or String == BigInt: parse string as BigInt per StringToBigInt.
+        (ConstantValue::BigInt(b), ConstantValue::String(s))
+        | (ConstantValue::String(s), ConstantValue::BigInt(b)) => {
+            let s_utf8: String = char::decode_utf16(s.0.iter().copied())
+                .map(|r| r.unwrap_or('\u{FFFD}'))
+                .collect();
+            let s_trimmed = s_utf8.trim();
+            if s_trimmed.is_empty() {
+                let bi = parse_bigint(b)?;
+                return Some(bi == 0);
+            }
+            let s_bi = string_to_bigint(s_trimmed)?;
+            let bi = parse_bigint(b)?;
+            return Some(bi == s_bi);
+        }
+        _ => None,
+    }
+}
+
+/// Parse a BigInt string to i128. Returns None for values that don't fit.
+fn parse_bigint(s: &str) -> Option<i128> {
+    s.parse::<i128>().ok()
+}
+
+/// StringToBigInt: parse a string as a BigInt value per spec.
+/// Handles decimal, 0b binary, 0o octal, and 0x hex prefixes.
+fn string_to_bigint(s: &str) -> Option<i128> {
+    if s.len() > 2 {
+        let (prefix, rest) = s.split_at(2);
+        match prefix {
+            "0b" | "0B" => return i128::from_str_radix(rest, 2).ok(),
+            "0o" | "0O" => return i128::from_str_radix(rest, 8).ok(),
+            "0x" | "0X" => return i128::from_str_radix(rest, 16).ok(),
+            _ => {}
+        }
+    }
+    s.parse::<i128>().ok()
+}
+
+/// Constant-fold a binary operation on two BigInt operands.
+fn try_constant_fold_bigint_binary(
+    gen: &mut Generator,
+    op: BinaryOp,
+    a_str: &str,
+    b_str: &str,
+) -> Option<ScopedOperand> {
+    match op {
+        // Arithmetic operations: produce a BigInt result.
+        BinaryOp::Addition => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint(a.checked_add(b)?.to_string()))
+        }
+        BinaryOp::Subtraction => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint(a.checked_sub(b)?.to_string()))
+        }
+        BinaryOp::Multiplication => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint(a.checked_mul(b)?.to_string()))
+        }
+        BinaryOp::Division => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            if b == 0 {
+                return None; // Division by zero throws at runtime.
+            }
+            // BigInt division truncates toward zero, which is what Rust does.
+            Some(gen.add_constant_bigint(a.checked_div(b)?.to_string()))
+        }
+        BinaryOp::Modulo => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            if b == 0 {
+                return None; // Modulo by zero throws at runtime.
+            }
+            Some(gen.add_constant_bigint(a.checked_rem(b)?.to_string()))
+        }
+        BinaryOp::Exponentiation => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            if b < 0 {
+                return None; // Negative exponent throws at runtime.
+            }
+            let exp = u32::try_from(b).ok()?;
+            // Only fold small exponents to avoid huge results.
+            if exp > 1000 {
+                return None;
+            }
+            Some(gen.add_constant_bigint(a.checked_pow(exp)?.to_string()))
+        }
+        // Comparison operations: produce a Boolean result.
+        BinaryOp::StrictlyEquals | BinaryOp::LooselyEquals => {
+            Some(gen.add_constant_boolean(a_str == b_str))
+        }
+        BinaryOp::StrictlyInequals | BinaryOp::LooselyInequals => {
+            Some(gen.add_constant_boolean(a_str != b_str))
+        }
+        BinaryOp::LessThan => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_boolean(a < b))
+        }
+        BinaryOp::LessThanEquals => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_boolean(a <= b))
+        }
+        BinaryOp::GreaterThan => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_boolean(a > b))
+        }
+        BinaryOp::GreaterThanEquals => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_boolean(a >= b))
+        }
+        // Bitwise operations on BigInt.
+        BinaryOp::BitwiseAnd => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint((a & b).to_string()))
+        }
+        BinaryOp::BitwiseOr => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint((a | b).to_string()))
+        }
+        BinaryOp::BitwiseXor => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            Some(gen.add_constant_bigint((a ^ b).to_string()))
+        }
+        BinaryOp::LeftShift => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            let shift = u32::try_from(b).ok()?;
+            if shift > 512 {
+                return None;
+            }
+            Some(gen.add_constant_bigint(a.checked_shl(shift)?.to_string()))
+        }
+        BinaryOp::RightShift => {
+            let a = parse_bigint(a_str)?;
+            let b = parse_bigint(b_str)?;
+            let shift = u32::try_from(b).ok()?;
+            Some(gen.add_constant_bigint((a >> shift).to_string()))
+        }
+        // UnsignedRightShift throws TypeError for BigInt.
+        _ => None,
+    }
 }
 
 /// Try to constant-fold a binary operation when both operands are constants.
@@ -7670,6 +7880,15 @@ fn try_constant_fold_binary(
 ) -> Option<ScopedOperand> {
     let lhs_const = gen.get_constant(lhs)?;
     let rhs_const = gen.get_constant(rhs)?;
+
+    // BigInt constant folding: if both operands are BigInt, handle separately.
+    // Clone strings to release the immutable borrow on gen before the mutable call.
+    if let (ConstantValue::BigInt(a), ConstantValue::BigInt(b)) = (lhs_const, rhs_const) {
+        let a = a.clone();
+        let b = b.clone();
+        return try_constant_fold_bigint_binary(gen, op, &a, &b);
+    }
+
     match op {
         BinaryOp::Addition => {
             // If either operand is a string, do string concatenation using ToString.
@@ -7717,7 +7936,8 @@ fn try_constant_fold_binary(
                 (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a == b)),
                 (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
                 (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
-                _ => None,
+                // Different types are never strictly equal.
+                _ => Some(gen.add_constant_boolean(false)),
             }
         }
         BinaryOp::StrictlyInequals => {
@@ -7727,7 +7947,8 @@ fn try_constant_fold_binary(
                 (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a != b)),
                 (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
                 (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
-                _ => None,
+                // Different types are never strictly equal.
+                _ => Some(gen.add_constant_boolean(true)),
             }
         }
         BinaryOp::GreaterThan => {
@@ -7764,50 +7985,12 @@ fn try_constant_fold_binary(
             Some(gen.add_constant_boolean(a <= b))
         }
         BinaryOp::LooselyEquals => {
-            // Null/undefined are only loosely equal to each other, nothing else.
-            if matches!(lhs_const, ConstantValue::Null | ConstantValue::Undefined)
-                || matches!(rhs_const, ConstantValue::Null | ConstantValue::Undefined)
-            {
-                let result = matches!(
-                    (lhs_const, rhs_const),
-                    (ConstantValue::Null, ConstantValue::Null)
-                        | (ConstantValue::Null, ConstantValue::Undefined)
-                        | (ConstantValue::Undefined, ConstantValue::Null)
-                        | (ConstantValue::Undefined, ConstantValue::Undefined)
-                );
-                return Some(gen.add_constant_boolean(result));
-            }
-            match (lhs_const, rhs_const) {
-                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a == b)),
-                _ => {
-                    let a = constant_to_number(lhs_const)?;
-                    let b = constant_to_number(rhs_const)?;
-                    Some(gen.add_constant_boolean(a == b))
-                }
-            }
+            let result = try_constant_loosely_equals(lhs_const, rhs_const)?;
+            Some(gen.add_constant_boolean(result))
         }
         BinaryOp::LooselyInequals => {
-            // Null/undefined are only loosely equal to each other, nothing else.
-            if matches!(lhs_const, ConstantValue::Null | ConstantValue::Undefined)
-                || matches!(rhs_const, ConstantValue::Null | ConstantValue::Undefined)
-            {
-                let result = !matches!(
-                    (lhs_const, rhs_const),
-                    (ConstantValue::Null, ConstantValue::Null)
-                        | (ConstantValue::Null, ConstantValue::Undefined)
-                        | (ConstantValue::Undefined, ConstantValue::Null)
-                        | (ConstantValue::Undefined, ConstantValue::Undefined)
-                );
-                return Some(gen.add_constant_boolean(result));
-            }
-            match (lhs_const, rhs_const) {
-                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a != b)),
-                _ => {
-                    let a = constant_to_number(lhs_const)?;
-                    let b = constant_to_number(rhs_const)?;
-                    Some(gen.add_constant_boolean(a != b))
-                }
-            }
+            let result = try_constant_loosely_equals(lhs_const, rhs_const)?;
+            Some(gen.add_constant_boolean(!result))
         }
         BinaryOp::BitwiseAnd => {
             let a = constant_to_number(lhs_const)?;
