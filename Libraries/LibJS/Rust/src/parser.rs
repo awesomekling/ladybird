@@ -238,10 +238,6 @@ pub struct Parser<'a> {
     /// binding pattern identifiers with local variable info.
     pub(crate) pattern_bound_names: Vec<(Utf16String, Rc<Identifier>)>,
 
-    /// Set by parse_primary_expression when the result is a bare Identifier("eval").
-    /// Read and cleared by parse_secondary_expression for the ParenOpen (call) case.
-    last_parsed_identifier_is_eval: bool,
-
     /// Set during synthesize_binding_pattern to allow MemberExpressions as binding targets.
     allow_member_expressions: bool,
 
@@ -294,7 +290,6 @@ impl<'a> Parser<'a> {
             last_inner_label_is_iteration: false,
             last_function_name: Vec::new(),
             last_function_kind: FunctionKind::Normal,
-            last_parsed_identifier_is_eval: false,
             last_class_name: Vec::new(),
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,

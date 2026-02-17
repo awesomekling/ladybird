@@ -194,7 +194,6 @@ impl<'a> Parser<'a> {
                 self.consume();
                 expressions.push(self.parse_expression(2, Associativity::Right, forbidden));
             }
-            self.last_parsed_identifier_is_eval = false;
             return self.expression(start, ExpressionKind::Sequence(expressions));
         }
         expression
@@ -204,7 +203,6 @@ impl<'a> Parser<'a> {
     /// Returns `(expression, should_continue)` — `false` means the caller
     /// should not attempt to parse a secondary expression (e.g. arrow).
     fn parse_primary_expression(&mut self, min_precedence: i32) -> (Expression, bool) {
-        self.last_parsed_identifier_is_eval = false;
         let start = self.position();
         let token = self.current_token().clone();
 
@@ -514,9 +512,6 @@ impl<'a> Parser<'a> {
                     }
                     let token = self.consume_and_check_identifier();
                     let value = self.token_value(&token).to_vec();
-                    if value == utf16!("eval") {
-                        self.last_parsed_identifier_is_eval = true;
-                    }
                     let id = self.make_identifier(start, value.clone());
                     self.scope_collector.register_identifier(id.clone(), &value, None);
                     (self.expression(start, ExpressionKind::Identifier(id)), true)
@@ -537,8 +532,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_secondary_expression(&mut self, lhs_start: Position, lhs: Expression, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expression, ForbiddenTokens) {
-        let callee_is_eval = self.last_parsed_identifier_is_eval;
-        self.last_parsed_identifier_is_eval = false;
         let start = self.position();
         let tt = self.current_token_type();
 
@@ -707,7 +700,7 @@ impl<'a> Parser<'a> {
 
             // === Call ===
             TokenType::ParenOpen => {
-                let expression = self.parse_call_expression(lhs, callee_is_eval);
+                let expression = self.parse_call_expression(lhs);
                 (expression, ForbiddenTokens::none())
             }
 
@@ -903,12 +896,16 @@ impl<'a> Parser<'a> {
     // https://tc39.es/ecma262/#sec-function-calls-runtime-semantics-evaluation
     // NB: A direct call to `eval` (bare identifier `eval` as callee) uses the
     // running execution context's variable environment, not a fresh one.
-    pub(crate) fn parse_call_expression(&mut self, callee: Expression, callee_is_eval: bool) -> Expression {
+    pub(crate) fn parse_call_expression(&mut self, callee: Expression) -> Expression {
         let start = self.position();
         let arguments = self.parse_arguments();
-        if callee_is_eval {
-            self.scope_collector.set_contains_direct_call_to_eval();
-            self.scope_collector.set_uses_this();
+        // Check the actual callee expression kind, matching C++ which does
+        // is<Identifier>(callee) && callee.string() == "eval".
+        if let ExpressionKind::Identifier(ref id) = callee.inner {
+            if id.name == utf16!("eval") {
+                self.scope_collector.set_contains_direct_call_to_eval();
+                self.scope_collector.set_uses_this();
+            }
         }
         self.expression(start, ExpressionKind::Call(CallExpressionData {
             callee: Box::new(callee),
