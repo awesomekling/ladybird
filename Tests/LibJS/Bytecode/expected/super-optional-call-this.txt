@@ -22,10 +22,9 @@ JS bytecode executable "Foo"
 [   8]       CreateVariable identifier:args, is_immutable:false, is_global:false, is_strict:false
 [  18]       CreateRestParams dst:arg0, rest_index:0
 [  28]       InitializeLexicalBinding identifier:args, src:arg0
-[  40]       GetBinding dst:reg7, identifier:args
-[  58]       Mov dst:reg6, src:reg7
-[  68]       SuperCallWithArgumentArray dst:reg5, arguments:reg6, is_synthetic:true
-[  78]       Return value:reg5
+[  40]       GetBinding dst:reg5, identifier:args
+[  58]       SuperCallWithArgumentArray dst:reg6, arguments:reg5, is_synthetic:true
+[  68]       Return value:reg6
 
 JS bytecode executable "Base"
 [   0]    0: GetLexicalEnvironment dst:reg4
