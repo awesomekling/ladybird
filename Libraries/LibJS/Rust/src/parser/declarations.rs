@@ -682,7 +682,7 @@ impl<'a> Parser<'a> {
     //             | `;`
     fn parse_class_element(&mut self, class_start: Position) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
-        let is_static = if self.match_token(TokenType::Static) {
+        let mut is_static = if self.match_token(TokenType::Static) {
             self.consume();
             // https://tc39.es/ecma262/#sec-class-static-initialization-blocks
             // ClassStaticBlock : `static` `{` ClassStaticBlockBody `}`
@@ -753,8 +753,40 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        // Parse key. C++ uses the class start position for identifier-name keys.
-        let PropertyKey { expression: key, name: key_value, .. } = self.parse_property_key(Some(class_start));
+        // If we consumed a modifier keyword (static/async/get/set) but the next token
+        // is one that can't start a property key (`;`, `=`, `(`, `}`), the keyword was
+        // actually the field/method name, not a modifier.
+        let PropertyKey { expression: key, name: key_value, .. } = if (is_static || is_async || is_getter || is_setter)
+            && (self.match_token(TokenType::Semicolon)
+                || self.match_token(TokenType::Equals)
+                || self.match_token(TokenType::ParenOpen)
+                || self.match_token(TokenType::CurlyClose))
+        {
+            let name: &[u16] = if is_async {
+                is_async = false;
+                utf16!("async")
+            } else if is_getter {
+                is_getter = false;
+                utf16!("get")
+            } else if is_setter {
+                is_setter = false;
+                utf16!("set")
+            } else {
+                is_static = false;
+                utf16!("static")
+            };
+            let expression = self.expression(class_start, ExpressionKind::StringLiteral(Utf16String(name.to_vec())));
+            PropertyKey {
+                expression,
+                name: Some(name.to_vec()),
+                is_proto: false,
+                is_computed: false,
+                is_identifier: false,
+            }
+        } else {
+            // Parse key. C++ uses the class start position for identifier-name keys.
+            self.parse_property_key(Some(class_start))
+        };
 
         // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
         // It is a Syntax Error if PropName of ClassElement is "prototype"
@@ -816,11 +848,14 @@ impl<'a> Parser<'a> {
         let init = if self.match_token(TokenType::Equals) {
             self.consume();
             let saved_field_init = self.flags.in_class_field_initializer;
+            let saved_super_lookup = self.flags.allow_super_property_lookup;
             self.flags.in_class_field_initializer = true;
+            self.flags.allow_super_property_lookup = true;
             self.scope_collector.open_class_field_scope(None);
             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
             self.flags.in_class_field_initializer = saved_field_init;
+            self.flags.allow_super_property_lookup = saved_super_lookup;
             Some(Box::new(expression))
         } else {
             None
