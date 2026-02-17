@@ -2980,7 +2980,6 @@ fn generate_assignment_expression(
                     let rhs_block = gen.make_block();
                     let lhs_block = gen.make_block();
                     let end_block = gen.make_block();
-                    let dst = choose_dst(gen, preferred_dst);
                     match op {
                         AssignmentOp::AndAssignment => {
                             gen.emit_jump_if(&lhs_val, Label(rhs_block as u32), Label(lhs_block as u32));
@@ -3002,6 +3001,12 @@ fn generate_assignment_expression(
                     gen.pending_lhs_name = Some(gen.intern_identifier(&ident.name));
                     let rhs_val = generate_expression(rhs, gen, None)?;
                     gen.pending_lhs_name = None;
+                    // Allocate dst after RHS evaluation to match C++ register order.
+                    let dst = if lhs_val.operand().is_local() {
+                        lhs_val.clone()
+                    } else {
+                        choose_dst(gen, preferred_dst)
+                    };
                     gen.emit_mov(&dst, &rhs_val);
                     emit_set_variable(gen, ident, &dst);
                     gen.emit(Instruction::Jump { target: Label(end_block as u32) });
@@ -3090,10 +3095,10 @@ fn generate_assignment_expression(
                         let rhs_block = gen.make_block();
                         let lhs_block = gen.make_block();
                         let end_block = gen.make_block();
-                        let dst = choose_dst(gen, preferred_dst);
                         emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
                         gen.switch_to_basic_block(rhs_block);
                         let rhs_val = generate_expression(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
                         gen.emit_mov(&dst, &rhs_val);
                         emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &dst, computed_key.as_ref());
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
@@ -3122,10 +3127,10 @@ fn generate_assignment_expression(
                         let rhs_block = gen.make_block();
                         let lhs_block = gen.make_block();
                         let end_block = gen.make_block();
-                        let dst = choose_dst(gen, preferred_dst);
                         emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
                         gen.switch_to_basic_block(rhs_block);
                         let rhs_val = generate_expression(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
                         gen.emit_mov(&dst, &rhs_val);
                         emit_put_normal_by_value(gen, &base, &saved_property, &dst, None);
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
@@ -3152,10 +3157,10 @@ fn generate_assignment_expression(
                         let rhs_block = gen.make_block();
                         let lhs_block = gen.make_block();
                         let end_block = gen.make_block();
-                        let dst = choose_dst(gen, preferred_dst);
                         emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
                         gen.switch_to_basic_block(rhs_block);
                         let rhs_val = generate_expression(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
                         gen.emit_mov(&dst, &rhs_val);
                         let key = gen.intern_property_key(&ident.name);
                         let cache2 = gen.next_property_lookup_cache();
