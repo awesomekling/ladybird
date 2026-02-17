@@ -6015,6 +6015,17 @@ fn assign_to_for_in_of_lhs(
 ) {
     match lhs {
         ForInOfLhs::Declaration(statement) => {
+            // UsingDeclaration: disposal semantics not yet implemented.
+            if matches!(statement.inner, StatementKind::UsingDeclaration { .. }) {
+                let error = gen.allocate_register();
+                let msg = gen.intern_string(utf16!("TODO: UsingDeclaration"));
+                gen.emit(Instruction::NewTypeError {
+                    dst: error.operand(),
+                    error_string: msg,
+                });
+                gen.emit(Instruction::Throw { src: error.operand() });
+                return;
+            }
             // The declaration is a VariableDeclaration with a single declarator
             if let StatementKind::VariableDeclaration { kind, declarations } = &statement.inner {
                 if let Some(declaration) = declarations.first() {
