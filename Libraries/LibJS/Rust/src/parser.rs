@@ -185,6 +185,10 @@ pub(crate) struct ParserFlags {
     pub in_class_static_init_block: bool,
     pub function_might_need_arguments_object: bool,
     pub previous_token_was_period: bool,
+    /// Set during property key parsing to suppress eval/arguments check.
+    /// C++ uses separate `consume()` and `consume_and_allow_division()` methods;
+    /// we emulate this by skipping the check in property key contexts.
+    pub in_property_key_context: bool,
 }
 
 /// Snapshot of parser state for speculative parsing (backtracking).
@@ -372,17 +376,18 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn consume(&mut self) -> Token {
         let old = std::mem::replace(&mut self.current_token, self.lexer.next());
+        // C++ checks for `arguments`/`eval` in `consume_and_allow_division()` which
+        // is used by `consume_identifier()`. We put the check here (in `consume()`)
+        // but skip it when parsing property keys, matching C++'s behavior.
+        if !self.flags.in_property_key_context {
+            self.check_arguments_or_eval(&old);
+        }
         self.flags.previous_token_was_period = old.token_type == TokenType::Period;
         old
     }
 
-    /// Consume and check for `arguments`/`eval` references.
-    /// Only call this when consuming a token used as an identifier reference,
-    /// not a property name or keyword.
     pub(crate) fn consume_and_check_identifier(&mut self) -> Token {
-        let old = self.consume();
-        self.check_arguments_or_eval(&old);
-        old
+        self.consume()
     }
 
     pub(crate) fn consume_token(&mut self, expected: TokenType) -> Token {
@@ -605,7 +610,7 @@ impl<'a> Parser<'a> {
             || (tt == TokenType::EscapedKeyword && !self.match_invalid_escaped_keyword())
             || (tt == TokenType::Let && !self.flags.strict_mode)
             || (tt == TokenType::Yield && !self.flags.strict_mode && !self.flags.in_generator_function_context)
-            || (tt == TokenType::Await && !self.flags.await_expression_is_valid && self.program_type != ProgramType::Module)
+            || (tt == TokenType::Await && !self.flags.await_expression_is_valid && self.program_type != ProgramType::Module && !self.flags.in_class_static_init_block)
             || tt == TokenType::Async
     }
 
@@ -620,7 +625,7 @@ impl<'a> Parser<'a> {
         }
         let value = self.token_value(&self.current_token);
         if value == utf16!("await") {
-            return self.program_type == ProgramType::Module || self.flags.await_expression_is_valid;
+            return self.program_type == ProgramType::Module || self.flags.await_expression_is_valid || self.flags.in_class_static_init_block;
         }
         if value == utf16!("async") {
             return false;

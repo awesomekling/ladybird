@@ -274,9 +274,9 @@ impl<'a> Parser<'a> {
             let id = self.make_identifier(declaration_start, name.clone());
 
             self.scope_collector.add_lexical_declaration(&[&name as &[u16]], declaration_line, declaration_column);
-            self.scope_collector.register_identifier(
-                id.clone(), &name, Some(DeclarationKind::Const),
-            );
+            // C++ calls parse_lexical_binding() without declaration_kind for using,
+            // so we pass None to match.
+            self.scope_collector.register_identifier(id.clone(), &name, None);
 
             let init = if self.match_token(TokenType::Equals) {
                 self.consume();
@@ -292,8 +292,9 @@ impl<'a> Parser<'a> {
                 None
             };
 
+            // C++ uses rule_start (using keyword position) for all VariableDeclarators.
             declarators.push(VariableDeclarator {
-                range: self.range_from(declaration_start),
+                range: self.range_from(start),
                 target: VariableDeclaratorTarget::Identifier(id),
                 init,
             });
@@ -366,8 +367,12 @@ impl<'a> Parser<'a> {
 
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
+        let saved_static_init = self.flags.in_class_static_init_block;
+        let saved_field_init2 = self.flags.in_class_field_initializer;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
+        self.flags.in_class_static_init_block = false;
+        self.flags.in_class_field_initializer = false;
 
         let parsed = self.parse_formal_parameters();
 
@@ -379,6 +384,9 @@ impl<'a> Parser<'a> {
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         self.scope_collector.close_scope();
+
+        self.flags.in_class_static_init_block = saved_static_init;
+        self.flags.in_class_field_initializer = saved_field_init2;
 
         if name.is_some() {
             self.check_identifier_name_for_assignment_validity(&fn_name, has_use_strict);
@@ -430,14 +438,26 @@ impl<'a> Parser<'a> {
             None
         };
 
+        // Register the function expression name in the outer scope, matching C++.
+        // This must happen before open_function_scope so that the identifier group
+        // exists with declaration_kind=None, preventing later var declarations
+        // with the same name from setting a spurious declaration_kind.
+        if let Some(ref id) = name {
+            self.scope_collector.register_identifier(id.clone(), &fn_name_value, None);
+        }
+
         // Open function scope (function expression name is bound within its own scope).
         let fn_name_for_scope = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
         self.scope_collector.open_function_scope(fn_name_for_scope);
 
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
+        let saved_static_init = self.flags.in_class_static_init_block;
+        let saved_field_init2 = self.flags.in_class_field_initializer;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
+        self.flags.in_class_static_init_block = false;
+        self.flags.in_class_field_initializer = false;
 
         let parsed = self.parse_formal_parameters();
 
@@ -449,6 +469,9 @@ impl<'a> Parser<'a> {
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         self.scope_collector.close_scope();
+
+        self.flags.in_class_static_init_block = saved_static_init;
+        self.flags.in_class_field_initializer = saved_field_init2;
 
         if name.is_some() {
             self.check_identifier_name_for_assignment_validity(&fn_name_value, has_use_strict);
@@ -615,14 +638,13 @@ impl<'a> Parser<'a> {
         // is stored in the SFD and compiled lazily — scope analysis runs at that point.
 
         if has_super {
-            let arguments_name: Vec<u16> = "arguments".encode_utf16().collect();
+            let arguments_name: Vec<u16> = "args".encode_utf16().collect();
 
             let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone().into()));
             let arguments_expression = self.expression(start, ExpressionKind::Identifier(arguments_ref));
-            let spread_expression = self.expression(start, ExpressionKind::Spread(Box::new(arguments_expression)));
 
             let super_call = self.expression(start, ExpressionKind::SuperCall(SuperCallData {
-                arguments: vec![CallArgument { value: spread_expression, is_spread: true }],
+                arguments: vec![CallArgument { value: arguments_expression, is_spread: true }],
                 is_synthetic: true,
             }));
             let return_statement = self.statement(start, StatementKind::Return(Some(Box::new(super_call))));
@@ -688,11 +710,15 @@ impl<'a> Parser<'a> {
     //             | `;`
     fn parse_class_element(&mut self, class_start: Position) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
-        let mut is_static = if self.match_token(TokenType::Static) {
+        // C++ lexes "static" as Identifier and checks original_value() == "static".
+        let mut is_static = if self.match_identifier()
+            && self.token_original_value(&self.current_token) == utf16!("static") {
             self.consume();
             // https://tc39.es/ecma262/#sec-class-static-initialization-blocks
             // ClassStaticBlock : `static` `{` ClassStaticBlockBody `}`
             if self.match_token(TokenType::CurlyOpen) {
+                // C++ captures static_start (push_start) before consuming '{'.
+                let static_start = self.position();
                 self.consume(); // consume '{'
                 let saved_flags = self.flags;
                 self.flags.in_break_context = false;
@@ -710,11 +736,13 @@ impl<'a> Parser<'a> {
                 let scope = ScopeData::shared_with_children(children);
                 self.scope_collector.set_scope_node(scope.clone());
                 self.scope_collector.close_scope();
-                let body = self.statement(start, StatementKind::FunctionBody {
+                // C++ uses rule_start (class start) for FunctionBody position.
+                let body = self.statement(class_start, StatementKind::FunctionBody {
                     scope,
                     in_strict_mode: self.flags.strict_mode,
                 });
-                return (Some(Node::new(self.range_from(start), ClassElement::StaticInitializer {
+                // C++ uses static_start (after '{') for StaticInitializer position.
+                return (Some(Node::new(self.range_from(static_start), ClassElement::StaticInitializer {
                     body: Box::new(body),
                 })), None);
             }
@@ -790,8 +818,17 @@ impl<'a> Parser<'a> {
                 is_identifier: false,
             }
         } else {
-            // Parse key. C++ uses the class start position for identifier-name keys.
-            self.parse_property_key(Some(class_start))
+            // C++ only uses class start position for Identifier and PrivateIdentifier
+            // tokens (handled directly in the switch). Keywords like `return` go through
+            // parse_property_key which uses its own position.
+            let key_override = if self.current_token.token_type == TokenType::Identifier
+                || self.current_token.token_type == TokenType::PrivateIdentifier
+            {
+                Some(class_start)
+            } else {
+                None
+            };
+            self.parse_property_key(key_override)
         };
 
         // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
@@ -976,7 +1013,25 @@ impl<'a> Parser<'a> {
             let parameter_start = self.position();
             let rest = self.eat(TokenType::TripleDot);
 
-            let (binding, _is_pat) = if self.match_identifier() {
+            let (binding, _is_pat) = if self.match_identifier()
+                || self.match_token(TokenType::Await)
+                || self.match_token(TokenType::Yield)
+            {
+                // Emit errors for await/yield used as parameter names in
+                // contexts where they are reserved.
+                if self.current_token_type() == TokenType::Await {
+                    if self.program_type == ProgramType::Module
+                        || self.flags.await_expression_is_valid
+                        || self.flags.in_class_static_init_block
+                    {
+                        self.syntax_error("'await' is not allowed as an identifier in this context");
+                    }
+                }
+                if self.current_token_type() == TokenType::Yield {
+                    if self.flags.strict_mode || self.flags.in_generator_function_context {
+                        self.syntax_error("'yield' is not allowed as an identifier in this context");
+                    }
+                }
                 let token = self.consume();
                 let value = self.token_value(&token).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);

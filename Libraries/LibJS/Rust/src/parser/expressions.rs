@@ -265,12 +265,8 @@ impl<'a> Parser<'a> {
             TokenType::BigIntLiteral => {
                 let token = self.consume();
                 let value = self.token_value(&token);
-                let digits = if value.last() == Some(&(b'n' as u16)) {
-                    &value[..value.len() - 1]
-                } else {
-                    value
-                };
-                let value_utf8: String = digits.iter().map(|&c| c as u8 as char).collect();
+                // Store the raw value including the 'n' suffix, matching C++.
+                let value_utf8: String = value.iter().map(|&c| c as u8 as char).collect();
                 (self.expression(start, ExpressionKind::BigIntLiteral(value_utf8)), true)
             }
 
@@ -470,9 +466,30 @@ impl<'a> Parser<'a> {
             }
 
             _ => {
-                if self.match_identifier() {
+                // NB: When Await/Yield guards above don't match, those tokens fall
+                // through here. match_identifier() may return false for Await in
+                // class static init blocks, but we still need to try arrow function
+                // parsing and identifier consumption (with appropriate errors).
+                // This matches C++'s "goto read_as_identifier" pattern.
+                if self.match_identifier()
+                    || self.match_token(TokenType::Await)
+                    || self.match_token(TokenType::Yield)
+                {
                     if let Some(arrow) = self.try_parse_arrow_function_expression(false, false) {
                         return (arrow, false);
+                    }
+                    if self.match_token(TokenType::Await) {
+                        if self.program_type == ProgramType::Module
+                            || self.flags.await_expression_is_valid
+                            || self.flags.in_class_static_init_block
+                        {
+                            self.syntax_error("'await' is not allowed as an identifier in this context");
+                        }
+                    }
+                    if self.match_token(TokenType::Yield) {
+                        if self.flags.strict_mode || self.flags.in_generator_function_context {
+                            self.syntax_error("'yield' is not allowed as an identifier in this context");
+                        }
                     }
                     let token = self.consume_and_check_identifier();
                     let value = self.token_value(&token).to_vec();
@@ -1166,7 +1183,21 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let PropertyKey { expression: key, name: key_value, is_proto, is_computed, is_identifier } = self.parse_property_key(Some(obj_start));
+        // In C++, identifiers matching match_identifier() are consumed directly in
+        // parse_object_expression and get the object's rule_start position. This applies
+        // even after consuming an `async` prefix. Only get/set prefix and generator `*`
+        // cause the key to go through parse_property_key with its own position.
+        // C++ also matches Async and EscapedKeyword tokens in match_identifier().
+        let ident_override = if !is_getter && !is_setter && !is_generator
+            && (self.match_identifier()
+                || self.current_token.token_type == TokenType::Async
+                || self.current_token.token_type == TokenType::EscapedKeyword)
+        {
+            Some(obj_start)
+        } else {
+            None
+        };
+        let PropertyKey { expression: key, name: key_value, is_proto, is_computed, is_identifier } = self.parse_property_key(ident_override);
 
         // https://tc39.es/ecma262/#sec-object-initializer
         // Private names are not allowed in object literals.
@@ -1291,6 +1322,16 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn parse_property_key(&mut self, ident_pos_override: Option<Position>) -> PropertyKey {
+        // Suppress eval/arguments check for property key tokens (C++ uses
+        // regular `consume()` not `consume_and_allow_division()` here).
+        let saved_property_key_ctx = self.flags.in_property_key_context;
+        self.flags.in_property_key_context = true;
+        let result = self.parse_property_key_inner(ident_pos_override);
+        self.flags.in_property_key_context = saved_property_key_ctx;
+        result
+    }
+
+    fn parse_property_key_inner(&mut self, ident_pos_override: Option<Position>) -> PropertyKey {
         let proto_name = utf16!("__proto__");
         let start = self.position();
         match self.current_token_type() {
@@ -1327,12 +1368,8 @@ impl<'a> Parser<'a> {
             TokenType::BigIntLiteral => {
                 let token = self.consume();
                 let value = self.token_value(&token);
-                let digits = if value.last() == Some(&(b'n' as u16)) {
-                    &value[..value.len() - 1]
-                } else {
-                    value
-                };
-                let value_utf8: String = digits.iter().map(|&c| c as u8 as char).collect();
+                // Store the raw value including the 'n' suffix, matching C++.
+                let value_utf8: String = value.iter().map(|&c| c as u8 as char).collect();
                 let expression = self.expression(start, ExpressionKind::BigIntLiteral(value_utf8));
                 PropertyKey { expression, name: None, is_proto: false, is_computed: false, is_identifier: false }
             }
@@ -1344,8 +1381,10 @@ impl<'a> Parser<'a> {
                 if value == utf16!("#constructor") {
                     self.syntax_error("Private property with name '#constructor' is not allowed");
                 }
-                let expression = self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
-                    range: self.range_from(start),
+                // C++ uses the class start position for private identifiers in class elements.
+                let key_start = ident_pos_override.unwrap_or(start);
+                let expression = self.expression(key_start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
+                    range: self.range_from(key_start),
                     name: value.clone().into(),
                 }));
                 PropertyKey { expression, name: Some(value), is_proto: false, is_computed: false, is_identifier: false }
@@ -1381,10 +1420,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenType::TripleDot) {
-                let spread_start = self.position();
                 self.consume();
                 let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-                elements.push(Some(self.expression(spread_start, ExpressionKind::Spread(Box::new(expression)))));
+                // C++ uses the array's rule_start ([ position) for SpreadExpression.
+                elements.push(Some(self.expression(start, ExpressionKind::Spread(Box::new(expression)))));
             } else {
                 elements.push(Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none())));
             }
@@ -1445,12 +1484,16 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenType::TemplateLiteralString) {
                 let token = self.consume();
+                // C++ calls parse_string_literal after consume(), so its position
+                // is after the template string token. Match that behavior.
+                let string_pos = self.position();
                 let raw = self.token_value(&token).to_vec();
                 if is_tagged {
                     let raw_value = raw_template_value(&raw);
                     raw_strings.push(raw_value.into());
                     match self.process_template_escape_sequences(&raw) {
-                        Some(cooked) => expressions.push(self.expression(start, ExpressionKind::StringLiteral(cooked.into()))),
+                        Some(cooked) => expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(cooked.into()))),
+                        // C++ uses rule_start (template literal start) for NullLiteral.
                         None => expressions.push(self.expression(start, ExpressionKind::NullLiteral)),
                     }
                 } else {
@@ -1458,7 +1501,7 @@ impl<'a> Parser<'a> {
                     if has_octal {
                         self.syntax_error("Octal escape sequence not allowed in template literal");
                     }
-                    expressions.push(self.expression(start, ExpressionKind::StringLiteral(value.into())));
+                    expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(value.into())));
                 }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
@@ -1693,13 +1736,13 @@ impl<'a> Parser<'a> {
             }
             self.consume(); // consume ')'
         } else if self.match_identifier() || self.match_token(TokenType::Await) {
-            let parameter_start = self.position();
             let token = self.consume();
             let value = self.token_value(&token).to_vec();
             if is_async && value == utf16!("await") {
                 self.syntax_error("'await' is a reserved identifier in async functions");
             }
-            let binding = Rc::new(Identifier::new(self.range_from(parameter_start), value.clone().into()));
+            // C++ uses rule_start (arrow function start, which is `async` for async arrows).
+            let binding = Rc::new(Identifier::new(self.range_from(start), value.clone().into()));
             parsed = ParsedParameters {
                 parameters: vec![FunctionParameter {
                     binding: FunctionParameterBinding::Identifier(binding.clone()),
@@ -1821,8 +1864,12 @@ impl<'a> Parser<'a> {
 
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
+        let saved_static_init = self.flags.in_class_static_init_block;
+        let saved_field_init = self.flags.in_class_field_initializer;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
+        self.flags.in_class_static_init_block = false;
+        self.flags.in_class_field_initializer = false;
 
         let parsed = self.parse_formal_parameters();
 
@@ -1850,6 +1897,9 @@ impl<'a> Parser<'a> {
         self.flags.allow_super_property_lookup = saved_allow_super_lookup;
 
         self.scope_collector.close_scope();
+
+        self.flags.in_class_static_init_block = saved_static_init;
+        self.flags.in_class_field_initializer = saved_field_init;
 
         if has_use_strict || fn_kind != FunctionKind::Normal {
             self.check_parameters_post_body(&parsed.parameter_info, has_use_strict, fn_kind);
