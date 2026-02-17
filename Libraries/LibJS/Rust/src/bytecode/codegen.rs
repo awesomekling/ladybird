@@ -7588,6 +7588,18 @@ fn js_exponentiate(base: f64, exponent: f64) -> f64 {
     base.powf(exponent)
 }
 
+/// Convert a constant value to a JS number for constant folding purposes.
+/// Returns None for types where ToNumber requires runtime (e.g. String, objects).
+fn constant_to_number(val: &ConstantValue) -> Option<f64> {
+    match val {
+        ConstantValue::Number(n) => Some(*n),
+        ConstantValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+        ConstantValue::Null => Some(0.0),
+        ConstantValue::Undefined => Some(f64::NAN),
+        _ => None,
+    }
+}
+
 fn try_constant_fold_binary(
     gen: &mut Generator,
     op: BinaryOp,
@@ -7598,58 +7610,60 @@ fn try_constant_fold_binary(
     let rhs_const = gen.get_constant(rhs)?;
     match op {
         BinaryOp::Addition => {
+            // String concatenation and string coercion cases
             match (lhs_const, rhs_const) {
                 (ConstantValue::String(a), ConstantValue::String(b)) => {
                     let mut result = a.clone();
                     result.0.extend_from_slice(b);
-                    Some(gen.add_constant_string(result))
+                    return Some(gen.add_constant_string(result));
                 }
-                (ConstantValue::Number(a), ConstantValue::Number(b)) => {
-                    Some(gen.add_constant_number(a + b))
+                (ConstantValue::String(a), _) => {
+                    if let Some(n) = constant_to_number(rhs_const) {
+                        let mut result = a.clone();
+                        result.0.extend_from_slice(&super::ffi::js_number_to_utf16(n));
+                        return Some(gen.add_constant_string(result));
+                    }
+                    return None;
                 }
-                // String + Number or Number + String coercion
-                (ConstantValue::String(a), ConstantValue::Number(b)) => {
-                    let mut result = a.clone();
-                    result.0.extend_from_slice(&super::ffi::js_number_to_utf16(*b));
-                    Some(gen.add_constant_string(result))
+                (_, ConstantValue::String(b)) => {
+                    if let Some(n) = constant_to_number(lhs_const) {
+                        let mut result = super::ffi::js_number_to_utf16(n);
+                        result.0.extend_from_slice(b);
+                        return Some(gen.add_constant_string(result));
+                    }
+                    return None;
                 }
-                (ConstantValue::Number(a), ConstantValue::String(b)) => {
-                    let mut result = super::ffi::js_number_to_utf16(*a);
-                    result.0.extend_from_slice(b);
-                    Some(gen.add_constant_string(result))
-                }
-                _ => None,
+                _ => {}
             }
+            // Numeric addition: both operands coerced to number
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(a + b))
         }
         BinaryOp::Subtraction => {
-            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(a - b));
-            }
-            None
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(a - b))
         }
         BinaryOp::Multiplication => {
-            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(a * b));
-            }
-            None
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(a * b))
         }
         BinaryOp::Division => {
-            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(a / b));
-            }
-            None
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(a / b))
         }
         BinaryOp::Modulo => {
-            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(a % b));
-            }
-            None
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(a % b))
         }
         BinaryOp::Exponentiation => {
-            if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(js_exponentiate(*a, *b)));
-            }
-            None
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number(js_exponentiate(a, b)))
         }
         BinaryOp::StrictlyEquals => {
             match (lhs_const, rhs_const) {
@@ -7670,6 +7684,84 @@ fn try_constant_fold_binary(
                 (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
                 _ => None,
             }
+        }
+        BinaryOp::GreaterThan => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_boolean(a > b))
+        }
+        BinaryOp::GreaterThanEquals => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_boolean(a >= b))
+        }
+        BinaryOp::LessThan => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_boolean(a < b))
+        }
+        BinaryOp::LessThanEquals => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_boolean(a <= b))
+        }
+        BinaryOp::LooselyEquals => {
+            match (lhs_const, rhs_const) {
+                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
+                (ConstantValue::Null, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
+                (ConstantValue::Undefined, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
+                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
+                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a == b)),
+                _ => {
+                    let a = constant_to_number(lhs_const)?;
+                    let b = constant_to_number(rhs_const)?;
+                    Some(gen.add_constant_boolean(a == b))
+                }
+            }
+        }
+        BinaryOp::LooselyInequals => {
+            match (lhs_const, rhs_const) {
+                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
+                (ConstantValue::Null, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
+                (ConstantValue::Undefined, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
+                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
+                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a != b)),
+                _ => {
+                    let a = constant_to_number(lhs_const)?;
+                    let b = constant_to_number(rhs_const)?;
+                    Some(gen.add_constant_boolean(a != b))
+                }
+            }
+        }
+        BinaryOp::BitwiseAnd => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_int32(a) & to_int32(b)) as f64))
+        }
+        BinaryOp::BitwiseOr => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_int32(a) | to_int32(b)) as f64))
+        }
+        BinaryOp::BitwiseXor => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_int32(a) ^ to_int32(b)) as f64))
+        }
+        BinaryOp::LeftShift => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_int32(a) << (to_u32(b) & 0x1f)) as f64))
+        }
+        BinaryOp::RightShift => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_int32(a) >> (to_u32(b) & 0x1f)) as f64))
+        }
+        BinaryOp::UnsignedRightShift => {
+            let a = constant_to_number(lhs_const)?;
+            let b = constant_to_number(rhs_const)?;
+            Some(gen.add_constant_number((to_u32(a) >> (to_u32(b) & 0x1f)) as f64))
         }
         _ => None,
     }
