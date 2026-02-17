@@ -661,47 +661,19 @@ pub fn generate_expression(
 
         // === SuperCall ===
         ExpressionKind::SuperCall(data) => {
-            let dst = choose_dst(gen, preferred_dst);
-            let arguments_array_dst = gen.allocate_register();
-
-            if data.is_synthetic {
+            let arguments = if data.is_synthetic {
                 // Synthetic constructor: super(...arguments) — single spread argument,
                 // don't call @@iterator on %Array.prototype%.
                 assert!(data.arguments.len() == 1 && data.arguments[0].is_spread);
-                let val = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
-                gen.emit_mov(&arguments_array_dst, &val);
+                generate_expression_or_undefined(&data.arguments[0].value, gen, None)
             } else {
-                // Build arguments array with proper spread handling.
-                let first_spread = data.arguments.iter()
-                    .position(|a| a.is_spread)
-                    .unwrap_or(data.arguments.len());
+                generate_arguments_array(gen, &data.arguments)
+            };
 
-                let mut pre_holders = Vec::new();
-                for argument in &data.arguments[..first_spread] {
-                    let val = generate_expression_or_undefined(&argument.value, gen, None);
-                    pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
-                }
-                let pre_ops: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
-                gen.emit(Instruction::NewArray {
-                    dst: arguments_array_dst.operand(),
-                    element_count: pre_ops.len() as u32,
-                    elements: pre_ops,
-                });
-                drop(pre_holders);
-
-                for argument in &data.arguments[first_spread..] {
-                    let val = generate_expression_or_undefined(&argument.value, gen, None);
-                    gen.emit(Instruction::ArrayAppend {
-                        dst: arguments_array_dst.operand(),
-                        src: val.operand(),
-                        is_spread: argument.is_spread,
-                    });
-                }
-            }
-
+            let dst = choose_dst(gen, preferred_dst);
             gen.emit(Instruction::SuperCallWithArgumentArray {
                 dst: dst.operand(),
-                arguments: arguments_array_dst.operand(),
+                arguments: arguments.operand(),
                 is_synthetic: data.is_synthetic,
             });
             Some(dst)
