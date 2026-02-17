@@ -1306,12 +1306,24 @@ impl<'a> Parser<'a> {
                 None
             };
 
+            if is_rest && initializer.is_some() {
+                self.syntax_error("Unexpected initializer after rest element");
+            }
+
             entries.push(BindingEntry {
                 name: entry_name,
                 alias: entry_alias,
                 initializer,
                 is_rest,
             });
+
+            if is_rest {
+                if self.match_token(TokenType::Comma) {
+                    self.syntax_error("Rest element may not be followed by a comma");
+                    self.consume();
+                }
+                break;
+            }
 
             if self.match_token(TokenType::Comma) {
                 self.consume();
