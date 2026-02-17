@@ -112,7 +112,8 @@ impl<'a> Parser<'a> {
             //   UpdateExpression `**` ExponentiationExpression
             // NB: UnaryExpression cannot be the base of `**`, only UpdateExpression can.
             // This prevents ambiguity like `-x ** y` (is it `(-x) ** y` or `-(x ** y)`?).
-            if self.match_token(TokenType::DoubleAsterisk) {
+            // ++x ** y and --x ** y are valid (they're UpdateExpressions, not UnaryExpressions).
+            if self.match_token(TokenType::DoubleAsterisk) && !Self::is_update_expression(&expression) {
                 self.syntax_error("Unparenthesized unary expression can't appear on the left-hand side of '**'");
             }
 
