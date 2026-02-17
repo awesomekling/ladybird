@@ -3904,6 +3904,15 @@ fn generate_tagged_template_literal(
 ) -> Option<ScopedOperand> {
     // Resolve tag and this_value based on the tag expression type.
     let (tag_reg, this_value) = match &tag.inner {
+        ExpressionKind::Member { object, property, computed } if matches!(object.inner, ExpressionKind::Super) => {
+            // super.func`` or super["func"]``
+            let this_value = emit_resolve_this_binding(gen);
+            let super_base = gen.allocate_register();
+            gen.emit(Instruction::ResolveSuperBase { dst: super_base.operand() });
+            let method = gen.allocate_register();
+            emit_super_get(gen, &method, &super_base, property, *computed, &this_value);
+            (method, Some(this_value))
+        }
         ExpressionKind::Member { object, property, computed } => {
             let obj = generate_expression_or_undefined(object, gen, None);
             let method = gen.allocate_register();
@@ -3912,6 +3921,13 @@ fn generate_tagged_template_literal(
                 emit_get_by_value(gen, &method, &obj, &property, None);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 emit_get_by_id(gen, &method, &obj, &ident.name, None);
+            } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
+                let id = gen.intern_identifier(&priv_ident.name);
+                gen.emit(Instruction::GetPrivateById {
+                    dst: method.operand(),
+                    base: obj.operand(),
+                    property: id,
+                });
             }
             (method, Some(obj))
         }
