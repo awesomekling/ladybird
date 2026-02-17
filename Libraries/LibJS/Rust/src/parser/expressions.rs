@@ -1737,12 +1737,10 @@ impl<'a> Parser<'a> {
         // 'await' is rejected as an identifier in async arrow parameters.
         let saved_await = self.flags.await_expression_is_valid;
         let saved_static_init = self.flags.in_class_static_init_block;
-        let saved_field_init = self.flags.in_class_field_initializer;
         if is_async {
             self.flags.await_expression_is_valid = true;
         }
         self.flags.in_class_static_init_block = false;
-        self.flags.in_class_field_initializer = false;
 
         let parsed;
 
@@ -1817,7 +1815,6 @@ impl<'a> Parser<'a> {
 
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
-            self.flags.in_class_field_initializer = saved_field_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
@@ -1855,7 +1852,6 @@ impl<'a> Parser<'a> {
 
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
-            self.flags.in_class_field_initializer = saved_field_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
