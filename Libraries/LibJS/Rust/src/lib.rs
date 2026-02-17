@@ -473,7 +473,31 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             }
         };
 
-        // Validate parameters: wrap in the appropriate function kind and parse.
+        // Validate parameters standalone.
+        // First lex independently to catch lexer errors (e.g. unterminated comments)
+        // with correct line/column positions relative to the parameter string.
+        let Some(parameters_slice) = source_from_raw(parameters_source, parameters_source_len) else {
+            return std::ptr::null_mut();
+        };
+        {
+            let mut lexer = lexer::Lexer::new(parameters_slice, 1, 0);
+            loop {
+                let token = lexer.next();
+                if token.token_type == token::TokenType::Eof {
+                    break;
+                }
+                if token.token_type == token::TokenType::Invalid {
+                    let msg = token.message.unwrap_or_else(|| format!("Unexpected token {}", token.token_type.name()));
+                    if let Some(cb) = error_callback {
+                        unsafe {
+                            cb(error_context, msg.as_ptr(), msg.len(), token.line_number, token.line_column);
+                        }
+                    }
+                    return std::ptr::null_mut();
+                }
+            }
+        }
+        // Then wrap in a function for syntactic validation.
         {
             let mut validate_src: Vec<u16> = Vec::new();
             match kind {
@@ -482,9 +506,6 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
                 ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
                 ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
             }
-            let Some(parameters_slice) = source_from_raw(parameters_source, parameters_source_len) else {
-                return std::ptr::null_mut();
-            };
             validate_src.extend_from_slice(parameters_slice);
             validate_src.extend_from_slice(utf16!(") {}"));
             let mut parser = Parser::new(&validate_src, ProgramType::Script);
@@ -494,21 +515,29 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             }
         }
 
-        // Validate body: wrap in "function test() { BODY }" and parse.
+        // Validate body standalone: parse directly with function context flags.
+        // NB: The C++ caller already wraps the body as "\nBODY\n" in body_parse_string,
+        // so body_source already contains the newline-wrapped body. We parse it
+        // directly as a script with function context flags set, matching the C++
+        // approach of parse_function_body_from_string.
         {
-            let mut validate_src: Vec<u16> = Vec::new();
-            match kind {
-                ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test() {")),
-                ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test() {")),
-                ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test() {")),
-                ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test() {")),
-            }
             let Some(body_slice) = source_from_raw(body_source, body_source_len) else {
                 return std::ptr::null_mut();
             };
-            validate_src.extend_from_slice(body_slice);
-            validate_src.extend_from_slice(utf16!("}"));
-            let mut parser = Parser::new(&validate_src, ProgramType::Script);
+            let mut parser = Parser::new(body_slice, ProgramType::Script);
+            parser.flags.in_function_context = true;
+            match kind {
+                ast::FunctionKind::Async | ast::FunctionKind::AsyncGenerator => {
+                    parser.flags.await_expression_is_valid = true;
+                }
+                _ => {}
+            }
+            match kind {
+                ast::FunctionKind::Generator | ast::FunctionKind::AsyncGenerator => {
+                    parser.flags.in_generator_function_context = true;
+                }
+                _ => {}
+            }
             parser.parse_program(false);
             if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
                 return std::ptr::null_mut();

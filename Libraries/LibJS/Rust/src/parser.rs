@@ -539,11 +539,15 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn expected(&mut self, what: &str) {
-        let msg = format!(
-            "Unexpected token {}. Expected {}",
-            self.current_token.token_type.name(),
-            what
-        );
+        let msg = if let Some(ref message) = self.current_token.message {
+            message.clone()
+        } else {
+            format!(
+                "Unexpected token {}. Expected {}",
+                self.current_token.token_type.name(),
+                what
+            )
+        };
         self.syntax_error(&msg);
     }
 
@@ -851,7 +855,11 @@ impl<'a> Parser<'a> {
 
         children.extend(self.parse_statement_list(true));
         if !self.done() {
-            self.expected("statement or declaration");
+            if self.flags.in_function_context {
+                self.expected("CurlyClose");
+            } else {
+                self.expected("statement or declaration");
+            }
             self.consume();
         }
 
