@@ -722,6 +722,16 @@ pub enum ForInOfKind {
     ForAwaitOf,
 }
 
+/// Init clause of a for loop: either a declaration or an expression.
+/// C++ stores this as a polymorphic `RefPtr<ASTNode>` that can be either
+/// an Expression or a VariableDeclaration. We use an explicit enum so that
+/// expression inits are NOT wrapped in an ExpressionStatement node.
+#[derive(Clone, Debug)]
+pub enum ForInit {
+    Declaration(Box<Statement>),
+    Expression(Box<Expression>),
+}
+
 /// Left-hand side of for-in, for-of, for-await-of.
 #[derive(Clone, Debug)]
 pub enum ForInOfLhs {
@@ -981,7 +991,7 @@ pub enum StatementKind {
         body: Box<Statement>,
     },
     For {
-        init: Option<Box<Statement>>,
+        init: Option<ForInit>,
         test: Option<Box<Expression>>,
         update: Option<Box<Expression>>,
         body: Box<Statement>,

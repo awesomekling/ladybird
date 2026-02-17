@@ -725,8 +725,8 @@ fn for_each_child_statement(statement: &ast::StatementKind, f: &mut dyn FnMut(&a
             f(&body.inner);
         }
         StatementKind::For { init, body, .. } => {
-            if let Some(init) = init {
-                f(&init.inner);
+            if let Some(ast::ForInit::Declaration(decl)) = init {
+                f(&decl.inner);
             }
             f(&body.inner);
         }

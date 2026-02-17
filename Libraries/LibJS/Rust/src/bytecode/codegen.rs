@@ -49,7 +49,11 @@ pub fn generate_expression(
 
         ExpressionKind::StringLiteral(value) => Some(gen.add_constant_string(value.clone())),
 
-        ExpressionKind::BigIntLiteral(value) => Some(gen.add_constant_bigint(value.clone())),
+        ExpressionKind::BigIntLiteral(value) => {
+            // The AST stores the raw value including the 'n' suffix; strip it for codegen.
+            let digits = value.strip_suffix('n').unwrap_or(value);
+            Some(gen.add_constant_bigint(digits.to_string()))
+        }
 
         ExpressionKind::RegExpLiteral(data) => {
             let source_index = gen.intern_string(&data.pattern);
@@ -776,7 +780,7 @@ pub fn generate_statement(
             test,
             update,
             body,
-        } => generate_for_statement(gen, init.as_deref(), test.as_deref(), update.as_deref(), body, preferred_dst),
+        } => generate_for_statement(gen, init.as_ref(), test.as_deref(), update.as_deref(), body, preferred_dst),
 
         // === Return ===
         StatementKind::Return(value) => {
@@ -2041,7 +2045,7 @@ fn generate_do_while_statement(
 
 fn generate_for_statement(
     gen: &mut Generator,
-    init: Option<&Statement>,
+    init: Option<&ForInit>,
     test: Option<&Expression>,
     update: Option<&Expression>,
     body: &Statement,
@@ -2053,7 +2057,7 @@ fn generate_for_statement(
     let mut has_lexical_environment = false;
     let mut per_iteration_binding_names: Vec<Utf16String> = Vec::new();
 
-    if let Some(init) = init {
+    if let Some(ForInit::Declaration(init)) = init {
         if let StatementKind::VariableDeclaration { kind, declarations } = &init.inner {
             if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                 let mut non_local_names: Vec<(Utf16String, bool)> = Vec::new();
@@ -2086,8 +2090,10 @@ fn generate_for_statement(
     }
 
     // Init
-    if let Some(init) = init {
-        generate_statement(init, gen, None);
+    match init {
+        Some(ForInit::Declaration(decl)) => { generate_statement(decl, gen, None); }
+        Some(ForInit::Expression(expr)) => { generate_expression(expr, gen, None); }
+        None => {}
     }
 
     // CreatePerIterationEnvironment after init (first iteration setup).

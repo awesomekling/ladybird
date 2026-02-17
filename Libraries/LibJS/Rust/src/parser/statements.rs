@@ -12,9 +12,8 @@ use crate::ast::*;
 use crate::parser::{Associativity, ForbiddenTokens, Parser, Position};
 use crate::token::TokenType;
 
-/// Used in parse_for_statement to track whether the init is a
-/// declaration or expression, since they have different Rust types.
-enum ForInit {
+/// Used locally during for-statement parsing before converting to `ast::ForInit`.
+enum LocalForInit {
     Declaration(Statement),
     Expression(Expression),
 }
@@ -238,7 +237,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenClose);
 
         let consequent = if !self.flags.strict_mode && self.match_token(TokenType::Function) {
-            self.parse_function_declaration_as_block_statement()
+            self.parse_function_declaration_as_block_statement(start)
         } else {
             self.parse_statement(false)
         };
@@ -246,7 +245,7 @@ impl<'a> Parser<'a> {
         let alternate = if self.match_token(TokenType::Else) {
             self.consume();
             if !self.flags.strict_mode && self.match_token(TokenType::Function) {
-                Some(Box::new(self.parse_function_declaration_as_block_statement()))
+                Some(Box::new(self.parse_function_declaration_as_block_statement(start)))
             } else {
                 Some(Box::new(self.parse_statement(false)))
             }
@@ -263,8 +262,9 @@ impl<'a> Parser<'a> {
 
     /// Annex B: Parse a function declaration as if wrapped in a synthetic block.
     /// See https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses
-    fn parse_function_declaration_as_block_statement(&mut self) -> Statement {
-        let start = self.position();
+    fn parse_function_declaration_as_block_statement(&mut self, if_start: Position) -> Statement {
+        // C++ uses rule_start from the enclosing if-statement for the block position.
+        let start = if_start;
         self.scope_collector.open_block_scope(None);
         let declaration = self.parse_function_declaration();
         let scope = ScopeData::shared_with_children(vec![declaration]);
@@ -355,12 +355,12 @@ impl<'a> Parser<'a> {
         let is_using = self.match_for_using_declaration();
         let is_declaration = is_var_init || is_using || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
         let init = if is_using {
-            ForInit::Declaration(self.parse_using_declaration(true))
+            LocalForInit::Declaration(self.parse_using_declaration(true))
         } else if is_declaration {
-            ForInit::Declaration(self.parse_variable_declaration(true))
+            LocalForInit::Declaration(self.parse_variable_declaration(true))
         } else {
             let forbidden = ForbiddenTokens::with_in();
-            ForInit::Expression(self.parse_expression(0, Associativity::Right, forbidden))
+            LocalForInit::Expression(self.parse_expression(0, Associativity::Right, forbidden))
         };
 
         // Check for in
@@ -384,7 +384,7 @@ impl<'a> Parser<'a> {
                         self.syntax_error("Variable initializer not allowed in for..in/of");
                     }
                 }
-            } else if let ForInit::Expression(ref expression) = init {
+            } else if let LocalForInit::Expression(ref expression) = init {
                 if !Self::is_identifier(expression) && !Self::is_member_expression(expression)
                     && !Self::is_call_expression(expression)
                     && !Self::is_object_expression(expression) && !Self::is_array_expression(expression) {
@@ -404,8 +404,8 @@ impl<'a> Parser<'a> {
             self.flags.in_continue_context = continue_before;
 
             let lhs = match init {
-                ForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
-                ForInit::Expression(expression) => {
+                LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
+                LocalForInit::Expression(expression) => {
                     if Self::is_array_expression(&expression) || Self::is_object_expression(&expression) {
                         if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
                             for (name, id) in self.pattern_bound_names.drain(..) {
@@ -442,7 +442,7 @@ impl<'a> Parser<'a> {
                     if self.for_loop_declaration_has_init {
                         self.syntax_error("Variable initializer not allowed in for..of");
                     }
-                } else if let ForInit::Expression(ref expression) = init {
+                } else if let LocalForInit::Expression(ref expression) = init {
                     if !Self::is_identifier(expression) && !Self::is_member_expression(expression)
                         && !Self::is_call_expression(expression)
                         && !Self::is_object_expression(expression) && !Self::is_array_expression(expression) {
@@ -462,8 +462,8 @@ impl<'a> Parser<'a> {
                 self.flags.in_continue_context = continue_before;
 
                 let lhs = match init {
-                    ForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
-                    ForInit::Expression(expression) => {
+                    LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
+                    LocalForInit::Expression(expression) => {
                         if Self::is_array_expression(&expression) || Self::is_object_expression(&expression) {
                             if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
                                 for (name, id) in self.pattern_bound_names.drain(..) {
@@ -490,7 +490,7 @@ impl<'a> Parser<'a> {
         }
 
         // Standard for loop — const requires initializer.
-        if let ForInit::Declaration(ref declaration) = init {
+        if let LocalForInit::Declaration(ref declaration) = init {
             if let StatementKind::VariableDeclaration { kind: DeclarationKind::Const, ref declarations } = declaration.inner {
                 for d in declarations {
                     if d.init.is_none() {
@@ -500,14 +500,11 @@ impl<'a> Parser<'a> {
             }
         }
         self.consume_token(TokenType::Semicolon);
-        let init_statement = match init {
-            ForInit::Declaration(declaration) => Some(Box::new(declaration)),
-            ForInit::Expression(expression) => {
-                let range = expression.range;
-                Some(Box::new(Statement::new(range, StatementKind::Expression(Box::new(expression)))))
-            }
+        let for_init = match init {
+            LocalForInit::Declaration(declaration) => Some(ForInit::Declaration(Box::new(declaration))),
+            LocalForInit::Expression(expression) => Some(ForInit::Expression(Box::new(expression))),
         };
-        let result = self.parse_standard_for_loop(start, init_statement);
+        let result = self.parse_standard_for_loop(start, for_init);
         self.close_for_loop_scope(start, result)
     }
 
@@ -520,7 +517,7 @@ impl<'a> Parser<'a> {
         self.statement(start, StatementKind::Block(scope))
     }
 
-    fn parse_standard_for_loop(&mut self, start: Position, init: Option<Box<Statement>>) -> Statement {
+    fn parse_standard_for_loop(&mut self, start: Position, init: Option<ForInit>) -> Statement {
         let test = if self.match_token(TokenType::Semicolon) {
             None
         } else {
