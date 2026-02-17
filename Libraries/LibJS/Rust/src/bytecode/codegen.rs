@@ -13,7 +13,7 @@
 //! - `Some(op)` if the node produces a value (expressions)
 //! - `None` for statements that don't produce values
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::ast::*;
 
@@ -1830,6 +1830,30 @@ fn generate_conditional(
     Some(dst)
 }
 
+/// Generate a statement while propagating the completion register.
+///
+/// Saves and restores `gen.current_completion_register`, and emits a mov
+/// from the statement's result to the completion register when appropriate.
+fn generate_with_completion(
+    body: &Statement,
+    gen: &mut Generator,
+    completion: &Option<ScopedOperand>,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
+    let saved = gen.current_completion_register.clone();
+    if let Some(ref c) = completion {
+        gen.current_completion_register = Some(c.clone());
+    }
+    let result = generate_statement(body, gen, preferred_dst);
+    if !gen.is_current_block_terminated() {
+        if let (Some(ref c), Some(ref val)) = (completion, &result) {
+            gen.emit_mov(c, val);
+        }
+    }
+    gen.current_completion_register = saved;
+    result
+}
+
 // =============================================================================
 // If statement
 // =============================================================================
@@ -1856,29 +1880,9 @@ fn generate_if_statement(
     if let Some(constant) = gen.get_constant(&pred) {
         let is_truthy = constant_to_boolean(constant);
         if is_truthy {
-            let saved_completion = gen.current_completion_register.clone();
-            if let Some(ref c) = completion {
-                gen.current_completion_register = Some(c.clone());
-            }
-            let val = generate_statement(consequent, gen, preferred_dst);
-            if !gen.is_current_block_terminated() {
-                if let (Some(ref c), Some(ref v)) = (&completion, &val) {
-                    gen.emit_mov(c, v);
-                }
-            }
-            gen.current_completion_register = saved_completion;
+            generate_with_completion(consequent, gen, &completion, preferred_dst);
         } else if let Some(alt) = alternate {
-            let saved_completion = gen.current_completion_register.clone();
-            if let Some(ref c) = completion {
-                gen.current_completion_register = Some(c.clone());
-            }
-            let val = generate_statement(alt, gen, preferred_dst);
-            if !gen.is_current_block_terminated() {
-                if let (Some(ref c), Some(ref v)) = (&completion, &val) {
-                    gen.emit_mov(c, v);
-                }
-            }
-            gen.current_completion_register = saved_completion;
+            generate_with_completion(alt, gen, &completion, preferred_dst);
         }
         return completion;
     }
@@ -1970,17 +1974,7 @@ fn generate_while_statement(
     gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
     gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
 
-    let saved_completion = gen.current_completion_register.clone();
-    if let Some(ref c) = completion {
-        gen.current_completion_register = Some(c.clone());
-    }
-    let body_result = generate_statement(body, gen, preferred_dst);
-    if !gen.is_current_block_terminated() {
-        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
-            gen.emit_mov(c, body_val);
-        }
-    }
-    gen.current_completion_register = saved_completion;
+    generate_with_completion(body, gen, &completion, preferred_dst);
 
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -2031,17 +2025,7 @@ fn generate_do_while_statement(
     gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
     gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
 
-    let saved_completion = gen.current_completion_register.clone();
-    if let Some(ref c) = completion {
-        gen.current_completion_register = Some(c.clone());
-    }
-    let body_result = generate_statement(body, gen, preferred_dst);
-    if !gen.is_current_block_terminated() {
-        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
-            gen.emit_mov(c, body_val);
-        }
-    }
-    gen.current_completion_register = saved_completion;
+    generate_with_completion(body, gen, &completion, preferred_dst);
 
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -2176,17 +2160,7 @@ fn generate_for_statement(
     gen.begin_continuable_scope(Label(continue_target as u32), labels.clone(), completion.clone());
     gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
 
-    let saved_completion = gen.current_completion_register.clone();
-    if let Some(ref c) = completion {
-        gen.current_completion_register = Some(c.clone());
-    }
-    let body_result = generate_statement(body, gen, preferred_dst);
-    if !gen.is_current_block_terminated() {
-        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
-            gen.emit_mov(c, body_val);
-        }
-    }
-    gen.current_completion_register = saved_completion;
+    generate_with_completion(body, gen, &completion, preferred_dst);
 
     gen.end_breakable_scope();
     gen.end_continuable_scope();
@@ -5493,17 +5467,7 @@ fn generate_for_in_statement(
         gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
     }
 
-    let saved_completion = gen.current_completion_register.clone();
-    if let Some(ref c) = completion {
-        gen.current_completion_register = Some(c.clone());
-    }
-    let body_result = generate_statement(body, gen, preferred_dst);
-    if !gen.is_current_block_terminated() {
-        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
-            gen.emit_mov(c, body_val);
-        }
-    }
-    gen.current_completion_register = saved_completion;
+    generate_with_completion(body, gen, &completion, preferred_dst);
 
     if needs_lexical_env {
         gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
@@ -5740,17 +5704,7 @@ fn generate_for_of_statement_inner(
     // Body
     gen.begin_continuable_scope(Label(update_block as u32), labels, completion.clone());
 
-    let saved_completion = gen.current_completion_register.clone();
-    if let Some(ref c) = completion {
-        gen.current_completion_register = Some(c.clone());
-    }
-    let body_result = generate_statement(body, gen, preferred_dst);
-    if !gen.is_current_block_terminated() {
-        if let (Some(ref c), Some(ref body_val)) = (&completion, &body_result) {
-            gen.emit_mov(c, body_val);
-        }
-    }
-    gen.current_completion_register = saved_completion;
+    generate_with_completion(body, gen, &completion, preferred_dst);
 
     // Restore lexical env before continuing
     if needs_lexical_env {
