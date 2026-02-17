@@ -342,7 +342,6 @@ impl<'a> Parser<'a> {
         let is_async = self.eat(TokenType::Async);
         self.consume_token(TokenType::Function);
         let is_generator = self.eat(TokenType::Asterisk);
-
         let kind = FunctionKind::from_async_generator(is_async, is_generator);
 
         // Parse function name.
@@ -361,21 +360,6 @@ impl<'a> Parser<'a> {
         };
         self.last_function_kind = kind;
 
-        if name.is_some() {
-            if kind == FunctionKind::AsyncGenerator
-                && (fn_name == utf16!("await") || fn_name == utf16!("yield"))
-            {
-                let name_str = String::from_utf16_lossy(&fn_name);
-                self.syntax_error(&format!(
-                    "async generator function is not allowed to be called '{}'",
-                    name_str
-                ));
-            }
-            if self.flags.in_class_static_init_block && fn_name == utf16!("await") {
-                self.syntax_error("'await' is a reserved word");
-            }
-        }
-
         // Register function declaration in parent scope (before opening function scope).
         self.scope_collector.add_function_declaration(
             &fn_name, name.clone(),
@@ -386,52 +370,8 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(fn_name_for_scope);
         self.scope_collector.set_is_function_declaration();
 
-        let in_generator_before = self.flags.in_generator_function_context;
-        let await_before = self.flags.await_expression_is_valid;
-        let saved_static_init = self.flags.in_class_static_init_block;
-        let saved_field_init2 = self.flags.in_class_field_initializer;
-        self.flags.in_generator_function_context = is_generator;
-        self.flags.await_expression_is_valid = is_async;
-        self.flags.in_class_static_init_block = false;
-        self.flags.in_class_field_initializer = false;
-
-        let parsed = self.parse_formal_parameters();
-
-        self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
-
-        self.flags.in_generator_function_context = in_generator_before;
-        self.flags.await_expression_is_valid = await_before;
-
-        let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
-
-        self.scope_collector.close_scope();
-
-        self.flags.in_class_static_init_block = saved_static_init;
-        self.flags.in_class_field_initializer = saved_field_init2;
-
-        if name.is_some() {
-            self.check_identifier_name_for_assignment_validity(&fn_name, has_use_strict);
-        }
-        if has_use_strict || kind != FunctionKind::Normal {
-            self.check_parameters_post_body(&parsed.parameter_info, has_use_strict, kind);
-        }
-
-        insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
-        self.flags.function_might_need_arguments_object = saved_might_need_arguments;
-
-        self.statement(start, StatementKind::FunctionDeclaration(Box::new(FunctionData {
-            name,
-            source_text_start: start.offset,
-            source_text_end: self.source_text_end_offset(),
-            body: Box::new(body),
-            parameters: parsed.parameters,
-            function_length: parsed.function_length,
-            kind,
-            is_strict_mode: self.flags.strict_mode || has_use_strict,
-            is_arrow_function: false,
-            parsing_insights: insights,
-            is_hoisted: false,
-        })))
+        let fd = self.parse_function_common(&name, &fn_name, kind, is_async, is_generator, start, saved_might_need_arguments);
+        self.statement(start, StatementKind::FunctionDeclaration(Box::new(fd)))
     }
 
     // https://tc39.es/ecma262/#sec-function-definitions
@@ -447,7 +387,6 @@ impl<'a> Parser<'a> {
         let is_async = self.eat(TokenType::Async);
         self.consume_token(TokenType::Function);
         let is_generator = self.eat(TokenType::Asterisk);
-
         let kind = FunctionKind::from_async_generator(is_async, is_generator);
 
         let mut fn_name_value: Vec<u16> = Vec::new();
@@ -465,21 +404,6 @@ impl<'a> Parser<'a> {
             None
         };
 
-        if name.is_some() {
-            if kind == FunctionKind::AsyncGenerator
-                && (fn_name_value == utf16!("await") || fn_name_value == utf16!("yield"))
-            {
-                let name_str = String::from_utf16_lossy(&fn_name_value);
-                self.syntax_error(&format!(
-                    "async generator function is not allowed to be called '{}'",
-                    name_str
-                ));
-            }
-            if self.flags.in_class_static_init_block && fn_name_value == utf16!("await") {
-                self.syntax_error("'await' is a reserved word");
-            }
-        }
-
         // Register the function expression name in the outer scope, matching C++.
         // This must happen before open_function_scope so that the identifier group
         // exists with declaration_kind=None, preventing later var declarations
@@ -492,17 +416,48 @@ impl<'a> Parser<'a> {
         let fn_name_for_scope = if fn_name_value.is_empty() { None } else { Some(fn_name_value.as_slice()) };
         self.scope_collector.open_function_scope(fn_name_for_scope);
 
+        let fd = self.parse_function_common(&name, &fn_name_value, kind, is_async, is_generator, start, saved_might_need_arguments);
+        self.expression(start, ExpressionKind::Function(Box::new(fd)))
+    }
+
+    /// Shared logic for parsing formal parameters, function body, and constructing
+    /// FunctionData. Called after the function scope has been opened.
+    fn parse_function_common(
+        &mut self,
+        name: &Option<Rc<Identifier>>,
+        fn_name: &[u16],
+        kind: FunctionKind,
+        is_async: bool,
+        is_generator: bool,
+        start: Position,
+        saved_might_need_arguments: bool,
+    ) -> FunctionData {
+        // Validate name against async generator and class static init restrictions.
+        if name.is_some() {
+            if kind == FunctionKind::AsyncGenerator
+                && (fn_name == utf16!("await") || fn_name == utf16!("yield"))
+            {
+                let name_str = String::from_utf16_lossy(fn_name);
+                self.syntax_error(&format!(
+                    "async generator function is not allowed to be called '{}'",
+                    name_str
+                ));
+            }
+            if self.flags.in_class_static_init_block && fn_name == utf16!("await") {
+                self.syntax_error("'await' is a reserved word");
+            }
+        }
+
         let in_generator_before = self.flags.in_generator_function_context;
         let await_before = self.flags.await_expression_is_valid;
         let saved_static_init = self.flags.in_class_static_init_block;
-        let saved_field_init2 = self.flags.in_class_field_initializer;
+        let saved_field_init = self.flags.in_class_field_initializer;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
         self.flags.in_class_static_init_block = false;
         self.flags.in_class_field_initializer = false;
 
         let parsed = self.parse_formal_parameters();
-
         self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
         self.flags.in_generator_function_context = in_generator_before;
@@ -513,10 +468,10 @@ impl<'a> Parser<'a> {
         self.scope_collector.close_scope();
 
         self.flags.in_class_static_init_block = saved_static_init;
-        self.flags.in_class_field_initializer = saved_field_init2;
+        self.flags.in_class_field_initializer = saved_field_init;
 
         if name.is_some() {
-            self.check_identifier_name_for_assignment_validity(&fn_name_value, has_use_strict);
+            self.check_identifier_name_for_assignment_validity(fn_name, has_use_strict);
         }
         if has_use_strict || kind != FunctionKind::Normal {
             self.check_parameters_post_body(&parsed.parameter_info, has_use_strict, kind);
@@ -525,8 +480,8 @@ impl<'a> Parser<'a> {
         insights.might_need_arguments_object = self.flags.function_might_need_arguments_object;
         self.flags.function_might_need_arguments_object = saved_might_need_arguments;
 
-        self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
-            name,
+        FunctionData {
+            name: name.clone(),
             source_text_start: start.offset,
             source_text_end: self.source_text_end_offset(),
             body: Box::new(body),
@@ -537,7 +492,7 @@ impl<'a> Parser<'a> {
             is_arrow_function: false,
             parsing_insights: insights,
             is_hoisted: false,
-        })))
+        }
     }
 
     // https://tc39.es/ecma262/#sec-class-definitions
