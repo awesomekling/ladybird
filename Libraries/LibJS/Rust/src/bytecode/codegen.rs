@@ -7523,25 +7523,16 @@ fn try_constant_fold_unary(
     let constant = gen.get_constant(operand)?;
     match op {
         UnaryOp::Minus => {
-            if let ConstantValue::Number(n) = constant {
-                Some(gen.add_constant_number(-n))
-            } else {
-                None
-            }
+            let n = constant_to_number(constant)?;
+            Some(gen.add_constant_number(-n))
         }
         UnaryOp::Plus => {
-            if let ConstantValue::Number(n) = constant {
-                Some(gen.add_constant_number(*n))
-            } else {
-                None
-            }
+            let n = constant_to_number(constant)?;
+            Some(gen.add_constant_number(n))
         }
         UnaryOp::BitwiseNot => {
-            if let ConstantValue::Number(n) = constant {
-                Some(gen.add_constant_number((!to_int32(*n)) as f64))
-            } else {
-                None
-            }
+            let n = constant_to_number(constant)?;
+            Some(gen.add_constant_number((!to_int32(n)) as f64))
         }
         UnaryOp::Not => {
             let as_bool = match constant {
