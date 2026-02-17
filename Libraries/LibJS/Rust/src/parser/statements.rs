@@ -284,6 +284,18 @@ impl<'a> Parser<'a> {
         self.statement(start, StatementKind::Block(scope))
     }
 
+    /// Parse a statement in a loop body context (break and continue allowed).
+    fn parse_loop_body(&mut self) -> Statement {
+        let break_before = self.flags.in_break_context;
+        let continue_before = self.flags.in_continue_context;
+        self.flags.in_break_context = true;
+        self.flags.in_continue_context = true;
+        let body = self.parse_statement(false);
+        self.flags.in_break_context = break_before;
+        self.flags.in_continue_context = continue_before;
+        body
+    }
+
     fn parse_while_statement(&mut self) -> Statement {
         let start = self.position();
         self.consume_token(TokenType::While);
@@ -291,15 +303,7 @@ impl<'a> Parser<'a> {
         let test = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
 
-        let break_before = self.flags.in_break_context;
-        let continue_before = self.flags.in_continue_context;
-        self.flags.in_break_context = true;
-        self.flags.in_continue_context = true;
-
-        let body = self.parse_statement(false);
-
-        self.flags.in_break_context = break_before;
-        self.flags.in_continue_context = continue_before;
+        let body = self.parse_loop_body();
 
         self.statement(start, StatementKind::While {
             test: Box::new(test),
@@ -311,15 +315,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Do);
 
-        let break_before = self.flags.in_break_context;
-        let continue_before = self.flags.in_continue_context;
-        self.flags.in_break_context = true;
-        self.flags.in_continue_context = true;
-
-        let body = self.parse_statement(false);
-
-        self.flags.in_break_context = break_before;
-        self.flags.in_continue_context = continue_before;
+        let body = self.parse_loop_body();
 
         self.consume_token(TokenType::While);
         self.consume_token(TokenType::ParenOpen);
@@ -410,13 +406,7 @@ impl<'a> Parser<'a> {
             let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
             self.consume_token(TokenType::ParenClose);
 
-            let break_before = self.flags.in_break_context;
-            let continue_before = self.flags.in_continue_context;
-            self.flags.in_break_context = true;
-            self.flags.in_continue_context = true;
-            let body = self.parse_statement(false);
-            self.flags.in_break_context = break_before;
-            self.flags.in_continue_context = continue_before;
+            let body = self.parse_loop_body();
 
             let lhs = match init {
                 LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
@@ -468,13 +458,7 @@ impl<'a> Parser<'a> {
                 let rhs = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
                 self.consume_token(TokenType::ParenClose);
 
-                let break_before = self.flags.in_break_context;
-                let continue_before = self.flags.in_continue_context;
-                self.flags.in_break_context = true;
-                self.flags.in_continue_context = true;
-                let body = self.parse_statement(false);
-                self.flags.in_break_context = break_before;
-                self.flags.in_continue_context = continue_before;
+                let body = self.parse_loop_body();
 
                 let lhs = match init {
                     LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
@@ -547,15 +531,7 @@ impl<'a> Parser<'a> {
         };
         self.consume_token(TokenType::ParenClose);
 
-        let break_before = self.flags.in_break_context;
-        let continue_before = self.flags.in_continue_context;
-        self.flags.in_break_context = true;
-        self.flags.in_continue_context = true;
-
-        let body = self.parse_statement(false);
-
-        self.flags.in_break_context = break_before;
-        self.flags.in_continue_context = continue_before;
+        let body = self.parse_loop_body();
 
         self.statement(start, StatementKind::For {
             init,
