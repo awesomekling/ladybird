@@ -139,6 +139,9 @@ impl<'a> Parser<'a> {
                 let token = self.consume();
                 let value = self.token_value(&token).to_vec();
                 self.check_identifier_name_for_assignment_validity(&value, false);
+                if kind != DeclarationKind::Var && value == utf16!("let") {
+                    self.syntax_error("Lexical binding may not be called 'let'");
+                }
                 let id = self.make_identifier(declaration_start, value.clone());
 
                 if kind == DeclarationKind::Var {
@@ -164,6 +167,9 @@ impl<'a> Parser<'a> {
 
                 for (name, _) in &bound_names {
                     self.check_identifier_name_for_assignment_validity(name, false);
+                    if kind != DeclarationKind::Var && name.as_slice() == utf16!("let") {
+                        self.syntax_error("Lexical binding may not be called 'let'");
+                    }
                 }
 
                 if kind != DeclarationKind::Var {
