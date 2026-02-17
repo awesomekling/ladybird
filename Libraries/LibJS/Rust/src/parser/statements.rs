@@ -98,9 +98,16 @@ impl<'a> Parser<'a> {
     fn parse_expression_statement(&mut self) -> Statement {
         let start = self.position();
 
-        if self.match_token(TokenType::Function) || self.match_token(TokenType::Class) {
+        if self.match_token(TokenType::Async) {
+            let lookahead = self.next_token();
+            if lookahead.token_type == TokenType::Function && !lookahead.trivia_has_line_terminator {
+                self.syntax_error("Async function declaration not allowed in single-statement context");
+            }
+        } else if self.match_token(TokenType::Function) || self.match_token(TokenType::Class) {
             let name = self.current_token.token_type.name();
             self.syntax_error(&format!("{} declaration not allowed in single-statement context", name));
+        } else if self.match_token(TokenType::Let) && self.next_token().token_type == TokenType::BracketOpen {
+            self.syntax_error("let followed by [ is not allowed in single-statement context");
         }
 
         let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
