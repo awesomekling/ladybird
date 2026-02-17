@@ -3579,6 +3579,29 @@ fn emit_delete_reference(
             dst
         }
         ExpressionKind::Member { object, property, computed } => {
+            // https://tc39.es/ecma262/#sec-super-keyword-runtime-semantics-evaluation
+            // Deleting a super property is always a ReferenceError.
+            if matches!(object.inner, ExpressionKind::Super) {
+                let this_value = emit_resolve_this_binding(gen);
+                let super_base = gen.allocate_register();
+                gen.emit(Instruction::ResolveSuperBase { dst: super_base.operand() });
+                // Evaluate computed property for side effects before throwing.
+                if *computed {
+                    generate_expression_or_undefined(property, gen, None);
+                }
+                let exception = gen.allocate_register();
+                let error_string = gen.intern_string(utf16!("Can't delete a property on 'super'"));
+                gen.emit(Instruction::NewReferenceError {
+                    dst: exception.operand(),
+                    error_string,
+                });
+                gen.perform_needed_unwinds();
+                gen.emit(Instruction::Throw { src: exception.operand() });
+                let dead_block = gen.make_block();
+                gen.switch_to_basic_block(dead_block);
+                let _ = this_value;
+                return gen.add_constant_undefined();
+            }
             let base = generate_expression_or_undefined(object, gen, None);
             let dst = choose_dst(gen, preferred_dst);
             if *computed {
