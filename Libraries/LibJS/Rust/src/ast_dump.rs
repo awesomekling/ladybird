@@ -222,15 +222,14 @@ fn format_f64(value: f64) -> String {
         }
     }
 
-    // Fix tie-breaking: Rust's ryu rounds up on ties (e.g. 75.407867431640625 → ...63)
-    // but C++ rounds to even (→ ...62). Only decrement the last digit when the actual
-    // float64 value is exactly at the midpoint between two decimal representations
-    // (i.e., the next digit after the shortest representation is exactly '5').
+    // Fix tie-breaking: Rust's ryu may round differently than C++ (AK) on ties.
+    // C++ uses round-to-even. When the value is exactly at the midpoint between
+    // two shortest decimal representations, pick the one with an even last digit.
     let num_sig_digits = digits_str.len();
     if num_sig_digits > 0 {
         let last_byte = digits_str.as_bytes()[num_sig_digits - 1];
-        if last_byte > b'0' {
-            // Get one more digit of precision to check if it's a midpoint tie.
+        if (last_byte - b'0') % 2 != 0 {
+            // Last digit is odd — check if this is a midpoint tie.
             let prec = num_sig_digits;
             let more_precise = format!("{:.*e}", prec, abs_value);
             let (mp_mantissa, _) = more_precise.split_once('e').unwrap();
@@ -240,18 +239,27 @@ fn format_f64(value: f64) -> String {
                 let full_check = format!("{:.*e}", prec + 3, abs_value);
                 let (fc_mantissa, _) = full_check.split_once('e').unwrap();
                 let fc_digits: Vec<u8> = fc_mantissa.replace('.', "").bytes().collect();
-                let all_zero_after = fc_digits[num_sig_digits + 1..].iter().all(|&b| b == b'0');
+                let all_zero_after = fc_digits.get(num_sig_digits + 1..).map_or(true, |s| s.iter().all(|&b| b == b'0'));
                 if all_zero_after {
-                    let mut digits_bytes: Vec<u8> = digits_str.bytes().collect();
-                    digits_bytes[num_sig_digits - 1] -= 1;
-                    let test_mantissa = String::from_utf8(digits_bytes).unwrap();
-                    let test_str = if test_mantissa.len() == 1 {
-                        format!("{}e{}", test_mantissa, exp)
-                    } else {
-                        format!("{}.{}e{}", &test_mantissa[..1], &test_mantissa[1..], exp)
-                    };
-                    if test_str.parse::<f64>().unwrap_or(f64::NAN) == abs_value {
-                        digits_str = test_mantissa;
+                    // Try adjusting the last digit to make it even.
+                    // Ryu may have rounded up (try -1) or down (try +1).
+                    for delta in [-1i8, 1] {
+                        let new_digit = (last_byte as i8 + delta) as u8;
+                        if new_digit < b'0' || new_digit > b'9' {
+                            continue;
+                        }
+                        let mut digits_bytes: Vec<u8> = digits_str.bytes().collect();
+                        digits_bytes[num_sig_digits - 1] = new_digit;
+                        let test_mantissa = String::from_utf8(digits_bytes).unwrap();
+                        let test_str = if test_mantissa.len() == 1 {
+                            format!("{}e{}", test_mantissa, exp)
+                        } else {
+                            format!("{}.{}e{}", &test_mantissa[..1], &test_mantissa[1..], exp)
+                        };
+                        if test_str.parse::<f64>().unwrap_or(f64::NAN) == abs_value {
+                            digits_str = test_mantissa;
+                            break;
+                        }
                     }
                 }
             }
