@@ -7482,6 +7482,17 @@ fn try_constant_fold_to_boolean(
 }
 
 /// Try to constant-fold a binary operation when both operands are constants.
+// 6.1.6.1.3 Number::exponentiate ( base, exponent )
+// https://tc39.es/ecma262/#sec-numeric-types-number-exponentiate
+// Rust's f64::powf follows C's pow() which returns 1.0 for pow(±1, ±∞),
+// but JS specifies NaN when abs(base) is 1 and exponent is ±∞.
+fn js_exponentiate(base: f64, exponent: f64) -> f64 {
+    if exponent.is_infinite() && base.abs() == 1.0 {
+        return f64::NAN;
+    }
+    base.powf(exponent)
+}
+
 fn try_constant_fold_binary(
     gen: &mut Generator,
     op: BinaryOp,
@@ -7541,7 +7552,7 @@ fn try_constant_fold_binary(
         }
         BinaryOp::Exponentiation => {
             if let (ConstantValue::Number(a), ConstantValue::Number(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_number(a.powf(*b)));
+                return Some(gen.add_constant_number(js_exponentiate(*a, *b)));
             }
             None
         }
