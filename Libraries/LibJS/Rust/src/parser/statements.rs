@@ -126,8 +126,12 @@ impl<'a> Parser<'a> {
 
         // [no LineTerminator here]: if a line terminator follows `return`,
         // ASI inserts a semicolon and the return has no argument.
-        if self.current_token.trivia_has_line_terminator
-            || self.match_token(TokenType::Semicolon)
+        // NB: Don't consume the next token — it may be `;` which should
+        // become an EmptyStatement, not be swallowed by the return.
+        if self.current_token.trivia_has_line_terminator {
+            return self.statement(start, StatementKind::Return(None));
+        }
+        if self.match_token(TokenType::Semicolon)
             || self.match_token(TokenType::CurlyClose)
             || self.done()
         {
