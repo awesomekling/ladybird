@@ -4321,7 +4321,6 @@ fn generate_object_expression(
             let base_name: Option<Utf16String> = match &property.key.inner {
                 ExpressionKind::StringLiteral(s) => Some(s.clone()),
                 ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
-                ExpressionKind::NumericLiteral(n) => Some(super::ffi::js_number_to_utf16(*n)),
                 _ => None,
             };
             if let Some(name) = base_name {
