@@ -123,7 +123,7 @@ impl<'a> Parser<'a> {
         }
 
         let lhs_start = self.position();
-        let (expression, should_continue) = self.parse_primary_expression();
+        let (expression, should_continue) = self.parse_primary_expression(min_precedence);
 
         // C++ checks for freestanding `arguments` references here (after
         // parse_primary_expression), NOT during consume(). This avoids
@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
     /// Parse a primary expression (literal, identifier, `this`, etc.).
     /// Returns `(expression, should_continue)` — `false` means the caller
     /// should not attempt to parse a secondary expression (e.g. arrow).
-    fn parse_primary_expression(&mut self) -> (Expression, bool) {
+    fn parse_primary_expression(&mut self, min_precedence: i32) -> (Expression, bool) {
         self.last_parsed_identifier_is_eval = false;
         let start = self.position();
         let token = self.current_token().clone();
@@ -408,7 +408,10 @@ impl<'a> Parser<'a> {
             // YieldExpression : `yield`
             //                 | `yield` [no LineTerminator here] AssignmentExpression
             //                 | `yield` [no LineTerminator here] `*` AssignmentExpression
-            TokenType::Yield if self.flags.in_generator_function_context => {
+            // YieldExpression is at AssignmentExpression level (precedence 2).
+            // When min_precedence is higher (e.g. void/typeof at 17), yield must
+            // be treated as an identifier, not a yield expression.
+            TokenType::Yield if self.flags.in_generator_function_context && min_precedence <= 2 => {
                 let expression = self.parse_yield_expression();
                 (expression, false)
             }

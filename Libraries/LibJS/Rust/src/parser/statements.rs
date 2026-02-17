@@ -765,6 +765,12 @@ impl<'a> Parser<'a> {
         if self.flags.strict_mode && label == utf16!("let") {
             self.syntax_error("Strict mode reserved word 'let' is not allowed in label");
         }
+        if self.flags.in_generator_function_context && label == utf16!("yield") {
+            self.syntax_error("'yield' label is not allowed in generator function context");
+        }
+        if self.flags.await_expression_is_valid && label == utf16!("await") {
+            self.syntax_error("'await' label is not allowed in async function context");
+        }
 
         if self.labels_in_scope.contains_key(&label) {
             self.syntax_error("Label has already been declared");
