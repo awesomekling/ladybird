@@ -1416,15 +1416,14 @@ impl<'a> Parser<'a> {
             }
 
             let initializer = if self.match_token(TokenType::Equals) {
+                if is_rest {
+                    self.syntax_error("Unexpected initializer after rest element");
+                }
                 self.consume();
                 Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none()))
             } else {
                 None
             };
-
-            if is_rest && initializer.is_some() {
-                self.syntax_error("Unexpected initializer after rest element");
-            }
 
             entries.push(BindingEntry {
                 name: entry_name,
