@@ -22,11 +22,9 @@
 #ifdef ENABLE_RUST_PARSER
 static void collect_rust_parse_error(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column)
 {
-    (void)line;
-    (void)column;
     auto& error_message = *static_cast<String*>(ctx);
     if (error_message.is_empty())
-        error_message = MUST(String::from_utf8({ message, message_len }));
+        error_message = MUST(String::formatted("{} (line: {}, column: {})", MUST(String::from_utf8({ message, message_len })), line, column));
 }
 #endif
 
