@@ -114,11 +114,15 @@ fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
 }
 
 /// Create a UTF-16 slice from a raw pointer, returning None if the pointer is null.
+///
+/// NB: C++ Vector<u16>::data() returns nullptr when the vector is empty (no allocation),
+/// so we must handle len == 0 with a null pointer as a valid empty slice.
 unsafe fn source_from_raw(source: *const u16, len: usize) -> Option<&'static [u16]> {
+    if len == 0 {
+        return Some(&[]);
+    }
     if source.is_null() {
-        if len > 0 {
-            eprintln!("source_from_raw: null pointer with non-zero length {len}");
-        }
+        eprintln!("source_from_raw: null pointer with non-zero length {len}");
         return None;
     }
     Some(std::slice::from_raw_parts(source, len))
