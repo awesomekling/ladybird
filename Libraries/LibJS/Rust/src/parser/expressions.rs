@@ -157,6 +157,7 @@ impl<'a> Parser<'a> {
         associativity: Associativity,
         mut forbidden: ForbiddenTokens,
     ) -> Expression {
+        let original_forbidden = forbidden;
         while self.match_secondary_expression(&forbidden) {
             let new_precedence = Self::operator_precedence(self.current_token_type());
             if new_precedence < min_precedence {
@@ -166,7 +167,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            let result = self.parse_secondary_expression(lhs_start, expression, new_precedence, forbidden);
+            let result = self.parse_secondary_expression(lhs_start, expression, new_precedence, original_forbidden);
             expression = result.0;
             forbidden = forbidden.merge(result.1);
 
