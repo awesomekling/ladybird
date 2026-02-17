@@ -91,7 +91,27 @@ use parser::{Parser, ProgramType};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::c_void;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
+
+/// Catch any Rust panics to prevent undefined behavior from unwinding across
+/// the FFI boundary. Aborts the process on panic.
+fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            eprintln!("Rust panic at FFI boundary: {msg}");
+            std::process::abort();
+        }
+    }
+}
 
 /// Create a UTF-16 slice from a raw pointer, returning None if the pointer is null.
 unsafe fn source_from_raw(source: *const u16, len: usize) -> Option<&'static [u16]> {
@@ -239,42 +259,43 @@ pub unsafe extern "C" fn rust_compile_program(
     allow_super_constructor_call: bool,
     in_class_field_initializer: bool,
 ) -> *mut c_void {
-    let Some(source_slice) = source_from_raw(source, source_len) else {
-        return std::ptr::null_mut();
-    };
-    let pt = match program_type {
-        0 => ProgramType::Script,
-        1 => ProgramType::Module,
-        _ => {
-            eprintln!("rust_compile_program: invalid program_type: {program_type}");
+    abort_on_panic(|| {
+        let Some(source_slice) = source_from_raw(source, source_len) else {
+            return std::ptr::null_mut();
+        };
+        let pt = match program_type {
+            0 => ProgramType::Script,
+            1 => ProgramType::Module,
+            _ => {
+                return std::ptr::null_mut();
+            }
+        };
+        let mut parser = Parser::new(source_slice, pt);
+        if initiated_by_eval {
+            parser.initiated_by_eval = true;
+            parser.in_eval_function_context = in_eval_function_context;
+            parser.flags.allow_super_property_lookup = allow_super_property_lookup;
+            parser.flags.allow_super_constructor_call = allow_super_constructor_call;
+            parser.flags.in_class_field_initializer = in_class_field_initializer;
+        }
+
+        let program = parser.parse_program(starts_in_strict_mode);
+
+        parser.scope_collector.analyze(initiated_by_eval);
+
+        if check_errors(&mut parser, "rust_compile_program") {
             return std::ptr::null_mut();
         }
-    };
-    let mut parser = Parser::new(source_slice, pt);
-    if initiated_by_eval {
-        parser.initiated_by_eval = true;
-        parser.in_eval_function_context = in_eval_function_context;
-        parser.flags.allow_super_property_lookup = allow_super_property_lookup;
-        parser.flags.allow_super_constructor_call = allow_super_constructor_call;
-        parser.flags.in_class_field_initializer = in_class_field_initializer;
-    }
 
-    let program = parser.parse_program(starts_in_strict_mode);
+        let scope_ref = if let StatementKind::Program(ref data) = program.inner {
+            data.scope.clone()
+        } else {
+            return std::ptr::null_mut();
+        };
 
-    parser.scope_collector.analyze(initiated_by_eval);
-
-    if check_errors(&mut parser, "rust_compile_program") {
-        return std::ptr::null_mut();
-    }
-
-    let scope_ref = if let StatementKind::Program(ref data) = program.inner {
-        data.scope.clone()
-    } else {
-        return std::ptr::null_mut();
-    };
-
-    let mut gen = new_program_generator(starts_in_strict_mode, vm_ptr, source_code_ptr, source, source_len);
-    compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
+        let mut gen = new_program_generator(starts_in_strict_mode, vm_ptr, source_code_ptr, source, source_len);
+        compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
+    })
 }
 
 /// Compile a script and extract GDI (GlobalDeclarationInstantiation) metadata.
@@ -305,39 +326,41 @@ pub unsafe extern "C" fn rust_compile_script(
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
 ) -> *mut c_void {
-    let Some(source_slice) = source_from_raw(source, source_len) else {
-        return std::ptr::null_mut();
-    };
-    let mut parser = Parser::new(source_slice, ProgramType::Script);
+    abort_on_panic(|| {
+        let Some(source_slice) = source_from_raw(source, source_len) else {
+            return std::ptr::null_mut();
+        };
+        let mut parser = Parser::new(source_slice, ProgramType::Script);
 
-    let program = parser.parse_program(false);
+        let program = parser.parse_program(false);
 
-    parser.scope_collector.analyze(false);
+        parser.scope_collector.analyze(false);
 
-    if check_errors_with_callback(&mut parser, "rust_compile_script", error_context, error_callback) {
-        return std::ptr::null_mut();
-    }
+        if check_errors_with_callback(&mut parser, "rust_compile_script", error_context, error_callback) {
+            return std::ptr::null_mut();
+        }
 
-    // Dump AST if requested (after scope analysis so identifier metadata is populated).
-    if dump_ast {
-        ast_dump::dump_program(&program, use_color);
-    }
+        // Dump AST if requested (after scope analysis so identifier metadata is populated).
+        if dump_ast {
+            ast_dump::dump_program(&program, use_color);
+        }
 
-    let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
-        (data.scope.clone(), data.is_strict_mode)
-    } else {
-        return std::ptr::null_mut();
-    };
+        let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
+            (data.scope.clone(), data.is_strict_mode)
+        } else {
+            return std::ptr::null_mut();
+        };
 
-    let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
-    let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
-    if exec_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
+        let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
+        let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
+        if exec_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
 
-    extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+        extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
 
-    exec_ptr
+        exec_ptr
+    })
 }
 
 /// Compile an eval script and extract EDI (EvalDeclarationInstantiation) metadata.
@@ -369,39 +392,41 @@ pub unsafe extern "C" fn rust_compile_eval(
     allow_super_constructor_call: bool,
     in_class_field_initializer: bool,
 ) -> *mut c_void {
-    let Some(source_slice) = source_from_raw(source, source_len) else {
-        return std::ptr::null_mut();
-    };
-    let mut parser = Parser::new(source_slice, ProgramType::Script);
-    parser.initiated_by_eval = true;
-    parser.in_eval_function_context = in_eval_function_context;
-    parser.flags.allow_super_property_lookup = allow_super_property_lookup;
-    parser.flags.allow_super_constructor_call = allow_super_constructor_call;
-    parser.flags.in_class_field_initializer = in_class_field_initializer;
+    abort_on_panic(|| {
+        let Some(source_slice) = source_from_raw(source, source_len) else {
+            return std::ptr::null_mut();
+        };
+        let mut parser = Parser::new(source_slice, ProgramType::Script);
+        parser.initiated_by_eval = true;
+        parser.in_eval_function_context = in_eval_function_context;
+        parser.flags.allow_super_property_lookup = allow_super_property_lookup;
+        parser.flags.allow_super_constructor_call = allow_super_constructor_call;
+        parser.flags.in_class_field_initializer = in_class_field_initializer;
 
-    let program = parser.parse_program(starts_in_strict_mode);
+        let program = parser.parse_program(starts_in_strict_mode);
 
-    parser.scope_collector.analyze(true);
+        parser.scope_collector.analyze(true);
 
-    if check_errors(&mut parser, "rust_compile_eval") {
-        return std::ptr::null_mut();
-    }
+        if check_errors(&mut parser, "rust_compile_eval") {
+            return std::ptr::null_mut();
+        }
 
-    let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
-        (data.scope.clone(), data.is_strict_mode)
-    } else {
-        return std::ptr::null_mut();
-    };
+        let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
+            (data.scope.clone(), data.is_strict_mode)
+        } else {
+            return std::ptr::null_mut();
+        };
 
-    let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
-    let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
-    if exec_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
+        let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
+        let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
+        if exec_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
 
-    extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+        extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
 
-    exec_ptr
+        exec_ptr
+    })
 }
 
 /// Compile a dynamically-created function (new Function()).
@@ -429,115 +454,116 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     source_code_ptr: *const c_void,
     function_kind: u8,
 ) -> *mut c_void {
-    let kind = match function_kind {
-        0 => ast::FunctionKind::Normal,
-        1 => ast::FunctionKind::Generator,
-        2 => ast::FunctionKind::Async,
-        3 => ast::FunctionKind::AsyncGenerator,
-        _ => {
-            eprintln!("rust_compile_dynamic_function: invalid function_kind: {function_kind}");
-            return std::ptr::null_mut();
-        }
-    };
+    abort_on_panic(|| {
+        let kind = match function_kind {
+            0 => ast::FunctionKind::Normal,
+            1 => ast::FunctionKind::Generator,
+            2 => ast::FunctionKind::Async,
+            3 => ast::FunctionKind::AsyncGenerator,
+            _ => {
+                return std::ptr::null_mut();
+            }
+        };
 
-    // Validate parameters: wrap in the appropriate function kind and parse.
-    {
-        let mut validate_src: Vec<u16> = Vec::new();
-        match kind {
-            ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test(")),
-            ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test(")),
-            ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
-            ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
+        // Validate parameters: wrap in the appropriate function kind and parse.
+        {
+            let mut validate_src: Vec<u16> = Vec::new();
+            match kind {
+                ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test(")),
+                ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test(")),
+                ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test(")),
+                ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
+            }
+            let Some(parameters_slice) = source_from_raw(parameters_source, parameters_source_len) else {
+                return std::ptr::null_mut();
+            };
+            validate_src.extend_from_slice(parameters_slice);
+            validate_src.extend_from_slice(utf16!(") {}"));
+            let mut parser = Parser::new(&validate_src, ProgramType::Script);
+            parser.parse_program(false);
+            if parser.has_errors() {
+                return std::ptr::null_mut();
+            }
         }
-        let Some(parameters_slice) = source_from_raw(parameters_source, parameters_source_len) else {
+
+        // Validate body: wrap in "function test() { BODY }" and parse.
+        {
+            let mut validate_src: Vec<u16> = Vec::new();
+            match kind {
+                ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test() {")),
+                ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test() {")),
+                ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test() {")),
+                ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test() {")),
+            }
+            let Some(body_slice) = source_from_raw(body_source, body_source_len) else {
+                return std::ptr::null_mut();
+            };
+            validate_src.extend_from_slice(body_slice);
+            validate_src.extend_from_slice(utf16!("}"));
+            let mut parser = Parser::new(&validate_src, ProgramType::Script);
+            parser.parse_program(false);
+            if parser.has_errors() {
+                return std::ptr::null_mut();
+            }
+        }
+
+        let Some(full_slice) = source_from_raw(full_source, full_source_len) else {
             return std::ptr::null_mut();
         };
-        validate_src.extend_from_slice(parameters_slice);
-        validate_src.extend_from_slice(utf16!(") {}"));
-        let mut parser = Parser::new(&validate_src, ProgramType::Script);
-        parser.parse_program(false);
+        let mut parser = Parser::new(full_slice, ProgramType::Script);
+        let program = parser.parse_program(false);
+
         if parser.has_errors() {
             return std::ptr::null_mut();
         }
-    }
 
-    // Validate body: wrap in "function test() { BODY }" and parse.
-    {
-        let mut validate_src: Vec<u16> = Vec::new();
-        match kind {
-            ast::FunctionKind::Generator => validate_src.extend_from_slice(utf16!("function* test() {")),
-            ast::FunctionKind::Async => validate_src.extend_from_slice(utf16!("async function test() {")),
-            ast::FunctionKind::AsyncGenerator => validate_src.extend_from_slice(utf16!("async function* test() {")),
-            ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test() {")),
-        }
-        let Some(body_slice) = source_from_raw(body_source, body_source_len) else {
-            return std::ptr::null_mut();
-        };
-        validate_src.extend_from_slice(body_slice);
-        validate_src.extend_from_slice(utf16!("}"));
-        let mut parser = Parser::new(&validate_src, ProgramType::Script);
-        parser.parse_program(false);
-        if parser.has_errors() {
+        // Run scope analysis. Use analyze_as_dynamic_function() to suppress
+        // marking identifiers as global, matching the C++ path which parses
+        // as a FunctionExpression (no Program scope for globals to bind to).
+        parser.scope_collector.analyze_as_dynamic_function();
+
+        if parser.scope_collector.has_errors() {
             return std::ptr::null_mut();
         }
-    }
 
-    let Some(full_slice) = source_from_raw(full_source, full_source_len) else {
-        return std::ptr::null_mut();
-    };
-    let mut parser = Parser::new(full_slice, ProgramType::Script);
-    let program = parser.parse_program(false);
-
-    if parser.has_errors() {
-        return std::ptr::null_mut();
-    }
-
-    // Run scope analysis. Use analyze_as_dynamic_function() to suppress
-    // marking identifiers as global, matching the C++ path which parses
-    // as a FunctionExpression (no Program scope for globals to bind to).
-    parser.scope_collector.analyze_as_dynamic_function();
-
-    if parser.scope_collector.has_errors() {
-        return std::ptr::null_mut();
-    }
-
-    // Extract the FunctionExpression from the program.
-    // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
-    let function_data = if let StatementKind::Program(ref data) = program.inner {
-        let scope = data.scope.borrow();
-        let mut found: Option<ast::FunctionData> = None;
-        for child in &scope.children {
-            match &child.inner {
-                StatementKind::FunctionDeclaration(fd) => {
-                    found = Some(fd.as_ref().clone());
-                    break;
-                }
-                StatementKind::Expression(expression) => {
-                    if let ast::ExpressionKind::Function(fd) = &expression.inner {
+        // Extract the FunctionExpression from the program.
+        // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
+        let function_data = if let StatementKind::Program(ref data) = program.inner {
+            let scope = data.scope.borrow();
+            let mut found: Option<ast::FunctionData> = None;
+            for child in &scope.children {
+                match &child.inner {
+                    StatementKind::FunctionDeclaration(fd) => {
                         found = Some(fd.as_ref().clone());
                         break;
                     }
+                    StatementKind::Expression(expression) => {
+                        if let ast::ExpressionKind::Function(fd) = &expression.inner {
+                            found = Some(fd.as_ref().clone());
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
-        found
-    } else {
-        None
-    };
+            found
+        } else {
+            None
+        };
 
-    let mut function_data = match function_data {
-        Some(fd) => fd,
-        None => return std::ptr::null_mut(),
-    };
+        let mut function_data = match function_data {
+            Some(fd) => fd,
+            None => return std::ptr::null_mut(),
+        };
 
-    // Dynamic functions always need an arguments object, matching the C++
-    // path in FunctionConstructor::create_dynamic_function.
-    function_data.parsing_insights.might_need_arguments_object = true;
+        // Dynamic functions always need an arguments object, matching the C++
+        // path in FunctionConstructor::create_dynamic_function.
+        function_data.parsing_insights.might_need_arguments_object = true;
 
-    let is_strict = function_data.is_strict_mode;
+        let is_strict = function_data.is_strict_mode;
 
-    bytecode::ffi::create_sfd_for_gdi(&function_data, vm_ptr, source_code_ptr, is_strict)
+        bytecode::ffi::create_sfd_for_gdi(&function_data, vm_ptr, source_code_ptr, is_strict)
+    })
 }
 
 /// Recursively collect var-declared names from a statement and all nested
@@ -821,9 +847,11 @@ fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnM
 /// `ast` must be a valid pointer returned by `Box::into_raw(Box<FunctionData>)`.
 #[no_mangle]
 pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
-    if !ast.is_null() {
-        drop(Box::from_raw(ast as *mut ast::FunctionData));
-    }
+    abort_on_panic(|| {
+        if !ast.is_null() {
+            drop(Box::from_raw(ast as *mut ast::FunctionData));
+        }
+    });
 }
 
 /// Compile a function body using the Rust pipeline.
@@ -846,6 +874,7 @@ pub unsafe extern "C" fn rust_compile_function(
     sfd_ptr: *mut c_void,
     rust_function_ast: *mut c_void,
 ) -> *mut c_void {
+    abort_on_panic(|| {
     if rust_function_ast.is_null() {
         return std::ptr::null_mut();
     }
@@ -966,6 +995,7 @@ pub unsafe extern "C" fn rust_compile_function(
     write_sfd_metadata(sfd_ptr, &sfd_metadata);
 
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
+    })
 }
 
 /// Metadata computed from scope analysis for a SharedFunctionInstanceData.
