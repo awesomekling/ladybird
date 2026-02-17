@@ -1711,6 +1711,28 @@ fn generate_logical(
     preferred_dst: Option<&ScopedOperand>,
 ) -> Option<ScopedOperand> {
     let lhs_val = generate_expression(lhs, gen, preferred_dst)?;
+
+    // Constant-fold: if LHS is a constant, we can statically determine the branch.
+    if let Some(constant) = gen.get_constant(&lhs_val) {
+        let is_nullish = matches!(constant, ConstantValue::Null | ConstantValue::Undefined);
+        let is_truthy = constant_to_boolean(constant);
+        let take_rhs = match op {
+            LogicalOp::And => is_truthy,
+            LogicalOp::Or => !is_truthy,
+            LogicalOp::NullishCoalescing => is_nullish,
+        };
+        if take_rhs {
+            let dst = choose_dst(gen, preferred_dst);
+            let rhs_val = generate_expression(rhs, gen, Some(&dst))?;
+            if rhs_val.operand().is_constant() {
+                return Some(rhs_val);
+            }
+            gen.emit_mov(&dst, &rhs_val);
+            return Some(dst);
+        }
+        return Some(lhs_val);
+    }
+
     let dst = choose_dst(gen, preferred_dst);
     gen.emit_mov(&dst, &lhs_val);
 
