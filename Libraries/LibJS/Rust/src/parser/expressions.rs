@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
             let mut expressions = vec![expression];
             while self.match_token(TokenType::Comma) {
                 self.consume();
-                expressions.push(self.parse_expression(2, Associativity::Right, forbidden));
+                expressions.push(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none()));
             }
             return self.expression(start, ExpressionKind::Sequence(expressions));
         }
