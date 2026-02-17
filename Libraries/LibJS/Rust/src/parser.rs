@@ -704,6 +704,17 @@ impl<'a> Parser<'a> {
     /// Re-parse the source range starting at `start` as a binding pattern
     /// with member expressions allowed (for destructuring assignment patterns).
     pub(crate) fn synthesize_binding_pattern(&mut self, start: Position) -> Option<BindingPattern> {
+        // Clear any syntax errors that occurred in the range of the expression
+        // being reinterpreted as a binding pattern. This matches C++'s behavior
+        // where errors like duplicate __proto__ in object literals are cleared
+        // when the object is reinterpreted as an assignment target.
+        let end_line = self.current_token.line_number;
+        let end_column = self.current_token.line_column;
+        self.errors.retain(|e| {
+            !(e.line > start.line || (e.line == start.line && e.column >= start.column))
+                || (e.line > end_line || (e.line == end_line && e.column >= end_column))
+        });
+
         let saved_lexer = std::mem::replace(
             &mut self.lexer,
             Lexer::new_at_offset(self.source, start.offset as usize, start.line, start.column),
@@ -910,6 +921,8 @@ impl<'a> Parser<'a> {
                 | TokenType::With
                 | TokenType::Debugger
                 | TokenType::Semicolon
+                | TokenType::Slash
+                | TokenType::SlashEquals
         ) || self.match_expression()
     }
 

@@ -31,7 +31,9 @@ impl<'a> Parser<'a> {
             | TokenType::ParenOpen
             | TokenType::CurlyOpen
             | TokenType::BracketOpen
-            | TokenType::PrivateIdentifier => true,
+            | TokenType::PrivateIdentifier
+            | TokenType::Slash
+            | TokenType::SlashEquals => true,
 
             TokenType::Async => true,
             TokenType::Yield => true,
@@ -136,7 +138,10 @@ impl<'a> Parser<'a> {
         }
 
         if !should_continue {
-            return expression;
+            // Yield/Await expressions don't participate in secondary expression
+            // parsing (e.g. member access), but they DO participate in comma
+            // expressions (e.g. `yield 1, yield 2`). Check for comma here.
+            return self.parse_comma_expression(lhs_start, expression, min_precedence, forbidden);
         }
 
         let expression = self.parse_tagged_template_literals(lhs_start, expression);
@@ -173,6 +178,16 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.parse_comma_expression(lhs_start, expression, min_precedence, forbidden)
+    }
+
+    fn parse_comma_expression(
+        &mut self,
+        start: Position,
+        expression: Expression,
+        min_precedence: i32,
+        forbidden: ForbiddenTokens,
+    ) -> Expression {
         if min_precedence <= 1 && self.match_token(TokenType::Comma) && forbidden.allows(TokenType::Comma) {
             let mut expressions = vec![expression];
             while self.match_token(TokenType::Comma) {
@@ -180,9 +195,8 @@ impl<'a> Parser<'a> {
                 expressions.push(self.parse_expression(2, Associativity::Right, forbidden));
             }
             self.last_parsed_identifier_is_eval = false;
-            return self.expression(lhs_start, ExpressionKind::Sequence(expressions));
+            return self.expression(start, ExpressionKind::Sequence(expressions));
         }
-
         expression
     }
 
@@ -401,9 +415,12 @@ impl<'a> Parser<'a> {
 
             // https://tc39.es/ecma262/#sec-async-function-definitions
             // AwaitExpression : `await` UnaryExpression
+            // NB: Unlike yield (AssignmentExpression level), await is at
+            // UnaryExpression level, so `await 1 + 2` is `(await 1) + 2`.
+            // We set should_continue=true to allow binary operators.
             TokenType::Await if self.flags.await_expression_is_valid => {
                 let expression = self.parse_await_expression();
-                (expression, false)
+                (expression, true)
             }
 
             TokenType::PrivateIdentifier => {
@@ -1055,15 +1072,7 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::Yield);
 
-        if self.current_token.trivia_has_line_terminator
-            || self.match_token(TokenType::Semicolon)
-            || self.done()
-            || self.match_token(TokenType::CurlyClose)
-            || self.match_token(TokenType::ParenClose)
-            || self.match_token(TokenType::BracketClose)
-            || self.match_token(TokenType::Comma)
-            || self.match_token(TokenType::Colon)
-        {
+        if self.current_token.trivia_has_line_terminator {
             return self.expression(start, ExpressionKind::Yield {
                 argument: None,
                 is_yield_from: false,
@@ -1075,11 +1084,18 @@ impl<'a> Parser<'a> {
             self.consume();
         }
 
-        let argument = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-        self.expression(start, ExpressionKind::Yield {
-            argument: Some(Box::new(argument)),
-            is_yield_from,
-        })
+        if is_yield_from || self.match_expression() || self.match_token(TokenType::Class) {
+            let argument = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+            self.expression(start, ExpressionKind::Yield {
+                argument: Some(Box::new(argument)),
+                is_yield_from,
+            })
+        } else {
+            self.expression(start, ExpressionKind::Yield {
+                argument: None,
+                is_yield_from: false,
+            })
+        }
     }
 
     /// Parse an `await` expression.
@@ -1679,7 +1695,10 @@ impl<'a> Parser<'a> {
         let start = source_start_override.unwrap_or_else(|| self.position());
 
         if !expect_parens && !is_async {
-            if !self.match_identifier() {
+            if !self.match_identifier()
+                && !self.match_token(TokenType::Await)
+                && !self.match_token(TokenType::Yield)
+            {
                 return None;
             }
             let next = self.next_token();
@@ -1717,9 +1736,13 @@ impl<'a> Parser<'a> {
         // Set await_expression_is_valid during parameter parsing so that
         // 'await' is rejected as an identifier in async arrow parameters.
         let saved_await = self.flags.await_expression_is_valid;
+        let saved_static_init = self.flags.in_class_static_init_block;
+        let saved_field_init = self.flags.in_class_field_initializer;
         if is_async {
             self.flags.await_expression_is_valid = true;
         }
+        self.flags.in_class_static_init_block = false;
+        self.flags.in_class_field_initializer = false;
 
         let parsed;
 
@@ -1779,12 +1802,9 @@ impl<'a> Parser<'a> {
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
         let src_start = source_start_override.unwrap_or(start).offset;
 
-        // Set context flags for the arrow body (await in async, no
-        // class static init block).
+        // Set context flags for the arrow body.
         let saved_await_body = self.flags.await_expression_is_valid;
-        let saved_static_init = self.flags.in_class_static_init_block;
         self.flags.await_expression_is_valid = is_async;
-        self.flags.in_class_static_init_block = false;
 
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);
@@ -1797,6 +1817,7 @@ impl<'a> Parser<'a> {
 
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
+            self.flags.in_class_field_initializer = saved_field_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
@@ -1834,6 +1855,7 @@ impl<'a> Parser<'a> {
 
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
+            self.flags.in_class_field_initializer = saved_field_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
@@ -1866,10 +1888,14 @@ impl<'a> Parser<'a> {
         let await_before = self.flags.await_expression_is_valid;
         let saved_static_init = self.flags.in_class_static_init_block;
         let saved_field_init = self.flags.in_class_field_initializer;
+        let saved_allow_super_call = self.flags.allow_super_constructor_call;
+        let saved_allow_super_lookup = self.flags.allow_super_property_lookup;
         self.flags.in_generator_function_context = is_generator;
         self.flags.await_expression_is_valid = is_async;
         self.flags.in_class_static_init_block = false;
         self.flags.in_class_field_initializer = false;
+        self.flags.allow_super_constructor_call = method_kind == MethodKind::Constructor && self.class_has_super_class;
+        self.flags.allow_super_property_lookup = true;
 
         let parsed = self.parse_formal_parameters();
 
@@ -1886,11 +1912,6 @@ impl<'a> Parser<'a> {
 
         self.flags.in_generator_function_context = in_generator_before;
         self.flags.await_expression_is_valid = await_before;
-
-        let saved_allow_super_call = self.flags.allow_super_constructor_call;
-        let saved_allow_super_lookup = self.flags.allow_super_property_lookup;
-        self.flags.allow_super_constructor_call = method_kind == MethodKind::Constructor && self.class_has_super_class;
-        self.flags.allow_super_property_lookup = true;
 
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
         self.flags.allow_super_constructor_call = saved_allow_super_call;

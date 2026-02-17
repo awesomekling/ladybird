@@ -314,7 +314,10 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::ParenOpen);
         let test = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
         self.consume_token(TokenType::ParenClose);
-        self.consume_or_insert_semicolon();
+
+        // Since ES 2015 a missing semicolon is inserted here, despite
+        // the regular ASI rules not applying.
+        self.eat(TokenType::Semicolon);
 
         self.statement(start, StatementKind::DoWhile {
             test: Box::new(test),
@@ -353,7 +356,8 @@ impl<'a> Parser<'a> {
         let init_start = self.position();
         let is_var_init = self.match_token(TokenType::Var);
         let is_using = self.match_for_using_declaration();
-        let is_declaration = is_var_init || is_using || self.match_token(TokenType::Let) || self.match_token(TokenType::Const);
+        let is_let = self.match_token(TokenType::Let) && (self.flags.strict_mode || self.try_match_let_declaration());
+        let is_declaration = is_var_init || is_using || is_let || self.match_token(TokenType::Const);
         let init = if is_using {
             LocalForInit::Declaration(self.parse_using_declaration(true))
         } else if is_declaration {
@@ -759,14 +763,8 @@ impl<'a> Parser<'a> {
             self.syntax_error("Label has already been declared");
         }
 
-        if self.match_token(TokenType::Function) {
-            if !allow_labelled_function || self.flags.strict_mode {
-                self.syntax_error("Not allowed to declare a function here");
-            }
-            let next = self.next_token();
-            if next.token_type == TokenType::Asterisk {
-                self.syntax_error("Generator functions cannot be defined in labelled statements");
-            }
+        if self.match_token(TokenType::Function) && (!allow_labelled_function || self.flags.strict_mode) {
+            self.syntax_error("Not allowed to declare a function here");
         }
         if self.match_token(TokenType::Async) {
             let next = self.next_token();
@@ -782,7 +780,23 @@ impl<'a> Parser<'a> {
 
         let body_starts_iteration = self.match_iteration_start();
         self.last_inner_label_is_iteration = false;
-        let body = self.parse_statement(allow_labelled_function);
+        let body = if self.match_token(TokenType::Function) {
+            let fn_decl = self.parse_function_declaration();
+            if let StatementKind::FunctionDeclaration(ref f) = fn_decl.inner {
+                match f.kind {
+                    FunctionKind::Generator | FunctionKind::AsyncGenerator => {
+                        self.syntax_error("Generator functions cannot be defined in labelled statements");
+                    }
+                    FunctionKind::Async => {
+                        self.syntax_error("Async functions cannot be defined in labelled statements");
+                    }
+                    _ => {}
+                }
+            }
+            fn_decl
+        } else {
+            self.parse_statement(allow_labelled_function)
+        };
 
         let is_iteration = body_starts_iteration || self.last_inner_label_is_iteration;
         if !is_iteration {

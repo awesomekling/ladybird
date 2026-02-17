@@ -434,6 +434,12 @@ impl<'a> Parser<'a> {
             let token = self.consume();
             fn_name_value = self.token_value(&token).to_vec();
             Some(self.make_identifier(start, fn_name_value.clone()))
+        } else if self.match_token(TokenType::Yield) || self.match_token(TokenType::Await) {
+            // C++ explicitly allows yield/await as function expression names
+            // even inside generator/async contexts, then validates after.
+            let token = self.consume();
+            fn_name_value = self.token_value(&token).to_vec();
+            Some(self.make_identifier(start, fn_name_value.clone()))
         } else {
             None
         };
@@ -1072,7 +1078,11 @@ impl<'a> Parser<'a> {
             let default_value = if !rest && self.match_token(TokenType::Equals) {
                 self.consume();
                 has_seen_default = true;
-                Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in()))
+                let saved_in_function = self.flags.in_function_context;
+                self.flags.in_function_context = true;
+                let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in());
+                self.flags.in_function_context = saved_in_function;
+                Some(expr)
             } else {
                 None
             };
