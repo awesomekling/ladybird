@@ -7600,6 +7600,21 @@ fn constant_to_number(val: &ConstantValue) -> Option<f64> {
     }
 }
 
+/// Convert a constant value to a JS string (ToString) for string concatenation.
+/// Returns None for types where ToString requires runtime (e.g. objects).
+fn constant_to_string(val: &ConstantValue) -> Option<Utf16String> {
+    match val {
+        ConstantValue::String(s) => Some(s.clone()),
+        ConstantValue::Number(n) => Some(super::ffi::js_number_to_utf16(*n)),
+        ConstantValue::Boolean(b) => {
+            Some(if *b { Utf16String(utf16!("true").to_vec()) } else { Utf16String(utf16!("false").to_vec()) })
+        }
+        ConstantValue::Null => Some(Utf16String(utf16!("null").to_vec())),
+        ConstantValue::Undefined => Some(Utf16String(utf16!("undefined").to_vec())),
+        _ => None,
+    }
+}
+
 fn try_constant_fold_binary(
     gen: &mut Generator,
     op: BinaryOp,
@@ -7610,30 +7625,13 @@ fn try_constant_fold_binary(
     let rhs_const = gen.get_constant(rhs)?;
     match op {
         BinaryOp::Addition => {
-            // String concatenation and string coercion cases
-            match (lhs_const, rhs_const) {
-                (ConstantValue::String(a), ConstantValue::String(b)) => {
-                    let mut result = a.clone();
-                    result.0.extend_from_slice(b);
-                    return Some(gen.add_constant_string(result));
-                }
-                (ConstantValue::String(a), _) => {
-                    if let Some(n) = constant_to_number(rhs_const) {
-                        let mut result = a.clone();
-                        result.0.extend_from_slice(&super::ffi::js_number_to_utf16(n));
-                        return Some(gen.add_constant_string(result));
-                    }
-                    return None;
-                }
-                (_, ConstantValue::String(b)) => {
-                    if let Some(n) = constant_to_number(lhs_const) {
-                        let mut result = super::ffi::js_number_to_utf16(n);
-                        result.0.extend_from_slice(b);
-                        return Some(gen.add_constant_string(result));
-                    }
-                    return None;
-                }
-                _ => {}
+            // If either operand is a string, do string concatenation using ToString.
+            if matches!(lhs_const, ConstantValue::String(_)) || matches!(rhs_const, ConstantValue::String(_)) {
+                let a = constant_to_string(lhs_const)?;
+                let b = constant_to_string(rhs_const)?;
+                let mut result = a;
+                result.0.extend_from_slice(&b);
+                return Some(gen.add_constant_string(result));
             }
             // Numeric addition: both operands coerced to number
             let a = constant_to_number(lhs_const)?;
@@ -7706,11 +7704,20 @@ fn try_constant_fold_binary(
             Some(gen.add_constant_boolean(a <= b))
         }
         BinaryOp::LooselyEquals => {
+            // Null/undefined are only loosely equal to each other, nothing else.
+            if matches!(lhs_const, ConstantValue::Null | ConstantValue::Undefined)
+                || matches!(rhs_const, ConstantValue::Null | ConstantValue::Undefined)
+            {
+                let result = matches!(
+                    (lhs_const, rhs_const),
+                    (ConstantValue::Null, ConstantValue::Null)
+                        | (ConstantValue::Null, ConstantValue::Undefined)
+                        | (ConstantValue::Undefined, ConstantValue::Null)
+                        | (ConstantValue::Undefined, ConstantValue::Undefined)
+                );
+                return Some(gen.add_constant_boolean(result));
+            }
             match (lhs_const, rhs_const) {
-                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
-                (ConstantValue::Null, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
-                (ConstantValue::Undefined, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
-                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
                 (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a == b)),
                 _ => {
                     let a = constant_to_number(lhs_const)?;
@@ -7720,11 +7727,20 @@ fn try_constant_fold_binary(
             }
         }
         BinaryOp::LooselyInequals => {
+            // Null/undefined are only loosely equal to each other, nothing else.
+            if matches!(lhs_const, ConstantValue::Null | ConstantValue::Undefined)
+                || matches!(rhs_const, ConstantValue::Null | ConstantValue::Undefined)
+            {
+                let result = !matches!(
+                    (lhs_const, rhs_const),
+                    (ConstantValue::Null, ConstantValue::Null)
+                        | (ConstantValue::Null, ConstantValue::Undefined)
+                        | (ConstantValue::Undefined, ConstantValue::Null)
+                        | (ConstantValue::Undefined, ConstantValue::Undefined)
+                );
+                return Some(gen.add_constant_boolean(result));
+            }
             match (lhs_const, rhs_const) {
-                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
-                (ConstantValue::Null, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
-                (ConstantValue::Undefined, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
-                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
                 (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a != b)),
                 _ => {
                     let a = constant_to_number(lhs_const)?;
