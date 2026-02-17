@@ -10,7 +10,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, PropertyKey};
+use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, PropertyKey, is_strict_reserved_word};
 use crate::token::{Token, TokenType};
 
 impl<'a> Parser<'a> {
@@ -1315,6 +1315,12 @@ impl<'a> Parser<'a> {
         // Shorthand property: { x }
         // Only identifiers can be shorthand properties, not string/numeric literals.
         if let Some(kv) = key_value.filter(|_| is_identifier) {
+            // https://tc39.es/ecma262/#sec-object-initializer-static-semantics-early-errors
+            // Strict-mode reserved words cannot be used as shorthand properties.
+            if self.flags.strict_mode && is_strict_reserved_word(&kv) {
+                let name_str = String::from_utf16_lossy(&kv);
+                self.syntax_error(&format!("'{}' is a reserved keyword", name_str));
+            }
             let id = self.make_identifier(obj_start, kv);
             self.scope_collector.register_identifier(id.clone(), &id.name, None);
             let value = self.expression(obj_start, ExpressionKind::Identifier(id));
@@ -1421,13 +1427,17 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 if self.match_identifier_name() {
+                    // is_identifier is true only for valid identifier references (not just
+                    // identifier names). This matters for shorthand properties: { await }
+                    // is not valid in class static blocks since await is not an identifier there.
+                    let is_ident = self.match_identifier();
                     let token = self.consume();
                     let value = self.token_value(&token).to_vec();
                     let is_proto = value == proto_name;
                     // C++ uses the object expression start position for identifier-name keys.
                     let key_start = ident_pos_override.unwrap_or(start);
                     let expression = self.expression(key_start, ExpressionKind::StringLiteral(value.clone().into()));
-                    PropertyKey { expression, name: Some(value), is_proto, is_computed: false, is_identifier: true }
+                    PropertyKey { expression, name: Some(value), is_proto, is_computed: false, is_identifier: is_ident }
                 } else {
                     self.expected("property key");
                     self.consume();
@@ -1754,7 +1764,10 @@ impl<'a> Parser<'a> {
         if is_async {
             self.flags.await_expression_is_valid = true;
         }
-        self.flags.in_class_static_init_block = false;
+        // NB: Do NOT clear in_class_static_init_block here. Arrow functions don't
+        // create a new `await` boundary, so `await` in parameter defaults must still
+        // be rejected inside class static initializer blocks. The flag is cleared
+        // below, after parameter parsing, for the arrow body only.
 
         let parsed;
 
@@ -1817,6 +1830,7 @@ impl<'a> Parser<'a> {
         // Set context flags for the arrow body.
         let saved_await_body = self.flags.await_expression_is_valid;
         self.flags.await_expression_is_valid = is_async;
+        self.flags.in_class_static_init_block = false;
 
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);

@@ -578,6 +578,13 @@ impl<'a> Parser<'a> {
         let class_name_for_scope = if name_value.is_empty() { None } else { Some(name_value.as_slice()) };
         self.scope_collector.open_class_declaration_scope(class_name_for_scope);
 
+        if name_id.is_some() {
+            self.check_identifier_name_for_assignment_validity(&name_value, true);
+            if self.flags.in_class_static_init_block && name_value == utf16!("await") {
+                self.syntax_error("Identifier must not be a reserved word in modules ('await')");
+            }
+        }
+
         let super_class = if self.match_token(TokenType::Extends) {
             self.consume();
             Some(Box::new(self.parse_expression(0, Associativity::Right, ForbiddenTokens::none())))

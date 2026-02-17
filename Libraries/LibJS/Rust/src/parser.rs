@@ -1059,7 +1059,7 @@ fn is_use_strict(raw: &[u16]) -> bool {
 // https://tc39.es/ecma262/#sec-keywords-and-reserved-words
 // In strict mode code, the following tokens are also reserved:
 // `implements` `interface` `let` `package` `private` `protected` `public` `static` `yield`
-fn is_strict_reserved_word(name: &[u16]) -> bool {
+pub(crate) fn is_strict_reserved_word(name: &[u16]) -> bool {
     name == utf16!("implements")
         || name == utf16!("interface")
         || name == utf16!("let")
