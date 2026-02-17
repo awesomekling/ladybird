@@ -5461,24 +5461,20 @@ fn generate_for_in_statement(
     gen.switch_to_basic_block(loop_continue_block);
 
     // Create per-iteration lexical environment for let/const declarations.
-    let parent_env = if needs_lexical_env {
-        Some(create_for_in_of_lexical_env(gen, lhs))
-    } else {
-        None
-    };
+    if needs_lexical_env {
+        create_for_in_of_lexical_env(gen, lhs);
+    }
 
     // Assign to LHS
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
-    // Body — use cleanup blocks for break/continue if we have a lexical env.
-    let (break_target, continue_target) = if needs_lexical_env {
-        (gen.make_block(), gen.make_block())
-    } else {
-        (end_block, update_block)
-    };
+    // Body — break/continue handle environment restoration via LeaveLexicalEnvironment boundary.
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone(), completion.clone());
-    gen.begin_breakable_scope(Label(break_target as u32), labels, completion.clone());
+    gen.begin_continuable_scope(Label(update_block as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    if needs_lexical_env {
+        gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+    }
 
     let saved_completion = gen.current_completion_register.clone();
     if let Some(ref c) = completion {
@@ -5492,27 +5488,21 @@ fn generate_for_in_statement(
     }
     gen.current_completion_register = saved_completion;
 
+    if needs_lexical_env {
+        gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+        gen.lexical_environment_register_stack.pop();
+        if !gen.is_current_block_terminated() {
+            let parent = gen.current_lexical_environment();
+            gen.emit(Instruction::SetLexicalEnvironment {
+                environment: parent.operand(),
+            });
+        }
+    }
+
     gen.end_breakable_scope();
     gen.end_continuable_scope();
 
-    if needs_lexical_env {
-        let parent = parent_env.as_ref().expect("parent_env must be set when restoring lexical environment");
-        if !gen.is_current_block_terminated() {
-            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-            gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-        }
-        gen.lexical_environment_register_stack.pop();
-
-        // Break cleanup: restore environment then jump to end.
-        gen.switch_to_basic_block(break_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-
-        // Continue cleanup: restore environment then jump to update.
-        gen.switch_to_basic_block(continue_target);
-        gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
-    } else if !gen.is_current_block_terminated() {
+    if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump { target: Label(update_block as u32) });
     }
 
