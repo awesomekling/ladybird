@@ -116,32 +116,28 @@ fn check_errors(parser: &mut Parser, context: &str) -> bool {
 /// Check for errors, optionally reporting them via a C++ callback.
 fn check_errors_with_callback(
     parser: &mut Parser,
-    context: &str,
+    _context: &str,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
 ) -> bool {
     if parser.has_errors() {
-        for err in parser.errors() {
-            if let Some(cb) = error_callback {
+        if let Some(cb) = error_callback {
+            for err in parser.errors() {
                 let msg = &err.message;
                 unsafe {
                     cb(error_context, msg.as_ptr(), msg.len(), err.line, err.column);
                 }
-            } else {
-                eprintln!("[{context}] parse error: {}:{}: {}", err.line, err.column, err.message);
             }
         }
         return true;
     }
     if parser.scope_collector.has_errors() {
-        for err in parser.scope_collector.drain_errors() {
-            if let Some(cb) = error_callback {
+        if let Some(cb) = error_callback {
+            for err in parser.scope_collector.drain_errors() {
                 let msg = &err.message;
                 unsafe {
                     cb(error_context, msg.as_ptr(), msg.len(), err.line, err.column);
                 }
-            } else {
-                eprintln!("[{context}] scope error: {}:{}: {}", err.line, err.column, err.message);
             }
         }
         return true;
