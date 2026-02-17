@@ -2674,8 +2674,10 @@ fn generate_call_expression(
 
         let mut pre_holders = Vec::new();
         for argument in &data.arguments[..first_spread] {
+            let reg = gen.allocate_register();
             let val = generate_expression_or_undefined(&argument.value, gen, None);
-            pre_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
+            gen.emit_mov(&reg, &val);
+            pre_holders.push(reg);
         }
         let pre_arguments: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
         gen.emit(Instruction::NewArray {
@@ -2683,7 +2685,6 @@ fn generate_call_expression(
             element_count: pre_arguments.len() as u32,
             elements: pre_arguments,
         });
-        drop(pre_holders);
 
         for argument in &data.arguments[first_spread..] {
             let val = generate_expression_or_undefined(&argument.value, gen, None);
@@ -2693,6 +2694,7 @@ fn generate_call_expression(
                 is_spread: argument.is_spread,
             });
         }
+        drop(pre_holders);
 
         if is_new {
             gen.emit(Instruction::CallConstructWithArgumentArray {
