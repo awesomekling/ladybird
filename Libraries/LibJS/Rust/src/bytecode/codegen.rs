@@ -4594,13 +4594,23 @@ fn generate_optional_chain_inner(
     // Evaluate base expression.
     let new_current_value = match &base.inner {
         ExpressionKind::Member { object, property, computed } => {
+            let is_super = matches!(object.inner, ExpressionKind::Super);
+            // For super property access, resolve this binding first (before
+            // ResolveSuperBase) to match C++ evaluation order.
+            let this_value = if is_super { Some(emit_resolve_this_binding(gen)) } else { None };
             let obj = generate_expression(object, gen, None)?;
             let val = gen.allocate_register();
-            if *computed {
+            if is_super {
+                let this_value = this_value.unwrap();
+                emit_super_get(gen, &val, &obj, property, *computed, &this_value);
+                gen.emit_mov(current_base, &this_value);
+            } else if *computed {
                 let property = generate_expression(property, gen, None)?;
                 emit_get_by_value(gen, &val, &obj, &property, None);
+                gen.emit_mov(current_base, &obj);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 emit_get_by_id(gen, &val, &obj, &ident.name, None);
+                gen.emit_mov(current_base, &obj);
             } else if let ExpressionKind::PrivateIdentifier(name) = &property.inner {
                 let id = gen.intern_identifier(&name.name);
                 gen.emit(Instruction::GetPrivateById {
@@ -4608,11 +4618,12 @@ fn generate_optional_chain_inner(
                     base: obj.operand(),
                     property: id,
                 });
+                gen.emit_mov(current_base, &obj);
             } else {
                 let property = generate_expression(property, gen, None)?;
                 emit_get_by_value(gen, &val, &obj, &property, None);
+                gen.emit_mov(current_base, &obj);
             }
-            gen.emit_mov(current_base, &obj);
             val
         }
         ExpressionKind::OptionalChain { base: inner_base, references: inner_refs } => {
