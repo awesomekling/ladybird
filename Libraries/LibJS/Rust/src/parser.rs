@@ -672,6 +672,25 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Check for duplicate parameter names in arrow functions.
+    /// Arrow functions always reject duplicates, regardless of strict mode.
+    pub(crate) fn check_arrow_duplicate_parameters(&mut self, parameter_info: &[ParamInfo]) {
+        let mut seen_names: HashSet<&[u16]> = HashSet::new();
+        for pi in parameter_info {
+            let name = &pi.name;
+            if name.is_empty() {
+                continue;
+            }
+            if !seen_names.insert(&**name) {
+                let name_str = String::from_utf16_lossy(name);
+                self.syntax_error(&format!(
+                    "Duplicate parameter '{}' not allowed in arrow function",
+                    name_str
+                ));
+            }
+        }
+    }
+
     /// Post-body check for function parameters when 'use strict' was found in the
     /// body or the function is a generator/async.
     pub(crate) fn check_parameters_post_body(

@@ -1087,12 +1087,12 @@ impl<'a> Parser<'a> {
     //                  | FormalParameterList `,` FunctionRestParameter
     pub(crate) fn parse_formal_parameters(&mut self) -> ParsedParameters {
         self.consume_token(TokenType::ParenOpen);
-        let result = self.parse_formal_parameters_without_parens();
+        let result = self.parse_formal_parameters_impl(false);
         self.consume_token(TokenType::ParenClose);
         result
     }
 
-    pub(crate) fn parse_formal_parameters_without_parens(&mut self) -> ParsedParameters {
+    pub(crate) fn parse_formal_parameters_impl(&mut self, is_arrow: bool) -> ParsedParameters {
         let saved_formal_parameter_ctx = self.flags.in_formal_parameter_context;
         self.flags.in_formal_parameter_context = true;
 
@@ -1120,6 +1120,9 @@ impl<'a> Parser<'a> {
         loop {
             let parameter_start = self.position();
             let rest = self.eat(TokenType::TripleDot);
+            if rest {
+                has_seen_rest = true;
+            }
 
             let (binding, _is_pat) = if self.match_identifier()
                 || self.match_token(TokenType::Await)
@@ -1147,7 +1150,10 @@ impl<'a> Parser<'a> {
                 // It is a Syntax Error if IsSimpleParameterList is false and
                 // BoundNames of FormalParameters contains any duplicate elements.
                 // In strict mode, duplicates are always an error.
-                if seen_parameter_names.contains(value.as_slice()) {
+                // Arrow functions check duplicates post-confirmation (after =>).
+                // Inline duplicate checks would cause speculative arrow parsing
+                // to bail out, so skip them when is_arrow is true.
+                if !is_arrow && seen_parameter_names.contains(value.as_slice()) {
                     if self.flags.strict_mode {
                         let name_str = String::from_utf16_lossy(&value);
                         self.syntax_error(&format!("Duplicate parameter '{}' not allowed in strict mode", name_str));
@@ -1198,10 +1204,6 @@ impl<'a> Parser<'a> {
                 default_value,
                 is_rest: rest,
             });
-
-            if rest {
-                has_seen_rest = true;
-            }
 
             if rest || !self.match_token(TokenType::Comma) {
                 break;

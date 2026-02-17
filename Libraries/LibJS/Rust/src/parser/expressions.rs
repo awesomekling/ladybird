@@ -1773,7 +1773,7 @@ impl<'a> Parser<'a> {
 
         if expect_parens {
             let previous_errors = self.errors.len();
-            parsed = self.parse_formal_parameters_without_parens();
+            parsed = self.parse_formal_parameters_impl(true);
             if self.errors.len() > previous_errors {
                 self.load_state();
                 return None;
@@ -1821,6 +1821,9 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
 
         let ParsedParameters { parameters, function_length, parameter_info, is_simple } = parsed;
+
+        // Arrow functions always reject duplicate parameter names.
+        self.check_arrow_duplicate_parameters(&parameter_info);
 
         self.register_function_parameters_with_scope(&parameters, &parameter_info);
 
