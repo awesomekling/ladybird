@@ -1716,6 +1716,8 @@ impl<'a> Parser<'a> {
             return None;
         }
 
+        // Restore await flag during arrow-check; it will be set
+        // again for the body below.
         self.flags.await_expression_is_valid = saved_await;
 
         // [no LineTerminator here] before `=>`
@@ -1734,6 +1736,13 @@ impl<'a> Parser<'a> {
         let fn_kind = if is_async { FunctionKind::Async } else { FunctionKind::Normal };
         let src_start = source_start_override.unwrap_or(start).offset;
 
+        // Set context flags for the arrow body (await in async, no
+        // class static init block).
+        let saved_await_body = self.flags.await_expression_is_valid;
+        let saved_static_init = self.flags.in_class_static_init_block;
+        self.flags.await_expression_is_valid = is_async;
+        self.flags.in_class_static_init_block = false;
+
         if self.match_token(TokenType::CurlyOpen) {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);
 
@@ -1743,6 +1752,8 @@ impl<'a> Parser<'a> {
                 self.check_parameters_post_body(&parameter_info, has_use_strict, fn_kind);
             }
 
+            self.flags.await_expression_is_valid = saved_await_body;
+            self.flags.in_class_static_init_block = saved_static_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
@@ -1778,6 +1789,8 @@ impl<'a> Parser<'a> {
 
             self.scope_collector.close_scope();
 
+            self.flags.await_expression_is_valid = saved_await_body;
+            self.flags.in_class_static_init_block = saved_static_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
             Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
                 name: None,
