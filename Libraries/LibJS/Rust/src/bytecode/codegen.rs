@@ -781,21 +781,24 @@ pub fn generate_statement(
         // === Return ===
         StatementKind::Return(value) => {
             let mut val = match value {
-                Some(expression) => generate_expression_or_undefined(expression, gen, None),
+                Some(expression) => {
+                    let v = generate_expression_or_undefined(expression, gen, None);
+                    // Async functions implicitly await an explicit return value.
+                    // Bare `return;` does NOT await (matches C++ and spec).
+                    if gen.is_in_async_function() {
+                        let received_completion = gen.allocate_register();
+                        let received_completion_type = gen.allocate_register();
+                        let received_completion_value = gen.allocate_register();
+                        generate_await_with_completions(
+                            gen, &v,
+                            &received_completion, &received_completion_type, &received_completion_value,
+                        )
+                    } else {
+                        v
+                    }
+                }
                 None => gen.add_constant_undefined(),
             };
-            // Async functions implicitly await the return value.
-            // Match C++ ReturnStatement::generate_bytecode which allocates
-            // completion registers here (not inside generate_await).
-            if gen.is_in_async_function() {
-                let received_completion = gen.allocate_register();
-                let received_completion_type = gen.allocate_register();
-                let received_completion_value = gen.allocate_register();
-                val = generate_await_with_completions(
-                    gen, &val,
-                    &received_completion, &received_completion_type, &received_completion_value,
-                );
-            }
             gen.generate_return(&val);
             None
         }
