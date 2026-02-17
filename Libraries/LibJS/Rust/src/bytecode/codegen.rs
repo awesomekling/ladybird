@@ -7892,10 +7892,7 @@ fn expression_identifier(expression: &Expression) -> Option<Utf16String> {
             result.0.extend_from_slice(utf16!("'"));
             Some(result)
         }
-        ExpressionKind::NumericLiteral(n) => {
-            let s = format!("{}", n);
-            Some(s.encode_utf16().collect())
-        }
+        ExpressionKind::NumericLiteral(n) => Some(super::ffi::js_number_to_utf16(*n)),
         ExpressionKind::This => Some(Utf16String(utf16!("this").to_vec())),
         ExpressionKind::Member { object, property, computed } => {
             let mut s = Utf16String::new();
