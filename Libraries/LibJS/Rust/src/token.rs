@@ -441,6 +441,8 @@ pub struct Token {
     /// Decoded identifier value, set when the identifier contains unicode
     /// escape sequences (e.g. `l\u0065t` → `let`).
     pub identifier_value: Option<Vec<u16>>,
+    /// Error message for Invalid tokens (e.g. "Unterminated multi-line comment").
+    pub message: Option<std::string::String>,
 }
 
 impl Token {
@@ -456,6 +458,7 @@ impl Token {
             offset: 0,
             trivia_has_line_terminator: false,
             identifier_value: None,
+            message: None,
         }
     }
 }

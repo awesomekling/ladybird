@@ -179,7 +179,8 @@ impl<'a> Parser<'a> {
             let label_value = self.token_value(&token).to_vec();
 
             if !self.labels_in_scope.contains_key(&label_value) {
-                self.syntax_error("Label not found");
+                let label_str = String::from_utf16_lossy(&label_value);
+                self.syntax_error(&format!("Label '{}' not found", label_str));
             }
 
             self.consume_or_insert_semicolon();
@@ -220,7 +221,8 @@ impl<'a> Parser<'a> {
             if let Some(entry) = self.labels_in_scope.get_mut(&label_value) {
                 *entry = Some((label_line, label_col));
             } else {
-                self.syntax_error("Label not found or invalid");
+                let label_str = String::from_utf16_lossy(&label_value);
+                self.syntax_error(&format!("Label '{}' not found or invalid", label_str));
             }
 
             Some(label_value)
@@ -761,7 +763,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.labels_in_scope.contains_key(&label) {
-            self.syntax_error("Label has already been declared");
+            let label_str = String::from_utf16_lossy(&label);
+            self.syntax_error(&format!("Label '{}' has already been declared", label_str));
         }
 
         if self.match_token(TokenType::Function) && (!allow_labelled_function || self.flags.strict_mode) {

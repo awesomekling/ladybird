@@ -825,6 +825,7 @@ impl<'a> Lexer<'a> {
         let in_template = !self.template_states.is_empty();
         let mut line_has_token_yet = self.line_column > 1;
         let mut unterminated_comment = false;
+        let mut token_message: Option<String> = None;
 
         if !in_template || self.template_states.last().expect("template_states must not be empty").in_expression {
             loop {
@@ -956,7 +957,7 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::PrivateIdentifier;
             } else {
                 token_type = TokenType::Invalid;
-                // token_message = StartOfPrivateNameNotFollowedByValidIdentifier
+                token_message = Some("Start of private name '#' but not followed by valid identifier".to_string());
             }
         } else if let Some((_cp, len)) = self.is_identifier_start() {
             let has_escape = self.scan_identifier_body(len);
@@ -1040,7 +1041,7 @@ impl<'a> Lexer<'a> {
             }
             if is_invalid {
                 token_type = TokenType::Invalid;
-                // token_message = InvalidNumericLiteral
+                token_message = Some("Invalid numeric literal".to_string());
             }
         } else if self.current_code_unit == b'"' as u16 || self.current_code_unit == b'\'' as u16 {
             let stop_char = self.current_code_unit;
@@ -1073,7 +1074,7 @@ impl<'a> Lexer<'a> {
         } else if self.eof {
             if unterminated_comment {
                 token_type = TokenType::Invalid;
-                // token_message = UnterminatedMultiLineComment
+                token_message = Some("Unterminated multi-line comment".to_string());
             } else {
                 token_type = TokenType::Eof;
             }
@@ -1167,6 +1168,7 @@ impl<'a> Lexer<'a> {
             offset: value_start.saturating_sub(1) as u32,
             trivia_has_line_terminator,
             identifier_value,
+            message: token_message,
         }
     }
 
@@ -1256,6 +1258,7 @@ impl<'a> Lexer<'a> {
             offset: value_start.saturating_sub(1) as u32,
             trivia_has_line_terminator: false,
             identifier_value: None,
+            message: None,
         }
     }
 }
