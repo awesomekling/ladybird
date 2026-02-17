@@ -6405,9 +6405,15 @@ fn generate_object_binding_pattern(
             Some(BindingEntryName::Expression(expression)) => {
                 let property_name = generate_expression_or_undefined(expression, gen, None);
                 if has_rest {
-                    let excluded_name = gen.allocate_register();
-                    gen.emit_mov(&excluded_name, &property_name);
-                    excluded_names.push(excluded_name);
+                    // Only copy to a new register if the property name is a local variable,
+                    // since locals can be reassigned. Registers are temporaries and won't change.
+                    if property_name.operand().is_local() {
+                        let excluded_name = gen.allocate_register();
+                        gen.emit_mov(&excluded_name, &property_name);
+                        excluded_names.push(excluded_name);
+                    } else {
+                        excluded_names.push(property_name.clone());
+                    }
                 }
                 emit_get_by_value(gen, &value, object, &property_name, None);
             }
