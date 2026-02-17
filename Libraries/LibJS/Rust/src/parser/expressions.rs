@@ -523,7 +523,7 @@ impl<'a> Parser<'a> {
                     self.scope_collector.register_identifier(id.clone(), &value, None);
                     (self.expression(start, ExpressionKind::Identifier(id)), true)
                 } else {
-                    self.expected("expression");
+                    self.expected("primary expression");
                     self.consume();
                     (self.expression(start, ExpressionKind::Error), true)
                 }

@@ -478,7 +478,7 @@ impl<'a> Parser<'a> {
         {
             return;
         }
-        self.expected("semicolon");
+        self.expected("Semicolon");
     }
 
     // === Lookahead ===

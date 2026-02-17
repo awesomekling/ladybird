@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
 
                 VariableDeclaratorTarget::BindingPattern(pat)
             } else {
-                self.expected("variable name");
+                self.expected("identifier or a binding pattern");
                 self.consume();
                 let id = self.make_identifier(declaration_start, Vec::new());
                 VariableDeclaratorTarget::Identifier(id)
