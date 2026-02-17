@@ -230,7 +230,10 @@ impl ScopeRecord {
     }
 
     fn variable(&mut self, name: &[u16]) -> &mut ScopeVariable {
-        self.variables.entry(name.to_vec()).or_default()
+        if !self.variables.contains_key(name) {
+            self.variables.insert(name.to_vec(), ScopeVariable::default());
+        }
+        self.variables.get_mut(name).unwrap()
     }
 
     fn has_flag(&self, name: &[u16], flags: VarFlags) -> bool {
