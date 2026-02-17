@@ -666,7 +666,7 @@ impl<'a> Parser<'a> {
                 self.syntax_error("Binding pattern target may not be called 'arguments' or 'eval' in strict mode");
             } else if is_strict_reserved_word(name) {
                 let name_str = String::from_utf16_lossy(name);
-                self.syntax_error(&format!("Binding pattern target may not be called '{}' in strict mode", name_str));
+                self.syntax_error(&format!("Identifier must not be a reserved word in strict mode ('{}')", name_str));
             }
         }
     }
