@@ -187,11 +187,15 @@ fn is_identifier_continue_cp(cp: u32) -> bool {
 }
 
 fn unicode_id_start(cp: u32) -> bool {
-    char::from_u32(cp).is_some_and(unicode_ident::is_xid_start)
+    // NB: The ECMAScript spec requires ID_Start, not XID_Start.
+    //     U+309B and U+309C are Other_ID_Start (thus ID_Start) but not XID_Start.
+    cp == 0x309B || cp == 0x309C || char::from_u32(cp).is_some_and(unicode_ident::is_xid_start)
 }
 
 fn unicode_id_continue(cp: u32) -> bool {
-    char::from_u32(cp).is_some_and(unicode_ident::is_xid_continue)
+    // NB: The ECMAScript spec requires ID_Continue, not XID_Continue.
+    //     U+309B and U+309C are Other_ID_Start (thus ID_Continue) but not XID_Continue.
+    cp == 0x309B || cp == 0x309C || char::from_u32(cp).is_some_and(unicode_ident::is_xid_continue)
 }
 
 // https://tc39.es/ecma262/#sec-keywords-and-reserved-words
