@@ -7588,14 +7588,65 @@ fn js_exponentiate(base: f64, exponent: f64) -> f64 {
     base.powf(exponent)
 }
 
+// 7.1.4.1.1 StringToNumber ( str ), https://tc39.es/ecma262/#sec-stringtonumber
+fn string_to_number(s: &Utf16String) -> f64 {
+    let text: String = char::decode_utf16(s.0.iter().copied())
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return 0.0;
+    }
+    if trimmed == "Infinity" || trimmed == "+Infinity" {
+        return f64::INFINITY;
+    }
+    if trimmed == "-Infinity" {
+        return f64::NEG_INFINITY;
+    }
+    if trimmed.len() > 2 {
+        let (prefix, rest) = trimmed.split_at(2);
+        match prefix {
+            "0b" | "0B" => {
+                return if rest.bytes().all(|b| b == b'0' || b == b'1') {
+                    u64::from_str_radix(rest, 2).map(|n| n as f64).unwrap_or(f64::NAN)
+                } else {
+                    f64::NAN
+                };
+            }
+            "0o" | "0O" => {
+                return if rest.bytes().all(|b| b.is_ascii_digit() && b < b'8') {
+                    u64::from_str_radix(rest, 8).map(|n| n as f64).unwrap_or(f64::NAN)
+                } else {
+                    f64::NAN
+                };
+            }
+            "0x" | "0X" => {
+                return if rest.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    u64::from_str_radix(rest, 16).map(|n| n as f64).unwrap_or(f64::NAN)
+                } else {
+                    f64::NAN
+                };
+            }
+            _ => {}
+        }
+    }
+    if !trimmed
+        .bytes()
+        .all(|b| b.is_ascii_digit() || b == b'.' || b == b'e' || b == b'E' || b == b'+' || b == b'-')
+    {
+        return f64::NAN;
+    }
+    trimmed.parse::<f64>().unwrap_or(f64::NAN)
+}
+
 /// Convert a constant value to a JS number for constant folding purposes.
-/// Returns None for types where ToNumber requires runtime (e.g. String, objects).
 fn constant_to_number(val: &ConstantValue) -> Option<f64> {
     match val {
         ConstantValue::Number(n) => Some(*n),
         ConstantValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         ConstantValue::Null => Some(0.0),
         ConstantValue::Undefined => Some(f64::NAN),
+        ConstantValue::String(s) => Some(string_to_number(s)),
         _ => None,
     }
 }
@@ -7684,21 +7735,34 @@ fn try_constant_fold_binary(
             }
         }
         BinaryOp::GreaterThan => {
+            // String-string comparison is lexicographic (by UTF-16 code units).
+            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_boolean(a.0 > b.0));
+            }
             let a = constant_to_number(lhs_const)?;
             let b = constant_to_number(rhs_const)?;
             Some(gen.add_constant_boolean(a > b))
         }
         BinaryOp::GreaterThanEquals => {
+            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_boolean(a.0 >= b.0));
+            }
             let a = constant_to_number(lhs_const)?;
             let b = constant_to_number(rhs_const)?;
             Some(gen.add_constant_boolean(a >= b))
         }
         BinaryOp::LessThan => {
+            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_boolean(a.0 < b.0));
+            }
             let a = constant_to_number(lhs_const)?;
             let b = constant_to_number(rhs_const)?;
             Some(gen.add_constant_boolean(a < b))
         }
         BinaryOp::LessThanEquals => {
+            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
+                return Some(gen.add_constant_boolean(a.0 <= b.0));
+            }
             let a = constant_to_number(lhs_const)?;
             let b = constant_to_number(rhs_const)?;
             Some(gen.add_constant_boolean(a <= b))
