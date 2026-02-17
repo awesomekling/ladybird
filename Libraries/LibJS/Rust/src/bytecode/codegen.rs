@@ -2331,10 +2331,10 @@ fn generate_block_statement(
     result
 }
 
-/// Create a lexical environment for a block with non-local lexical declarations.
-/// Returns true if an environment was created.
-fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, environment: &ScopedOperand, children: impl Iterator<Item = &'a Statement>) {
-    let mut function_binding_created: HashSet<Utf16String> = HashSet::new();
+/// Create lexical bindings and instantiate function declarations for a block.
+/// Matches C++ behavior: for each declaration, creates bindings and immediately
+/// instantiates functions (single pass, not two separate passes).
+fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &ScopedOperand, children: impl Iterator<Item = &'a Statement>) {
     for child in children {
         match &child.inner {
             StatementKind::VariableDeclaration { kind, declarations } => {
@@ -2376,12 +2376,35 @@ fn create_lexical_bindings_for_block<'a>(gen: &mut Generator, environment: &Scop
             }
             StatementKind::FunctionDeclaration(function_data) => {
                 if let Some(ref name_ident) = function_data.name {
-                    if !name_ident.is_local() && function_binding_created.insert(name_ident.name.clone()) {
+                    // a. Create binding.
+                    if !name_ident.is_local() {
                         let id = gen.intern_identifier(&name_ident.name);
                         gen.emit(Instruction::CreateMutableBinding {
                             environment: environment.operand(),
                             identifier: id,
                             can_be_deleted: false,
+                        });
+                    }
+                    // b. Instantiate function object.
+                    let sfd_index = emit_new_function(gen, function_data, None);
+                    let fo = gen.allocate_register();
+                    gen.emit(Instruction::NewFunction {
+                        dst: fo.operand(),
+                        shared_function_data_index: sfd_index,
+                        home_object: None,
+                        lhs_name: None,
+                    });
+                    if name_ident.is_local() {
+                        let local_index = name_ident.local_index.get();
+                        let local = gen.local(local_index);
+                        gen.emit_mov(&local, &fo);
+                        gen.mark_local_initialized(local_index);
+                    } else {
+                        let id = gen.intern_identifier(&name_ident.name);
+                        gen.emit(Instruction::InitializeLexicalBinding {
+                            identifier: id,
+                            src: fo.operand(),
+                            cache: EnvironmentCoordinate::empty(),
                         });
                     }
                 }
@@ -2398,50 +2421,7 @@ fn emit_block_declaration_instantiation(gen: &mut Generator, scope: &ScopeData) 
 
     let new_env = gen.push_new_lexical_environment(0);
 
-    create_lexical_bindings_for_block(gen, &new_env, scope.children.iter());
-
-    // Pass 2: Instantiate function declarations.
-    // For duplicate names, only instantiate the last declaration (it wins).
-    // Process in reverse to find which index is "last" per name.
-    let mut last_function_indices: HashMap<Utf16String, usize> = HashMap::new();
-    for (i, child) in scope.children.iter().enumerate().rev() {
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name_ident) = function_data.name {
-                last_function_indices.entry(name_ident.name.clone()).or_insert(i);
-            }
-        }
-    }
-    // Emit in forward order — only the last declaration per name.
-    for (i, child) in scope.children.iter().enumerate() {
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name_ident) = function_data.name {
-                if last_function_indices.get(&name_ident.name) != Some(&i) {
-                    continue;
-                }
-                let sfd_index = emit_new_function(gen, function_data, None);
-                let fo = gen.allocate_register();
-                gen.emit(Instruction::NewFunction {
-                    dst: fo.operand(),
-                    shared_function_data_index: sfd_index,
-                    home_object: None,
-                    lhs_name: None,
-                });
-                if name_ident.is_local() {
-                    let local_index = name_ident.local_index.get();
-                    let local = gen.local(local_index);
-                    gen.emit_mov(&local, &fo);
-                    gen.mark_local_initialized(local_index);
-                } else {
-                    let id = gen.intern_identifier(&name_ident.name);
-                    gen.emit(Instruction::InitializeLexicalBinding {
-                        identifier: id,
-                        src: fo.operand(),
-                        cache: EnvironmentCoordinate::empty(),
-                    });
-                }
-            }
-        }
-    }
+    emit_lexical_declarations_for_block(gen, &new_env, scope.children.iter());
 
     true
 }
@@ -4287,44 +4267,7 @@ fn emit_switch_block_declaration_instantiation(
 
     let new_env = gen.push_new_lexical_environment(0);
 
-    create_lexical_bindings_for_block(gen, &new_env, all_children.iter().copied());
-
-    // Pass 2: Instantiate function declarations (last one wins for duplicates).
-    let mut last_function_indices: HashMap<Utf16String, usize> = HashMap::new();
-    for (i, child) in all_children.iter().enumerate().rev() {
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name_ident) = function_data.name {
-                last_function_indices.entry(name_ident.name.clone()).or_insert(i);
-            }
-        }
-    }
-    for (i, child) in all_children.iter().enumerate() {
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name_ident) = function_data.name {
-                if last_function_indices.get(&name_ident.name) == Some(&i) {
-                    let sfd_index = emit_new_function(gen, function_data, None);
-                    let fo = gen.allocate_register();
-                    gen.emit(Instruction::NewFunction {
-                        dst: fo.operand(),
-                        shared_function_data_index: sfd_index,
-                        home_object: None,
-                        lhs_name: None,
-                    });
-                    if name_ident.is_local() {
-                        let local = gen.local(name_ident.local_index.get());
-                        gen.emit_mov(&local, &fo);
-                    } else {
-                        let id = gen.intern_identifier(&name_ident.name);
-                        gen.emit(Instruction::InitializeLexicalBinding {
-                            identifier: id,
-                            src: fo.operand(),
-                            cache: EnvironmentCoordinate::empty(),
-                        });
-                    }
-                }
-            }
-        }
-    }
+    emit_lexical_declarations_for_block(gen, &new_env, all_children.iter().copied());
 
     true
 }
@@ -6722,9 +6665,11 @@ fn generate_try_statement(
 
     // Try body gets its own completion register to prevent
     // break/continue inside try from leaking values.
+    // NB: try_completion must be declared outside the inner scope so its
+    // register stays alive during finally body generation, matching C++.
+    let mut try_completion: Option<ScopedOperand> = None;
     {
         let saved_completion = gen.current_completion_register.clone();
-        let mut try_completion: Option<ScopedOperand> = None;
         if gen.must_propagate_completion {
             let reg = gen.allocate_register();
             let undef = gen.add_constant_undefined();
