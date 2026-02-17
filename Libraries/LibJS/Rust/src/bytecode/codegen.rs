@@ -896,7 +896,6 @@ pub fn generate_statement(
 
         // === UsingDeclaration ===
         StatementKind::UsingDeclaration { .. } => {
-            // Disposal semantics are not yet implemented in the Rust codegen.
             // Disposal semantics are not yet implemented.
             let error = gen.allocate_register();
             let msg = gen.intern_string(utf16!("TODO: UsingDeclaration"));
@@ -905,6 +904,9 @@ pub fn generate_statement(
                 error_string: msg,
             });
             gen.emit(Instruction::Throw { src: error.operand() });
+            // Switch to a dead block so subsequent codegen doesn't crash.
+            let dead = gen.make_block();
+            gen.switch_to_basic_block(dead);
             None
         }
 
@@ -6010,6 +6012,9 @@ fn assign_to_for_in_of_lhs(
                     error_string: msg,
                 });
                 gen.emit(Instruction::Throw { src: error.operand() });
+                // Switch to a dead block so subsequent codegen doesn't crash.
+                let dead = gen.make_block();
+                gen.switch_to_basic_block(dead);
                 return;
             }
             // The declaration is a VariableDeclaration with a single declarator
