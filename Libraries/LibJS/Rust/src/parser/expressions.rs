@@ -816,6 +816,11 @@ impl<'a> Parser<'a> {
                 if self.flags.strict_mode && Self::is_identifier(&expression) {
                     self.syntax_error_at("Delete of an unqualified identifier in strict mode.", rhs_start.line, rhs_start.column);
                 }
+                if let ExpressionKind::Member { property, .. } = &expression.inner {
+                    if matches!(property.inner, ExpressionKind::PrivateIdentifier(_)) {
+                        self.syntax_error("Private fields cannot be deleted");
+                    }
+                }
                 self.expression(start, ExpressionKind::Unary {
                     op: UnaryOp::Delete,
                     operand: Box::new(expression),
