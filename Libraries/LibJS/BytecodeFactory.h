@@ -284,7 +284,9 @@ void* rust_compile_eval(
     bool in_eval_function_context,
     bool allow_super_property_lookup,
     bool allow_super_constructor_call,
-    bool in_class_field_initializer);
+    bool in_class_field_initializer,
+    void* error_context,
+    RustParseErrorCallback error_callback);
 
 // Parse and compile a dynamically-created function (new Function()).
 // Validates parameters and body separately per spec, then parses the
@@ -303,7 +305,9 @@ void* rust_compile_dynamic_function(
     size_t body_source_len,
     void* vm_ptr,
     void const* source_code_ptr,
-    uint8_t function_kind);
+    uint8_t function_kind,
+    void* error_context,
+    RustParseErrorCallback error_callback);
 
 // Callbacks used by rust_compile_eval to populate EDI metadata.
 void eval_gdi_set_strict(void* ctx, bool is_strict);

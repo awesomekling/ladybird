@@ -19,6 +19,17 @@
 #include <LibJS/Runtime/Realm.h>
 #include <LibJS/SourceCode.h>
 
+#ifdef ENABLE_RUST_PARSER
+static void collect_rust_parse_error(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column)
+{
+    (void)line;
+    (void)column;
+    auto& error_message = *static_cast<String*>(ctx);
+    if (error_message.is_empty())
+        error_message = MUST(String::from_utf8({ message, message_len }));
+}
+#endif
+
 namespace JS {
 
 GC_DEFINE_ALLOCATOR(FunctionConstructor);
@@ -181,16 +192,18 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
         auto const* body_data = get_utf16_data(body_utf16.utf16_view(), body_buf);
 
         GC::DeferGC defer_gc(vm.heap());
+        String parse_error;
 
         void* sfd_ptr = rust_compile_dynamic_function(
             full_data, full_length,
             params_data, params_utf16.utf16_view().length_in_code_units(),
             body_data, body_utf16.utf16_view().length_in_code_units(),
             &vm, source_code.ptr(),
-            static_cast<u8>(kind));
+            static_cast<u8>(kind),
+            &parse_error, collect_rust_parse_error);
 
         if (!sfd_ptr)
-            return vm.throw_completion<SyntaxError>("Unable to parse dynamic function"_string);
+            return vm.throw_completion<SyntaxError>(parse_error);
 
         function_data = static_cast<SharedFunctionInstanceData*>(sfd_ptr);
         function_data->m_source_text_owner = Utf16String::from_utf8(source_text);

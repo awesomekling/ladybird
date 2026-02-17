@@ -391,6 +391,8 @@ pub unsafe extern "C" fn rust_compile_eval(
     allow_super_property_lookup: bool,
     allow_super_constructor_call: bool,
     in_class_field_initializer: bool,
+    error_context: *mut c_void,
+    error_callback: Option<ParseErrorCallback>,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
@@ -407,7 +409,7 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         parser.scope_collector.analyze(true);
 
-        if check_errors(&mut parser, "rust_compile_eval") {
+        if check_errors_with_callback(&mut parser, "rust_compile_eval", error_context, error_callback) {
             return std::ptr::null_mut();
         }
 
@@ -453,6 +455,8 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     function_kind: u8,
+    error_context: *mut c_void,
+    error_callback: Option<ParseErrorCallback>,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let kind = match function_kind {
@@ -481,7 +485,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             validate_src.extend_from_slice(utf16!(") {}"));
             let mut parser = Parser::new(&validate_src, ProgramType::Script);
             parser.parse_program(false);
-            if parser.has_errors() {
+            if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
                 return std::ptr::null_mut();
             }
         }
@@ -502,7 +506,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             validate_src.extend_from_slice(utf16!("}"));
             let mut parser = Parser::new(&validate_src, ProgramType::Script);
             parser.parse_program(false);
-            if parser.has_errors() {
+            if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
                 return std::ptr::null_mut();
             }
         }
@@ -513,7 +517,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         let mut parser = Parser::new(full_slice, ProgramType::Script);
         let program = parser.parse_program(false);
 
-        if parser.has_errors() {
+        if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
             return std::ptr::null_mut();
         }
 
@@ -523,6 +527,14 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         parser.scope_collector.analyze_as_dynamic_function();
 
         if parser.scope_collector.has_errors() {
+            if let Some(cb) = error_callback {
+                for err in parser.scope_collector.drain_errors() {
+                    let msg = &err.message;
+                    unsafe {
+                        cb(error_context, msg.as_ptr(), msg.len(), err.line, err.column);
+                    }
+                }
+            }
             return std::ptr::null_mut();
         }
 
@@ -551,9 +563,14 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             None
         };
 
-        let mut function_data = match function_data {
-            Some(fd) => fd,
-            None => return std::ptr::null_mut(),
+        let Some(mut function_data) = function_data else {
+            if let Some(cb) = error_callback {
+                let msg = "Failed to parse dynamic function";
+                unsafe {
+                    cb(error_context, msg.as_ptr(), msg.len(), 0, 0);
+                }
+            }
+            return std::ptr::null_mut();
         };
 
         // Dynamic functions always need an arguments object, matching the C++

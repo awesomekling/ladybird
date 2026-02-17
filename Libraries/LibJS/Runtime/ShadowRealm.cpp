@@ -21,6 +21,17 @@
 #include <LibJS/Runtime/WrappedFunction.h>
 #include <LibJS/SourceCode.h>
 
+#ifdef ENABLE_RUST_PARSER
+static void collect_rust_parse_error(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column)
+{
+    (void)line;
+    (void)column;
+    auto& error_message = *static_cast<String*>(ctx);
+    if (error_message.is_empty())
+        error_message = MUST(String::from_utf8({ message, message_len }));
+}
+#endif
+
 namespace JS {
 
 GC_DEFINE_ALLOCATOR(ShadowRealm);
@@ -140,6 +151,7 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
 
             GC::DeferGC defer_gc(vm.heap());
             EvalGdiBuilder builder;
+            String parse_error;
 
             void* exec_ptr;
             if (code_view.has_ascii_storage()) {
@@ -149,15 +161,17 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
                 for (size_t i = 0; i < length; ++i)
                     utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
                 exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
-                    false, false, false, false, false);
+                    false, false, false, false, false,
+                    &parse_error, collect_rust_parse_error);
             } else {
                 auto utf16 = code_view.utf16_span();
                 exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
-                    false, false, false, false, false);
+                    false, false, false, false, false,
+                    &parse_error, collect_rust_parse_error);
             }
 
             if (!exec_ptr)
-                return vm.throw_completion<SyntaxError>("Unable to parse eval source"_string);
+                return vm.throw_completion<SyntaxError>(parse_error);
 
             executable = static_cast<Bytecode::Executable*>(exec_ptr);
             executable->name = "ShadowRealmEval"_utf16_fly_string;
