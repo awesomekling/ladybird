@@ -1297,7 +1297,9 @@ impl<'a> Parser<'a> {
                         if self.match_token(TokenType::StringLiteral) {
                             let token = self.consume();
                             let (value, _has_octal) = self.parse_string_value(&token);
-                            entry_name = Some(BindingEntryName::Identifier(self.make_identifier(entry_start, value)));
+                            let id = self.make_identifier(entry_start, value);
+                            self.scope_collector.register_identifier(id.clone(), &id.name, None);
+                            entry_name = Some(BindingEntryName::Identifier(id));
                         } else if self.match_token(TokenType::BigIntLiteral) {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
@@ -1306,7 +1308,9 @@ impl<'a> Parser<'a> {
                             } else {
                                 value
                             };
-                            entry_name = Some(BindingEntryName::Identifier(self.make_identifier(entry_start, name_value)));
+                            let id = self.make_identifier(entry_start, name_value);
+                            self.scope_collector.register_identifier(id.clone(), &id.name, None);
+                            entry_name = Some(BindingEntryName::Identifier(id));
                         } else {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
