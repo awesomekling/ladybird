@@ -4628,10 +4628,12 @@ fn generate_optional_chain_inner(
                 gen.emit_mov(current_base, &this_value);
             } else if *computed {
                 let property = generate_expression(property, gen, None)?;
-                emit_get_by_value(gen, &val, &obj, &property, None);
+                let base_id = intern_base_identifier(gen, object);
+                emit_get_by_value(gen, &val, &obj, &property, base_id);
                 gen.emit_mov(current_base, &obj);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
-                emit_get_by_id(gen, &val, &obj, &ident.name, None);
+                let base_id = intern_base_identifier(gen, object);
+                emit_get_by_id(gen, &val, &obj, &ident.name, base_id);
                 gen.emit_mov(current_base, &obj);
             } else if let ExpressionKind::PrivateIdentifier(name) = &property.inner {
                 let id = gen.intern_identifier(&name.name);
