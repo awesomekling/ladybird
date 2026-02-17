@@ -3714,16 +3714,15 @@ fn emit_evaluate_member_reference(gen: &mut Generator, target: &Expression) -> E
                 unreachable!()
             }
         } else {
-            let base_id = intern_base_identifier(gen, object);
             if *computed {
                 let property = generate_expression_or_undefined(property, gen, None);
                 let saved_property = gen.allocate_register();
                 gen.emit_mov(&saved_property, &property);
-                EvaluatedReference::Member { base, property: saved_property, base_identifier: base_id }
+                EvaluatedReference::Member { base, property: saved_property, base_identifier: None }
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 let key = gen.intern_property_key(&ident.name);
                 let cache = gen.next_property_lookup_cache();
-                EvaluatedReference::MemberId { base, property: key, cache, base_identifier: base_id }
+                EvaluatedReference::MemberId { base, property: key, cache, base_identifier: None }
             } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
                 let id = gen.intern_identifier(&priv_ident.name);
                 EvaluatedReference::PrivateMember { base, property: id }
