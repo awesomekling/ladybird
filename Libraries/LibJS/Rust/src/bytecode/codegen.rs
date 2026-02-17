@@ -7650,7 +7650,7 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
                 let bi = parse_bigint(b)?;
                 return Some(bi == 0);
             }
-            let s_bi = string_to_bigint(s_trimmed)?;
+            let s_bi = parse_bigint(s_trimmed)?;
             let bi = parse_bigint(b)?;
             return Some(bi == s_bi);
         }
@@ -7659,13 +7659,9 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
 }
 
 /// Parse a BigInt string to i128. Returns None for values that don't fit.
-fn parse_bigint(s: &str) -> Option<i128> {
-    s.parse::<i128>().ok()
-}
-
-/// StringToBigInt: parse a string as a BigInt value per spec.
+/// Parse a BigInt string as an i128 value.
 /// Handles decimal, 0b binary, 0o octal, and 0x hex prefixes.
-fn string_to_bigint(s: &str) -> Option<i128> {
+fn parse_bigint(s: &str) -> Option<i128> {
     if s.len() > 2 {
         let (prefix, rest) = s.split_at(2);
         match prefix {
