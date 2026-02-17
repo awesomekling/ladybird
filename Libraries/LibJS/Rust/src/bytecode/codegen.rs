@@ -4768,9 +4768,9 @@ fn generate_class_expression(
     gen.lexical_environment_register_stack.push(class_env.clone());
 
     // Step 3.a: Create binding for the class name in the class environment.
-    // For named classes, this is the class name (e.g. "A" in "class A {}").
-    // For anonymous classes without lhs_name, create binding for empty name.
-    {
+    // Only emit when the class has a name, or when there's no lhs_name
+    // (matching C++ behavior which skips this for anonymous classes with lhs_name).
+    if data.name.is_some() || lhs_name.is_none() {
         let name = if let Some(name_ident) = &data.name {
             name_ident.name.clone()
         } else {
