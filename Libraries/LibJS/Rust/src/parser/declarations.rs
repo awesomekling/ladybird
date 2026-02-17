@@ -309,6 +309,12 @@ impl<'a> Parser<'a> {
             self.consume_or_insert_semicolon();
         }
 
+        if is_for_loop {
+            let any_init = declarators.iter().any(|d| d.init.is_some());
+            self.for_loop_declaration_count = declarators.len();
+            self.for_loop_declaration_has_init = any_init;
+        }
+
         self.statement(start, StatementKind::UsingDeclaration {
             declarations: declarators,
         })
