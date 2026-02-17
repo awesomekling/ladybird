@@ -6824,6 +6824,12 @@ fn generate_try_statement(
             });
         }
 
+        // Drop try_completion before the FinallyContext registers to match
+        // C++ destructor order: try_completion (declared after FinallyContext)
+        // is destroyed first, then FinallyContext's members in reverse order.
+        // This ensures the register free list ends up with the same ordering.
+        drop(try_completion);
+
         // Release the FinallyContext's ScopedOperands so their registers
         // can be reused (matching C++ where the FinallyContext goes out
         // of scope on the stack after try-statement codegen).
