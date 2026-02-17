@@ -78,6 +78,15 @@ extern "C" void script_gdi_push_lexical_binding(void* ctx, uint16_t const* name,
     static_cast<JS::ScriptGdiBuilder*>(ctx)->lexical_bindings.append({ utf16_fly_from(name, len), is_constant });
 }
 
+static void collect_rust_parse_error(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column)
+{
+    auto& errors = *static_cast<Vector<JS::ParserError>*>(ctx);
+    errors.append({
+        MUST(String::from_utf8({ message, message_len })),
+        JS::Position { line, column, 0 },
+    });
+}
+
 namespace JS {
 
 // 16.1.5 ParseScript ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parse-script
@@ -95,6 +104,7 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
 
         GC::DeferGC defer_gc(realm.vm().heap());
         ScriptGdiBuilder builder;
+        Vector<ParserError> parse_errors;
 
         void* exec_ptr;
         if (code_view.has_ascii_storage()) {
@@ -103,17 +113,16 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
             utf16_buf.ensure_capacity(length);
             for (size_t i = 0; i < length; ++i)
                 utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color);
+            exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
+                &parse_errors, collect_rust_parse_error);
         } else {
             auto utf16 = code_view.utf16_span();
-            exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color);
+            exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
+                &parse_errors, collect_rust_parse_error);
         }
 
-        if (!exec_ptr) {
-            Vector<ParserError> errors;
-            errors.append({ "Rust parser failed"_string, {} });
-            return errors;
-        }
+        if (!exec_ptr)
+            return parse_errors;
 
         auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
         return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);

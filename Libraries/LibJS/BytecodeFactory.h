@@ -63,8 +63,13 @@ struct FFIClassElement {
 extern "C" {
 #endif
 
+// Callback for reporting parse errors from Rust.
+// message is UTF-8, line and column are 1-based.
+typedef void (*RustParseErrorCallback)(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column);
+
 // Parse, compile, and extract GDI metadata for a script using the Rust
 // parser. Populates gdi_context (a ScriptGdiBuilder*) via callbacks.
+// On parse failure, calls error_callback for each error, then returns nullptr.
 // Returns a Bytecode::Executable* cast to void*, or nullptr on failure.
 void* rust_compile_script(
     uint16_t const* source,
@@ -73,7 +78,9 @@ void* rust_compile_script(
     void const* source_code_ptr,
     void* gdi_context,
     bool dump_ast,
-    bool use_color);
+    bool use_color,
+    void* error_context,
+    RustParseErrorCallback error_callback);
 
 // Parse and compile a JavaScript program using the Rust parser and
 // bytecode generator. Returns a Bytecode::Executable* cast to void*,

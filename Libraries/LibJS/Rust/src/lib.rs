@@ -104,17 +104,45 @@ unsafe fn source_from_raw(source: *const u16, len: usize) -> Option<&'static [u1
     Some(std::slice::from_raw_parts(source, len))
 }
 
+/// Callback type for reporting parse errors to C++.
+type ParseErrorCallback =
+    unsafe extern "C" fn(ctx: *mut c_void, message: *const u8, message_len: usize, line: u32, column: u32);
+
 /// Log parser and scope collector errors, returning true if any were found.
 fn check_errors(parser: &mut Parser, context: &str) -> bool {
+    check_errors_with_callback(parser, context, std::ptr::null_mut(), None)
+}
+
+/// Check for errors, optionally reporting them via a C++ callback.
+fn check_errors_with_callback(
+    parser: &mut Parser,
+    context: &str,
+    error_context: *mut c_void,
+    error_callback: Option<ParseErrorCallback>,
+) -> bool {
     if parser.has_errors() {
-        for msg in parser.error_messages() {
-            eprintln!("[{context}] parse error: {msg}");
+        for err in parser.errors() {
+            if let Some(cb) = error_callback {
+                let msg = &err.message;
+                unsafe {
+                    cb(error_context, msg.as_ptr(), msg.len(), err.line, err.column);
+                }
+            } else {
+                eprintln!("[{context}] parse error: {}:{}: {}", err.line, err.column, err.message);
+            }
         }
         return true;
     }
     if parser.scope_collector.has_errors() {
         for err in parser.scope_collector.drain_errors() {
-            eprintln!("[{context}] scope error: {}", err.message);
+            if let Some(cb) = error_callback {
+                let msg = &err.message;
+                unsafe {
+                    cb(error_context, msg.as_ptr(), msg.len(), err.line, err.column);
+                }
+            } else {
+                eprintln!("[{context}] scope error: {}:{}: {}", err.line, err.column, err.message);
+            }
         }
         return true;
     }
@@ -278,6 +306,8 @@ pub unsafe extern "C" fn rust_compile_script(
     gdi_context: *mut c_void,
     dump_ast: bool,
     use_color: bool,
+    error_context: *mut c_void,
+    error_callback: Option<ParseErrorCallback>,
 ) -> *mut c_void {
     let Some(source_slice) = source_from_raw(source, source_len) else {
         return std::ptr::null_mut();
@@ -288,7 +318,7 @@ pub unsafe extern "C" fn rust_compile_script(
 
     parser.scope_collector.analyze(false);
 
-    if check_errors(&mut parser, "rust_compile_script") {
+    if check_errors_with_callback(&mut parser, "rust_compile_script", error_context, error_callback) {
         return std::ptr::null_mut();
     }
 

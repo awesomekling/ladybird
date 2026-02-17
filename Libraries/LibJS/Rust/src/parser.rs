@@ -579,6 +579,10 @@ impl<'a> Parser<'a> {
         !self.errors.is_empty()
     }
 
+    pub fn errors(&self) -> &[ParserError] {
+        &self.errors
+    }
+
     pub fn error_messages(&self) -> Vec<String> {
         self.errors
             .iter()
