@@ -1228,11 +1228,9 @@ impl<'a> Parser<'a> {
         let PropertyKey { expression: key, name: key_value, is_proto, is_computed, is_identifier } = self.parse_property_key(ident_override);
 
         // https://tc39.es/ecma262/#sec-object-initializer
-        // Private names are not allowed in object literals.
+        // Private names are not allowed in object literals, even inside class bodies.
         if let ExpressionKind::PrivateIdentifier(_) = key.inner {
-            if self.class_scope_depth == 0 {
-                self.syntax_error("Private field or method is not allowed in object literal");
-            }
+            self.syntax_error("Private field or method is not allowed in object literal");
         }
 
         if self.match_token(TokenType::ParenOpen) {
