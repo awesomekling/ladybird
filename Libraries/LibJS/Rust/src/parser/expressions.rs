@@ -408,10 +408,10 @@ impl<'a> Parser<'a> {
             // YieldExpression : `yield`
             //                 | `yield` [no LineTerminator here] AssignmentExpression
             //                 | `yield` [no LineTerminator here] `*` AssignmentExpression
-            // YieldExpression is at AssignmentExpression level (precedence 2).
+            // YieldExpression is at AssignmentExpression level (precedence 3).
             // When min_precedence is higher (e.g. void/typeof at 17), yield must
             // be treated as an identifier, not a yield expression.
-            TokenType::Yield if self.flags.in_generator_function_context && min_precedence <= 2 => {
+            TokenType::Yield if self.flags.in_generator_function_context && min_precedence <= 3 => {
                 let expression = self.parse_yield_expression();
                 (expression, false)
             }
