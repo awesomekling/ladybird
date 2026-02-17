@@ -256,6 +256,12 @@ pub struct Parser<'a> {
     pub(crate) class_scope_depth: u32,
     pub(crate) has_default_export_name: bool,
 
+    /// Stack of sets tracking private names referenced inside class bodies.
+    /// Each class body pushes a new set. At the end of the class, any names
+    /// not found in the class's declared private names are bubbled up to the
+    /// outer class, or reported as errors if there is no outer class.
+    referenced_private_names_stack: Vec<HashSet<Vec<u16>>>,
+
     /// Communication channel from `parse_variable_declaration` back to
     /// `parse_for_statement` when parsing `for (let/const/var ... ; ...)`.
     /// These are set when `is_for_loop` is true and read by the for-loop
@@ -296,6 +302,7 @@ impl<'a> Parser<'a> {
             class_has_super_class: false,
             class_scope_depth: 0,
             has_default_export_name: false,
+            referenced_private_names_stack: Vec::new(),
             for_loop_declaration_count: 0,
             for_loop_declaration_has_init: false,
             for_loop_declaration_is_var: false,
@@ -522,6 +529,18 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn syntax_error_at_position(&mut self, message: &str, pos: Position) {
         self.syntax_error_at(message, pos.line, pos.column);
+    }
+
+    /// Register a referenced private name. Returns true if we're inside a class
+    /// body (the reference is valid for now, will be checked at class end).
+    /// Returns false if we're outside all class bodies (always invalid).
+    pub(crate) fn register_referenced_private_name(&mut self, name: &[u16]) -> bool {
+        if let Some(set) = self.referenced_private_names_stack.last_mut() {
+            set.insert(name.to_vec());
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn expected(&mut self, what: &str) {

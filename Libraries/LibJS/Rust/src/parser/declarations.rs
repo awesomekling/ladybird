@@ -6,7 +6,7 @@
 
 //! Declaration parsing: variables, functions, classes, imports, exports.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
@@ -558,6 +558,9 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
         let mut elements: Vec<Node<ClassElement>> = Vec::new();
         let mut constructor: Option<Expression> = None;
+        let mut found_private_names: HashMap<Vec<u16>, (Option<ClassMethodKind>, bool)> = HashMap::new();
+
+        self.referenced_private_names_stack.push(HashSet::new());
 
         let saved_class_has_super = self.class_has_super_class;
         self.class_has_super_class = super_class.is_some();
@@ -569,7 +572,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let (element, maybe_ctor) = self.parse_class_element(start);
+            let (element, maybe_ctor) = self.parse_class_element(start, &mut found_private_names);
             if let Some(ctor) = maybe_ctor {
                 // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
                 // It is a Syntax Error if PrototypePropertyNameList of ClassElementList
@@ -586,6 +589,21 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyClose);
         self.class_scope_depth -= 1;
         self.class_has_super_class = saved_class_has_super;
+
+        // AllPrivateNamesValid: check that all referenced private names were declared.
+        let referenced = self.referenced_private_names_stack.pop().unwrap_or_default();
+        for name in referenced {
+            if found_private_names.contains_key(&name) {
+                continue;
+            }
+            // Bubble up to outer class, or error if no outer class.
+            if let Some(outer) = self.referenced_private_names_stack.last_mut() {
+                outer.insert(name);
+            } else {
+                let name_str = String::from_utf16_lossy(&name);
+                self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name_str));
+            }
+        }
         self.flags.strict_mode = strict_before;
 
         self.scope_collector.close_scope();
@@ -720,7 +738,11 @@ impl<'a> Parser<'a> {
     //             | `static` FieldDefinition `;`
     //             | ClassStaticBlock
     //             | `;`
-    fn parse_class_element(&mut self, class_start: Position) -> (Option<Node<ClassElement>>, Option<Expression>) {
+    fn parse_class_element(
+        &mut self,
+        class_start: Position,
+        found_private_names: &mut HashMap<Vec<u16>, (Option<ClassMethodKind>, bool)>,
+    ) -> (Option<Node<ClassElement>>, Option<Expression>) {
         let start = self.position();
         // C++ lexes "static" as Identifier and checks original_value() == "static".
         let mut is_static = if self.match_identifier()
@@ -848,6 +870,43 @@ impl<'a> Parser<'a> {
         // and ClassElement is `static` MethodDefinition or `static` FieldDefinition.
         if is_static && key_value.as_deref() == Some(utf16!("prototype")) {
             self.syntax_error("Classes may not have a static property named 'prototype'");
+        }
+
+        // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
+        // It is a Syntax Error if PrivateBoundIdentifiers of ClassElementList contains
+        // any duplicate entries, unless the name is used once for a getter and once for
+        // a setter and in no other entries, and they are either both static or both non-static.
+        let is_private = key_value.as_ref().is_some_and(|v| v.first() == Some(&(b'#' as u16)));
+        if is_private {
+            let name = key_value.as_ref().unwrap();
+            let current_kind = if is_getter { Some(ClassMethodKind::Getter) } else if is_setter { Some(ClassMethodKind::Setter) } else { None };
+            let is_accessor = is_getter || is_setter;
+            if is_accessor {
+                // Getter or setter: check against existing private names
+                if let Some(&(existing_kind, existing_static)) = found_private_names.get(name) {
+                    let is_error = match existing_kind {
+                        // Existing is not a method (field/plain method) → error
+                        None => true,
+                        // Existing is a getter/setter
+                        Some(ek) => {
+                            // Different staticness → error
+                            existing_static != is_static
+                            // Same kind (getter+getter or setter+setter) → error
+                            // Plain method → error
+                            || ek == ClassMethodKind::Method
+                            || ek == current_kind.unwrap()
+                        }
+                    };
+                    if is_error {
+                        let name_str = String::from_utf16_lossy(name);
+                        self.syntax_error(&format!("Duplicate private field or method named '{}'", name_str));
+                    }
+                }
+                found_private_names.insert(name.clone(), (current_kind, is_static));
+            } else if found_private_names.insert(name.clone(), (current_kind, is_static)).is_some() {
+                let name_str = String::from_utf16_lossy(name);
+                self.syntax_error(&format!("Duplicate private field or method named '{}'", name_str));
+            }
         }
 
         if self.match_token(TokenType::ParenOpen) {

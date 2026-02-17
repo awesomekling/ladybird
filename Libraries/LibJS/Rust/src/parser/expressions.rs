@@ -427,8 +427,9 @@ impl<'a> Parser<'a> {
             }
 
             TokenType::PrivateIdentifier => {
-                if self.class_scope_depth == 0 {
-                    let name = String::from_utf16_lossy(self.token_value(&self.current_token));
+                let value = self.token_value(&self.current_token).to_vec();
+                if !self.register_referenced_private_name(&value) {
+                    let name = String::from_utf16_lossy(&value);
                     self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                 }
                 let token = self.consume();
@@ -657,8 +658,9 @@ impl<'a> Parser<'a> {
             TokenType::Period => {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
-                    if self.class_scope_depth == 0 {
-                        let name = String::from_utf16_lossy(self.token_value(&self.current_token));
+                    let pvalue = self.token_value(&self.current_token).to_vec();
+                    if !self.register_referenced_private_name(&pvalue) {
+                        let name = String::from_utf16_lossy(&pvalue);
                         self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                     }
                     let token = self.consume();
@@ -969,8 +971,9 @@ impl<'a> Parser<'a> {
                         });
                     }
                     TokenType::PrivateIdentifier => {
-                        if self.class_scope_depth == 0 {
-                            let name = String::from_utf16_lossy(self.token_value(&self.current_token));
+                        let pvalue = self.token_value(&self.current_token).to_vec();
+                        if !self.register_referenced_private_name(&pvalue) {
+                            let name = String::from_utf16_lossy(&pvalue);
                             self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                         }
                         let property_start = self.position();
@@ -1016,8 +1019,9 @@ impl<'a> Parser<'a> {
             } else if self.match_token(TokenType::Period) {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
-                    if self.class_scope_depth == 0 {
-                        let name = String::from_utf16_lossy(self.token_value(&self.current_token));
+                    let pvalue = self.token_value(&self.current_token).to_vec();
+                    if !self.register_referenced_private_name(&pvalue) {
+                        let name = String::from_utf16_lossy(&pvalue);
                         self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
                     }
                     let property_start = self.position();
