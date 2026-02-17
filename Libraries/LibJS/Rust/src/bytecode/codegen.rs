@@ -2583,8 +2583,42 @@ fn generate_call_expression(
                 object,
                 property,
                 computed,
+            } if matches!(object.inner, ExpressionKind::Super) => {
+                // Super member call: super.method() or super[expr]()
+                // Must match C++ evaluation order:
+                // 1. ResolveThisBinding
+                // 2. Evaluate computed property (if any)
+                // 3. ResolveSuperBase
+                // 4. GetByIdWithThis / GetByValueWithThis
+                let this_value = emit_resolve_this_binding(gen);
+                let computed_key = if *computed {
+                    Some(generate_expression_or_undefined(property, gen, None))
+                } else {
+                    None
+                };
+                let super_base = gen.allocate_register();
+                gen.emit(Instruction::ResolveSuperBase { dst: super_base.operand() });
+                let method = gen.allocate_register();
+                if let Some(key) = computed_key {
+                    emit_get_by_value_with_this(gen, &method, &super_base, &key, &this_value);
+                } else if let ExpressionKind::Identifier(ident) = &property.inner {
+                    let key = gen.intern_property_key(&ident.name);
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::GetByIdWithThis {
+                        dst: method.operand(),
+                        base: super_base.operand(),
+                        property: key,
+                        this_value: this_value.operand(),
+                        cache_index: cache,
+                    });
+                }
+                (method, Some(this_value))
+            }
+            ExpressionKind::Member {
+                object,
+                property,
+                computed,
             } => {
-                let is_super = matches!(object.inner, ExpressionKind::Super);
                 let obj = generate_expression_or_undefined(object, gen, None);
                 let base_id = intern_base_identifier(gen, object);
                 let method = gen.allocate_register();
@@ -2601,14 +2635,7 @@ fn generate_call_expression(
                         property: id,
                     });
                 }
-                // For super.method(), the this value should be the
-                // current this binding, not the super base.
-                let this_val = if is_super {
-                    emit_resolve_this_binding(gen)
-                } else {
-                    obj
-                };
-                (method, Some(this_val))
+                (method, Some(obj))
             }
             ExpressionKind::Identifier(ident) if ident.is_local() => {
                 // Local identifier: use the local directly, with ThrowIfTDZ
