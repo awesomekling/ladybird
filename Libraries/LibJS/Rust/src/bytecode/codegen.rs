@@ -3768,7 +3768,7 @@ fn emit_store_to_reference(
                 let this_value = emit_resolve_this_binding(gen);
                 emit_super_put(gen, &base, property, *computed, &this_value, value, None);
             } else {
-                emit_put_to_member(gen, &base, property, *computed, value, Some(object));
+                emit_put_to_member(gen, &base, property, *computed, value, None);
             }
         }
         _ => {
@@ -7747,6 +7747,7 @@ fn member_to_string_approximation(expression: &Expression) -> Utf16String {
             s.encode_utf16().collect()
         }
         ExpressionKind::This => Utf16String(utf16!("this").to_vec()),
+        ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
         _ => Utf16String(utf16!("<object>").to_vec()),
     }
 }
