@@ -1294,6 +1294,12 @@ impl<'a> Parser<'a> {
                         entry_is_keyword = self.current_token.token_type.is_identifier_name()
                             && !self.match_identifier();
 
+                        // Suppress eval/arguments check for binding pattern property
+                        // keys. C++ uses regular consume() here (no arguments check),
+                        // not consume_and_allow_division().
+                        let saved_prop_key_ctx = self.flags.in_property_key_context;
+                        self.flags.in_property_key_context = true;
+
                         if self.match_token(TokenType::StringLiteral) {
                             let token = self.consume();
                             let (value, _has_octal) = self.parse_string_value(&token);
@@ -1321,6 +1327,8 @@ impl<'a> Parser<'a> {
                             self.scope_collector.register_identifier(id.clone(), &id.name, None);
                             entry_name = Some(BindingEntryName::Identifier(id));
                         }
+
+                        self.flags.in_property_key_context = saved_prop_key_ctx;
                     } else if self.match_token(TokenType::BracketOpen) {
                         self.consume();
                         let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
