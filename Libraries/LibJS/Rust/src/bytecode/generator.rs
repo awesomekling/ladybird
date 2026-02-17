@@ -592,9 +592,9 @@ impl Generator {
     }
 
     pub fn emit_mov_raw(&mut self, dst: Operand, src: Operand) {
-        if dst != src {
-            self.emit(Instruction::Mov { dst, src });
-        }
+        // NB: Unlike emit_mov (ScopedOperand version), this does NOT skip self-moves.
+        //     This matches C++ emit_mov(Operand, Operand) which also emits unconditionally.
+        self.emit(Instruction::Mov { dst, src });
     }
 
     /// Emit a conditional jump, with comparison fusion and constant folding.
