@@ -3955,7 +3955,8 @@ fn generate_tagged_template_literal(
                 let property = generate_expression_or_undefined(property, gen, None);
                 emit_get_by_value(gen, &method, &obj, &property, None);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
-                emit_get_by_id(gen, &method, &obj, &ident.name, None);
+                let base_id = intern_base_identifier(gen, object);
+                emit_get_by_id(gen, &method, &obj, &ident.name, base_id);
             } else if let ExpressionKind::PrivateIdentifier(priv_ident) = &property.inner {
                 let id = gen.intern_identifier(&priv_ident.name);
                 gen.emit(Instruction::GetPrivateById {
@@ -4635,8 +4636,7 @@ fn generate_optional_chain_inner(
                 gen.emit_mov(current_base, &this_value);
             } else if *computed {
                 let property = generate_expression(property, gen, None)?;
-                let base_id = intern_base_identifier(gen, object);
-                emit_get_by_value(gen, &val, &obj, &property, base_id);
+                emit_get_by_value(gen, &val, &obj, &property, None);
                 gen.emit_mov(current_base, &obj);
             } else if let ExpressionKind::Identifier(ident) = &property.inner {
                 let base_id = intern_base_identifier(gen, object);
