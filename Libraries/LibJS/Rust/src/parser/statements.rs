@@ -595,8 +595,16 @@ impl<'a> Parser<'a> {
         self.flags.in_break_context = true;
 
         let mut cases = Vec::new();
+        let mut has_default = false;
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
-            cases.push(self.parse_switch_case());
+            let case = self.parse_switch_case();
+            if case.test.is_none() {
+                if has_default {
+                    self.syntax_error("Multiple 'default' clauses in switch statement");
+                }
+                has_default = true;
+            }
+            cases.push(case);
         }
 
         self.flags.in_break_context = break_before;
