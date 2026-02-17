@@ -361,6 +361,21 @@ impl<'a> Parser<'a> {
         };
         self.last_function_kind = kind;
 
+        if name.is_some() {
+            if kind == FunctionKind::AsyncGenerator
+                && (fn_name == utf16!("await") || fn_name == utf16!("yield"))
+            {
+                let name_str = String::from_utf16_lossy(&fn_name);
+                self.syntax_error(&format!(
+                    "async generator function is not allowed to be called '{}'",
+                    name_str
+                ));
+            }
+            if self.flags.in_class_static_init_block && fn_name == utf16!("await") {
+                self.syntax_error("'await' is a reserved word");
+            }
+        }
+
         // Register function declaration in parent scope (before opening function scope).
         self.scope_collector.add_function_declaration(
             &fn_name, name.clone(),
@@ -449,6 +464,21 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
+        if name.is_some() {
+            if kind == FunctionKind::AsyncGenerator
+                && (fn_name_value == utf16!("await") || fn_name_value == utf16!("yield"))
+            {
+                let name_str = String::from_utf16_lossy(&fn_name_value);
+                self.syntax_error(&format!(
+                    "async generator function is not allowed to be called '{}'",
+                    name_str
+                ));
+            }
+            if self.flags.in_class_static_init_block && fn_name_value == utf16!("await") {
+                self.syntax_error("'await' is a reserved word");
+            }
+        }
 
         // Register the function expression name in the outer scope, matching C++.
         // This must happen before open_function_scope so that the identifier group
@@ -955,7 +985,7 @@ impl<'a> Parser<'a> {
         // https://tc39.es/ecma262/#sec-class-definitions-static-semantics-early-errors
         // It is a Syntax Error if PropName of ClassElement is "constructor"
         // and ClassElement is FieldDefinition.
-        if !is_static && key_value.as_deref() == Some(utf16!("constructor")) {
+        if key_value.as_deref() == Some(utf16!("constructor")) {
             self.syntax_error("Class cannot have field named 'constructor'");
         }
 
