@@ -2851,15 +2851,35 @@ fn generate_update_expression(
         }
         ExpressionKind::Member { object, property, computed } => {
             let is_super = matches!(object.inner, ExpressionKind::Super);
-            let base = generate_expression(object, gen, None)?;
-            let base_id = intern_base_identifier(gen, object);
-            let value = gen.allocate_register();
 
             if is_super {
-                // For super property references, use WithThis variants
-                // with this_value = ResolveThisBinding.
+                // Per spec, evaluation order for super property access is:
+                // 1. ResolveThisBinding
+                // 2. Evaluate computed property (if any)
+                // 3. ResolveSuperBase
+                // 4. Property lookup with this
                 let this_value = emit_resolve_this_binding(gen);
-                let computed_key = emit_super_get(gen, &value, &base, property, *computed, &this_value);
+                let computed_key = if *computed {
+                    Some(generate_expression_or_undefined(property, gen, None))
+                } else {
+                    None
+                };
+                let base = gen.allocate_register();
+                gen.emit(Instruction::ResolveSuperBase { dst: base.operand() });
+                let value = gen.allocate_register();
+                if let Some(ref key) = computed_key {
+                    emit_get_by_value_with_this(gen, &value, &base, key, &this_value);
+                } else if let ExpressionKind::Identifier(ident) = &property.inner {
+                    let key = gen.intern_property_key(&ident.name);
+                    let cache = gen.next_property_lookup_cache();
+                    gen.emit(Instruction::GetByIdWithThis {
+                        dst: value.operand(),
+                        base: base.operand(),
+                        property: key,
+                        this_value: this_value.operand(),
+                        cache_index: cache,
+                    });
+                }
                 if prefixed {
                     match op {
                         UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
@@ -2882,7 +2902,12 @@ fn generate_update_expression(
                     emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
                     Some(dst)
                 }
-            } else if *computed {
+            } else {
+                // Non-super member update expression.
+                let base = generate_expression(object, gen, None)?;
+                let base_id = intern_base_identifier(gen, object);
+                let value = gen.allocate_register();
+                if *computed {
                 let property = generate_expression(property, gen, None)?;
                 emit_get_by_value(gen, &value, &base, &property, base_id);
                 // Save property for store-back (matching C++ emit_load_from_reference).
@@ -2913,25 +2938,35 @@ fn generate_update_expression(
                     drop(value);
                     Some(dst)
                 }
-            } else if let ExpressionKind::Identifier(property_ident) = &property.inner {
-                emit_get_by_id(gen, &value, &base, &property_ident.name, base_id);
-                let key = gen.intern_property_key(&property_ident.name);
-                if prefixed {
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                    }
-                } else {
-                    let dst = choose_dst(gen, preferred_dst);
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                            dst: dst.operand(),
+                } else if let ExpressionKind::Identifier(property_ident) = &property.inner {
+                    emit_get_by_id(gen, &value, &base, &property_ident.name, base_id);
+                    let key = gen.intern_property_key(&property_ident.name);
+                    if prefixed {
+                        match op {
+                            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+                            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+                        }
+                    } else {
+                        let dst = choose_dst(gen, preferred_dst);
+                        match op {
+                            UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                                dst: dst.operand(),
+                                src: value.operand(),
+                            }),
+                            UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                                dst: dst.operand(),
+                                src: value.operand(),
+                            }),
+                        }
+                        let cache2 = gen.next_property_lookup_cache();
+                        gen.emit(Instruction::PutNormalById {
+                            base: base.operand(),
+                            property: key,
                             src: value.operand(),
-                        }),
-                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                            dst: dst.operand(),
-                            src: value.operand(),
-                        }),
+                            cache_index: cache2,
+                            base_identifier: None,
+                        });
+                        return Some(dst);
                     }
                     let cache2 = gen.next_property_lookup_cache();
                     gen.emit(Instruction::PutNormalById {
@@ -2941,20 +2976,11 @@ fn generate_update_expression(
                         cache_index: cache2,
                         base_identifier: None,
                     });
-                    return Some(dst);
+                    Some(value)
+                } else {
+                    // Fallback: just evaluate, no store-back
+                    Some(value)
                 }
-                let cache2 = gen.next_property_lookup_cache();
-                gen.emit(Instruction::PutNormalById {
-                    base: base.operand(),
-                    property: key,
-                    src: value.operand(),
-                    cache_index: cache2,
-                    base_identifier: None,
-                });
-                Some(value)
-            } else {
-                // Fallback: just evaluate, no store-back
-                Some(value)
             }
         }
         _ => {
@@ -3060,39 +3086,80 @@ fn generate_assignment_expression(
             // Member expression LHS (e.g., obj.foo = x, obj[key] = x)
             if let ExpressionKind::Member { object, property, computed } = &lhs_expression.inner {
                 let is_super = matches!(object.inner, ExpressionKind::Super);
-                let base_raw = generate_expression(object, gen, None)?;
 
-                // For super property references, resolve this binding once.
-                let super_this = if is_super {
-                    Some(emit_resolve_this_binding(gen))
-                } else {
-                    None
-                };
+                if is_super {
+                    // Per spec, evaluation order for super property reference is:
+                    // 1. ResolveThisBinding
+                    // 2. Evaluate computed property (if any)
+                    // 3. ResolveSuperBase
+                    let super_this = emit_resolve_this_binding(gen);
 
-                if op == AssignmentOp::Assignment {
-                    // Simple assignment: copy base/property only if needed
-                    // (matching C++ copy_if_needed_to_preserve_evaluation_order).
-                    let base = if is_super {
-                        base_raw.clone()
-                    } else {
-                        gen.copy_if_needed_to_preserve_evaluation_order(&base_raw)
-                    };
-                    if is_super {
-                        // For computed super, evaluate the key before the RHS.
+                    if op == AssignmentOp::Assignment {
                         let computed_key = if *computed {
-                            let key_val = generate_expression_or_undefined(property, gen, None);
-                            let saved = gen.allocate_register();
-                            gen.emit_mov(&saved, &key_val);
-                            Some(saved)
+                            Some(generate_expression_or_undefined(property, gen, None))
                         } else {
                             None
                         };
+                        let base = gen.allocate_register();
+                        gen.emit(Instruction::ResolveSuperBase { dst: base.operand() });
                         let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
-                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &rhs_val, computed_key.as_ref());
+                        emit_super_put(gen, &base, property, *computed, &super_this, &rhs_val, computed_key.as_ref());
                         return Some(rhs_val);
                     }
-                    // For computed properties, evaluate the key BEFORE the RHS
-                    // (spec: LHS is fully evaluated before RHS).
+
+                    // Compound/logical assignment: evaluate property, resolve
+                    // super base, then get old value.
+                    let computed_key = if *computed {
+                        Some(generate_expression_or_undefined(property, gen, None))
+                    } else {
+                        None
+                    };
+                    let base = gen.allocate_register();
+                    gen.emit(Instruction::ResolveSuperBase { dst: base.operand() });
+                    let old_val = gen.allocate_register();
+                    if let Some(ref key) = computed_key {
+                        emit_get_by_value_with_this(gen, &old_val, &base, key, &super_this);
+                    } else if let ExpressionKind::Identifier(ident) = &property.inner {
+                        let key = gen.intern_property_key(&ident.name);
+                        let cache = gen.next_property_lookup_cache();
+                        gen.emit(Instruction::GetByIdWithThis {
+                            dst: old_val.operand(),
+                            base: base.operand(),
+                            property: key,
+                            this_value: super_this.operand(),
+                            cache_index: cache,
+                        });
+                    }
+                    let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
+                    if is_logical {
+                        let rhs_block = gen.make_block();
+                        let lhs_block = gen.make_block();
+                        let end_block = gen.make_block();
+                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
+                        gen.switch_to_basic_block(rhs_block);
+                        let rhs_val = generate_expression(rhs, gen, None)?;
+                        let dst = choose_dst(gen, preferred_dst);
+                        gen.emit_mov(&dst, &rhs_val);
+                        emit_super_put(gen, &base, property, *computed, &super_this, &dst, computed_key.as_ref());
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(lhs_block);
+                        gen.emit_mov(&dst, &old_val);
+                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.switch_to_basic_block(end_block);
+                        return Some(dst);
+                    }
+                    let rhs_val = generate_expression(rhs, gen, None)?;
+                    let dst = choose_dst(gen, preferred_dst);
+                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
+                    emit_super_put(gen, &base, property, *computed, &super_this, &dst, computed_key.as_ref());
+                    return Some(dst);
+                }
+
+                // Non-super member assignment.
+                let base_raw = generate_expression(object, gen, None)?;
+
+                if op == AssignmentOp::Assignment {
+                    let base = gen.copy_if_needed_to_preserve_evaluation_order(&base_raw);
                     let precomputed_key = if *computed {
                         let key_val = generate_expression_or_undefined(property, gen, None);
                         Some(gen.copy_if_needed_to_preserve_evaluation_order(&key_val))
@@ -3109,38 +3176,10 @@ fn generate_assignment_expression(
                     return Some(rhs_val);
                 }
 
-                // Compound/logical member assignment: match C++ emit_load_from_reference
-                // pattern (no base copy, save property after GetByValue).
+                // Compound/logical member assignment.
                 let base = base_raw;
                 let base_id = intern_base_identifier(gen, object);
                 let is_logical = matches!(op, AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment);
-
-                if is_super {
-                    let old_val = gen.allocate_register();
-                    let computed_key = emit_super_get(gen, &old_val, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"));
-                    if is_logical {
-                        let rhs_block = gen.make_block();
-                        let lhs_block = gen.make_block();
-                        let end_block = gen.make_block();
-                        emit_logical_jump(gen, op, &old_val, rhs_block, lhs_block);
-                        gen.switch_to_basic_block(rhs_block);
-                        let rhs_val = generate_expression(rhs, gen, None)?;
-                        let dst = choose_dst(gen, preferred_dst);
-                        gen.emit_mov(&dst, &rhs_val);
-                        emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &dst, computed_key.as_ref());
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                        gen.switch_to_basic_block(lhs_block);
-                        gen.emit_mov(&dst, &old_val);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
-                        gen.switch_to_basic_block(end_block);
-                        return Some(dst);
-                    }
-                    let rhs_val = generate_expression(rhs, gen, None)?;
-                    let dst = choose_dst(gen, preferred_dst);
-                    emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
-                    emit_super_put(gen, &base, property, *computed, super_this.as_ref().expect("super_this must be set for super member access"), &dst, computed_key.as_ref());
-                    return Some(dst);
-                }
 
                 if *computed {
                     let property = generate_expression(property, gen, None)?;
