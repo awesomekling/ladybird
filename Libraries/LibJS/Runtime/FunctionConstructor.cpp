@@ -189,13 +189,12 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
             &vm, source_code.ptr(),
             static_cast<u8>(kind));
 
-        if (sfd_ptr) {
-            function_data = static_cast<SharedFunctionInstanceData*>(sfd_ptr);
-            function_data->m_source_text_owner = Utf16String::from_utf8(source_text);
-            function_data->m_source_text = function_data->m_source_text_owner.utf16_view();
-        }
+        if (!sfd_ptr)
+            return vm.throw_completion<SyntaxError>("Unable to parse dynamic function"_string);
 
-        // Fall through to C++ parser on Rust failure.
+        function_data = static_cast<SharedFunctionInstanceData*>(sfd_ptr);
+        function_data->m_source_text_owner = Utf16String::from_utf8(source_text);
+        function_data->m_source_text = function_data->m_source_text_owner.utf16_view();
     }
 #endif
 

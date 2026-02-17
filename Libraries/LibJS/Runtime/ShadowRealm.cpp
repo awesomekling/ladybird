@@ -156,20 +156,19 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
                     false, false, false, false, false);
             }
 
-            if (exec_ptr) {
-                executable = static_cast<Bytecode::Executable*>(exec_ptr);
-                executable->name = "ShadowRealmEval"_utf16_fly_string;
-                strict_eval = builder.is_strict_mode;
+            if (!exec_ptr)
+                return vm.throw_completion<SyntaxError>("Unable to parse eval source"_string);
 
-                eval_declaration_data.var_names = move(builder.var_names);
-                eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
-                eval_declaration_data.declared_function_names = move(builder.declared_function_names);
-                eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
-                eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
-                eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
-            }
+            executable = static_cast<Bytecode::Executable*>(exec_ptr);
+            executable->name = "ShadowRealmEval"_utf16_fly_string;
+            strict_eval = builder.is_strict_mode;
 
-            // Fall through to C++ parser on Rust failure.
+            eval_declaration_data.var_names = move(builder.var_names);
+            eval_declaration_data.functions_to_initialize = move(builder.functions_to_initialize);
+            eval_declaration_data.declared_function_names = move(builder.declared_function_names);
+            eval_declaration_data.var_scoped_names = move(builder.var_scoped_names);
+            eval_declaration_data.annex_b_candidate_names = move(builder.annex_b_candidate_names);
+            eval_declaration_data.lexical_bindings = move(builder.lexical_bindings);
         }
     }
 #endif
