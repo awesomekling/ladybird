@@ -5262,7 +5262,7 @@ fn create_for_in_of_lexical_env(gen: &mut Generator, lhs: &ForInOfLhs) -> Scoped
         }
     }
 
-    gen.push_new_lexical_environment(1);
+    gen.push_new_lexical_environment(0);
 
     // Create variable bindings in the new environment.
     for (name, _) in &binding_names {
