@@ -596,7 +596,11 @@ impl<'a> Parser<'a> {
     // === Token matching helpers ===
 
     pub(crate) fn match_identifier(&self) -> bool {
-        let tt = self.current_token.token_type;
+        self.token_is_identifier(&self.current_token)
+    }
+
+    pub(crate) fn token_is_identifier(&self, token: &Token) -> bool {
+        let tt = token.token_type;
         tt == TokenType::Identifier
             || (tt == TokenType::EscapedKeyword && !self.match_invalid_escaped_keyword())
             || (tt == TokenType::Let && !self.flags.strict_mode)

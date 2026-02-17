@@ -823,6 +823,8 @@ impl<'a> Parser<'a> {
                 return false;
             }
         }
-        next.token_type.is_identifier_name()
+        // Must be an actual identifier, not just an identifier-name keyword
+        // like `in`. This matches C++ token_is_identifier().
+        self.token_is_identifier(&next)
     }
 }
