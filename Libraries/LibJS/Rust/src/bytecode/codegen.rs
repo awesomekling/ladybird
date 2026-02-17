@@ -7158,8 +7158,13 @@ pub fn emit_function_declaration_instantiation(
 
     // --- Step 6: AnnexB function name bindings (non-strict only) ---
     if !strict {
+        let var_names = function_scope_data.map(|fsd| &fsd.var_names);
         for name in &body_scope.annexb_function_names {
             gen.annexb_function_names.insert(name.clone());
+            // Skip creating a var binding if this name is already declared as a var.
+            if var_names.is_some_and(|names| names.iter().any(|n| *n == *name)) {
+                continue;
+            }
             let id = gen.intern_identifier(name);
             gen.emit(Instruction::CreateVariable {
                 identifier: id,
