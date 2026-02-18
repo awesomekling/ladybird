@@ -4150,6 +4150,9 @@ fn generate_template_literal(
         return Some(gen.add_constant_string(Utf16String::new()));
     }
 
+    // Allocate dst before generating expressions to match C++ register order.
+    let dst = choose_dst(gen, preferred_dst);
+
     if segments.len() == 1 {
         let val = generate_expression(segments[0], gen, None)?;
         // If it's a constant, return directly.
@@ -4157,7 +4160,6 @@ fn generate_template_literal(
             return Some(val);
         }
         // Otherwise, emit ToString.
-        let dst = choose_dst(gen, preferred_dst);
         gen.emit(Instruction::ToString {
             dst: dst.operand(),
             value: val.operand(),
@@ -4165,7 +4167,6 @@ fn generate_template_literal(
         return Some(dst);
     }
 
-    let dst = choose_dst(gen, preferred_dst);
     let mut first = true;
     for expression in &segments {
         let val = generate_expression_or_undefined(expression, gen, None);
