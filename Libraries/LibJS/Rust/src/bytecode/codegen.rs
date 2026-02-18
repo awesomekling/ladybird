@@ -729,7 +729,7 @@ pub fn generate_statement(
         StatementKind::Debugger => None,
 
         // === ExpressionStatement ===
-        StatementKind::Expression(expression) => generate_expression(expression, gen, preferred_dst),
+        StatementKind::Expression(expression) => generate_expression(expression, gen, None),
 
         // === Block ===
         StatementKind::Block(ref scope) => generate_block_statement(gen, &scope.borrow(), preferred_dst),
