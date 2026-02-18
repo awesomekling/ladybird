@@ -1804,7 +1804,7 @@ impl<'a> Parser<'a> {
                     is_rest: false,
                 }],
                 function_length: 1,
-                parameter_info: vec![ParamInfo { name: value.into(), is_rest: false, is_from_pattern: false, identifier: Some(binding) }],
+                parameter_info: vec![ParamInfo { name: value.into(), is_rest: false, is_from_pattern: false, is_first_from_pattern: false, identifier: Some(binding) }],
                 is_simple: true,
             };
         } else {

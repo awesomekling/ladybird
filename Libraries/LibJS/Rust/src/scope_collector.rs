@@ -643,24 +643,21 @@ impl ScopeCollector {
 
     pub fn set_function_parameters(
         &mut self,
-        entries: &[(Utf16String, Option<Rc<Identifier>>, bool, bool)],
+        entries: &[(Utf16String, Option<Rc<Identifier>>, bool, bool, bool)],
     ) {
         let index = self.current.expect("no current scope");
         self.records[index].has_function_parameters = true;
 
-        let mut previous_was_pattern = false;
-        for (name, identifier, is_rest, is_from_pattern) in entries {
+        for (name, identifier, is_rest, is_from_pattern, is_first_from_pattern) in entries {
             if *is_from_pattern {
-                if !previous_was_pattern {
-                    // First bound name from a pattern parameter — push one
-                    // empty placeholder so subsequent non-pattern parameters
-                    // get the correct positional index.
+                if *is_first_from_pattern {
+                    // First bound name from a pattern parameter — push an
+                    // empty placeholder so subsequent parameters get the
+                    // correct positional index.
                     self.records[index].parameter_names.push(ParameterName { name: Vec::new(), is_rest: false });
                 }
-                previous_was_pattern = true;
             } else {
                 self.records[index].parameter_names.push(ParameterName { name: name.0.clone(), is_rest: *is_rest });
-                previous_was_pattern = false;
             }
             if let Some(id) = identifier {
                 self.register_identifier(id.clone(), name, None);
