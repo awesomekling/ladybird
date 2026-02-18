@@ -795,7 +795,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
                 auto cpp_executable = Bytecode::Generator::generate_from_ast_node(vm, *cpp_program, {});
                 auto rust_bytecode_dump = rust_executable.dump_to_string();
                 auto cpp_bytecode_dump = cpp_executable->dump_to_string();
-                compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, "eval"sv);
+                compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, "eval"sv, cpp_ast_dump);
             }
 
             rust_free_string(rust_ast_data, rust_ast_len);

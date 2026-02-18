@@ -32,10 +32,13 @@ void compare_pipeline_asts(StringView rust_ast, StringView cpp_ast, StringView c
         report_mismatch("AST"sv, rust_ast, cpp_ast, context);
 }
 
-void compare_pipeline_bytecode(StringView rust_bytecode, StringView cpp_bytecode, StringView context)
+void compare_pipeline_bytecode(StringView rust_bytecode, StringView cpp_bytecode, StringView context, StringView ast_dump)
 {
-    if (rust_bytecode != cpp_bytecode)
+    if (rust_bytecode != cpp_bytecode) {
+        if (!ast_dump.is_empty())
+            warnln("\n=== AST (both identical) ===\n{}", ast_dump);
         report_mismatch("Bytecode"sv, rust_bytecode, cpp_bytecode, context);
+    }
 }
 
 }
