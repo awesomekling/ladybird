@@ -6,6 +6,7 @@
  */
 
 #include <LibGC/Root.h>
+#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/Accessor.h>
@@ -206,10 +207,41 @@ GC::Ref<Intrinsics> Intrinsics::create(Realm& realm)
     return *intrinsics;
 }
 
+#ifdef ENABLE_RUST_PARSER
+static void collect_builtin_function(void* ctx, void* sfd_ptr, uint16_t const*, size_t)
+{
+    auto& list = *static_cast<Vector<GC::Root<SharedFunctionInstanceData>>*>(ctx);
+    list.append(*static_cast<SharedFunctionInstanceData*>(sfd_ptr));
+}
+#endif
+
 static Vector<GC::Root<SharedFunctionInstanceData>> parse_builtin_file(unsigned char const* script_text, VM& vm)
 {
     auto script_text_as_utf16 = Utf16String::from_utf8_without_validation({ script_text, strlen(reinterpret_cast<char const*>(script_text)) });
     auto code = SourceCode::create("BuiltinFile"_string, move(script_text_as_utf16));
+
+#ifdef ENABLE_RUST_PARSER
+    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+    if (use_rust_codegen) {
+        auto const& code_view = code->code_view();
+        auto length = code_view.length_in_code_units();
+
+        Vector<GC::Root<SharedFunctionInstanceData>> shared_data_list;
+        if (code_view.has_ascii_storage()) {
+            auto ascii = code_view.ascii_span();
+            Vector<u16> utf16_buf;
+            utf16_buf.ensure_capacity(length);
+            for (size_t i = 0; i < length; ++i)
+                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
+            rust_compile_builtin_file(utf16_buf.data(), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function);
+        } else {
+            auto utf16 = code_view.utf16_span();
+            rust_compile_builtin_file(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function);
+        }
+        return shared_data_list;
+    }
+#endif
+
     auto lexer = Lexer { move(code) };
     auto parser = Parser { move(lexer) };
     VERIFY(!parser.has_errors());

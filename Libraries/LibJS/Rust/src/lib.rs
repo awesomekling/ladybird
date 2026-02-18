@@ -640,6 +640,74 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     })
 }
 
+/// Callback type for reporting builtin file functions to C++.
+type BuiltinFunctionCallback =
+    unsafe extern "C" fn(ctx: *mut c_void, sfd_ptr: *mut c_void, name: *const u16, name_len: usize);
+
+/// Parse a builtin JS file in strict mode, extract top-level function
+/// declarations, and create SharedFunctionInstanceData for each via the
+/// Rust pipeline (no C++ parser involved).
+///
+/// Calls `push_function` for each top-level FunctionDeclaration found.
+///
+/// # Safety
+/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `ctx` must be a valid pointer passed through to `push_function`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_builtin_file(
+    source: *const u16,
+    source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    ctx: *mut c_void,
+    push_function: BuiltinFunctionCallback,
+) {
+    abort_on_panic(|| {
+        let Some(source_slice) = source_from_raw(source, source_len) else {
+            return;
+        };
+
+        let mut parser = Parser::new(source_slice, ProgramType::Script);
+        let program = parser.parse_program(true); // strict mode
+
+        parser.scope_collector.analyze(false);
+
+        if check_errors(&mut parser, "rust_compile_builtin_file") {
+            return;
+        }
+
+        let scope_ref = if let StatementKind::Program(ref data) = program.inner {
+            data.scope.clone()
+        } else {
+            return;
+        };
+
+        let scope = scope_ref.borrow();
+        for child in &scope.children {
+            if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
+                let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(
+                    function_data,
+                    vm_ptr,
+                    source_code_ptr,
+                    true, // strict
+                );
+                if !sfd_ptr.is_null() {
+                    if let Some(ref name_ident) = function_data.name {
+                        push_function(
+                            ctx,
+                            sfd_ptr,
+                            name_ident.name.as_ptr(),
+                            name_ident.name.len(),
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// Recursively collect var-declared names from a statement and all nested
 /// statements, excluding function/class bodies (which create new var scopes).
 fn collect_var_names_recursive(

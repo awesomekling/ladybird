@@ -305,6 +305,18 @@ void eval_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
 void eval_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);
 
+// Parse a builtin JS file in strict mode, extract top-level function
+// declarations, and create SharedFunctionInstanceData for each via the
+// Rust pipeline. Calls push_function for each function found.
+typedef void (*RustBuiltinFunctionCallback)(void* ctx, void* sfd_ptr, uint16_t const* name, size_t name_len);
+void rust_compile_builtin_file(
+    uint16_t const* source,
+    size_t source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    void* ctx,
+    RustBuiltinFunctionCallback push_function);
+
 // Compile a regex pattern+flags. On success, returns a heap-allocated
 // opaque object (RustCompiledRegex*) and sets *error_out to nullptr.
 // On failure, returns nullptr and sets *error_out to a heap-allocated
