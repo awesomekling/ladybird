@@ -4475,10 +4475,19 @@ fn emit_switch_block_declaration_instantiation(
         .collect();
 
     // Check if we need a lexical environment.
+    // Only needed if there are non-local lexical declarations.
     let needs_env = all_children.iter().any(|child| match &child.inner {
         StatementKind::FunctionDeclaration(_) => true,
-        StatementKind::VariableDeclaration { kind, .. } => {
-            *kind == DeclarationKind::Let || *kind == DeclarationKind::Const
+        StatementKind::VariableDeclaration { kind, declarations } => {
+            if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
+                declarations.iter().any(|declaration| {
+                    let mut names = Vec::new();
+                    collect_target_names(&declaration.target, &mut names);
+                    !names.is_empty()
+                })
+            } else {
+                false
+            }
         }
         StatementKind::ClassDeclaration(class_data) => {
             class_data.name.as_ref().is_some_and(|n| !n.is_local())
