@@ -533,7 +533,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
                 ast::FunctionKind::Normal => validate_src.extend_from_slice(utf16!("function test(")),
             }
             validate_src.extend_from_slice(parameters_slice);
-            validate_src.extend_from_slice(utf16!(") {}"));
+            validate_src.extend_from_slice(utf16!("\n) {}"));
             let mut parser = Parser::new(&validate_src, ProgramType::Script);
             parser.parse_program(false);
             if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
