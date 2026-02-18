@@ -4071,6 +4071,11 @@ fn generate_tagged_template_literal(
         arguments,
     });
 
+    // Match C++ destruction order: argument_regs (containing strings_array)
+    // frees before the tag/this_value struct members.
+    drop(argument_regs);
+    drop(this_op);
+
     Some(dst)
 }
 
