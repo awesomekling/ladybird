@@ -8575,11 +8575,43 @@ fn member_to_string_approximation(expression: &Expression) -> Utf16String {
             result
         }
         ExpressionKind::NumericLiteral(n) => {
-            let s = format!("{}", n);
+            let s = format_double_for_display(*n);
             s.encode_utf16().collect()
         }
         ExpressionKind::This => Utf16String(utf16!("this").to_vec()),
         ExpressionKind::PrivateIdentifier(ident) => ident.name.clone(),
         _ => Utf16String(utf16!("<object>").to_vec()),
     }
+}
+
+/// Format a double matching AK's `Utf16String::formatted("{}", double)`.
+/// Uses ECMA-262 rules: scientific notation when the decimal exponent n
+/// satisfies n < -5 or n > 21, otherwise regular decimal notation.
+fn format_double_for_display(n: f64) -> String {
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 { "inf" } else { "-inf" }.to_string();
+    }
+    if n == 0.0 {
+        return "0".to_string();
+    }
+    // Get the scientific notation representation to extract the exponent.
+    let e_str = format!("{:e}", n);
+    if let Some(e_pos) = e_str.find('e') {
+        let exp_str = &e_str[e_pos + 1..];
+        let displayed_exponent = exp_str.parse::<i32>().unwrap_or(0);
+        // AK uses: n < -5 || n > 21 where n = displayed_exponent + 1.
+        // Equivalently: displayed_exponent < -6 || displayed_exponent > 20.
+        if displayed_exponent < -6 || displayed_exponent > 20 {
+            let mantissa_part = &e_str[..e_pos];
+            if displayed_exponent < 0 {
+                return format!("{}e{}", mantissa_part, displayed_exponent);
+            } else {
+                return format!("{}e+{}", mantissa_part, displayed_exponent);
+            }
+        }
+    }
+    format!("{}", n)
 }
