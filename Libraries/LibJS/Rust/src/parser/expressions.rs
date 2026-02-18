@@ -1217,11 +1217,17 @@ impl<'a> Parser<'a> {
         // parse_object_expression and get the object's rule_start position. This applies
         // even after consuming an `async` prefix. Only get/set prefix and generator `*`
         // cause the key to go through parse_property_key with its own position.
-        // C++ also matches Async and EscapedKeyword tokens in match_identifier().
+        // NB: C++ match_identifier() returns true for most EscapedKeyword tokens
+        // (like escaped reserved words "if", "while", etc.), only rejecting
+        // let/yield/await under specific conditions. Rust's match_identifier()
+        // is more restrictive, so we add explicit EscapedKeyword handling here.
+        let is_cpp_identifier = self.match_identifier()
+            || (self.current_token.token_type == TokenType::EscapedKeyword && {
+                let value = self.token_value(&self.current_token);
+                value != utf16!("let") && value != utf16!("yield") && value != utf16!("await")
+            });
         let ident_override = if !is_getter && !is_setter && !is_generator
-            && (self.match_identifier()
-                || self.current_token.token_type == TokenType::Async
-                || self.current_token.token_type == TokenType::EscapedKeyword)
+            && is_cpp_identifier
         {
             Some(obj_start)
         } else {
