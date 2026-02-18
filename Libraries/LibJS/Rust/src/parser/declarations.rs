@@ -1133,15 +1133,13 @@ impl<'a> Parser<'a> {
                 }
                 seen_parameter_names.insert(value.clone());
                 let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone().into()));
-                parameter_info.push(ParamInfo { name: value.into(), is_rest: rest, is_from_pattern: false, is_first_from_pattern: false, identifier: Some(id.clone()) });
+                parameter_info.push(ParamInfo { name: value.into(), is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
-                let mut first = true;
                 for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
                     seen_parameter_names.insert(n.0.clone());
-                    parameter_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, is_first_from_pattern: first, identifier: Some(id) });
-                    first = false;
+                    parameter_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)
             } else {

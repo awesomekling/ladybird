@@ -67,7 +67,6 @@ pub struct ParamInfo {
     pub name: Utf16String,
     pub is_rest: bool,
     pub is_from_pattern: bool,
-    pub is_first_from_pattern: bool,
     pub identifier: Option<Rc<Identifier>>,
 }
 
@@ -339,20 +338,23 @@ impl<'a> Parser<'a> {
         for parameter in parameters {
             match &parameter.binding {
                 FunctionParameterBinding::Identifier(id) => {
-                    let (name, is_rest, is_from_pattern, is_first_from_pattern) = if info_index < parameter_info.len() {
+                    let (name, is_rest, is_from_pattern) = if info_index < parameter_info.len() {
                         let pi = &parameter_info[info_index];
                         info_index += 1;
-                        (pi.name.clone(), pi.is_rest, pi.is_from_pattern, pi.is_first_from_pattern)
+                        (pi.name.clone(), pi.is_rest, pi.is_from_pattern)
                     } else {
-                        (id.name.clone(), parameter.is_rest, false, false)
+                        (id.name.clone(), parameter.is_rest, false)
                     };
-                    entries.push((name, Some(id.clone()), is_rest, is_from_pattern, is_first_from_pattern));
+                    entries.push((name, Some(id.clone()), is_rest, is_from_pattern, false));
                 }
                 FunctionParameterBinding::BindingPattern(_pat) => {
-                    // Pattern parameters have multiple bound names in parameter_info.
+                    // Push a placeholder entry for the pattern parameter itself
+                    // so subsequent parameters get correct positional indices.
+                    entries.push((Utf16String::default(), None, false, true, true));
+                    // Then push bound names from this pattern.
                     while info_index < parameter_info.len() && parameter_info[info_index].is_from_pattern {
                         let pi = &parameter_info[info_index];
-                        entries.push((pi.name.clone(), pi.identifier.clone(), pi.is_rest, true, pi.is_first_from_pattern));
+                        entries.push((pi.name.clone(), pi.identifier.clone(), pi.is_rest, true, false));
                         info_index += 1;
                     }
                 }

@@ -651,10 +651,11 @@ impl ScopeCollector {
         for (name, identifier, is_rest, is_from_pattern, is_first_from_pattern) in entries {
             if *is_from_pattern {
                 if *is_first_from_pattern {
-                    // First bound name from a pattern parameter — push an
-                    // empty placeholder so subsequent parameters get the
-                    // correct positional index.
+                    // Placeholder for a pattern parameter — push an empty
+                    // entry so subsequent parameters get the correct
+                    // positional index. Don't register anything else.
                     self.records[index].parameter_names.push(ParameterName { name: Vec::new(), is_rest: false });
+                    continue;
                 }
             } else {
                 self.records[index].parameter_names.push(ParameterName { name: name.0.clone(), is_rest: *is_rest });
