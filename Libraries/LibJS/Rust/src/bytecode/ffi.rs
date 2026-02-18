@@ -88,16 +88,6 @@ extern "C" {
         regex_count: usize,
     ) -> *mut c_void;
 
-    pub fn rust_create_shared_function_data(
-        vm_ptr: *mut c_void,
-        source_code_ptr: *const c_void,
-        source_text: *const u16,
-        source_text_len: usize,
-        name: *const u16,
-        name_len: usize,
-        strict_mode: bool,
-    ) -> *mut c_void;
-
     pub fn rust_create_sfd(
         vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,

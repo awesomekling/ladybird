@@ -5188,24 +5188,56 @@ fn generate_class_expression(
 
 /// Synthesize a default constructor SharedFunctionInstanceData.
 fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
-    // Default constructor source:
-    // - Base class: "constructor() {}"
-    // - Derived class: "constructor(...arguments) { super(...arguments); }"
-    let source: &[u16] = if has_super {
-        utf16!("constructor(...arguments) { super(...arguments); }")
+    use crate::parser::{Parser, ProgramType};
+
+    // Wrap in "function" keyword so it parses as a FunctionDeclaration.
+    let source: Vec<u16> = if has_super {
+        utf16!("function constructor(...arguments) { super(...arguments); }")
+            .to_vec()
     } else {
-        utf16!("constructor() {}")
+        utf16!("function constructor() {}").to_vec()
     };
 
+    let mut parser = Parser::new(&source, ProgramType::Script);
+    if has_super {
+        parser.flags.allow_super_constructor_call = true;
+    }
+    let program = parser.parse_program(false);
+    parser.scope_collector.analyze(false);
+
+    assert!(
+        !parser.has_errors(),
+        "default constructor parse failed"
+    );
+
+    // Extract FunctionData from the parsed program.
+    let function_data = if let StatementKind::Program(ref data) = program.inner {
+        let scope = data.scope.borrow();
+        scope.children.iter().find_map(|child| {
+            if let StatementKind::FunctionDeclaration(fd) = &child.inner {
+                Some(fd.as_ref().clone())
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    let mut function_data = function_data.expect("default constructor: no FunctionDeclaration found");
+
+    // Zero out source text range since this is synthetic source,
+    // not part of the original source code buffer.
+    function_data.source_text_start = 0;
+    function_data.source_text_end = 0;
+
     let sfd_ptr = unsafe {
-        super::ffi::rust_create_shared_function_data(
+        super::ffi::create_shared_function_data(
+            &function_data,
             gen.vm_ptr,
             gen.source_code_ptr,
-            source.as_ptr(),
-            source.len(),
-            std::ptr::null(),
-            0,
             gen.strict,
+            None,
         )
     };
     assert!(
