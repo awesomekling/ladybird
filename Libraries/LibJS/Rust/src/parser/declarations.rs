@@ -1051,8 +1051,14 @@ impl<'a> Parser<'a> {
         let saved_formal_parameter_ctx = self.flags.in_formal_parameter_context;
         self.flags.in_formal_parameter_context = true;
 
+        // Save and clear pattern_bound_names so that nested function parsing
+        // (e.g. arrow functions in default values) doesn't steal binding names
+        // accumulated by an outer binding pattern context.
+        let saved_pattern_bound_names = std::mem::take(&mut self.pattern_bound_names);
+
         if self.match_token(TokenType::ParenClose) {
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
+            self.pattern_bound_names = saved_pattern_bound_names;
             return ParsedParameters {
                 parameters: Vec::new(),
                 function_length: 0,
@@ -1171,6 +1177,7 @@ impl<'a> Parser<'a> {
         }
 
         self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
+        self.pattern_bound_names = saved_pattern_bound_names;
 
         let is_simple = !has_seen_default && !has_seen_rest && !parameters.iter().any(|p| matches!(&p.binding, FunctionParameterBinding::BindingPattern(_)));
         ParsedParameters { parameters, function_length, parameter_info, is_simple }
