@@ -2976,7 +2976,7 @@ fn generate_assignment_expression(
             if let ExpressionKind::Identifier(ident) = &lhs_expression.inner {
                 if op == AssignmentOp::Assignment {
                     gen.pending_lhs_name = Some(gen.intern_identifier(&ident.name));
-                    let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
+                    let rhs_val = generate_expression(rhs, gen, None)?;
                     gen.pending_lhs_name = None;
                     emit_set_variable(gen, ident, &rhs_val);
                     return Some(rhs_val);
@@ -3060,7 +3060,7 @@ fn generate_assignment_expression(
                         };
                         let base = gen.allocate_register();
                         gen.emit(Instruction::ResolveSuperBase { dst: base.operand() });
-                        let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
+                        let rhs_val = generate_expression(rhs, gen, None)?;
                         emit_super_put(gen, &base, property, *computed, &super_this, &rhs_val, computed_key.as_ref());
                         return Some(rhs_val);
                     }
@@ -3124,7 +3124,7 @@ fn generate_assignment_expression(
                     } else {
                         None
                     };
-                    let rhs_val = generate_expression(rhs, gen, preferred_dst)?;
+                    let rhs_val = generate_expression(rhs, gen, None)?;
                     if let Some(key) = precomputed_key {
                         let base_id = intern_base_identifier(gen, object);
                         emit_put_normal_by_value(gen, &base, &key, &rhs_val, base_id);
