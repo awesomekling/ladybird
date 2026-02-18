@@ -1522,6 +1522,11 @@ impl<'a> Parser<'a> {
                     } else if self.match_token(TokenType::StringLiteral) {
                         let token = self.consume();
                         let (name, _) = self.parse_string_value(&token);
+                        if let Some(&last) = name.last() {
+                            if (0xD800..=0xDBFF).contains(&last) {
+                                self.syntax_error("StringValue ending with unpaired high surrogate");
+                            }
+                        }
 
                         if !self.match_as() {
                             self.expected("'as'");
@@ -1761,6 +1766,21 @@ impl<'a> Parser<'a> {
             None
         };
 
+        // Check for duplicate exported names.
+        for entry in &entries {
+            if let Some(ref name) = entry.export_name {
+                if !self.exported_names.insert(name.as_slice().to_vec()) {
+                    self.syntax_error_at_position(
+                        &format!(
+                            "Duplicate export with name: '{}'",
+                            String::from_utf16_lossy(name.as_slice())
+                        ),
+                        start,
+                    );
+                }
+            }
+        }
+
         self.statement(start, StatementKind::Export(ExportStatementData {
             statement,
             entries,
@@ -1798,6 +1818,14 @@ impl<'a> Parser<'a> {
         } else if self.match_token(TokenType::StringLiteral) {
             let token = self.consume();
             let (value, _) = self.parse_string_value(&token);
+            // https://tc39.es/ecma262/#sec-module-semantics-static-semantics-early-errors
+            // It is a Syntax Error if IsStringWellFormedUnicode of the StringValue
+            // of StringLiteral is false.
+            if let Some(&last) = value.last() {
+                if (0xD800..=0xDBFF).contains(&last) {
+                    self.syntax_error("StringValue ending with unpaired high surrogate");
+                }
+            }
             (value.into(), true)
         } else {
             self.expected("export specifier (string or identifier)");

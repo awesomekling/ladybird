@@ -267,6 +267,9 @@ pub struct Parser<'a> {
     pub(crate) for_loop_declaration_is_var: bool,
 
     pub scope_collector: ScopeCollector,
+
+    /// Track exported names for duplicate detection in modules.
+    exported_names: HashSet<Vec<u16>>,
 }
 
 impl<'a> Parser<'a> {
@@ -306,6 +309,7 @@ impl<'a> Parser<'a> {
             for_loop_declaration_has_init: false,
             for_loop_declaration_is_var: false,
             scope_collector: ScopeCollector::new(),
+            exported_names: HashSet::new(),
         }
     }
 
@@ -396,7 +400,18 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn consume_and_check_identifier(&mut self) -> Token {
-        self.consume()
+        let token = self.consume();
+        if self.flags.strict_mode && token.token_type == TokenType::Identifier {
+            let value = self.token_value(&token);
+            if is_strict_reserved_word(value) {
+                let name = String::from_utf16_lossy(value);
+                self.syntax_error(&format!(
+                    "Identifier must not be a reserved word in strict mode ('{}')",
+                    name
+                ));
+            }
+        }
+        token
     }
 
     pub(crate) fn consume_token(&mut self, expected: TokenType) -> Token {
@@ -907,10 +922,73 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Check that all exported bindings are declared in the module.
+        self.check_undeclared_exports(&children);
+
         self.flags.strict_mode = strict_before;
         self.flags.await_expression_is_valid = await_before;
         let has_top_level_await = self.scope_collector.contains_await_expression();
         (children, has_top_level_await)
+    }
+
+    fn check_undeclared_exports(&mut self, children: &[Statement]) {
+        use crate::ast::*;
+
+        // Collect all declared names at module level.
+        let mut declared_names: HashSet<Vec<u16>> = HashSet::new();
+        for child in children {
+            match &child.inner {
+                StatementKind::VariableDeclaration { declarations, .. } => {
+                    for decl in declarations {
+                        collect_binding_names(&decl.target, &mut declared_names);
+                    }
+                }
+                StatementKind::FunctionDeclaration(data) => {
+                    if let Some(ref name) = data.name {
+                        declared_names.insert(name.name.as_slice().to_vec());
+                    }
+                }
+                StatementKind::ClassDeclaration(data) => {
+                    if let Some(ref name) = data.name {
+                        declared_names.insert(name.name.as_slice().to_vec());
+                    }
+                }
+                StatementKind::Import(data) => {
+                    for entry in &data.entries {
+                        declared_names.insert(entry.local_name.as_slice().to_vec());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Check each export's local bindings.
+        for child in children {
+            if let StatementKind::Export(data) = &child.inner {
+                if data.statement.is_some() {
+                    continue;
+                }
+                for entry in &data.entries {
+                    if data.module_request.is_some() {
+                        continue;
+                    }
+                    if entry.kind == ExportEntryKind::EmptyNamedExport {
+                        continue;
+                    }
+                    if let Some(ref local_name) = entry.local_or_import_name {
+                        if !declared_names.contains(local_name.as_slice()) {
+                            self.syntax_error_at_position(
+                                &format!(
+                                    "'{}' in export is not declared",
+                                    String::from_utf16_lossy(local_name.as_slice())
+                                ),
+                                child.range.start,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // https://tc39.es/ecma262/#sec-directive-prologues-and-the-use-strict-directive
@@ -1087,6 +1165,37 @@ impl<'a> Parser<'a> {
 
 fn is_use_strict(raw: &[u16]) -> bool {
     raw == utf16!("'use strict'") || raw == utf16!("\"use strict\"")
+}
+
+/// Collect all binding names introduced by a variable declarator target.
+fn collect_binding_names(target: &crate::ast::VariableDeclaratorTarget, names: &mut HashSet<Vec<u16>>) {
+    match target {
+        crate::ast::VariableDeclaratorTarget::Identifier(identifier) => {
+            names.insert(identifier.name.as_slice().to_vec());
+        }
+        crate::ast::VariableDeclaratorTarget::BindingPattern(pattern) => {
+            collect_binding_pattern_names(pattern, names);
+        }
+    }
+}
+
+/// Collect all binding names from a binding pattern (object or array destructuring).
+fn collect_binding_pattern_names(pattern: &crate::ast::BindingPattern, names: &mut HashSet<Vec<u16>>) {
+    for entry in &pattern.entries {
+        if let Some(ref alias) = entry.alias {
+            match alias {
+                crate::ast::BindingEntryAlias::Identifier(identifier) => {
+                    names.insert(identifier.name.as_slice().to_vec());
+                }
+                crate::ast::BindingEntryAlias::BindingPattern(nested) => {
+                    collect_binding_pattern_names(nested, names);
+                }
+                crate::ast::BindingEntryAlias::MemberExpression(_) => {}
+            }
+        } else if let Some(crate::ast::BindingEntryName::Identifier(identifier)) = &entry.name {
+            names.insert(identifier.name.as_slice().to_vec());
+        }
+    }
 }
 
 // https://tc39.es/ecma262/#sec-keywords-and-reserved-words
