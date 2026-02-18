@@ -485,6 +485,8 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     function_kind: u8,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
+    ast_dump_output: *mut *mut u8,
+    ast_dump_output_len: *mut usize,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let kind = match function_kind {
@@ -595,6 +597,15 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             return std::ptr::null_mut();
         }
 
+        // If caller wants an AST dump string, produce it.
+        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
+            let dump_string = ast_dump::dump_program_to_string(&program);
+            let mut boxed = dump_string.into_bytes().into_boxed_slice();
+            *ast_dump_output = boxed.as_mut_ptr();
+            *ast_dump_output_len = boxed.len();
+            std::mem::forget(boxed);
+        }
+
         // Extract the FunctionExpression from the program.
         // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
         let function_data = if let StatementKind::Program(ref data) = program.inner {
@@ -663,6 +674,8 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
     push_function: BuiltinFunctionCallback,
+    ast_dump_output: *mut *mut u8,
+    ast_dump_output_len: *mut usize,
 ) {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
@@ -676,6 +689,15 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
 
         if check_errors(&mut parser, "rust_compile_builtin_file") {
             return;
+        }
+
+        // If caller wants an AST dump string, produce it.
+        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
+            let dump_string = ast_dump::dump_program_to_string(&program);
+            let mut boxed = dump_string.into_bytes().into_boxed_slice();
+            *ast_dump_output = boxed.as_mut_ptr();
+            *ast_dump_output_len = boxed.len();
+            std::mem::forget(boxed);
         }
 
         let scope_ref = if let StatementKind::Program(ref data) = program.inner {
@@ -837,6 +859,8 @@ pub unsafe extern "C" fn rust_compile_module(
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
     tla_executable_out: *mut *mut c_void,
+    ast_dump_output: *mut *mut u8,
+    ast_dump_output_len: *mut usize,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
@@ -852,6 +876,15 @@ pub unsafe extern "C" fn rust_compile_module(
 
         if check_errors_with_callback(&mut parser, "rust_compile_module", error_context, error_callback) {
             return std::ptr::null_mut();
+        }
+
+        // If caller wants an AST dump string, produce it.
+        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
+            let dump_string = ast_dump::dump_program_to_string(&program);
+            let mut boxed = dump_string.into_bytes().into_boxed_slice();
+            *ast_dump_output = boxed.as_mut_ptr();
+            *ast_dump_output_len = boxed.len();
+            std::mem::forget(boxed);
         }
 
         let program_data = if let StatementKind::Program(ref data) = program.inner {

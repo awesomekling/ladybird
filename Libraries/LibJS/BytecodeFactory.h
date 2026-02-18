@@ -297,7 +297,9 @@ void* rust_compile_dynamic_function(
     void const* source_code_ptr,
     uint8_t function_kind,
     void* error_context,
-    RustParseErrorCallback error_callback);
+    RustParseErrorCallback error_callback,
+    uint8_t** ast_dump_output,
+    size_t* ast_dump_output_len);
 
 // Callbacks used by rust_compile_eval to populate EDI metadata.
 void eval_gdi_set_strict(void* ctx, bool is_strict);
@@ -317,7 +319,9 @@ void rust_compile_builtin_file(
     void* vm_ptr,
     void const* source_code_ptr,
     void* ctx,
-    RustBuiltinFunctionCallback push_function);
+    RustBuiltinFunctionCallback push_function,
+    uint8_t** ast_dump_output,
+    size_t* ast_dump_output_len);
 
 // Module compilation callback table (matches Rust ModuleCallbacks struct).
 struct ModuleCallbacks {
@@ -399,7 +403,9 @@ void* rust_compile_module(
     ModuleCallbacks const* callbacks,
     void* error_context,
     RustParseErrorCallback error_callback,
-    void** tla_executable_out);
+    void** tla_executable_out,
+    uint8_t** ast_dump_output,
+    size_t* ast_dump_output_len);
 
 // Set the name on a SharedFunctionInstanceData (used for module default
 // export renaming from "*default*" to "default").
