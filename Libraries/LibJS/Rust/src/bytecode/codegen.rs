@@ -5101,6 +5101,34 @@ fn generate_class_expression(
         }
     }
 
+    // First pass: evaluate all computed property keys.
+    // This must happen before registering the constructor and method SFDs,
+    // matching the C++ pipeline's two-loop structure.
+    let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
+    for element_node in &data.elements {
+        match &element_node.inner {
+            ClassElement::Method { key, .. } => {
+                if !is_private_key(key) {
+                    let key_val = generate_expression(key, gen, None);
+                    element_keys.push(key_val);
+                } else {
+                    element_keys.push(None);
+                }
+            }
+            ClassElement::Field { key, .. } => {
+                if !is_private_key(key) {
+                    let key_val = generate_expression(key, gen, None);
+                    element_keys.push(key_val);
+                } else {
+                    element_keys.push(None);
+                }
+            }
+            ClassElement::StaticInitializer { .. } => {
+                element_keys.push(None);
+            }
+        }
+    }
+
     // Create SharedFunctionInstanceData for constructor
     let constructor_sfd_index = if let Some(ctor_expression) = &data.constructor {
         // Explicit constructor — extract FunctionData from the expression
@@ -5115,9 +5143,8 @@ fn generate_class_expression(
         emit_default_constructor(gen, has_super)
     };
 
-    // Process class elements.
+    // Second pass: register method/field SFDs and build element descriptors.
     let mut ffi_elements = Vec::new();
-    let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
     // Keep literal string data alive until FFI call.
     let mut literal_string_storage: Vec<Utf16String> = Vec::new();
 
@@ -5151,14 +5178,6 @@ fn generate_class_expression(
 
                 // Handle computed vs static keys
                 let is_private = is_private_key(key);
-
-                // Evaluate the key for non-private elements
-                if !is_private {
-                    let key_val = generate_expression(key, gen, None);
-                    element_keys.push(key_val);
-                } else {
-                    element_keys.push(None);
-                }
 
                 // Point directly into the AST's PrivateIdentifier name (stable address).
                 let (priv_ptr, priv_len) = get_private_identifier_ptr(key);
@@ -5303,13 +5322,6 @@ fn generate_class_expression(
 
                 let is_private = is_private_key(key);
 
-                if !is_private {
-                    let key_val = generate_expression(key, gen, None);
-                    element_keys.push(key_val);
-                } else {
-                    element_keys.push(None);
-                }
-
                 let (priv_ptr, priv_len) = get_private_identifier_ptr(key);
 
                 // Keep literal string data alive until FFI call.
@@ -5357,7 +5369,6 @@ fn generate_class_expression(
                 };
                 let sfd_index = emit_new_function(gen, &function_data, None) as i32;
 
-                element_keys.push(None);
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: ClassElementKind::StaticInitializer as u8,
                     is_static: true,
