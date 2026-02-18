@@ -659,7 +659,14 @@ pub fn generate_expression(
 
         // === OptionalChain ===
         ExpressionKind::OptionalChain { base, references } => {
-            generate_optional_chain(gen, base, references, preferred_dst).map(|(v, _)| v)
+            // Match C++ OptionalChain::generate_bytecode: allocate current_base
+            // first, current_value second, and emit Mov Undefined for current_base.
+            let current_base = gen.allocate_register();
+            let current_value = choose_dst(gen, preferred_dst);
+            let undef = gen.add_constant_undefined();
+            gen.emit_mov(&current_base, &undef);
+            generate_optional_chain_inner(gen, base, references, &current_value, &current_base)?;
+            Some(current_value)
         }
 
         // === SuperCall ===
@@ -2867,8 +2874,13 @@ fn generate_call_expression(
                 (callee_reg, Some(this_reg))
             }
             ExpressionKind::OptionalChain { base, references } => {
-                let (callee, this_val) = generate_optional_chain(gen, base, references, None)?;
-                (callee, Some(this_val))
+                // Match C++ CallExpression::generate_bytecode: allocate callee
+                // (current_value) first, this_value (current_base) second,
+                // and do NOT emit Mov Undefined for current_base.
+                let callee = gen.allocate_register();
+                let this_value = gen.allocate_register();
+                generate_optional_chain_inner(gen, base, references, &callee, &this_value)?;
+                (callee, Some(this_value))
             }
             _ => {
                 let callee = generate_expression_or_undefined(&data.callee, gen, None);
@@ -4847,22 +4859,8 @@ fn emit_object_accessor_by_key(
 // Optional chain
 // =============================================================================
 
-fn generate_optional_chain(
-    gen: &mut Generator,
-    base: &Expression,
-    references: &[OptionalChainReference],
-    preferred_dst: Option<&ScopedOperand>,
-) -> Option<(ScopedOperand, ScopedOperand)> {
-    let current_base = gen.allocate_register();
-    let current_value = choose_dst(gen, preferred_dst);
-    let undef = gen.add_constant_undefined();
-    gen.emit_mov(&current_base, &undef);
-    generate_optional_chain_inner(gen, base, references, &current_value, &current_base)?;
-    Some((current_value, current_base))
-}
-
-/// Inner helper matching C++ generate_optional_chain: takes pre-allocated
-/// current_value and current_base registers, writes results into them directly.
+/// Matches C++ generate_optional_chain: takes pre-allocated current_value and
+/// current_base registers, writes results into them directly.
 fn generate_optional_chain_inner(
     gen: &mut Generator,
     base: &Expression,
