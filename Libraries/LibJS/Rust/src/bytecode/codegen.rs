@@ -7939,22 +7939,57 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
             return Some(BigInt::from(n_i64) == bi);
         }
         // BigInt == String or String == BigInt: parse string as BigInt per StringToBigInt.
+        // If the string cannot be parsed, the result is false (not equal).
         (ConstantValue::BigInt(b), ConstantValue::String(s))
         | (ConstantValue::String(s), ConstantValue::BigInt(b)) => {
-            let s_utf8: String = char::decode_utf16(s.0.iter().copied())
-                .map(|r| r.unwrap_or('\u{FFFD}'))
-                .collect();
-            let s_trimmed = s_utf8.trim();
-            if s_trimmed.is_empty() {
-                let bi = parse_bigint(b)?;
-                return Some(bi.is_zero());
+            match string_to_bigint(s) {
+                Some(s_bi) => {
+                    let bi = parse_bigint(b)?;
+                    return Some(bi == s_bi);
+                }
+                None => return Some(false),
             }
-            let s_bi = parse_bigint(s_trimmed)?;
-            let bi = parse_bigint(b)?;
-            return Some(bi == s_bi);
         }
         _ => None,
     }
+}
+
+/// Implements StringToBigInt per https://tc39.es/ecma262/#sec-stringtobigint.
+/// Trims whitespace, handles optional sign (decimal only), and handles
+/// 0b/0o/0x prefixes. Returns None if the string is not a valid
+/// StringIntegerLiteral.
+fn string_to_bigint(s: &Utf16String) -> Option<BigInt> {
+    use num_bigint::BigInt;
+    let s_utf8: String = char::decode_utf16(s.0.iter().copied())
+        .map(|r| r.unwrap_or('\u{FFFD}'))
+        .collect();
+    let s_trimmed = s_utf8.trim();
+    if s_trimmed.is_empty() {
+        return Some(BigInt::from(0));
+    }
+    // Check for non-decimal prefixes (no sign allowed).
+    if s_trimmed.len() > 2 {
+        let (prefix, rest) = s_trimmed.split_at(2);
+        match prefix {
+            "0b" | "0B" => return BigInt::parse_bytes(rest.as_bytes(), 2),
+            "0o" | "0O" => return BigInt::parse_bytes(rest.as_bytes(), 8),
+            "0x" | "0X" => return BigInt::parse_bytes(rest.as_bytes(), 16),
+            _ => {}
+        }
+    }
+    // Decimal with optional sign. Only allow digits (no dots, no exponents).
+    let (is_negative, digits) = if let Some(rest) = s_trimmed.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = s_trimmed.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, s_trimmed)
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let bi = BigInt::parse_bytes(digits.as_bytes(), 10)?;
+    Some(if is_negative { -bi } else { bi })
 }
 
 /// Parse a BigInt string to an arbitrary-precision BigInt.
@@ -8335,14 +8370,27 @@ fn try_constant_fold_binary(
                 (ConstantValue::Number(n), ConstantValue::BigInt(b)) => {
                     compare_bigint_and_number(b, *n).map(|o| o.map(|o| o.reverse()))
                 }
-                // BigInt vs String: parse the string as a number.
+                // BigInt vs String: per spec, parse the string as a BigInt
+                // using StringToBigInt, then compare the two BigInts.
+                // If the string is not a valid StringIntegerLiteral,
+                // the result is undefined (= false for all comparisons).
                 (ConstantValue::BigInt(b), ConstantValue::String(s)) => {
-                    let n = string_to_number(s);
-                    compare_bigint_and_number(b, n)
+                    match string_to_bigint(s) {
+                        Some(rhs_bi) => {
+                            let lhs_bi = parse_bigint(b)?;
+                            Some(Some(lhs_bi.cmp(&rhs_bi)))
+                        }
+                        None => Some(None),
+                    }
                 }
                 (ConstantValue::String(s), ConstantValue::BigInt(b)) => {
-                    let n = string_to_number(s);
-                    compare_bigint_and_number(b, n).map(|o| o.map(|o| o.reverse()))
+                    match string_to_bigint(s) {
+                        Some(lhs_bi) => {
+                            let rhs_bi = parse_bigint(b)?;
+                            Some(Some(lhs_bi.cmp(&rhs_bi)))
+                        }
+                        None => Some(None),
+                    }
                 }
                 _ => None,
             };
