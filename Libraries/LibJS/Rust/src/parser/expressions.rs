@@ -532,7 +532,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_secondary_expression(&mut self, lhs_start: Position, lhs: Expression, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expression, ForbiddenTokens) {
+    fn parse_secondary_expression(&mut self, _lhs_start: Position, lhs: Expression, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expression, ForbiddenTokens) {
         let start = self.position();
         let tt = self.current_token_type();
 
@@ -607,7 +607,11 @@ impl<'a> Parser<'a> {
                     // Save pattern_bound_names so that an outer binding
                     // pattern parse in progress doesn't lose its entries.
                     let saved_bound_names = std::mem::take(&mut self.pattern_bound_names);
-                    if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs_start) {
+                    // Use the expression's own range start, not the outer
+                    // lhs_start. When the expression is parenthesized (e.g.
+                    // `([a,b]) = ...`), lhs_start points to `(` but we need
+                    // to re-lex from `[` to correctly synthesize the pattern.
+                    if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs.range.start) {
                         // Register synthesized identifiers with the scope collector so
                         // they get resolved as locals during analyze().
                         for (name, id) in self.pattern_bound_names.drain(..) {
