@@ -7827,6 +7827,13 @@ fn try_constant_fold_unary(
                 ConstantValue::Boolean(b) => *b,
                 ConstantValue::Null | ConstantValue::Undefined => false,
                 ConstantValue::String(s) => !s.is_empty(),
+                ConstantValue::BigInt(s) => {
+                    if let Some(bi) = parse_bigint(s) {
+                        !bi.is_zero()
+                    } else {
+                        return None;
+                    }
+                }
                 _ => return None,
             };
             Some(gen.add_constant_boolean(!as_bool))
@@ -7846,6 +7853,13 @@ fn try_constant_fold_to_boolean(
         ConstantValue::Boolean(b) => *b,
         ConstantValue::Null | ConstantValue::Undefined => false,
         ConstantValue::String(s) => !s.is_empty(),
+        ConstantValue::BigInt(s) => {
+            if let Some(bi) = parse_bigint(s) {
+                !bi.is_zero()
+            } else {
+                return None;
+            }
+        }
         _ => return None,
     };
     Some(gen.add_constant_boolean(as_bool))
@@ -8142,8 +8156,57 @@ fn constant_to_string(val: &ConstantValue) -> Option<Utf16String> {
         }
         ConstantValue::Null => Some(Utf16String(utf16!("null").to_vec())),
         ConstantValue::Undefined => Some(Utf16String(utf16!("undefined").to_vec())),
+        ConstantValue::BigInt(s) => {
+            // BigInt.prototype.toString() returns the decimal string representation.
+            Some(Utf16String(s.encode_utf16().collect()))
+        }
         _ => None,
     }
+}
+
+/// Compare a BigInt and a Number using Abstract Relational Comparison semantics.
+/// Returns None if comparison cannot be folded (non-safe integer, etc).
+/// Returns Some(None) for NaN (undefined result - all comparisons return false).
+/// Returns Some(Some(Ordering)) for the BigInt relative to the Number.
+fn compare_bigint_and_number(bigint_str: &str, number: f64) -> Option<Option<std::cmp::Ordering>> {
+    use std::cmp::Ordering;
+    if number.is_nan() {
+        return Some(None); // Comparisons with NaN return undefined → false.
+    }
+    if number == f64::INFINITY {
+        return Some(Some(Ordering::Less)); // Any BigInt < +Infinity
+    }
+    if number == f64::NEG_INFINITY {
+        return Some(Some(Ordering::Greater)); // Any BigInt > -Infinity
+    }
+    let bigint = parse_bigint(bigint_str)?;
+    // Only fold if the f64 value is a safe integer for lossless comparison.
+    if number.fract() != 0.0 {
+        // The number has a fractional part, so we can still compare:
+        // floor(number) < bigint means bigint > number, etc.
+        let floored = number.floor();
+        if floored > i64::MAX as f64 || floored < i64::MIN as f64 {
+            return None;
+        }
+        let floored_i64 = floored as i64;
+        let floored_bigint = BigInt::from(floored_i64);
+        if bigint <= floored_bigint {
+            // bigint <= floor(number) means bigint < number
+            return Some(Some(Ordering::Less));
+        } else {
+            // bigint > floor(number) means bigint > number (since number = floor + fract where fract > 0)
+            return Some(Some(Ordering::Greater));
+        }
+    }
+    if number > i64::MAX as f64 || number < i64::MIN as f64 {
+        return None;
+    }
+    let number_i64 = number as i64;
+    if number_i64 as f64 != number {
+        return None;
+    }
+    let number_bigint = BigInt::from(number_i64);
+    Some(Some(bigint.cmp(&number_bigint)))
 }
 
 fn try_constant_fold_binary(
@@ -8225,38 +8288,70 @@ fn try_constant_fold_binary(
                 _ => Some(gen.add_constant_boolean(true)),
             }
         }
-        BinaryOp::GreaterThan => {
+        BinaryOp::GreaterThan
+        | BinaryOp::GreaterThanEquals
+        | BinaryOp::LessThan
+        | BinaryOp::LessThanEquals => {
             // String-string comparison is lexicographic (by UTF-16 code units).
             if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_boolean(a.0 > b.0));
+                let result = match op {
+                    BinaryOp::GreaterThan => a.0 > b.0,
+                    BinaryOp::GreaterThanEquals => a.0 >= b.0,
+                    BinaryOp::LessThan => a.0 < b.0,
+                    BinaryOp::LessThanEquals => a.0 <= b.0,
+                    _ => unreachable!(),
+                };
+                return Some(gen.add_constant_boolean(result));
             }
-            let a = constant_to_number(lhs_const)?;
-            let b = constant_to_number(rhs_const)?;
-            Some(gen.add_constant_boolean(a > b))
-        }
-        BinaryOp::GreaterThanEquals => {
-            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_boolean(a.0 >= b.0));
+            // BigInt-Number/Boolean cross-type comparison.
+            // Per spec, Booleans are converted to Number first.
+            let lhs_for_cmp = match lhs_const {
+                ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
+                other => other,
+            };
+            let rhs_for_cmp = match rhs_const {
+                ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
+                other => other,
+            };
+            // BigInt vs Number comparison using Abstract Relational Comparison.
+            let bigint_ord = match (lhs_for_cmp, rhs_for_cmp) {
+                (ConstantValue::BigInt(b), ConstantValue::Number(n)) => {
+                    compare_bigint_and_number(b, *n)
+                }
+                (ConstantValue::Number(n), ConstantValue::BigInt(b)) => {
+                    compare_bigint_and_number(b, *n).map(|o| o.map(|o| o.reverse()))
+                }
+                // BigInt vs String: parse the string as a number.
+                (ConstantValue::BigInt(b), ConstantValue::String(s)) => {
+                    let n = string_to_number(s);
+                    compare_bigint_and_number(b, n)
+                }
+                (ConstantValue::String(s), ConstantValue::BigInt(b)) => {
+                    let n = string_to_number(s);
+                    compare_bigint_and_number(b, n).map(|o| o.map(|o| o.reverse()))
+                }
+                _ => None,
+            };
+            if let Some(ord) = bigint_ord {
+                let result = match op {
+                    BinaryOp::GreaterThan => matches!(ord, Some(std::cmp::Ordering::Greater)),
+                    BinaryOp::GreaterThanEquals => matches!(ord, Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)),
+                    BinaryOp::LessThan => matches!(ord, Some(std::cmp::Ordering::Less)),
+                    BinaryOp::LessThanEquals => matches!(ord, Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)),
+                    _ => unreachable!(),
+                };
+                return Some(gen.add_constant_boolean(result));
             }
-            let a = constant_to_number(lhs_const)?;
-            let b = constant_to_number(rhs_const)?;
-            Some(gen.add_constant_boolean(a >= b))
-        }
-        BinaryOp::LessThan => {
-            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_boolean(a.0 < b.0));
-            }
-            let a = constant_to_number(lhs_const)?;
-            let b = constant_to_number(rhs_const)?;
-            Some(gen.add_constant_boolean(a < b))
-        }
-        BinaryOp::LessThanEquals => {
-            if let (ConstantValue::String(a), ConstantValue::String(b)) = (lhs_const, rhs_const) {
-                return Some(gen.add_constant_boolean(a.0 <= b.0));
-            }
-            let a = constant_to_number(lhs_const)?;
-            let b = constant_to_number(rhs_const)?;
-            Some(gen.add_constant_boolean(a <= b))
+            let a = constant_to_number(lhs_for_cmp)?;
+            let b = constant_to_number(rhs_for_cmp)?;
+            let result = match op {
+                BinaryOp::GreaterThan => a > b,
+                BinaryOp::GreaterThanEquals => a >= b,
+                BinaryOp::LessThan => a < b,
+                BinaryOp::LessThanEquals => a <= b,
+                _ => unreachable!(),
+            };
+            Some(gen.add_constant_boolean(result))
         }
         BinaryOp::LooselyEquals => {
             let result = try_constant_loosely_equals(lhs_const, rhs_const)?;
