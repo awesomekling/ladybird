@@ -411,6 +411,15 @@ extern "C" void* rust_create_class_blueprint(
     return blueprint;
 }
 
+extern "C" void module_sfd_set_name(
+    void* sfd_ptr,
+    uint16_t const* name,
+    size_t name_len)
+{
+    auto& shared = *static_cast<JS::SharedFunctionInstanceData*>(sfd_ptr);
+    shared.m_name = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len));
+}
+
 // Compile a regex pattern+flags. On success, returns a heap-allocated
 // RustCompiledRegex* (cast to void*) and sets *error_out to nullptr.
 // On failure, returns nullptr and sets *error_out to a heap-allocated

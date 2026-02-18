@@ -708,6 +708,590 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
     });
 }
 
+/// Callback types for module compilation.
+type ModuleBoolCallback = unsafe extern "C" fn(ctx: *mut c_void, value: bool);
+type ModuleNameCallback = unsafe extern "C" fn(ctx: *mut c_void, name: *const u16, name_len: usize);
+type ModuleImportEntryCallback = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    import_name: *const u16, import_name_len: usize, is_namespace: bool,
+    local_name: *const u16, local_name_len: usize,
+    module_specifier: *const u16, specifier_len: usize,
+    attribute_keys: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_values: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_count: usize,
+);
+type ModuleExportEntryCallback = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    kind: u8,
+    export_name: *const u16, export_name_len: usize,
+    local_or_import_name: *const u16, local_or_import_name_len: usize,
+    module_specifier: *const u16, specifier_len: usize,
+    attribute_keys: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_values: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_count: usize,
+);
+type ModuleRequestedModuleCallback = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    specifier: *const u16, specifier_len: usize,
+    attribute_keys: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_values: *const bytecode::ffi::FFIUtf16Slice,
+    attribute_count: usize,
+);
+type ModuleFunctionCallback = unsafe extern "C" fn(
+    ctx: *mut c_void, sfd_ptr: *mut c_void, name: *const u16, name_len: usize,
+);
+type ModuleLexicalBindingCallback = unsafe extern "C" fn(
+    ctx: *mut c_void, name: *const u16, name_len: usize, is_constant: bool, function_index: i32,
+);
+
+/// Module callback table passed from C++ to avoid many function pointer parameters.
+#[repr(C)]
+pub struct ModuleCallbacks {
+    pub set_has_top_level_await: ModuleBoolCallback,
+    pub push_import_entry: ModuleImportEntryCallback,
+    pub push_local_export: ModuleExportEntryCallback,
+    pub push_indirect_export: ModuleExportEntryCallback,
+    pub push_star_export: ModuleExportEntryCallback,
+    pub push_requested_module: ModuleRequestedModuleCallback,
+    pub set_default_export_binding: ModuleNameCallback,
+    pub push_var_name: ModuleNameCallback,
+    pub push_function: ModuleFunctionCallback,
+    pub push_lexical_binding: ModuleLexicalBindingCallback,
+}
+
+/// Helper to build FFI attribute arrays from a ModuleRequest.
+fn build_attribute_slices(
+    attributes: &[ast::ImportAttribute],
+) -> (Vec<bytecode::ffi::FFIUtf16Slice>, Vec<bytecode::ffi::FFIUtf16Slice>) {
+    let keys: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
+        .iter()
+        .map(|a| bytecode::ffi::FFIUtf16Slice {
+            data: a.key.as_ptr(),
+            length: a.key.len(),
+        })
+        .collect();
+    let values: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
+        .iter()
+        .map(|a| bytecode::ffi::FFIUtf16Slice {
+            data: a.value.as_ptr(),
+            length: a.value.len(),
+        })
+        .collect();
+    (keys, values)
+}
+
+/// Helper to call an export entry callback with optional module request.
+unsafe fn call_export_callback(
+    callback: ModuleExportEntryCallback,
+    ctx: *mut c_void,
+    kind: u8,
+    export_name: &Option<ast::Utf16String>,
+    local_or_import_name: &Option<ast::Utf16String>,
+    module_request: Option<&ast::ModuleRequest>,
+) {
+    let (en_ptr, en_len) = export_name
+        .as_ref()
+        .map_or((std::ptr::null(), 0), |n| (n.as_ptr(), n.len()));
+    let (lin_ptr, lin_len) = local_or_import_name
+        .as_ref()
+        .map_or((std::ptr::null(), 0), |n| (n.as_ptr(), n.len()));
+
+    if let Some(mr) = module_request {
+        let (keys, values) = build_attribute_slices(&mr.attributes);
+        callback(
+            ctx, kind, en_ptr, en_len, lin_ptr, lin_len,
+            mr.module_specifier.as_ptr(), mr.module_specifier.len(),
+            keys.as_ptr(), values.as_ptr(), keys.len(),
+        );
+    } else {
+        callback(
+            ctx, kind, en_ptr, en_len, lin_ptr, lin_len,
+            std::ptr::null(), 0, std::ptr::null(), std::ptr::null(), 0,
+        );
+    }
+}
+
+/// Compile an ES module using the Rust parser and bytecode generator.
+///
+/// Parses the source as a module, extracts import/export metadata,
+/// compiles the module body to bytecode, and extracts declaration data
+/// needed for initialize_environment().
+///
+/// Returns `Executable*` for non-TLA modules (tla_executable_out is null),
+/// or nullptr for TLA modules (tla_executable_out is set to the async wrapper executable).
+///
+/// # Safety
+/// - `source` must point to a valid UTF-16 buffer of `source_len` elements.
+/// - `vm_ptr` must be a valid `JS::VM*`.
+/// - `source_code_ptr` must be a valid `JS::SourceCode const*`.
+/// - `module_context` must be a valid `ModuleBuilder*`.
+/// - `callbacks` must point to a valid `ModuleCallbacks`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_compile_module(
+    source: *const u16,
+    source_len: usize,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    module_context: *mut c_void,
+    callbacks: *const ModuleCallbacks,
+    error_context: *mut c_void,
+    error_callback: Option<ParseErrorCallback>,
+    tla_executable_out: *mut *mut c_void,
+) -> *mut c_void {
+    abort_on_panic(|| {
+        let Some(source_slice) = source_from_raw(source, source_len) else {
+            return std::ptr::null_mut();
+        };
+
+        let cb = &*callbacks;
+
+        // 1. Parse as module.
+        let mut parser = Parser::new(source_slice, ProgramType::Module);
+        let program = parser.parse_program(false);
+        parser.scope_collector.analyze(false);
+
+        if check_errors_with_callback(&mut parser, "rust_compile_module", error_context, error_callback) {
+            return std::ptr::null_mut();
+        }
+
+        let program_data = if let StatementKind::Program(ref data) = program.inner {
+            data
+        } else {
+            return std::ptr::null_mut();
+        };
+
+        let scope_ref = program_data.scope.clone();
+        let has_top_level_await = program_data.has_top_level_await;
+
+        // 2. Report has_top_level_await.
+        (cb.set_has_top_level_await)(module_context, has_top_level_await);
+
+        // 3. Process imports and exports.
+        extract_module_metadata(&scope_ref.borrow(), module_context, cb);
+
+        // 4. Extract var declared names and lexical bindings.
+        extract_module_declarations(
+            &scope_ref.borrow(), vm_ptr, source_code_ptr, module_context, cb,
+        );
+
+        // 5. Compute requested modules (sorted by source offset).
+        extract_requested_modules(&scope_ref.borrow(), module_context, cb);
+
+        // 6. Compile module body.
+        if has_top_level_await {
+            // Compile as an async wrapper function.
+            let exec_ptr = compile_module_as_async(
+                &program, &scope_ref, vm_ptr, source_code_ptr, source, source_len,
+            );
+            *tla_executable_out = exec_ptr;
+            std::ptr::null_mut()
+        } else {
+            // Compile as a regular program.
+            *tla_executable_out = std::ptr::null_mut();
+            let mut gen = new_program_generator(true, vm_ptr, source_code_ptr, source, source_len);
+            compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
+        }
+    })
+}
+
+/// Extract import/export metadata from a module's scope and call C++ callbacks.
+unsafe fn extract_module_metadata(
+    scope: &ast::ScopeData,
+    ctx: *mut c_void,
+    cb: &ModuleCallbacks,
+) {
+    use ast::{ExportEntryKind, StatementKind};
+
+    // Collect all import entries with their module requests.
+    struct ImportEntryWithRequest {
+        import_name: Option<ast::Utf16String>,
+        local_name: ast::Utf16String,
+        module_request: ast::ModuleRequest,
+    }
+    let mut all_import_entries: Vec<ImportEntryWithRequest> = Vec::new();
+
+    for child in &scope.children {
+        if let StatementKind::Import(ref import_data) = child.inner {
+            for entry in &import_data.entries {
+                // Report each import entry.
+                let (in_ptr, in_len, is_ns) = entry
+                    .import_name
+                    .as_ref()
+                    .map_or((std::ptr::null(), 0, true), |n| (n.as_ptr(), n.len(), false));
+                let (keys, values) = build_attribute_slices(&import_data.module_request.attributes);
+                (cb.push_import_entry)(
+                    ctx,
+                    in_ptr, in_len, is_ns,
+                    entry.local_name.as_ptr(), entry.local_name.len(),
+                    import_data.module_request.module_specifier.as_ptr(),
+                    import_data.module_request.module_specifier.len(),
+                    keys.as_ptr(), values.as_ptr(), keys.len(),
+                );
+
+                all_import_entries.push(ImportEntryWithRequest {
+                    import_name: entry.import_name.clone(),
+                    local_name: entry.local_name.clone(),
+                    module_request: import_data.module_request.clone(),
+                });
+            }
+        }
+    }
+
+    // Process export entries (matching SourceTextModule::parse steps 9-10).
+    for child in &scope.children {
+        let export_data = if let StatementKind::Export(ref data) = child.inner {
+            data
+        } else {
+            continue;
+        };
+
+        // Handle default export binding name.
+        if export_data.is_default_export {
+            if export_data.entries.len() == 1 {
+                let entry = &export_data.entries[0];
+                // If the default export is not a declaration (function/class/etc.),
+                // its binding name is the local_or_import_name.
+                let is_declaration = export_data.statement.as_ref().is_some_and(|s| {
+                    matches!(
+                        s.inner,
+                        StatementKind::FunctionDeclaration(_) | StatementKind::ClassDeclaration(_)
+                    )
+                });
+                if !is_declaration {
+                    if let Some(ref name) = entry.local_or_import_name {
+                        (cb.set_default_export_binding)(ctx, name.as_ptr(), name.len());
+                    }
+                }
+            }
+        }
+
+        for entry in &export_data.entries {
+            if entry.kind == ExportEntryKind::EmptyNamedExport {
+                break;
+            }
+
+            let has_module_request = export_data.module_request.is_some();
+
+            if !has_module_request {
+                // No module request: check against import entries.
+                let matching_import = all_import_entries.iter().find(|ie| {
+                    entry.local_or_import_name.as_ref() == Some(&ie.local_name)
+                });
+
+                if let Some(import_entry) = matching_import {
+                    if import_entry.import_name.is_none() {
+                        // Namespace re-export → local export.
+                        call_export_callback(
+                            cb.push_local_export, ctx,
+                            entry.kind as u8, &entry.export_name, &entry.local_or_import_name,
+                            None,
+                        );
+                    } else {
+                        // Re-export of a specific binding → indirect export.
+                        call_export_callback(
+                            cb.push_indirect_export, ctx,
+                            ExportEntryKind::NamedExport as u8,
+                            &entry.export_name,
+                            &import_entry.import_name,
+                            Some(&import_entry.module_request),
+                        );
+                    }
+                } else {
+                    // Direct local export.
+                    call_export_callback(
+                        cb.push_local_export, ctx,
+                        entry.kind as u8, &entry.export_name, &entry.local_or_import_name,
+                        None,
+                    );
+                }
+            } else if entry.kind == ExportEntryKind::ModuleRequestAllButDefault {
+                // export * from "module"
+                call_export_callback(
+                    cb.push_star_export, ctx,
+                    entry.kind as u8, &entry.export_name, &entry.local_or_import_name,
+                    export_data.module_request.as_ref(),
+                );
+            } else {
+                // export { x } from "module" or export { x as y } from "module"
+                call_export_callback(
+                    cb.push_indirect_export, ctx,
+                    entry.kind as u8, &entry.export_name, &entry.local_or_import_name,
+                    export_data.module_request.as_ref(),
+                );
+            }
+        }
+    }
+}
+
+/// Extract var declared names and lexical bindings from a module scope.
+unsafe fn extract_module_declarations(
+    scope: &ast::ScopeData,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    ctx: *mut c_void,
+    cb: &ModuleCallbacks,
+) {
+    use ast::StatementKind;
+
+    let default_name: ast::Utf16String = utf16!("*default*").into();
+
+    // Var declared names (walk all nesting levels).
+    for child in &scope.children {
+        collect_module_var_names(&child.inner, ctx, cb.push_var_name);
+    }
+
+    // Lexical bindings and functions to initialize.
+    let mut function_count: i32 = 0;
+    for child in &scope.children {
+        let (declaration, is_exported) = match &child.inner {
+            StatementKind::Export(export_data) => {
+                if let Some(ref stmt) = export_data.statement {
+                    (&stmt.inner, true)
+                } else {
+                    continue;
+                }
+            }
+            other => (other, false),
+        };
+
+        match declaration {
+            StatementKind::FunctionDeclaration(function_data) => {
+                let is_default = is_exported
+                    && function_data.name.as_ref().is_some_and(|n| n.name == default_name);
+
+                let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(
+                    function_data, vm_ptr, source_code_ptr, true,
+                );
+
+                // Get the binding name from the AST (e.g., "*default*" for anonymous defaults).
+                let binding_name = if let Some(ref name_ident) = function_data.name {
+                    name_ident.name.clone()
+                } else {
+                    continue;
+                };
+
+                // If default export with *default* name, set the SFD display name to "default".
+                let sfd_name = if is_default {
+                    let sfd_display_name = utf16!("default");
+                    module_sfd_set_name(sfd_ptr, sfd_display_name.as_ptr(), sfd_display_name.len());
+                    let display_name: ast::Utf16String = sfd_display_name.into();
+                    display_name
+                } else {
+                    binding_name.clone()
+                };
+
+                let function_index = function_count;
+                (cb.push_function)(ctx, sfd_ptr, sfd_name.as_ptr(), sfd_name.len());
+                function_count += 1;
+
+                // Lexical binding uses the AST name (e.g., "*default*").
+                (cb.push_lexical_binding)(ctx, binding_name.as_ptr(), binding_name.len(), false, function_index);
+            }
+            StatementKind::ClassDeclaration(class_data) => {
+                if let Some(ref name_ident) = class_data.name {
+                    (cb.push_lexical_binding)(
+                        ctx,
+                        name_ident.name.as_ptr(),
+                        name_ident.name.len(),
+                        false,
+                        -1,
+                    );
+                }
+            }
+            StatementKind::VariableDeclaration { kind, declarations }
+                if *kind != ast::DeclarationKind::Var =>
+            {
+                let is_constant = *kind == ast::DeclarationKind::Const;
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
+                        (cb.push_lexical_binding)(ctx, name.as_ptr(), name.len(), is_constant, -1);
+                    });
+                }
+            }
+            StatementKind::UsingDeclaration { declarations } => {
+                for declaration in declarations {
+                    for_each_bound_name(&declaration.target, &mut |name| {
+                        (cb.push_lexical_binding)(ctx, name.as_ptr(), name.len(), false, -1);
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Recursively collect var declared names for module scope.
+unsafe fn collect_module_var_names(
+    statement: &ast::StatementKind,
+    ctx: *mut c_void,
+    push_var_name: ModuleNameCallback,
+) {
+    match statement {
+        ast::StatementKind::VariableDeclaration {
+            kind: ast::DeclarationKind::Var,
+            declarations,
+        } => {
+            for declaration in declarations {
+                for_each_bound_name(&declaration.target, &mut |name| {
+                    push_var_name(ctx, name.as_ptr(), name.len());
+                });
+            }
+        }
+        ast::StatementKind::Export(export_data) => {
+            if let Some(ref stmt) = export_data.statement {
+                collect_module_var_names(&stmt.inner, ctx, push_var_name);
+            }
+        }
+        _ => {
+            for_each_child_statement(statement, &mut |child| {
+                collect_module_var_names(child, ctx, push_var_name);
+            });
+        }
+    }
+}
+
+/// Extract requested modules sorted by source offset.
+unsafe fn extract_requested_modules(
+    scope: &ast::ScopeData,
+    ctx: *mut c_void,
+    cb: &ModuleCallbacks,
+) {
+    use ast::StatementKind;
+
+    struct RequestedModule {
+        source_offset: u32,
+        specifier: ast::Utf16String,
+        attributes: Vec<ast::ImportAttribute>,
+    }
+
+    let mut modules: Vec<RequestedModule> = Vec::new();
+
+    for child in &scope.children {
+        match &child.inner {
+            StatementKind::Import(import_data) => {
+                modules.push(RequestedModule {
+                    source_offset: child.range.start.offset,
+                    specifier: import_data.module_request.module_specifier.clone(),
+                    attributes: import_data.module_request.attributes.clone(),
+                });
+            }
+            StatementKind::Export(export_data) => {
+                if let Some(ref mr) = export_data.module_request {
+                    // Only add if there are actual module-request entries.
+                    let has_module_entry = export_data
+                        .entries
+                        .iter()
+                        .any(|e| e.kind != ast::ExportEntryKind::EmptyNamedExport);
+                    if has_module_entry || !export_data.entries.is_empty() {
+                        modules.push(RequestedModule {
+                            source_offset: child.range.start.offset,
+                            specifier: mr.module_specifier.clone(),
+                            attributes: mr.attributes.clone(),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Sort by source offset (spec requirement).
+    modules.sort_by_key(|m| m.source_offset);
+
+    for module in &modules {
+        let (keys, values) = build_attribute_slices(&module.attributes);
+        (cb.push_requested_module)(
+            ctx,
+            module.specifier.as_ptr(),
+            module.specifier.len(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            keys.len(),
+        );
+    }
+}
+
+/// Compile a module body as an async function (for TLA modules).
+///
+/// Emits async-function wrapping (initial Yield, final Yield) around the
+/// module body statements.
+unsafe fn compile_module_as_async(
+    program: &ast::Statement,
+    scope_ref: &Rc<RefCell<ast::ScopeData>>,
+    vm_ptr: *mut c_void,
+    source_code_ptr: *const c_void,
+    source: *const u16,
+    source_len: usize,
+) -> *mut c_void {
+    use bytecode::generator::Generator;
+    use bytecode::instruction::Instruction;
+    use bytecode::operand::{Label, Operand, Register};
+
+    let _scope = scope_ref.borrow();
+    let mut gen = Generator::new();
+    gen.strict = true;
+    gen.vm_ptr = vm_ptr;
+    gen.source_code_ptr = source_code_ptr;
+    gen.source = source;
+    gen.source_len = source_len;
+    gen.enclosing_function_kind = ast::FunctionKind::Async;
+
+    // Module locals are handled by initialize_environment, not by FDI,
+    // so we don't set gen.local_variables.
+
+    let entry_block = gen.make_block();
+    gen.switch_to_basic_block(entry_block);
+
+    // Async function start: emit initial Yield before GetLexicalEnvironment.
+    let start_block = gen.make_block();
+    let undef = gen.add_constant_undefined();
+    gen.emit(Instruction::Yield {
+        continuation_label: Some(Label(start_block as u32)),
+        value: undef.operand(),
+    });
+    gen.switch_to_basic_block(start_block);
+
+    // Get lexical environment.
+    let env_reg = gen.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT));
+    gen.emit(Instruction::GetLexicalEnvironment {
+        dst: env_reg.operand(),
+    });
+    gen.lexical_environment_register_stack.push(env_reg);
+
+    // Generate module body statements.
+    let _result = bytecode::codegen::generate_statement(program, &mut gen, None);
+
+    // Async function end: emit final Yield (no continuation = done).
+    if !gen.is_current_block_terminated() {
+        let undef = gen.add_constant_undefined();
+        gen.emit(Instruction::Yield {
+            continuation_label: None,
+            value: undef.operand(),
+        });
+    }
+
+    // Terminate all unterminated blocks with Yield.
+    let block_count = gen.basic_block_count();
+    for i in 0..block_count {
+        if gen.is_block_terminated(i) {
+            continue;
+        }
+        gen.switch_to_basic_block(i);
+        let undef = gen.add_constant_undefined();
+        gen.emit(Instruction::Yield {
+            continuation_label: None,
+            value: undef.operand(),
+        });
+    }
+
+    let assembled = gen.assemble();
+    bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
+}
+
+extern "C" {
+    fn module_sfd_set_name(sfd_ptr: *mut c_void, name: *const u16, name_len: usize);
+}
+
 /// Recursively collect var-declared names from a statement and all nested
 /// statements, excluding function/class bodies (which create new var scopes).
 fn collect_var_names_recursive(

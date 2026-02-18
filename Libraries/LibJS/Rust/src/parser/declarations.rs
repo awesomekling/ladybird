@@ -1737,13 +1737,14 @@ impl<'a> Parser<'a> {
                 self.expected("'from'");
             }
 
-            if check_for_from != FromSpecifier::NotAllowed {
+            if from_specifier.is_none() && check_for_from != FromSpecifier::NotAllowed {
                 self.consume_or_insert_semicolon();
             }
         }
 
         let module_request = if let Some(specifier) = from_specifier {
             let attributes = self.parse_with_clause();
+            self.consume_or_insert_semicolon();
             Some(ModuleRequest { module_specifier: specifier, attributes })
         } else {
             None

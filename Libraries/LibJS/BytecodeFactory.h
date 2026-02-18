@@ -317,6 +317,92 @@ void rust_compile_builtin_file(
     void* ctx,
     RustBuiltinFunctionCallback push_function);
 
+// Module compilation callback table (matches Rust ModuleCallbacks struct).
+struct ModuleCallbacks {
+    void (*set_has_top_level_await)(void* ctx, bool value);
+    void (*push_import_entry)(
+        void* ctx,
+        uint16_t const* import_name,
+        size_t import_name_len,
+        bool is_namespace,
+        uint16_t const* local_name,
+        size_t local_name_len,
+        uint16_t const* module_specifier,
+        size_t specifier_len,
+        FFIUtf16Slice const* attribute_keys,
+        FFIUtf16Slice const* attribute_values,
+        size_t attribute_count);
+    void (*push_local_export)(
+        void* ctx,
+        uint8_t kind,
+        uint16_t const* export_name,
+        size_t export_name_len,
+        uint16_t const* local_or_import_name,
+        size_t local_or_import_name_len,
+        uint16_t const* module_specifier,
+        size_t specifier_len,
+        FFIUtf16Slice const* attribute_keys,
+        FFIUtf16Slice const* attribute_values,
+        size_t attribute_count);
+    void (*push_indirect_export)(
+        void* ctx,
+        uint8_t kind,
+        uint16_t const* export_name,
+        size_t export_name_len,
+        uint16_t const* local_or_import_name,
+        size_t local_or_import_name_len,
+        uint16_t const* module_specifier,
+        size_t specifier_len,
+        FFIUtf16Slice const* attribute_keys,
+        FFIUtf16Slice const* attribute_values,
+        size_t attribute_count);
+    void (*push_star_export)(
+        void* ctx,
+        uint8_t kind,
+        uint16_t const* export_name,
+        size_t export_name_len,
+        uint16_t const* local_or_import_name,
+        size_t local_or_import_name_len,
+        uint16_t const* module_specifier,
+        size_t specifier_len,
+        FFIUtf16Slice const* attribute_keys,
+        FFIUtf16Slice const* attribute_values,
+        size_t attribute_count);
+    void (*push_requested_module)(
+        void* ctx,
+        uint16_t const* specifier,
+        size_t specifier_len,
+        FFIUtf16Slice const* attribute_keys,
+        FFIUtf16Slice const* attribute_values,
+        size_t attribute_count);
+    void (*set_default_export_binding)(void* ctx, uint16_t const* name, size_t name_len);
+    void (*push_var_name)(void* ctx, uint16_t const* name, size_t name_len);
+    void (*push_function)(void* ctx, void* sfd_ptr, uint16_t const* name, size_t name_len);
+    void (*push_lexical_binding)(void* ctx, uint16_t const* name, size_t name_len, bool is_constant, int32_t function_index);
+};
+
+// Parse, compile, and extract module metadata using the Rust parser.
+// Populates module_context (a ModuleBuilder*) via callbacks.
+// On parse failure, calls error_callback for each error, then returns nullptr.
+//
+// Returns Executable* for non-TLA modules (tla_executable_out is null).
+// For TLA modules, returns nullptr and sets tla_executable_out to the
+// async wrapper Executable*.
+void* rust_compile_module(
+    uint16_t const* source,
+    size_t source_len,
+    void* vm_ptr,
+    void const* source_code_ptr,
+    void* module_context,
+    ModuleCallbacks const* callbacks,
+    void* error_context,
+    RustParseErrorCallback error_callback,
+    void** tla_executable_out);
+
+// Set the name on a SharedFunctionInstanceData (used for module default
+// export renaming from "*default*" to "default").
+void module_sfd_set_name(void* sfd_ptr, uint16_t const* name, size_t name_len);
+
 // Compile a regex pattern+flags. On success, returns a heap-allocated
 // opaque object (RustCompiledRegex*) and sets *error_out to nullptr.
 // On failure, returns nullptr and sets *error_out to a heap-allocated
