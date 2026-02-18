@@ -604,12 +604,16 @@ impl<'a> Parser<'a> {
             | TokenType::DoubleQuestionMarkEquals => {
                 let op = token_to_assignment_op(tt);
                 if op == AssignmentOp::Assignment && (Self::is_object_expression(&lhs) || Self::is_array_expression(&lhs)) {
+                    // Save pattern_bound_names so that an outer binding
+                    // pattern parse in progress doesn't lose its entries.
+                    let saved_bound_names = std::mem::take(&mut self.pattern_bound_names);
                     if let Some(binding_pattern) = self.synthesize_binding_pattern(lhs_start) {
                         // Register synthesized identifiers with the scope collector so
                         // they get resolved as locals during analyze().
                         for (name, id) in self.pattern_bound_names.drain(..) {
                             self.scope_collector.register_identifier(id, &name, None);
                         }
+                        self.pattern_bound_names = saved_bound_names;
                         self.consume();
                         let rhs = self.parse_expression(min_precedence, Associativity::Right, forbidden);
                         return (self.expression(start, ExpressionKind::Assignment {
@@ -617,6 +621,8 @@ impl<'a> Parser<'a> {
                             lhs: AssignmentLhs::Pattern(binding_pattern),
                             rhs: Box::new(rhs),
                         }), ForbiddenTokens::none());
+                    } else {
+                        self.pattern_bound_names = saved_bound_names;
                     }
                 }
                 let allow_call = !matches!(tt, TokenType::DoubleAmpersandEquals | TokenType::DoublePipeEquals | TokenType::DoubleQuestionMarkEquals);
