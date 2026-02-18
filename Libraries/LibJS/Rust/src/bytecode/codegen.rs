@@ -3104,13 +3104,16 @@ fn generate_update_expression(
                 // Non-super member update expression.
                 let base = generate_expression(object, gen, None)?;
                 let base_id = intern_base_identifier(gen, object);
-                let value = gen.allocate_register();
                 if *computed {
                 let property = generate_expression(property, gen, None)?;
+                let value = gen.allocate_register();
                 emit_get_by_value(gen, &value, &base, &property, base_id);
                 // Save property for store-back (matching C++ emit_load_from_reference).
                 let saved_property = gen.allocate_register();
                 gen.emit_mov(&saved_property, &property);
+                // Drop property to free its register, matching C++ where property
+                // is a local in emit_load_from_reference and freed on return.
+                drop(property);
                 if prefixed {
                     match op {
                         UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
@@ -3137,6 +3140,7 @@ fn generate_update_expression(
                     Some(dst)
                 }
                 } else if let ExpressionKind::Identifier(property_ident) = &property.inner {
+                    let value = gen.allocate_register();
                     emit_get_by_id(gen, &value, &base, &property_ident.name, base_id);
                     let key = gen.intern_property_key(&property_ident.name);
                     if prefixed {
@@ -3177,6 +3181,7 @@ fn generate_update_expression(
                     Some(value)
                 } else {
                     // Fallback: just evaluate, no store-back
+                    let value = gen.allocate_register();
                     Some(value)
                 }
             }
