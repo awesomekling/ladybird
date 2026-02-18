@@ -15,6 +15,8 @@
 #include <LibJS/Bytecode/StringTable.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Runtime/BigInt.h>
+#include <LibJS/Runtime/Intrinsics.h>
+#include <LibJS/Runtime/NativeJavaScriptBackedFunction.h>
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/RegExpObject.h>
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
@@ -95,6 +97,13 @@ static JS::Value decode_constant(JS::VM& vm, uint8_t const*& cursor, uint8_t con
             return MUST(Crypto::SignedBigInteger::from_base(10, ascii));
         }();
         return JS::BigInt::create(vm, move(integer));
+    }
+    case CONSTANT_TAG_RAW_VALUE: {
+        VERIFY(cursor + 8 <= end);
+        JS::Value value;
+        memcpy(&value, cursor, 8);
+        cursor += 8;
+        return value;
     }
     default:
         VERIFY_NOT_REACHED();
@@ -488,4 +497,37 @@ extern "C" size_t rust_format_double(double value, uint8_t* buffer, size_t buffe
     auto len = min(bytes.size(), buffer_len);
     memcpy(buffer, bytes.data(), len);
     return len;
+}
+
+extern "C" uint64_t get_well_known_symbol(void* vm_ptr, uint32_t symbol_id)
+{
+    auto& vm = *static_cast<JS::VM*>(vm_ptr);
+    JS::Value value;
+    switch (symbol_id) {
+    case 0:
+        value = vm.well_known_symbol_iterator();
+        break;
+    case 1:
+        value = vm.well_known_symbol_async_iterator();
+        break;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+    return value.encoded();
+}
+
+extern "C" uint64_t get_abstract_operation_function(void* vm_ptr, uint16_t const* name, size_t name_len)
+{
+    auto& vm = *static_cast<JS::VM*>(vm_ptr);
+    auto& intrinsics = vm.current_realm()->intrinsics();
+    auto name_view = Utf16View(reinterpret_cast<char16_t const*>(name), name_len);
+    auto name_str = MUST(name_view.to_utf8());
+
+#define __JS_ENUMERATE(snake_name, functionName, length) \
+    if (name_str == #functionName##sv)                   \
+        return JS::Value(intrinsics.snake_name##_abstract_operation_function().ptr()).encoded();
+    JS_ENUMERATE_NATIVE_JAVASCRIPT_BACKED_ABSTRACT_OPERATIONS
+#undef __JS_ENUMERATE
+
+    VERIFY_NOT_REACHED();
 }

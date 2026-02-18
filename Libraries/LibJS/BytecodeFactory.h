@@ -26,6 +26,7 @@
 #    define CONSTANT_TAG_EMPTY 5
 #    define CONSTANT_TAG_STRING 6
 #    define CONSTANT_TAG_BIGINT 7
+#    define CONSTANT_TAG_RAW_VALUE 8
 
 struct FFIExceptionHandler {
     uint32_t start_offset;
@@ -210,7 +211,8 @@ void* rust_compile_function(
     uint16_t const* source,
     size_t source_len,
     void* sfd_ptr,
-    void* rust_function_ast);
+    void* rust_function_ast,
+    bool builtin_abstract_operations_enabled);
 
 // Free a Rust Box<FunctionData> (called from SFD destructor).
 void rust_free_function_ast(void* ast);
@@ -426,6 +428,13 @@ size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len);
 // Format a double using AK's shortest-representation algorithm.
 // Writes up to buffer_len bytes into buffer and returns the actual length.
 size_t rust_format_double(double value, uint8_t* buffer, size_t buffer_len);
+
+// Get a well-known symbol as an encoded JS::Value.
+// symbol_id: 0 = Symbol.iterator, 1 = Symbol.asyncIterator
+uint64_t get_well_known_symbol(void* vm_ptr, uint32_t symbol_id);
+
+// Get an intrinsic abstract operation function as an encoded JS::Value.
+uint64_t get_abstract_operation_function(void* vm_ptr, uint16_t const* name, size_t name_len);
 
 // Free a string allocated by Rust (e.g. AST dump output).
 void rust_free_string(uint8_t* ptr, size_t len);

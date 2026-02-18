@@ -1612,6 +1612,7 @@ pub unsafe extern "C" fn rust_compile_function(
     source_len: usize,
     sfd_ptr: *mut c_void,
     rust_function_ast: *mut c_void,
+    builtin_abstract_operations_enabled: bool,
 ) -> *mut c_void {
     abort_on_panic(|| {
     if rust_function_ast.is_null() {
@@ -1632,6 +1633,7 @@ pub unsafe extern "C" fn rust_compile_function(
     let mut gen = bytecode::generator::Generator::new();
     gen.strict = function_data.is_strict_mode;
     gen.function_environment_needed = sfd_metadata.function_environment_needed;
+    gen.builtin_abstract_operations_enabled = builtin_abstract_operations_enabled;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;

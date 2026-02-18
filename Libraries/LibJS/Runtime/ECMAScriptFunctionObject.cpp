@@ -215,7 +215,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
 }
 
 #ifdef ENABLE_RUST_PARSER
-extern "C" void* rust_compile_function(void* vm_ptr, void const* source_code_ptr, uint16_t const* source, size_t source_len, void* sfd_ptr, void* rust_function_ast);
+extern "C" void* rust_compile_function(void* vm_ptr, void const* source_code_ptr, uint16_t const* source, size_t source_len, void* sfd_ptr, void* rust_function_ast, bool builtin_abstract_operations_enabled);
 #endif
 
 void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals_count, size_t& constants_count, size_t& argument_count)
@@ -236,7 +236,8 @@ void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals
                 source_ptr,
                 code_view.length_in_code_units(),
                 m_shared_data.ptr(),
-                m_shared_data->m_rust_function_ast));
+                m_shared_data->m_rust_function_ast,
+                false));
             m_shared_data->m_rust_function_ast = nullptr;
             executable = exec;
             executable->name = m_shared_data->m_name;

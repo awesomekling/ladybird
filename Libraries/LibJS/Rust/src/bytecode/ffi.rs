@@ -156,6 +156,14 @@ extern "C" {
     pub fn rust_free_error_string(str: *const std::os::raw::c_char);
 
     pub fn rust_number_to_utf16(value: f64, buffer: *mut u16, buffer_len: usize) -> usize;
+
+    // Get a well-known symbol as an opaque Value.
+    // symbol_id: 0 = Symbol.iterator, 1 = Symbol.asyncIterator
+    pub fn get_well_known_symbol(vm_ptr: *mut c_void, symbol_id: u32) -> u64;
+
+    // Get an intrinsic abstract operation function as an opaque Value.
+    // name/name_len is the function name (e.g. "GetMethod").
+    pub fn get_abstract_operation_function(vm_ptr: *mut c_void, name: *const u16, name_len: usize) -> u64;
 }
 
 /// Create a SharedFunctionInstanceData from a FunctionData.
@@ -271,6 +279,7 @@ enum ConstantTag {
     Empty = 5,
     String = 6,
     BigInt = 7,
+    RawValue = 8,
 }
 
 /// Encode constants into a tagged byte buffer for FFI.
@@ -300,6 +309,10 @@ fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
                 let len = s.len() as u32;
                 buffer.extend_from_slice(&len.to_le_bytes());
                 buffer.extend_from_slice(s.as_bytes());
+            }
+            ConstantValue::RawValue(encoded) => {
+                buffer.push(ConstantTag::RawValue as u8);
+                buffer.extend_from_slice(&encoded.to_le_bytes());
             }
         }
     }

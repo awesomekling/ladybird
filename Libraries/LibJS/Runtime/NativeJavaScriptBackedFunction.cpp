@@ -12,6 +12,11 @@
 #include <LibJS/Runtime/AsyncGenerator.h>
 #include <LibJS/Runtime/GeneratorObject.h>
 #include <LibJS/Runtime/NativeJavaScriptBackedFunction.h>
+#ifdef ENABLE_RUST_PARSER
+#    include <LibGC/DeferGC.h>
+#    include <LibJS/BytecodeFactory.h>
+#    include <LibJS/SourceCode.h>
+#endif
 
 namespace JS {
 
@@ -98,7 +103,30 @@ Bytecode::Executable& NativeJavaScriptBackedFunction::bytecode_executable()
 {
     auto& executable = m_shared_function_instance_data->m_executable;
     if (!executable) {
-        executable = Bytecode::compile(vm(), m_shared_function_instance_data, Bytecode::BuiltinAbstractOperationsEnabled::Yes);
+#ifdef ENABLE_RUST_PARSER
+        if (m_shared_function_instance_data->m_use_rust_compilation) {
+            VERIFY(m_shared_function_instance_data->m_rust_function_ast);
+            GC::DeferGC defer_gc(heap());
+            auto const& code_view = m_shared_function_instance_data->m_source_code->code_view();
+            auto const* source_ptr = code_view.is_ascii()
+                ? reinterpret_cast<uint16_t const*>(code_view.ascii_span().data())
+                : reinterpret_cast<uint16_t const*>(code_view.utf16_span().data());
+            auto* exec = static_cast<Bytecode::Executable*>(rust_compile_function(
+                &vm(),
+                m_shared_function_instance_data->m_source_code.ptr(),
+                source_ptr,
+                code_view.length_in_code_units(),
+                m_shared_function_instance_data.ptr(),
+                m_shared_function_instance_data->m_rust_function_ast,
+                true));
+            m_shared_function_instance_data->m_rust_function_ast = nullptr;
+            executable = exec;
+            executable->name = m_shared_function_instance_data->m_name;
+            if (Bytecode::g_dump_bytecode)
+                executable->dump();
+        } else
+#endif
+            executable = Bytecode::compile(vm(), m_shared_function_instance_data, Bytecode::BuiltinAbstractOperationsEnabled::Yes);
         m_shared_function_instance_data->clear_compile_inputs();
     }
 

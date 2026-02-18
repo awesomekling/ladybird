@@ -945,7 +945,45 @@ pub fn generate_statement(
 
         // === Import/Export ===
         StatementKind::Import(_) => None, // Handled by module loading
-        StatementKind::Export(_) => None, // Handled by module loading
+        StatementKind::Export(export_data) => {
+            if !export_data.is_default_export {
+                // Non-default export: generate code for the wrapped statement.
+                if let Some(ref child_statement) = export_data.statement {
+                    generate_statement(child_statement, gen, None)
+                } else {
+                    None
+                }
+            } else if let Some(ref child_statement) = export_data.statement {
+                match &child_statement.inner {
+                    StatementKind::FunctionDeclaration(_) | StatementKind::ClassDeclaration(_) => {
+                        generate_statement(child_statement, gen, None)
+                    }
+                    _ => {
+                        // export default <expression>
+                        // The child_statement wraps an Expression via StatementKind::Expression.
+                        let default_name: Vec<u16> = utf16!("default").to_vec();
+                        gen.pending_lhs_name = Some(gen.intern_identifier(&default_name));
+                        let value = generate_statement(child_statement, gen, None);
+                        gen.pending_lhs_name = None;
+                        if let Some(value) = value {
+                            let local_name = gen.intern_identifier(
+                                &utf16!("*default*").to_vec(),
+                            );
+                            gen.emit(Instruction::InitializeLexicalBinding {
+                                identifier: local_name,
+                                src: value.operand(),
+                                cache: EnvironmentCoordinate::empty(),
+                            });
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    }
+                }
+            } else {
+                None
+            }
+        }
 
         // === ClassFieldInitializer ===
         StatementKind::ClassFieldInitializer { expression, field_name } => {
@@ -1647,6 +1685,9 @@ fn maybe_generate_builtin_constant(gen: &mut Generator, name: &[u16]) -> Option<
     }
     if name == utf16!("Infinity") {
         return Some(gen.add_constant_number(f64::INFINITY));
+    }
+    if let Some(op) = try_generate_builtin_constant(gen, &name.into()) {
+        return Some(op);
     }
     None
 }
@@ -2508,12 +2549,208 @@ fn generate_variable_declaration(
 // Call expression
 // =============================================================================
 
+fn try_generate_builtin_abstract_operation(
+    gen: &mut Generator,
+    data: &CallExpressionData,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<Option<ScopedOperand>> {
+    if !gen.builtin_abstract_operations_enabled {
+        return None;
+    }
+    let name = match &data.callee.inner {
+        ExpressionKind::Identifier(ident) => &ident.name,
+        _ => return None,
+    };
+    if data.arguments.iter().any(|a| a.is_spread) {
+        return None;
+    }
+
+    let dst = choose_dst(gen, preferred_dst);
+
+    // Operations that map to dedicated bytecode instructions.
+    if name == utf16!("IsCallable") {
+        let value = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::IsCallable { dst: dst.operand(), value: value.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("IsConstructor") {
+        let value = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::IsConstructor { dst: dst.operand(), value: value.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("ToBoolean") {
+        let value = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::ToBoolean { dst: dst.operand(), value: value.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("ToObject") {
+        let value = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::ToObject { dst: dst.operand(), value: value.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("ToLength") {
+        let value = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::ToLength { dst: dst.operand(), value: value.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("ThrowIfNotObject") {
+        let src = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::ThrowIfNotObject { src: src.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("ThrowTypeError") {
+        if let ExpressionKind::StringLiteral(ref s) = data.arguments[0].value.inner {
+            let message_string = gen.intern_string(s);
+            let type_error_register = gen.allocate_register();
+            gen.emit(Instruction::NewTypeError {
+                dst: type_error_register.operand(),
+                error_string: message_string,
+            });
+            gen.perform_needed_unwinds();
+            gen.emit(Instruction::Throw { src: type_error_register.operand() });
+            return Some(Some(dst));
+        }
+        return None;
+    }
+    if name == utf16!("NewTypeError") {
+        if let ExpressionKind::StringLiteral(ref s) = data.arguments[0].value.inner {
+            let message_string = gen.intern_string(s);
+            gen.emit(Instruction::NewTypeError {
+                dst: dst.operand(),
+                error_string: message_string,
+            });
+            return Some(Some(dst));
+        }
+        return None;
+    }
+    if name == utf16!("NewObjectWithNoPrototype") {
+        gen.emit(Instruction::NewObjectWithNoPrototype { dst: dst.operand() });
+        return Some(Some(dst));
+    }
+    if name == utf16!("NewArrayWithLength") {
+        let length = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        gen.emit(Instruction::NewArrayWithLength {
+            dst: dst.operand(),
+            array_length: length.operand(),
+        });
+        return Some(Some(dst));
+    }
+    if name == utf16!("CreateAsyncFromSyncIterator") {
+        let iterator = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        let next_method = generate_expression_or_undefined(&data.arguments[1].value, gen, None);
+        let done = generate_expression_or_undefined(&data.arguments[2].value, gen, None);
+        gen.emit(Instruction::CreateAsyncFromSyncIterator {
+            dst: dst.operand(),
+            iterator: iterator.operand(),
+            next_method: next_method.operand(),
+            done: done.operand(),
+        });
+        return Some(Some(dst));
+    }
+    if name == utf16!("CreateDataPropertyOrThrow") {
+        let object = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        let property = generate_expression_or_undefined(&data.arguments[1].value, gen, None);
+        let value = generate_expression_or_undefined(&data.arguments[2].value, gen, None);
+        gen.emit(Instruction::CreateDataPropertyOrThrow {
+            object: object.operand(),
+            property: property.operand(),
+            value: value.operand(),
+        });
+        return Some(Some(dst));
+    }
+    if name == utf16!("Call") {
+        let callee = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
+        let this_value = generate_expression_or_undefined(&data.arguments[1].value, gen, None);
+        let extra_args = &data.arguments[2..];
+        let mut argument_holders = Vec::new();
+        for argument in extra_args {
+            let val = generate_expression_or_undefined(&argument.value, gen, None);
+            argument_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
+        }
+        let callee_name = expression_string_approximation(&data.arguments[0].value)
+            .map(|s| gen.intern_string(&s));
+        let arguments: Vec<Operand> = argument_holders.iter().map(|a| a.operand()).collect();
+        gen.emit(Instruction::Call {
+            dst: dst.operand(),
+            callee: callee.operand(),
+            this_value: this_value.operand(),
+            argument_count: arguments.len() as u32,
+            expression_string: callee_name,
+            arguments,
+        });
+        return Some(Some(dst));
+    }
+
+    // Operations that map to intrinsic function calls.
+    let known_operations: &[&[u16]] = &[
+        utf16!("AsyncIteratorClose"),
+        utf16!("GetMethod"),
+        utf16!("GetIteratorDirect"),
+        utf16!("GetIteratorFromMethod"),
+        utf16!("IteratorComplete"),
+    ];
+    for &op_name in known_operations {
+        if *name == op_name {
+            let intrinsic_value = unsafe {
+                super::ffi::get_abstract_operation_function(gen.vm_ptr, op_name.as_ptr(), op_name.len())
+            };
+            let callee = gen.add_constant_raw_value(intrinsic_value);
+            let undefined = gen.add_constant_undefined();
+            let expression_string = gen.intern_string(name);
+            let mut argument_holders = Vec::new();
+            for argument in &data.arguments {
+                let val = generate_expression_or_undefined(&argument.value, gen, None);
+                argument_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
+            }
+            let arguments: Vec<Operand> = argument_holders.iter().map(|a| a.operand()).collect();
+            gen.emit(Instruction::Call {
+                dst: dst.operand(),
+                callee: callee.operand(),
+                this_value: undefined.operand(),
+                argument_count: arguments.len() as u32,
+                expression_string: Some(expression_string),
+                arguments,
+            });
+            return Some(Some(dst));
+        }
+    }
+
+    None
+}
+
+/// Try to generate a builtin constant (e.g. SYMBOL_ITERATOR).
+/// Returns Some(operand) if the identifier is a known builtin constant.
+fn try_generate_builtin_constant(gen: &mut Generator, name: &Utf16String) -> Option<ScopedOperand> {
+    if !gen.builtin_abstract_operations_enabled {
+        return None;
+    }
+    if *name == utf16!("SYMBOL_ITERATOR") {
+        let value = unsafe { super::ffi::get_well_known_symbol(gen.vm_ptr, 0) };
+        return Some(gen.add_constant_raw_value(value));
+    }
+    if *name == utf16!("SYMBOL_ASYNC_ITERATOR") {
+        let value = unsafe { super::ffi::get_well_known_symbol(gen.vm_ptr, 1) };
+        return Some(gen.add_constant_raw_value(value));
+    }
+    if *name == utf16!("MAX_ARRAY_LIKE_INDEX") {
+        return Some(gen.add_constant_number(9007199254740991.0));
+    }
+    None
+}
+
 fn generate_call_expression(
     gen: &mut Generator,
     data: &CallExpressionData,
     preferred_dst: Option<&ScopedOperand>,
     is_new: bool,
 ) -> Option<ScopedOperand> {
+    // Check for builtin abstract operations before anything else.
+    if !is_new {
+        if let Some(result) = try_generate_builtin_abstract_operation(gen, data, preferred_dst) {
+            return result;
+        }
+    }
+
     let dst = choose_dst(gen, preferred_dst);
 
     // Compute expression_string for error messages (e.g. "true is not a function (evaluated from 'a')").

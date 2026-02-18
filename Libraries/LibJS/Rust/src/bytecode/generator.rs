@@ -214,6 +214,12 @@ pub struct Generator {
     // Populated during FDI, checked in switch case codegen.
     pub annexb_function_names: HashSet<Utf16String>,
 
+    // --- Builtin abstract operations ---
+    // When true, calls to known abstract operations (e.g. IsCallable, GetMethod)
+    // are compiled to specialized bytecode instructions rather than normal calls.
+    // Used for builtin JS files.
+    pub builtin_abstract_operations_enabled: bool,
+
     // --- FFI context ---
     // These are set by the top-level compiler and passed through for
     // creating SharedFunctionInstanceData via FFI callbacks.
@@ -314,6 +320,7 @@ impl Generator {
             length_identifier: None,
             current_unwind_handler: None,
             annexb_function_names: HashSet::new(),
+            builtin_abstract_operations_enabled: false,
             vm_ptr: std::ptr::null_mut(),
             source_code_ptr: std::ptr::null(),
             source: std::ptr::null(),
@@ -458,6 +465,10 @@ impl Generator {
 
     pub fn add_constant_bigint(&mut self, value: String) -> ScopedOperand {
         self.append_constant(ConstantValue::BigInt(value))
+    }
+
+    pub fn add_constant_raw_value(&mut self, value: u64) -> ScopedOperand {
+        self.append_constant(ConstantValue::RawValue(value))
     }
 
     /// Get the constant value for a constant operand.
@@ -1428,6 +1439,8 @@ pub enum ConstantValue {
     Empty,
     String(Utf16String),
     BigInt(String),
+    /// An opaque pre-encoded JS::Value (e.g. well-known symbol, intrinsic function).
+    RawValue(u64),
 }
 
 /// Convert a constant value to a boolean, matching JS `ToBoolean`.
@@ -1438,6 +1451,7 @@ pub fn constant_to_boolean(value: &ConstantValue) -> bool {
         ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
         ConstantValue::String(s) => !s.is_empty(),
         ConstantValue::BigInt(s) => s != "0",
+        ConstantValue::RawValue(_) => true,
     }
 }
 
