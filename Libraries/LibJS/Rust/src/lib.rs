@@ -285,11 +285,11 @@ pub unsafe extern "C" fn rust_compile_program(
 
         let program = parser.parse_program(starts_in_strict_mode);
 
-        parser.scope_collector.analyze(initiated_by_eval);
-
         if check_errors(&mut parser, "rust_compile_program") {
             return std::ptr::null_mut();
         }
+
+        parser.scope_collector.analyze(initiated_by_eval);
 
         let scope_ref = if let StatementKind::Program(ref data) = program.inner {
             data.scope.clone()
@@ -341,11 +341,11 @@ pub unsafe extern "C" fn rust_compile_script(
 
         let program = parser.parse_program(false);
 
-        parser.scope_collector.analyze(false);
-
         if check_errors_with_callback(&mut parser, "rust_compile_script", error_context, error_callback) {
             return std::ptr::null_mut();
         }
+
+        parser.scope_collector.analyze(false);
 
         // Dump AST if requested (after scope analysis so identifier metadata is populated).
         if dump_ast {
@@ -426,11 +426,11 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         let program = parser.parse_program(starts_in_strict_mode);
 
-        parser.scope_collector.analyze(true);
-
         if check_errors_with_callback(&mut parser, "rust_compile_eval", error_context, error_callback) {
             return std::ptr::null_mut();
         }
+
+        parser.scope_collector.analyze(true);
 
         // If caller wants an AST dump string, produce it.
         if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
@@ -872,11 +872,12 @@ pub unsafe extern "C" fn rust_compile_module(
         // 1. Parse as module.
         let mut parser = Parser::new(source_slice, ProgramType::Module);
         let program = parser.parse_program(false);
-        parser.scope_collector.analyze(false);
 
         if check_errors_with_callback(&mut parser, "rust_compile_module", error_context, error_callback) {
             return std::ptr::null_mut();
         }
+
+        parser.scope_collector.analyze(false);
 
         // If caller wants an AST dump string, produce it.
         if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
