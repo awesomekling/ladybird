@@ -603,3 +603,16 @@ extern "C" size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t bu
         buffer[i] = view.code_unit_at(i);
     return len;
 }
+
+// FIXME: This FFI workaround exists only to match C++ float-to-string
+//        formatting in the Rust AST dump. Once the C++ pipeline is
+//        removed, this can be deleted and the Rust side can use its own
+//        formatting without needing to match C++.
+extern "C" size_t rust_format_double(double value, uint8_t* buffer, size_t buffer_len)
+{
+    auto str = MUST(String::formatted("{}", value));
+    auto bytes = str.bytes();
+    auto len = min(bytes.size(), buffer_len);
+    memcpy(buffer, bytes.data(), len);
+    return len;
+}

@@ -14,6 +14,14 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
+extern "C" {
+    // FIXME: This FFI workaround exists only to match C++ float-to-string
+    //        formatting in the Rust AST dump. Once the C++ pipeline is
+    //        removed, this can be deleted and the Rust side can use its own
+    //        formatting without needing to match C++.
+    fn rust_format_double(value: f64, buffer: *mut u8, buffer_len: usize) -> usize;
+}
+
 // ANSI color codes matching C++ ASTDump.cpp.
 const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";
@@ -213,146 +221,16 @@ fn utf16_to_string(s: &[u16]) -> String {
     buf
 }
 
-/// Format f64 matching ECMAScript Number::toString(x, 10).
+/// Format f64 matching the C++ AK::Formatter<double> output exactly.
+///
+/// FIXME: This calls into C++ via FFI to guarantee identical output.
+///        Once the C++ pipeline is removed, this can be replaced with
+///        a pure Rust implementation without needing to match C++.
 fn format_f64(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    if value.is_infinite() {
-        return if value > 0.0 {
-            "Infinity".to_string()
-        } else {
-            "-Infinity".to_string()
-        };
-    }
-
-    let negative = value < 0.0;
-    let abs_value = value.abs();
-
-    // Get shortest decimal representation using Rust's built-in ryu.
-    // format!("{:e}") gives e.g. "8.99e307", "1e20", "1e-7"
-    let sci = format!("{:e}", abs_value);
-
-    // Parse into mantissa digits and exponent.
-    let (mantissa_part, exp_part) = sci.split_once('e').unwrap();
-    let exp: i32 = exp_part.parse().unwrap();
-
-    // Extract mantissa digits (remove the decimal point).
-    let mut digits_str = String::new();
-    for c in mantissa_part.chars() {
-        if c != '.' {
-            digits_str.push(c);
-        }
-    }
-
-    // Fix tie-breaking: Rust's ryu may round differently than C++ (AK) on ties.
-    // C++ uses round-to-even. When the value is exactly at the midpoint between
-    // two shortest decimal representations, pick the one with an even last digit.
-    let num_sig_digits = digits_str.len();
-    if num_sig_digits > 0 {
-        let last_byte = digits_str.as_bytes()[num_sig_digits - 1];
-        if (last_byte - b'0') % 2 != 0 {
-            // Last digit is odd — check if this is a midpoint tie.
-            let prec = num_sig_digits;
-            let more_precise = format!("{:.*e}", prec, abs_value);
-            let (mp_mantissa, _) = more_precise.split_once('e').unwrap();
-            let extra_digit = mp_mantissa.replace('.', "").as_bytes().get(num_sig_digits).copied();
-            if extra_digit == Some(b'5') {
-                // Check that remaining digits are all zero (true midpoint).
-                let full_check = format!("{:.*e}", prec + 3, abs_value);
-                let (fc_mantissa, _) = full_check.split_once('e').unwrap();
-                let fc_digits: Vec<u8> = fc_mantissa.replace('.', "").bytes().collect();
-                let all_zero_after = fc_digits.get(num_sig_digits + 1..).map_or(true, |s| s.iter().all(|&b| b == b'0'));
-                if all_zero_after {
-                    // Try adjusting the last digit to make it even.
-                    // Ryu may have rounded up (try -1) or down (try +1).
-                    for delta in [-1i8, 1] {
-                        let new_digit = (last_byte as i8 + delta) as u8;
-                        if new_digit < b'0' || new_digit > b'9' {
-                            continue;
-                        }
-                        let mut digits_bytes: Vec<u8> = digits_str.bytes().collect();
-                        digits_bytes[num_sig_digits - 1] = new_digit;
-                        let test_mantissa = String::from_utf8(digits_bytes).unwrap();
-                        let test_str = if test_mantissa.len() == 1 {
-                            format!("{}e{}", test_mantissa, exp)
-                        } else {
-                            format!("{}.{}e{}", &test_mantissa[..1], &test_mantissa[1..], exp)
-                        };
-                        if test_str.parse::<f64>().unwrap_or(f64::NAN) == abs_value {
-                            digits_str = test_mantissa;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Remove trailing zeros from mantissa (shortest representation).
-    let trimmed = digits_str.trim_end_matches('0');
-    let digits: Vec<char> = if trimmed.is_empty() {
-        vec!['0']
-    } else {
-        trimmed.chars().collect()
-    };
-
-    let k = digits.len() as i32; // Number of significant digits.
-    let n = exp + 1; // Position of decimal point.
-
-    let mut result = String::new();
-    if negative {
-        result.push('-');
-    }
-
-    // ES2024 7.1.12.1 steps 6-12
-    if n >= 1 && n <= 21 {
-        if n >= k {
-            // Integer: digits followed by zeros.
-            for &d in &digits {
-                result.push(d);
-            }
-            for _ in 0..(n - k) {
-                result.push('0');
-            }
-        } else {
-            // Fixed decimal: digits with decimal point.
-            for (i, &d) in digits.iter().enumerate() {
-                if i as i32 == n {
-                    result.push('.');
-                }
-                result.push(d);
-            }
-        }
-    } else if n >= -5 && n <= 0 {
-        // 0.000...digits
-        result.push_str("0.");
-        for _ in 0..(-n) {
-            result.push('0');
-        }
-        for &d in &digits {
-            result.push(d);
-        }
-    } else {
-        // Scientific notation.
-        result.push(digits[0]);
-        if k > 1 {
-            result.push('.');
-            for &d in &digits[1..] {
-                result.push(d);
-            }
-        }
-        result.push('e');
-        if n - 1 >= 0 {
-            result.push('+');
-        }
-        result.push_str(&(n - 1).to_string());
-    }
-
-    result
+    let mut buffer = [0u8; 128];
+    let length = unsafe { rust_format_double(value, buffer.as_mut_ptr(), buffer.len()) };
+    // SAFETY: C++ writes valid ASCII/UTF-8 decimal representations.
+    unsafe { std::str::from_utf8_unchecked(&buffer[..length]).to_string() }
 }
 
 fn binary_op_to_string(op: BinaryOp) -> &'static str {

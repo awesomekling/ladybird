@@ -338,6 +338,14 @@ void rust_free_error_string(char const* str);
 // units into buffer and returns the actual length.
 size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len);
 
+// FIXME: This FFI workaround exists only to match C++ float-to-string
+//        formatting in the Rust AST dump. Once the C++ pipeline is
+//        removed, this can be deleted and the Rust side can use its own
+//        formatting without needing to match C++.
+// Format a double using AK's shortest-representation algorithm.
+// Writes up to buffer_len bytes into buffer and returns the actual length.
+size_t rust_format_double(double value, uint8_t* buffer, size_t buffer_len);
+
 // Free a string allocated by Rust (e.g. AST dump output).
 void rust_free_string(uint8_t* ptr, size_t len);
 
