@@ -13,11 +13,10 @@ from pathlib import Path
 LADYBIRD_SOURCE_DIR: Path
 AST_TEST_DIR: Path
 BUILD_DIR: Path
-USE_RUST_CODEGEN: bool
 
 
 def setup() -> None:
-    global LADYBIRD_SOURCE_DIR, AST_TEST_DIR, BUILD_DIR, USE_RUST_CODEGEN
+    global LADYBIRD_SOURCE_DIR, AST_TEST_DIR, BUILD_DIR
 
     ladybird_source_dir = os.getenv("LADYBIRD_SOURCE_DIR")
 
@@ -27,7 +26,6 @@ def setup() -> None:
 
     LADYBIRD_SOURCE_DIR = Path(ladybird_source_dir)
     AST_TEST_DIR = LADYBIRD_SOURCE_DIR / "Tests/LibJS/AST/"
-    USE_RUST_CODEGEN = os.getenv("USE_RUST_CODEGEN") is not None
 
     # The script is copied to bin/test-js-ast, so the build dir is one level up
     BUILD_DIR = Path(__file__).parent.parent.resolve()
@@ -68,10 +66,7 @@ def test(file: Path, rebaseline: bool) -> bool:
         sys.exit(1)
 
     expected_file = AST_TEST_DIR / "expected" / file.with_suffix(".txt")
-    if USE_RUST_CODEGEN:
-        output_file = AST_TEST_DIR / "output-rust" / file.with_suffix(".txt")
-    else:
-        output_file = AST_TEST_DIR / "output" / file.with_suffix(".txt")
+    output_file = AST_TEST_DIR / "output" / file.with_suffix(".txt")
 
     output_file.write_text(stdout + "\n", encoding="utf8")
 
