@@ -3162,6 +3162,11 @@ fn generate_assignment_expression(
                         gen.emit_mov(&dst, &old_val);
                         gen.emit(Instruction::Jump { target: Label(end_block as u32) });
                         gen.switch_to_basic_block(end_block);
+                        // Match C++ destruction order: rhs drops first, then
+                        // reference_operands (loaded_value before referenced_name).
+                        drop(rhs_val);
+                        drop(old_val);
+                        drop(saved_property);
                         return Some(dst);
                     }
                     let rhs_val = generate_expression(rhs, gen, None)?;
