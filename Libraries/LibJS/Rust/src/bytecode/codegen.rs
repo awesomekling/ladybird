@@ -15,6 +15,9 @@
 
 use std::collections::HashSet;
 
+use num_bigint::BigInt;
+use num_traits::{One, Signed, ToPrimitive, Zero};
+
 use crate::ast::*;
 
 use super::generator::{choose_dst, constant_to_boolean, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
@@ -7813,7 +7816,7 @@ fn try_constant_fold_unary(
         UnaryOp::BitwiseNot => {
             if let ConstantValue::BigInt(s) = constant {
                 let n = parse_bigint(&s.clone())?;
-                return Some(gen.add_constant_bigint((-(n + 1)).to_string()));
+                return Some(gen.add_constant_bigint((-(n + BigInt::one())).to_string()));
             }
             let n = constant_to_number(constant)?;
             Some(gen.add_constant_number((!to_int32(n)) as f64))
@@ -7896,7 +7899,9 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
                 return Some(false);
             }
             let bi = parse_bigint(b)?;
-            return Some(bi as f64 == *n && *n as i128 == bi);
+            // Compare: the number must be an integer that equals the BigInt.
+            let n_as_bigint = BigInt::from(*n as i64);
+            return Some(n_as_bigint == bi && *n == (*n as i64) as f64);
         }
         // BigInt == String or String == BigInt: parse string as BigInt per StringToBigInt.
         (ConstantValue::BigInt(b), ConstantValue::String(s))
@@ -7907,7 +7912,7 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
             let s_trimmed = s_utf8.trim();
             if s_trimmed.is_empty() {
                 let bi = parse_bigint(b)?;
-                return Some(bi == 0);
+                return Some(bi.is_zero());
             }
             let s_bi = parse_bigint(s_trimmed)?;
             let bi = parse_bigint(b)?;
@@ -7917,20 +7922,20 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
     }
 }
 
-/// Parse a BigInt string to i128. Returns None for values that don't fit.
-/// Parse a BigInt string as an i128 value.
+/// Parse a BigInt string to an arbitrary-precision BigInt.
 /// Handles decimal, 0b binary, 0o octal, and 0x hex prefixes.
-fn parse_bigint(s: &str) -> Option<i128> {
+fn parse_bigint(s: &str) -> Option<BigInt> {
+    use num_bigint::BigInt;
     if s.len() > 2 {
         let (prefix, rest) = s.split_at(2);
         match prefix {
-            "0b" | "0B" => return i128::from_str_radix(rest, 2).ok(),
-            "0o" | "0O" => return i128::from_str_radix(rest, 8).ok(),
-            "0x" | "0X" => return i128::from_str_radix(rest, 16).ok(),
+            "0b" | "0B" => return BigInt::parse_bytes(rest.as_bytes(), 2),
+            "0o" | "0O" => return BigInt::parse_bytes(rest.as_bytes(), 8),
+            "0x" | "0X" => return BigInt::parse_bytes(rest.as_bytes(), 16),
             _ => {}
         }
     }
-    s.parse::<i128>().ok()
+    s.parse::<BigInt>().ok()
 }
 
 /// Constant-fold a binary operation on two BigInt operands.
@@ -7940,114 +7945,108 @@ fn try_constant_fold_bigint_binary(
     a_str: &str,
     b_str: &str,
 ) -> Option<ScopedOperand> {
+    let a = parse_bigint(a_str)?;
+    let b = parse_bigint(b_str)?;
     match op {
         // Arithmetic operations: produce a BigInt result.
         BinaryOp::Addition => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint(a.checked_add(b)?.to_string()))
+            Some(gen.add_constant_bigint((&a + &b).to_string()))
         }
         BinaryOp::Subtraction => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint(a.checked_sub(b)?.to_string()))
+            Some(gen.add_constant_bigint((&a - &b).to_string()))
         }
         BinaryOp::Multiplication => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint(a.checked_mul(b)?.to_string()))
+            Some(gen.add_constant_bigint((&a * &b).to_string()))
         }
         BinaryOp::Division => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            if b == 0 {
+            if b.is_zero() {
                 return None; // Division by zero throws at runtime.
             }
-            // BigInt division truncates toward zero, which is what Rust does.
-            Some(gen.add_constant_bigint(a.checked_div(b)?.to_string()))
+            // BigInt division truncates toward zero.
+            use num_integer::Integer;
+            let (quotient, remainder) = a.div_rem(&b);
+            // Rust's div_rem rounds toward zero for BigInt, matching JS spec.
+            // However, for negative dividends with positive divisors (or vice versa),
+            // we need to ensure truncation toward zero. num-bigint's div_rem already
+            // does this (it uses truncated division), so just use the quotient.
+            let _ = remainder;
+            Some(gen.add_constant_bigint(quotient.to_string()))
         }
         BinaryOp::Modulo => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            if b == 0 {
+            if b.is_zero() {
                 return None; // Modulo by zero throws at runtime.
             }
-            Some(gen.add_constant_bigint(a.checked_rem(b)?.to_string()))
+            // JS BigInt remainder has the sign of the dividend (truncated division).
+            Some(gen.add_constant_bigint((&a % &b).to_string()))
         }
         BinaryOp::Exponentiation => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            if b < 0 {
+            if b.is_negative() {
                 return None; // Negative exponent throws at runtime.
             }
-            let exp = u32::try_from(b).ok()?;
+            let exp = b.to_u32()?;
             // Only fold small exponents to avoid huge results.
             if exp > 1000 {
                 return None;
             }
-            Some(gen.add_constant_bigint(a.checked_pow(exp)?.to_string()))
+            Some(gen.add_constant_bigint(num_traits::pow::pow(a, exp as usize).to_string()))
         }
         // Comparison operations: produce a Boolean result.
         BinaryOp::StrictlyEquals | BinaryOp::LooselyEquals => {
-            Some(gen.add_constant_boolean(a_str == b_str))
+            Some(gen.add_constant_boolean(a == b))
         }
         BinaryOp::StrictlyInequals | BinaryOp::LooselyInequals => {
-            Some(gen.add_constant_boolean(a_str != b_str))
+            Some(gen.add_constant_boolean(a != b))
         }
         BinaryOp::LessThan => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
             Some(gen.add_constant_boolean(a < b))
         }
         BinaryOp::LessThanEquals => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
             Some(gen.add_constant_boolean(a <= b))
         }
         BinaryOp::GreaterThan => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
             Some(gen.add_constant_boolean(a > b))
         }
         BinaryOp::GreaterThanEquals => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
             Some(gen.add_constant_boolean(a >= b))
         }
         // Bitwise operations on BigInt.
         BinaryOp::BitwiseAnd => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint((a & b).to_string()))
+            Some(gen.add_constant_bigint((&a & &b).to_string()))
         }
         BinaryOp::BitwiseOr => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint((a | b).to_string()))
+            Some(gen.add_constant_bigint((&a | &b).to_string()))
         }
         BinaryOp::BitwiseXor => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            Some(gen.add_constant_bigint((a ^ b).to_string()))
+            Some(gen.add_constant_bigint((&a ^ &b).to_string()))
         }
         BinaryOp::LeftShift => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            let shift = u32::try_from(b).ok()?;
+            let shift = b.to_u64()?;
             if shift > 512 {
                 return None;
             }
-            Some(gen.add_constant_bigint(a.checked_shl(shift)?.to_string()))
+            Some(gen.add_constant_bigint((&a << shift as usize).to_string()))
         }
         BinaryOp::RightShift => {
-            let a = parse_bigint(a_str)?;
-            let b = parse_bigint(b_str)?;
-            let shift = u32::try_from(b).ok()?;
-            Some(gen.add_constant_bigint((a >> shift).to_string()))
+            let shift = b.to_u64()?;
+            // BigInt right shift for negative numbers floors toward negative infinity.
+            Some(gen.add_constant_bigint(bigint_right_shift(&a, shift as usize).to_string()))
         }
         // UnsignedRightShift throws TypeError for BigInt.
         _ => None,
     }
+}
+
+/// BigInt arithmetic right shift that floors toward negative infinity
+/// (matching JS spec 6.1.6.2.9 BigInt::signedRightShift).
+fn bigint_right_shift(value: &BigInt, shift: usize) -> BigInt {
+    if !value.is_negative() || shift == 0 {
+        return value >> shift;
+    }
+    // For negative values, we need floor division behavior.
+    // Check if any of the shifted-out bits are set.
+    let divisor = BigInt::one() << shift;
+    use num_integer::Integer;
+    value.div_floor(&divisor)
 }
 
 /// Try to constant-fold a binary operation when both operands are constants.
