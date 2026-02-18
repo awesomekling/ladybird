@@ -12,4 +12,3 @@ JS bytecode executable ""
 JS bytecode executable "get 0"
 [   0]    0: GetLexicalEnvironment dst:reg4
 [   8]       Return value:Int32(42)
-

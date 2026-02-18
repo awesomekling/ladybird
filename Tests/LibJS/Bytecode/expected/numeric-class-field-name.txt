@@ -21,4 +21,3 @@ JS bytecode executable "field"
 [  18]       SetLexicalEnvironment environment:reg4
 [  20]       NewClass dst:reg6, class_environment:reg5, class_blueprint_index:0, lhs_name:42
 [  40]       Return value:reg6
-
