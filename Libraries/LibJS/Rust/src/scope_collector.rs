@@ -280,10 +280,23 @@ pub struct ScopeError {
 }
 
 /// Saved state for speculative parsing backtracking.
+/// Saved flags for a scope record, used to restore state after
+/// speculative parsing (e.g. failed arrow function attempts).
+struct SavedScopeFlags {
+    index: usize,
+    uses_this: bool,
+    uses_this_from_environment: bool,
+}
+
 pub struct ScopeCollectorState {
     records_len: usize,
     current: Option<usize>,
     errors_len: usize,
+    /// Snapshot of propagatable flags on existing scope records.
+    /// During speculative parsing, set_uses_this() and set_uses_new_target()
+    /// propagate flags to ancestor function scopes. These changes must be
+    /// undone if the speculative parse fails.
+    saved_flags: Vec<SavedScopeFlags>,
 }
 
 pub struct ScopeCollector {
@@ -328,10 +341,25 @@ impl ScopeCollector {
     }
 
     pub fn save_state(&self) -> ScopeCollectorState {
+        // Snapshot flags on ancestor function scopes that set_uses_this()
+        // and set_uses_new_target() might modify during speculative parsing.
+        let mut saved_flags = Vec::new();
+        if let Some(start) = self.current {
+            for index in ancestor_scopes(start, &self.records) {
+                if self.records[index].scope_type == ScopeType::Function {
+                    saved_flags.push(SavedScopeFlags {
+                        index,
+                        uses_this: self.records[index].uses_this,
+                        uses_this_from_environment: self.records[index].uses_this_from_environment,
+                    });
+                }
+            }
+        }
         ScopeCollectorState {
             records_len: self.records.len(),
             current: self.current,
             errors_len: self.errors.len(),
+            saved_flags,
         }
     }
 
@@ -343,6 +371,15 @@ impl ScopeCollector {
         // Remove any child indices that pointed to now-truncated records.
         if let Some(current_index) = self.current {
             self.records[current_index].children.retain(|&c| c < saved_len);
+        }
+        // Restore flags on ancestor function scopes that may have been
+        // modified by set_uses_this() or set_uses_new_target() during
+        // the speculative parse.
+        for saved in &state.saved_flags {
+            if saved.index < self.records.len() {
+                self.records[saved.index].uses_this = saved.uses_this;
+                self.records[saved.index].uses_this_from_environment = saved.uses_this_from_environment;
+            }
         }
     }
 
