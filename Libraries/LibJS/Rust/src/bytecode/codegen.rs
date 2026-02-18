@@ -1930,10 +1930,13 @@ fn generate_if_statement(
     // OPTIMIZATION: if the predicate is always true/false, only build the taken branch.
     if let Some(constant) = gen.get_constant(&pred) {
         let is_truthy = constant_to_boolean(constant);
+        // Pass the completion register as preferred_dst so nested
+        // if-statements reuse the same register (matching C++).
+        let child_dst = completion.as_ref().or(preferred_dst);
         if is_truthy {
-            generate_with_completion(consequent, gen, &completion, preferred_dst);
+            generate_with_completion(consequent, gen, &completion, child_dst);
         } else if let Some(alt) = alternate {
-            generate_with_completion(alt, gen, &completion, preferred_dst);
+            generate_with_completion(alt, gen, &completion, child_dst);
         }
         return completion;
     }
