@@ -271,7 +271,11 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub fn new(source: &'a [u16], program_type: ProgramType) -> Self {
-        let mut lexer = Lexer::new(source, 1, 0);
+        Self::new_with_line_offset(source, program_type, 1)
+    }
+
+    pub fn new_with_line_offset(source: &'a [u16], program_type: ProgramType, initial_line_number: u32) -> Self {
+        let mut lexer = Lexer::new(source, initial_line_number, 0);
         if program_type == ProgramType::Module {
             lexer.disallow_html_comments();
         }

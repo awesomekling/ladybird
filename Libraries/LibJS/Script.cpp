@@ -129,11 +129,11 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
             for (size_t i = 0; i < length; ++i)
                 utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
             exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
-                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
+                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr, line_number_offset);
         } else {
             auto utf16 = code_view.utf16_span();
             exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
-                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
+                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr, line_number_offset);
         }
 
         if (!exec_ptr) {

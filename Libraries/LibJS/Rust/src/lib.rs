@@ -331,12 +331,13 @@ pub unsafe extern "C" fn rust_compile_script(
     error_callback: Option<ParseErrorCallback>,
     ast_dump_output: *mut *mut u8,
     ast_dump_output_len: *mut usize,
+    initial_line_number: usize,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
             return std::ptr::null_mut();
         };
-        let mut parser = Parser::new(source_slice, ProgramType::Script);
+        let mut parser = Parser::new_with_line_offset(source_slice, ProgramType::Script, initial_line_number as u32);
 
         let program = parser.parse_program(false);
 

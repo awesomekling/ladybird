@@ -84,7 +84,8 @@ void* rust_compile_script(
     void* error_context,
     RustParseErrorCallback error_callback,
     uint8_t** ast_dump_output,
-    size_t* ast_dump_output_len);
+    size_t* ast_dump_output_len,
+    size_t initial_line_number);
 
 // Parse and compile a JavaScript program using the Rust parser and
 // bytecode generator. Returns a Bytecode::Executable* cast to void*,
