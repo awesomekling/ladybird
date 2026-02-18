@@ -8,3 +8,6 @@ var f = 1.5;
 // Values that exercise float-to-string tie-breaking edge cases
 var g = 0.000035656023101182655;
 var h = 0.08424758911132812;
+// Overflow to Infinity
+var i = 1e999;
+var j = -1e999;

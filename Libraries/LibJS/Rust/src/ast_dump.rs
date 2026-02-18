@@ -227,6 +227,19 @@ fn utf16_to_string(s: &[u16]) -> String {
 ///        Once the C++ pipeline is removed, this can be replaced with
 ///        a pure Rust implementation without needing to match C++.
 fn format_f64(value: f64) -> String {
+    // C++ AST dump formats JS::Value which uses to_string_without_side_effects(),
+    // producing "Infinity"/"-Infinity"/"NaN". The rust_format_double FFI uses
+    // AK's double formatter which produces "inf"/"-inf"/"nan" instead.
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        };
+    }
     let mut buffer = [0u8; 128];
     let length = unsafe { rust_format_double(value, buffer.as_mut_ptr(), buffer.len()) };
     // SAFETY: C++ writes valid ASCII/UTF-8 decimal representations.
