@@ -869,16 +869,16 @@ impl<'a> Parser<'a> {
             return self.expression(start, ExpressionKind::MetaProperty(MetaPropertyType::NewTarget));
         }
 
-        if self.match_token(TokenType::Import) {
-            self.syntax_error("Cannot call new on dynamic import");
-        }
-
         let callee = if self.match_token(TokenType::New) {
             self.parse_new_expression()
         } else {
             let forbidden = ForbiddenTokens::none().forbid(&[TokenType::ParenOpen, TokenType::QuestionMarkPeriod]);
             self.parse_expression(19, Associativity::Right, forbidden)
         };
+
+        if matches!(callee.inner, ExpressionKind::ImportCall { .. }) {
+            self.syntax_error("Cannot call new on dynamic import");
+        }
 
         if self.match_token(TokenType::ParenOpen) {
             let arguments = self.parse_arguments();
