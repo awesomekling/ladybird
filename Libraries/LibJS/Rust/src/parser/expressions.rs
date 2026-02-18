@@ -1696,6 +1696,12 @@ impl<'a> Parser<'a> {
                     c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
                     c => result.push(c),
                 }
+            } else if inner[i] == b'\r' as u16 {
+                // Normalize \r\n and bare \r to \n per spec (12.9.6).
+                result.push(b'\n' as u16);
+                if i + 1 < inner.len() && inner[i + 1] == b'\n' as u16 {
+                    i += 1;
+                }
             } else {
                 result.push(inner[i]);
             }
