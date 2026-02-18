@@ -1617,14 +1617,25 @@ impl<'a> Parser<'a> {
                     }
                     statement = Some(Box::new(declaration));
                 } else {
+                    // Unnamed class declaration - don't consume semicolon,
+                    // matching the C++ parser's special_case_declaration_without_name.
                     let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-                    self.consume_or_insert_semicolon();
                     let expression_range = expression.range;
                     statement = Some(Box::new(Statement::new(expression_range, StatementKind::Expression(Box::new(expression)))));
                 }
             } else if self.match_expression() {
+                // Check if this is an unnamed function/class declaration that
+                // should NOT consume a trailing semicolon.
+                let special_case_declaration_without_name = self.match_token(TokenType::Class)
+                    || self.match_token(TokenType::Function)
+                    || (self.match_token(TokenType::Async) && {
+                        let next = self.next_token();
+                        next.token_type == TokenType::Function && !next.trivia_has_line_terminator
+                    });
                 let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
-                self.consume_or_insert_semicolon();
+                if !special_case_declaration_without_name {
+                    self.consume_or_insert_semicolon();
+                }
                 let expression_range = expression.range;
                 statement = Some(Box::new(Statement::new(expression_range, StatementKind::Expression(Box::new(expression)))));
             } else {
