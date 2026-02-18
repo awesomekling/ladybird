@@ -7899,9 +7899,16 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
                 return Some(false);
             }
             let bi = parse_bigint(b)?;
-            // Compare: the number must be an integer that equals the BigInt.
-            let n_as_bigint = BigInt::from(*n as i64);
-            return Some(n_as_bigint == bi && *n == (*n as i64) as f64);
+            // Compare: the number must be a safe integer that equals the BigInt.
+            // Only fold if the f64 value fits in i64 range for lossless conversion.
+            if *n > i64::MAX as f64 || *n < i64::MIN as f64 {
+                return None;
+            }
+            let n_i64 = *n as i64;
+            if n_i64 as f64 != *n {
+                return None;
+            }
+            return Some(BigInt::from(n_i64) == bi);
         }
         // BigInt == String or String == BigInt: parse string as BigInt per StringToBigInt.
         (ConstantValue::BigInt(b), ConstantValue::String(s))
