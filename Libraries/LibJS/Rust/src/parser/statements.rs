@@ -687,6 +687,7 @@ impl<'a> Parser<'a> {
         let parameter = if self.match_token(TokenType::ParenOpen) {
             self.consume();
             let parameter = if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
+                self.pattern_bound_names.clear();
                 let pattern = self.parse_binding_pattern();
                 let names_to_check: Vec<Utf16String> = self.pattern_bound_names.iter().map(|(n, _)| n.clone()).collect();
                 for name in &names_to_check {
