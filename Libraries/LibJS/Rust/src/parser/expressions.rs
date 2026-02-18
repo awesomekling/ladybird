@@ -1729,6 +1729,11 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Save and clear pattern_bound_names so that parameter and body
+        // parsing inside this arrow function doesn't steal binding names
+        // accumulated by an outer binding pattern context.
+        let saved_pattern_bound_names = std::mem::take(&mut self.pattern_bound_names);
+
         self.save_state();
 
         // Reset in_formal_parameter_context so that yield/await inside
@@ -1740,6 +1745,7 @@ impl<'a> Parser<'a> {
         if is_async {
             self.consume(); // consume 'async'
             if self.current_token.trivia_has_line_terminator {
+                self.pattern_bound_names = saved_pattern_bound_names;
                 self.load_state();
                 return None;
             }
@@ -1773,10 +1779,12 @@ impl<'a> Parser<'a> {
             let previous_errors = self.errors.len();
             parsed = self.parse_formal_parameters_impl(true);
             if self.errors.len() > previous_errors {
+                self.pattern_bound_names = saved_pattern_bound_names;
                 self.load_state();
                 return None;
             }
             if !self.match_token(TokenType::ParenClose) {
+                self.pattern_bound_names = saved_pattern_bound_names;
                 self.load_state();
                 return None;
             }
@@ -1801,6 +1809,7 @@ impl<'a> Parser<'a> {
             };
         } else {
             self.flags.await_expression_is_valid = saved_await;
+            self.pattern_bound_names = saved_pattern_bound_names;
             self.load_state();
             return None;
         }
@@ -1811,6 +1820,7 @@ impl<'a> Parser<'a> {
 
         // [no LineTerminator here] before `=>`
         if !self.match_token(TokenType::Arrow) || self.current_token.trivia_has_line_terminator {
+            self.pattern_bound_names = saved_pattern_bound_names;
             self.load_state();
             return None;
         }
@@ -1837,6 +1847,7 @@ impl<'a> Parser<'a> {
             let (body, has_use_strict, insights) = self.parse_function_body(is_async, false, is_simple);
 
             self.scope_collector.close_scope();
+            self.pattern_bound_names = saved_pattern_bound_names;
 
             if has_use_strict || fn_kind != FunctionKind::Normal {
                 self.check_parameters_post_body(&parameter_info, has_use_strict, fn_kind);
@@ -1878,6 +1889,7 @@ impl<'a> Parser<'a> {
             };
 
             self.scope_collector.close_scope();
+            self.pattern_bound_names = saved_pattern_bound_names;
 
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
@@ -1922,6 +1934,10 @@ impl<'a> Parser<'a> {
         self.flags.allow_super_constructor_call = method_kind == MethodKind::Constructor && self.class_has_super_class;
         self.flags.allow_super_property_lookup = true;
 
+        // Save pattern_bound_names so that destructuring patterns in the
+        // method body don't steal names from an outer binding context.
+        let saved_pattern_bound_names = std::mem::take(&mut self.pattern_bound_names);
+
         let parsed = self.parse_formal_parameters();
 
         self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
@@ -1943,6 +1959,7 @@ impl<'a> Parser<'a> {
         self.flags.allow_super_property_lookup = saved_allow_super_lookup;
 
         self.scope_collector.close_scope();
+        self.pattern_bound_names = saved_pattern_bound_names;
 
         self.flags.in_class_static_init_block = saved_static_init;
         self.flags.in_class_field_initializer = saved_field_init;

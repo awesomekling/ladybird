@@ -457,6 +457,10 @@ impl<'a> Parser<'a> {
         self.flags.in_class_static_init_block = false;
         self.flags.in_class_field_initializer = false;
 
+        // Save pattern_bound_names so that destructuring patterns in the
+        // function body don't steal names from an outer binding context.
+        let saved_pattern_bound_names = std::mem::take(&mut self.pattern_bound_names);
+
         let parsed = self.parse_formal_parameters();
         self.register_function_parameters_with_scope(&parsed.parameters, &parsed.parameter_info);
 
@@ -466,6 +470,7 @@ impl<'a> Parser<'a> {
         let (body, has_use_strict, mut insights) = self.parse_function_body(is_async, is_generator, parsed.is_simple);
 
         self.scope_collector.close_scope();
+        self.pattern_bound_names = saved_pattern_bound_names;
 
         self.flags.in_class_static_init_block = saved_static_init;
         self.flags.in_class_field_initializer = saved_field_init;
