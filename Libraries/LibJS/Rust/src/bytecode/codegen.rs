@@ -1894,13 +1894,17 @@ fn generate_if_statement(
 
     gen.emit_jump_if(&pred, Label(true_block as u32), Label(false_block as u32));
 
+    // Pass completion as preferred_dst to children so nested if-else chains
+    // reuse the same completion register, matching C++ behavior.
+    let child_preferred_dst = completion.as_ref();
+
     // Consequent
     gen.switch_to_basic_block(true_block);
     let saved_completion = gen.current_completion_register.clone();
     if let Some(ref c) = completion {
         gen.current_completion_register = Some(c.clone());
     }
-    let cons_result = generate_statement(consequent, gen, preferred_dst);
+    let cons_result = generate_statement(consequent, gen, child_preferred_dst);
     if !gen.is_current_block_terminated() {
         if let (Some(ref c), Some(ref val)) = (&completion, &cons_result) {
             gen.emit_mov(c, val);
@@ -1920,7 +1924,7 @@ fn generate_if_statement(
         if let Some(ref c) = completion {
             gen.current_completion_register = Some(c.clone());
         }
-        let alt_result = generate_statement(alt, gen, preferred_dst);
+        let alt_result = generate_statement(alt, gen, child_preferred_dst);
         if !gen.is_current_block_terminated() {
             if let (Some(ref c), Some(ref val)) = (&completion, &alt_result) {
                 gen.emit_mov(c, val);
