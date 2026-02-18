@@ -9,6 +9,7 @@
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/AggregateErrorConstructor.h>
 #include <LibJS/Runtime/AggregateErrorPrototype.h>
@@ -222,9 +223,16 @@ static Vector<GC::Root<SharedFunctionInstanceData>> parse_builtin_file(unsigned 
 
 #ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-    if (use_rust_codegen) {
+    bool const compare_pipelines = compare_pipelines_enabled();
+
+    if (use_rust_codegen || compare_pipelines) {
         auto const& code_view = code->code_view();
         auto length = code_view.length_in_code_units();
+
+        u8* rust_ast_data = nullptr;
+        size_t rust_ast_len = 0;
+        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
 
         Vector<GC::Root<SharedFunctionInstanceData>> shared_data_list;
         if (code_view.has_ascii_storage()) {
@@ -233,11 +241,31 @@ static Vector<GC::Root<SharedFunctionInstanceData>> parse_builtin_file(unsigned 
             utf16_buf.ensure_capacity(length);
             for (size_t i = 0; i < length; ++i)
                 utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            rust_compile_builtin_file(utf16_buf.data(), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function);
+            rust_compile_builtin_file(utf16_buf.data(), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function,
+                rust_ast_data_ptr, rust_ast_len_ptr);
         } else {
             auto utf16 = code_view.utf16_span();
-            rust_compile_builtin_file(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function);
+            rust_compile_builtin_file(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function,
+                rust_ast_data_ptr, rust_ast_len_ptr);
         }
+
+        if (compare_pipelines) {
+            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+            // Run C++ pipeline for comparison.
+            auto lexer = Lexer { code };
+            auto parser = Parser { move(lexer) };
+            auto cpp_program = parser.parse_program(true);
+
+            if (!parser.has_errors()) {
+                // Compare AST dumps.
+                auto cpp_ast_dump = cpp_program->dump_to_string();
+                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "BuiltinFile"sv);
+            }
+
+            rust_free_string(rust_ast_data, rust_ast_len);
+        }
+
         return shared_data_list;
     }
 #endif

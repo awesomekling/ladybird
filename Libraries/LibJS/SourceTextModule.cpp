@@ -8,9 +8,11 @@
 #include <AK/Debug.h>
 #include <AK/QuickSort.h>
 #include <LibJS/Bytecode/Executable.h>
+#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AsyncFunctionDriverWrapper.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
@@ -369,7 +371,9 @@ Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(S
 {
 #ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-    if (use_rust_codegen) {
+    bool const compare_pipelines = compare_pipelines_enabled();
+
+    if (use_rust_codegen || compare_pipelines) {
         auto source_code = SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text));
         auto const& code_view = source_code->code_view();
         auto length = code_view.length_in_code_units();
@@ -395,6 +399,11 @@ Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(S
             error_list->empend(move(msg), Position { .line = line, .column = column, .offset = 0 });
         };
 
+        u8* rust_ast_data = nullptr;
+        size_t rust_ast_len = 0;
+        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
+
         void* tla_executable = nullptr;
         void* exec_ptr;
 
@@ -408,18 +417,49 @@ Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(S
                 &realm.vm(), source_code.ptr(),
                 &builder, &callbacks,
                 &errors, error_callback,
-                &tla_executable);
+                &tla_executable,
+                rust_ast_data_ptr, rust_ast_len_ptr);
         } else {
             auto utf16 = code_view.utf16_span();
             exec_ptr = rust_compile_module(reinterpret_cast<u16 const*>(utf16.data()), length,
                 &realm.vm(), source_code.ptr(),
                 &builder, &callbacks,
                 &errors, error_callback,
-                &tla_executable);
+                &tla_executable,
+                rust_ast_data_ptr, rust_ast_len_ptr);
         }
 
-        if (!exec_ptr && !tla_executable)
+        if (!exec_ptr && !tla_executable) {
+            if (rust_ast_data)
+                rust_free_string(rust_ast_data, rust_ast_len);
             return errors;
+        }
+
+        if (compare_pipelines) {
+            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+            // Run C++ pipeline for comparison.
+            auto parser = Parser(Lexer(source_code), Program::Type::Module);
+            auto cpp_program = parser.parse_program();
+
+            if (!parser.has_errors()) {
+                // Compare AST dumps.
+                auto cpp_ast_dump = cpp_program->dump_to_string();
+                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, filename);
+
+                // Compare bytecode dumps (non-TLA modules only, since TLA
+                // wrapping produces a structurally different executable).
+                if (!tla_executable) {
+                    auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+                    auto cpp_executable = Bytecode::Generator::generate_from_ast_node(realm.vm(), *cpp_program, {});
+                    auto rust_bytecode_dump = rust_executable.dump_to_string();
+                    auto cpp_bytecode_dump = cpp_executable->dump_to_string();
+                    compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, filename, cpp_ast_dump);
+                }
+            }
+
+            rust_free_string(rust_ast_data, rust_ast_len);
+        }
 
         GC::Ptr<Bytecode::Executable> executable;
         GC::Ptr<SharedFunctionInstanceData> tla_shared_data;

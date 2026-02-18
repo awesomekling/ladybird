@@ -5,9 +5,11 @@
  */
 
 #include <LibGC/DeferGC.h>
+#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Error.h>
@@ -164,8 +166,9 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
 
 #ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+    bool const compare_pipelines = compare_pipelines_enabled();
 
-    if (use_rust_codegen) {
+    if (use_rust_codegen || compare_pipelines) {
         auto source_code = SourceCode::create({}, Utf16String::from_utf8(source_text));
         auto const& code_view = source_code->code_view();
         auto full_length = code_view.length_in_code_units();
@@ -192,16 +195,43 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
         GC::DeferGC defer_gc(vm.heap());
         String parse_error;
 
+        u8* rust_ast_data = nullptr;
+        size_t rust_ast_len = 0;
+        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
+
         void* sfd_ptr = rust_compile_dynamic_function(
             full_data, full_length,
             params_data, params_utf16.utf16_view().length_in_code_units(),
             body_data, body_utf16.utf16_view().length_in_code_units(),
             &vm, source_code.ptr(),
             static_cast<u8>(kind),
-            &parse_error, collect_rust_parse_error);
+            &parse_error, collect_rust_parse_error,
+            rust_ast_data_ptr, rust_ast_len_ptr);
 
-        if (!sfd_ptr)
+        if (!sfd_ptr) {
+            if (rust_ast_data)
+                rust_free_string(rust_ast_data, rust_ast_len);
             return vm.throw_completion<SyntaxError>(parse_error);
+        }
+
+        if (compare_pipelines) {
+            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+            // Run C++ pipeline for comparison.
+            // Parse as a full program to match the Rust side which parses the
+            // complete source text as a Script.
+            auto source_parser = Parser(Lexer(source_code));
+            auto cpp_program = source_parser.parse_program();
+
+            if (!source_parser.has_errors()) {
+                // Compare AST dumps.
+                auto cpp_ast_dump = cpp_program->dump_to_string();
+                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "new Function"sv);
+            }
+
+            rust_free_string(rust_ast_data, rust_ast_len);
+        }
 
         function_data = static_cast<SharedFunctionInstanceData*>(sfd_ptr);
         function_data->m_source_text_owner = Utf16String::from_utf8(source_text);
