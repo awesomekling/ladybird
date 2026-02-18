@@ -753,8 +753,8 @@ impl<'a> Parser<'a> {
         self.discard_saved_state();
         self.consume(); // consume :
 
-        if self.flags.strict_mode && label == utf16!("let") {
-            self.syntax_error("Strict mode reserved word 'let' is not allowed in label");
+        if self.flags.strict_mode && (label == utf16!("let") || crate::parser::is_strict_reserved_word(&label)) {
+            self.syntax_error("Strict mode reserved word is not allowed in label");
         }
         if self.flags.in_generator_function_context && label == utf16!("yield") {
             self.syntax_error("'yield' label is not allowed in generator function context");
