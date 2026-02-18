@@ -354,13 +354,24 @@ impl Generator {
     // --- Register management ---
 
     /// Allocate a new register (or reuse a freed one).
+    /// Always picks the lowest-numbered free register to ensure deterministic
+    /// allocation regardless of operand drop order.
     pub fn allocate_register(&mut self) -> ScopedOperand {
-        let reg = if let Some(r) = self.free_register_pool.borrow_mut().pop() {
-            r
-        } else {
-            let r = Register(self.next_register);
-            self.next_register += 1;
-            r
+        let reg = {
+            let mut pool = self.free_register_pool.borrow_mut();
+            if pool.is_empty() {
+                let r = Register(self.next_register);
+                self.next_register += 1;
+                r
+            } else {
+                let min_index = pool
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, r)| r.0)
+                    .unwrap()
+                    .0;
+                pool.remove(min_index)
+            }
         };
         self.scoped_operand(Operand::register(reg))
     }

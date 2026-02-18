@@ -6,14 +6,14 @@ JS bytecode executable ""
 [  50]       Call dst:reg8, callee:reg6, this_value:reg5, arguments:[reg7]
 [  78]       InitializeLexicalBinding identifier:x, src:reg8
 [  90]       InitializeLexicalBinding identifier:y, src:Null
-[  a8]       GetGlobal dst:reg8, identifier:x
-[  b8]       StrictlyEquals dst:reg6, lhs:reg8, rhs:String("hello")
-[  c8]       Mov dst:reg8, src:Undefined
+[  a8]       GetGlobal dst:reg5, identifier:x
+[  b8]       StrictlyEquals dst:reg6, lhs:reg5, rhs:String("hello")
+[  c8]       Mov dst:reg5, src:Undefined
 [  d8]       JumpFalse condition:reg6, target:@160
-[  e8]    1: GetGlobal dst:reg7, identifier:x
-[  f8]       GetById dst:reg9, base:reg7, property:toUpperCase, base_identifier:x
-[ 110]       Call dst:reg5, callee:reg9, this_value:reg7, x.toUpperCase
-[ 130]       SetGlobal identifier:y, src:reg5
-[ 140]       Mov dst:reg8, src:reg5
-[ 150]       Mov dst:reg8, src:reg5
-[ 160]    2: End value:reg8
+[  e8]    1: GetGlobal dst:reg8, identifier:x
+[  f8]       GetById dst:reg9, base:reg8, property:toUpperCase, base_identifier:x
+[ 110]       Call dst:reg7, callee:reg9, this_value:reg8, x.toUpperCase
+[ 130]       SetGlobal identifier:y, src:reg7
+[ 140]       Mov dst:reg5, src:reg7
+[ 150]       Mov dst:reg5, src:reg7
+[ 160]    2: End value:reg5
