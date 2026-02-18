@@ -220,8 +220,11 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
 
             // Run C++ pipeline for comparison.
             // Parse as a full program to match the Rust side which parses the
-            // complete source text as a Script.
+            // complete source text as a Script. Mark as dynamic function so
+            // scope analysis suppresses global identifier marking, matching the
+            // Rust side's analyze_as_dynamic_function() behavior.
             auto source_parser = Parser(Lexer(source_code));
+            source_parser.set_is_dynamic_function();
             auto cpp_program = source_parser.parse_program();
 
             if (!source_parser.has_errors()) {
