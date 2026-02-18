@@ -1,0 +1,22 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       GetGlobal dst:reg5, identifier:String
+[  18]       GetById dst:reg6, base:reg5, property:raw, base_identifier:String
+[  30]       GetTemplateObject dst:reg7, strings:[String("hello"), String("hello")]
+[  50]       Call dst:reg8, callee:reg6, this_value:reg5, arguments:[reg7]
+[  78]       InitializeLexicalBinding identifier:x, src:reg8
+[  90]       InitializeLexicalBinding identifier:y, src:Null
+[  a8]       GetGlobal dst:reg6, identifier:isInBrowser
+[  b8]       Not dst:reg8, src:reg6
+[  c8]       Mov dst:reg6, src:Undefined
+[  d8]       JumpFalse condition:reg8, target:@150
+[  e8]    1: GetGlobal dst:reg7, identifier:makeBenchmarkRunner
+[  f8]       Call dst:reg5, callee:reg7, this_value:Undefined, makeBenchmarkRunner, arguments:[String("arg")]
+[ 120]       SetGlobal identifier:y, src:reg5
+[ 130]       Mov dst:reg6, src:reg5
+[ 140]       Mov dst:reg6, src:reg5
+[ 150]    2: End value:reg6
+
+Uncaught exception:
+[ReferenceError] 'isInBrowser' is not defined
+    at /Users/kling/src/ladybird/Tests/LibJS/Bytecode/input/tagged-template-if-register-order.js:4:6
