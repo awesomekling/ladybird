@@ -10,10 +10,12 @@
 #include <AK/Optional.h>
 #include <AK/Utf16View.h>
 #include <LibGC/DeferGC.h>
+#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/ModuleLoading.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/ArgumentsObject.h>
@@ -715,8 +717,9 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
 
 #ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+    bool const compare_pipelines = compare_pipelines_enabled();
 
-    if (use_rust_codegen) {
+    if (use_rust_codegen || compare_pipelines) {
         auto source_code = SourceCode::create({}, code_string->utf16_string());
         auto const& code_view = source_code->code_view();
         auto length = code_view.length_in_code_units();
@@ -724,6 +727,11 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         GC::DeferGC defer_gc(vm.heap());
         EvalGdiBuilder builder;
         String parse_error;
+
+        u8* rust_ast_data = nullptr;
+        size_t rust_ast_len = 0;
+        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
 
         void* exec_ptr;
         if (code_view.has_ascii_storage()) {
@@ -735,17 +743,49 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
             exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
                 strict_caller == CallerMode::Strict,
                 in_function, in_method, in_derived_constructor, in_class_field_initializer,
-                &parse_error, collect_rust_parse_error);
+                &parse_error, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
         } else {
             auto utf16 = code_view.utf16_span();
             exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
                 strict_caller == CallerMode::Strict,
                 in_function, in_method, in_derived_constructor, in_class_field_initializer,
-                &parse_error, collect_rust_parse_error);
+                &parse_error, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
         }
 
-        if (!exec_ptr)
+        if (!exec_ptr) {
+            if (rust_ast_data)
+                rust_free_string(rust_ast_data, rust_ast_len);
             return vm.throw_completion<SyntaxError>(parse_error);
+        }
+
+        if (compare_pipelines) {
+            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+            // Run C++ pipeline for comparison.
+            Parser::EvalInitialState initial_state {
+                .in_eval_function_context = in_function,
+                .allow_super_property_lookup = in_method,
+                .allow_super_constructor_call = in_derived_constructor,
+                .in_class_field_initializer = in_class_field_initializer,
+            };
+            Parser parser(Lexer(source_code), Program::Type::Script, move(initial_state));
+            auto cpp_program = parser.parse_program(strict_caller == CallerMode::Strict);
+
+            if (!parser.has_errors()) {
+                // Compare AST dumps.
+                auto cpp_ast_dump = cpp_program->dump_to_string();
+                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "eval"sv);
+
+                // Compare bytecode dumps.
+                auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+                auto cpp_executable = Bytecode::Generator::generate_from_ast_node(vm, *cpp_program, {});
+                auto rust_bytecode_dump = rust_executable.dump_to_string();
+                auto cpp_bytecode_dump = cpp_executable->dump_to_string();
+                compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, "eval"sv);
+            }
+
+            rust_free_string(rust_ast_data, rust_ast_len);
+        }
 
         executable = static_cast<Bytecode::Executable*>(exec_ptr);
         executable->name = "eval"_utf16_fly_string;

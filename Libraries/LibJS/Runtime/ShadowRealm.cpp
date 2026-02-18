@@ -6,10 +6,12 @@
 
 #include <LibGC/DeferGC.h>
 #include <LibJS/Bytecode/Executable.h>
+#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/DeclarativeEnvironment.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
@@ -141,8 +143,9 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
 #ifdef ENABLE_RUST_PARSER
     {
         static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+        bool const compare_pipelines = compare_pipelines_enabled();
 
-        if (use_rust_codegen) {
+        if (use_rust_codegen || compare_pipelines) {
             auto source_code = SourceCode::create({}, source_text->utf16_string());
             auto const& code_view = source_code->code_view();
             auto length = code_view.length_in_code_units();
@@ -150,6 +153,11 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
             GC::DeferGC defer_gc(vm.heap());
             EvalGdiBuilder builder;
             String parse_error;
+
+            u8* rust_ast_data = nullptr;
+            size_t rust_ast_len = 0;
+            u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+            size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
 
             void* exec_ptr;
             if (code_view.has_ascii_storage()) {
@@ -160,16 +168,40 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, Value source, Realm& 
                     utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
                 exec_ptr = rust_compile_eval(utf16_buf.data(), length, &vm, source_code.ptr(), &builder,
                     false, false, false, false, false,
-                    &parse_error, collect_rust_parse_error);
+                    &parse_error, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
             } else {
                 auto utf16 = code_view.utf16_span();
                 exec_ptr = rust_compile_eval(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, source_code.ptr(), &builder,
                     false, false, false, false, false,
-                    &parse_error, collect_rust_parse_error);
+                    &parse_error, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
             }
 
-            if (!exec_ptr)
+            if (!exec_ptr) {
+                if (rust_ast_data)
+                    rust_free_string(rust_ast_data, rust_ast_len);
                 return vm.throw_completion<SyntaxError>(parse_error);
+            }
+
+            if (compare_pipelines) {
+                auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+                // Run C++ pipeline for comparison.
+                auto parser = Parser(Lexer(source_code), Program::Type::Script, Parser::EvalInitialState {});
+                auto cpp_program = parser.parse_program();
+
+                if (!parser.has_errors()) {
+                    auto cpp_ast_dump = cpp_program->dump_to_string();
+                    compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "ShadowRealmEval"sv);
+
+                    auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+                    auto cpp_executable = Bytecode::Generator::generate_from_ast_node(vm, *cpp_program, {});
+                    auto rust_bytecode_dump = rust_executable.dump_to_string();
+                    auto cpp_bytecode_dump = cpp_executable->dump_to_string();
+                    compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, "ShadowRealmEval"sv);
+                }
+
+                rust_free_string(rust_ast_data, rust_ast_len);
+            }
 
             executable = static_cast<Bytecode::Executable*>(exec_ptr);
             executable->name = "ShadowRealmEval"_utf16_fly_string;

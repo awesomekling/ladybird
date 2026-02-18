@@ -27,6 +27,7 @@ set(SOURCES
     Module.cpp
     Parser.cpp
     ParserError.cpp
+    PipelineComparison.cpp
     Print.cpp
     Runtime/AbstractOperations.cpp
     Runtime/Accessor.cpp

@@ -329,6 +329,8 @@ pub unsafe extern "C" fn rust_compile_script(
     use_color: bool,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
+    ast_dump_output: *mut *mut u8,
+    ast_dump_output_len: *mut usize,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
@@ -347,6 +349,16 @@ pub unsafe extern "C" fn rust_compile_script(
         // Dump AST if requested (after scope analysis so identifier metadata is populated).
         if dump_ast {
             ast_dump::dump_program(&program, use_color);
+        }
+
+        // If caller wants an AST dump string, produce it.
+        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
+            let dump_string = ast_dump::dump_program_to_string(&program);
+            let mut boxed = dump_string.into_bytes().into_boxed_slice();
+            *ast_dump_output = boxed.as_mut_ptr();
+            *ast_dump_output_len = boxed.len();
+            // NB: Caller must free via rust_free_string(ptr, len).
+            std::mem::forget(boxed);
         }
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
@@ -397,6 +409,8 @@ pub unsafe extern "C" fn rust_compile_eval(
     in_class_field_initializer: bool,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
+    ast_dump_output: *mut *mut u8,
+    ast_dump_output_len: *mut usize,
 ) -> *mut c_void {
     abort_on_panic(|| {
         let Some(source_slice) = source_from_raw(source, source_len) else {
@@ -415,6 +429,15 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         if check_errors_with_callback(&mut parser, "rust_compile_eval", error_context, error_callback) {
             return std::ptr::null_mut();
+        }
+
+        // If caller wants an AST dump string, produce it.
+        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
+            let dump_string = ast_dump::dump_program_to_string(&program);
+            let mut boxed = dump_string.into_bytes().into_boxed_slice();
+            *ast_dump_output = boxed.as_mut_ptr();
+            *ast_dump_output_len = boxed.len();
+            std::mem::forget(boxed);
         }
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
@@ -900,6 +923,19 @@ pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
     abort_on_panic(|| {
         if !ast.is_null() {
             drop(Box::from_raw(ast as *mut ast::FunctionData));
+        }
+    });
+}
+
+/// Free a string allocated by Rust (e.g. AST dump output).
+///
+/// # Safety
+/// `ptr` and `len` must correspond to a `Box<[u8]>` previously leaked via `std::mem::forget`.
+#[no_mangle]
+pub unsafe extern "C" fn rust_free_string(ptr: *mut u8, len: usize) {
+    abort_on_panic(|| {
+        if !ptr.is_null() {
+            drop(Box::from_raw(std::slice::from_raw_parts_mut(ptr, len)));
         }
     });
 }

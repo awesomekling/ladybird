@@ -82,7 +82,9 @@ void* rust_compile_script(
     bool dump_ast,
     bool use_color,
     void* error_context,
-    RustParseErrorCallback error_callback);
+    RustParseErrorCallback error_callback,
+    uint8_t** ast_dump_output,
+    size_t* ast_dump_output_len);
 
 // Parse and compile a JavaScript program using the Rust parser and
 // bytecode generator. Returns a Bytecode::Executable* cast to void*,
@@ -286,7 +288,9 @@ void* rust_compile_eval(
     bool allow_super_constructor_call,
     bool in_class_field_initializer,
     void* error_context,
-    RustParseErrorCallback error_callback);
+    RustParseErrorCallback error_callback,
+    uint8_t** ast_dump_output,
+    size_t* ast_dump_output_len);
 
 // Parse and compile a dynamically-created function (new Function()).
 // Validates parameters and body separately per spec, then parses the
@@ -332,6 +336,9 @@ void rust_free_error_string(char const* str);
 // ECMA-262 Number::toString algorithm. Writes up to buffer_len code
 // units into buffer and returns the actual length.
 size_t rust_number_to_utf16(double value, uint16_t* buffer, size_t buffer_len);
+
+// Free a string allocated by Rust (e.g. AST dump output).
+void rust_free_string(uint8_t* ptr, size_t len);
 
 #    ifdef __cplusplus
 }

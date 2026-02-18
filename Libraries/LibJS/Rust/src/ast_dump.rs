@@ -10,6 +10,9 @@
 //! the C++ `outln` calls.
 
 use crate::ast::*;
+use std::cell::RefCell;
+use std::fmt::Write;
+use std::rc::Rc;
 
 // ANSI color codes matching C++ ASTDump.cpp.
 const RESET: &str = "\x1b[0m";
@@ -25,25 +28,47 @@ struct DumpState {
     is_last: bool,
     is_root: bool,
     use_color: bool,
+    output: Option<Rc<RefCell<String>>>,
 }
 
 fn print_node(state: &DumpState, text: &str) {
-    if state.is_root {
-        println!("{}", text);
-    } else if state.use_color {
-        let connector = if state.is_last {
-            "\u{2514}\u{2500} "
+    if let Some(ref output) = state.output {
+        let mut buf = output.borrow_mut();
+        if state.is_root {
+            let _ = writeln!(buf, "{}", text);
+        } else if state.use_color {
+            let connector = if state.is_last {
+                "\u{2514}\u{2500} "
+            } else {
+                "\u{251c}\u{2500} "
+            };
+            let _ = writeln!(buf, "{}{}{}{}{}", state.prefix, DIM, connector, RESET, text);
         } else {
-            "\u{251c}\u{2500} "
-        };
-        println!("{}{}{}{}{}", state.prefix, DIM, connector, RESET, text);
+            let connector = if state.is_last {
+                "\u{2514}\u{2500} "
+            } else {
+                "\u{251c}\u{2500} "
+            };
+            let _ = writeln!(buf, "{}{}{}", state.prefix, connector, text);
+        }
     } else {
-        let connector = if state.is_last {
-            "\u{2514}\u{2500} "
+        if state.is_root {
+            println!("{}", text);
+        } else if state.use_color {
+            let connector = if state.is_last {
+                "\u{2514}\u{2500} "
+            } else {
+                "\u{251c}\u{2500} "
+            };
+            println!("{}{}{}{}{}", state.prefix, DIM, connector, RESET, text);
         } else {
-            "\u{251c}\u{2500} "
-        };
-        println!("{}{}{}", state.prefix, connector, text);
+            let connector = if state.is_last {
+                "\u{2514}\u{2500} "
+            } else {
+                "\u{251c}\u{2500} "
+            };
+            println!("{}{}{}", state.prefix, connector, text);
+        }
     }
 }
 
@@ -69,6 +94,7 @@ fn child_state(state: &DumpState, is_last: bool) -> DumpState {
         is_last,
         is_root: false,
         use_color: state.use_color,
+        output: state.output.clone(),
     }
 }
 
@@ -437,9 +463,25 @@ pub fn dump_program(program: &Statement, use_color: bool) {
         is_last: false,
         is_root: true,
         use_color,
+        output: None,
     };
     dump_statement(program, &state);
     println!();
+}
+
+pub fn dump_program_to_string(program: &Statement) -> String {
+    let output = Rc::new(RefCell::new(String::new()));
+    {
+        let state = DumpState {
+            prefix: String::new(),
+            is_last: false,
+            is_root: true,
+            use_color: false,
+            output: Some(output.clone()),
+        };
+        dump_statement(program, &state);
+    }
+    Rc::try_unwrap(output).unwrap().into_inner()
 }
 
 // ============================================================================

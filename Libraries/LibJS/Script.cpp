@@ -7,9 +7,11 @@
 #include <LibGC/DeferGC.h>
 #include <LibJS/AST.h>
 #include <LibJS/Bytecode/Executable.h>
+#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
+#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
@@ -100,8 +102,9 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
 {
 #ifdef ENABLE_RUST_PARSER
     static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
+    bool const compare_pipelines = compare_pipelines_enabled();
 
-    if (use_rust_codegen) {
+    if (use_rust_codegen || compare_pipelines) {
         auto source_code = SourceCode::create(
             String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(),
             Utf16String::from_utf8(source_text));
@@ -113,6 +116,11 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
         ScriptGdiBuilder builder;
         Vector<ParserError> parse_errors;
 
+        u8* rust_ast_data = nullptr;
+        size_t rust_ast_len = 0;
+        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
+        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
+
         void* exec_ptr;
         if (code_view.has_ascii_storage()) {
             auto ascii = code_view.ascii_span();
@@ -121,15 +129,41 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
             for (size_t i = 0; i < length; ++i)
                 utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
             exec_ptr = rust_compile_script(utf16_buf.data(), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
-                &parse_errors, collect_rust_parse_error);
+                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
         } else {
             auto utf16 = code_view.utf16_span();
             exec_ptr = rust_compile_script(reinterpret_cast<u16 const*>(utf16.data()), length, &realm.vm(), source_code.ptr(), &builder, g_dump_ast, g_dump_ast_use_color,
-                &parse_errors, collect_rust_parse_error);
+                &parse_errors, collect_rust_parse_error, rust_ast_data_ptr, rust_ast_len_ptr);
         }
 
-        if (!exec_ptr)
+        if (!exec_ptr) {
+            if (rust_ast_data)
+                rust_free_string(rust_ast_data, rust_ast_len);
             return parse_errors;
+        }
+
+        if (compare_pipelines) {
+            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
+
+            // Run C++ pipeline for comparison.
+            auto parser = Parser(Lexer(source_code, line_number_offset));
+            auto cpp_program = parser.parse_program();
+
+            if (!parser.has_errors()) {
+                // Compare AST dumps.
+                auto cpp_ast_dump = cpp_program->dump_to_string();
+                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, filename);
+
+                // Compare bytecode dumps.
+                auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
+                auto cpp_executable = Bytecode::Generator::generate_from_ast_node(realm.vm(), *cpp_program, {});
+                auto rust_bytecode_dump = rust_executable.dump_to_string();
+                auto cpp_bytecode_dump = cpp_executable->dump_to_string();
+                compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, filename);
+            }
+
+            rust_free_string(rust_ast_data, rust_ast_len);
+        }
 
         auto& executable = *static_cast<Bytecode::Executable*>(exec_ptr);
         return realm.heap().allocate<Script>(realm, filename, move(builder), executable, host_defined);
