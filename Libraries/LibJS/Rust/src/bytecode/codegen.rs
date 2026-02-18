@@ -3798,6 +3798,86 @@ fn emit_put_normal_by_value_with_this(
     });
 }
 
+enum PutKind {
+    Own,
+    Getter,
+    Setter,
+}
+
+/// Emit a property write by value, optimizing constant string properties to the ById variant.
+/// Matches C++ Generator::emit_put_by_value which upgrades to emit_put_by_id for constant strings.
+fn emit_put_by_value(
+    gen: &mut Generator,
+    base: &ScopedOperand,
+    property: &ScopedOperand,
+    src: &ScopedOperand,
+    kind: PutKind,
+) {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            let s = s.0.clone();
+            let key = gen.intern_property_key(&s);
+            let cache = gen.next_property_lookup_cache();
+            match kind {
+                PutKind::Own => {
+                    gen.emit(Instruction::PutOwnById {
+                        base: base.operand(),
+                        property: key,
+                        src: src.operand(),
+                        cache_index: cache,
+                        base_identifier: None,
+                    });
+                }
+                PutKind::Getter => {
+                    gen.emit(Instruction::PutGetterById {
+                        base: base.operand(),
+                        property: key,
+                        src: src.operand(),
+                        cache_index: cache,
+                        base_identifier: None,
+                    });
+                }
+                PutKind::Setter => {
+                    gen.emit(Instruction::PutSetterById {
+                        base: base.operand(),
+                        property: key,
+                        src: src.operand(),
+                        cache_index: cache,
+                        base_identifier: None,
+                    });
+                }
+            }
+            return;
+        }
+    }
+    match kind {
+        PutKind::Own => {
+            gen.emit(Instruction::PutOwnByValue {
+                base: base.operand(),
+                property: property.operand(),
+                src: src.operand(),
+                base_identifier: None,
+            });
+        }
+        PutKind::Getter => {
+            gen.emit(Instruction::PutGetterByValue {
+                base: base.operand(),
+                property: property.operand(),
+                src: src.operand(),
+                base_identifier: None,
+            });
+        }
+        PutKind::Setter => {
+            gen.emit(Instruction::PutSetterByValue {
+                base: base.operand(),
+                property: property.operand(),
+                src: src.operand(),
+                base_identifier: None,
+            });
+        }
+    }
+}
+
 fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
     if ident.is_local() {
         if ident.declaration_kind.get() == Some(DeclarationKind::Const) {
@@ -4657,12 +4737,7 @@ fn generate_object_expression(
             ObjectPropertyType::Spread => unreachable!(),
             ObjectPropertyType::KeyValue => {
                 if let Some(key_val) = &computed_key {
-                    gen.emit(Instruction::PutOwnByValue {
-                        base: dst.operand(),
-                        property: key_val.operand(),
-                        src: value.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_by_value(gen, &dst, key_val, &value, PutKind::Own);
                 } else if is_simple {
                     emit_object_property_set_by_key(gen, &dst, &property.key, &value, slot as u32, cache_index, false);
                 } else {
@@ -4687,24 +4762,14 @@ fn generate_object_expression(
             }
             ObjectPropertyType::Getter => {
                 if let Some(key_val) = &computed_key {
-                    gen.emit(Instruction::PutGetterByValue {
-                        base: dst.operand(),
-                        property: key_val.operand(),
-                        src: value.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_by_value(gen, &dst, key_val, &value, PutKind::Getter);
                 } else {
                     emit_object_accessor_by_key(gen, &dst, &property.key, &value, true, false);
                 }
             }
             ObjectPropertyType::Setter => {
                 if let Some(key_val) = &computed_key {
-                    gen.emit(Instruction::PutSetterByValue {
-                        base: dst.operand(),
-                        property: key_val.operand(),
-                        src: value.operand(),
-                        base_identifier: None,
-                    });
+                    emit_put_by_value(gen, &dst, key_val, &value, PutKind::Setter);
                 } else {
                     emit_object_accessor_by_key(gen, &dst, &property.key, &value, false, false);
                 }
