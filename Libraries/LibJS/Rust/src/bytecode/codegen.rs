@@ -381,7 +381,9 @@ pub fn generate_expression(
                 element_count: arguments.len() as u32,
                 elements: arguments,
             });
-            drop(scoped_arguments);
+
+            // NB: Keep scoped_arguments alive until the end of the expression
+            // to match C++ register lifetime behavior.
 
             // Append elements after the first spread using ArrayAppend.
             if let Some(spread_index) = first_spread {
