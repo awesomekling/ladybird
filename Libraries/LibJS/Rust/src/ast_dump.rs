@@ -833,7 +833,7 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                 for (i, entry) in data.entries.iter().enumerate() {
                     let import_name = match &entry.import_name {
                         Some(name) => utf16_to_string(name),
-                        None => "*".to_string(),
+                        None => "None".to_string(),
                     };
                     let local_name = utf16_to_string(&entry.local_name);
                     print_node(
@@ -868,9 +868,15 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                         Some(name) => format!("\"{}\"", utf16_to_string(name)),
                         None => "null".to_string(),
                     };
-                    let local_name = match &entry.local_or_import_name {
-                        Some(name) => format!("\"{}\"", utf16_to_string(name)),
-                        None => "null".to_string(),
+                    // When the entry is a module re-export, C++ prints
+                    // "null" for LocalName regardless of the stored value.
+                    let local_name = if data.module_request.is_some() {
+                        "null".to_string()
+                    } else {
+                        match &entry.local_or_import_name {
+                            Some(name) => format!("\"{}\"", utf16_to_string(name)),
+                            None => "null".to_string(),
+                        }
                     };
                     let mut desc = format!(
                         "ExportName: {}, LocalName: {}",
@@ -895,10 +901,15 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
                     &child_state(state, true),
                     &color_label(state, "statement"),
                 );
-                dump_statement(
-                    statement,
-                    &child_state(&child_state(state, true), true),
-                );
+                let inner_state = &child_state(&child_state(state, true), true);
+                // For `export default <expression>`, the C++ AST stores the
+                // expression directly without an ExpressionStatement wrapper.
+                // Match that by unwrapping StatementKind::Expression here.
+                if let StatementKind::Expression(ref expression) = statement.inner {
+                    dump_expression(expression, inner_state);
+                } else {
+                    dump_statement(statement, inner_state);
+                }
             }
         }
 
