@@ -776,6 +776,20 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
                 auto cpp_ast_dump = cpp_program->dump_to_string();
                 compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "eval"sv);
 
+                // Run Annex B analysis on the C++ AST before generating bytecode.
+                if (!cpp_program->is_strict_mode()) {
+                    HashTable<Utf16FlyString> lexical_names;
+                    MUST(cpp_program->for_each_lexically_declared_identifier([&](Identifier const& identifier) -> ThrowCompletionOr<void> {
+                        lexical_names.set(identifier.string());
+                        return {};
+                    }));
+                    MUST(cpp_program->for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) -> ThrowCompletionOr<void> {
+                        if (!lexical_names.contains(function_declaration.name()))
+                            function_declaration.set_should_do_additional_annexB_steps();
+                        return {};
+                    }));
+                }
+
                 // Compare bytecode dumps.
                 auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
                 auto cpp_executable = Bytecode::Generator::generate_from_ast_node(vm, *cpp_program, {});

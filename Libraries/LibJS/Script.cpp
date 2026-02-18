@@ -154,6 +154,22 @@ Result<GC::Ref<Script>, Vector<ParserError>> Script::parse(StringView source_tex
                 auto cpp_ast_dump = cpp_program->dump_to_string();
                 compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, filename);
 
+                // Run Annex B analysis on the C++ AST before generating bytecode.
+                // Normally this runs at runtime during GDI, but the Rust pipeline
+                // handles it statically during scope analysis.
+                if (!cpp_program->is_strict_mode()) {
+                    HashTable<Utf16FlyString> lexical_names;
+                    MUST(cpp_program->for_each_lexically_declared_identifier([&](Identifier const& identifier) -> ThrowCompletionOr<void> {
+                        lexical_names.set(identifier.string());
+                        return {};
+                    }));
+                    MUST(cpp_program->for_each_function_hoistable_with_annexB_extension([&](FunctionDeclaration& function_declaration) -> ThrowCompletionOr<void> {
+                        if (!lexical_names.contains(function_declaration.name()))
+                            function_declaration.set_should_do_additional_annexB_steps();
+                        return {};
+                    }));
+                }
+
                 // Compare bytecode dumps.
                 auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
                 auto cpp_executable = Bytecode::Generator::generate_from_ast_node(realm.vm(), *cpp_program, {});
