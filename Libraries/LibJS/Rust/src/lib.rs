@@ -1261,7 +1261,7 @@ unsafe fn compile_module_as_async(
     use bytecode::instruction::Instruction;
     use bytecode::operand::{Label, Operand, Register};
 
-    let _scope = scope_ref.borrow();
+    let scope = scope_ref.borrow();
     let mut gen = Generator::new();
     gen.strict = true;
     gen.vm_ptr = vm_ptr;
@@ -1270,8 +1270,16 @@ unsafe fn compile_module_as_async(
     gen.source_len = source_len;
     gen.enclosing_function_kind = ast::FunctionKind::Async;
 
-    // Module locals are handled by initialize_environment, not by FDI,
-    // so we don't set gen.local_variables.
+    // Extract local variables from the program scope so the executable has the
+    // correct registers_and_locals_count. Without this, locals are not saved
+    // across await suspension points, causing them to become undefined.
+    gen.local_variables = scope.local_variables.iter().map(|lv| {
+        bytecode::generator::LocalVariable {
+            name: lv.name.clone(),
+            is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+            is_initialized_during_declaration_instantiation: false,
+        }
+    }).collect();
 
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
