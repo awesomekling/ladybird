@@ -6871,6 +6871,7 @@ fn generate_try_statement(
                         gen.mark_local_initialized(ident.local_index.get());
                     } else {
                         gen.push_new_lexical_environment(0);
+                        gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
                         created_catch_scope = true;
 
                         let id = gen.intern_identifier(&ident.name);
@@ -6894,6 +6895,7 @@ fn generate_try_statement(
 
                     if !names.is_empty() {
                         gen.push_new_lexical_environment(0);
+                        gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
                         created_catch_scope = true;
 
                         for (name, _) in &names {
@@ -6942,6 +6944,7 @@ fn generate_try_statement(
         }
 
         if created_catch_scope {
+            gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
             gen.lexical_environment_register_stack.pop();
             if !gen.is_current_block_terminated() {
                 let parent = gen.current_lexical_environment();
