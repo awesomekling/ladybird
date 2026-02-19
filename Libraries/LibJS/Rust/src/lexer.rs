@@ -1298,7 +1298,7 @@ fn encode_utf16(cp: u32, buffer: &mut Vec<u16>) {
         buffer.push(cp as u16);
     } else {
         let cp = cp - 0x10000;
-        buffer.push(0xD800 + (cp >> 10) as u16);
-        buffer.push(0xDC00 + (cp & 0x3FF) as u16);
+        buffer.push((0xD800 + (cp >> 10)) as u16);
+        buffer.push((0xDC00 + (cp & 0x3FF)) as u16);
     }
 }
