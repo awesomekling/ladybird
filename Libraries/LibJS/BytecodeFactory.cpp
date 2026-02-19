@@ -265,58 +265,44 @@ extern "C" void* rust_create_executable(
 extern "C" void* rust_create_sfd(
     void* vm_ptr,
     void const* source_code_ptr,
-    uint16_t const* name,
-    size_t name_len,
-    uint8_t function_kind,
-    int32_t function_length,
-    uint32_t formal_parameter_count,
-    bool strict,
-    bool is_arrow,
-    bool has_simple_parameter_list,
-    FFIUtf16Slice const* param_names,
-    size_t param_name_count,
-    size_t source_text_offset,
-    size_t source_text_len,
-    void* rust_function_ast,
-    bool uses_this,
-    bool uses_this_from_environment)
+    FFISharedFunctionData const* data)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
 
-    auto fn_name = name_len > 0
-        ? Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(name), name_len))
+    auto fn_name = data->name_len > 0
+        ? Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(data->name), data->name_len))
         : Utf16FlyString {};
 
     Vector<Utf16FlyString> mapped_param_names;
-    if (has_simple_parameter_list) {
-        mapped_param_names.ensure_capacity(param_name_count);
-        for (size_t i = 0; i < param_name_count; ++i)
-            mapped_param_names.append(utf16_fly_from_ffi(param_names[i]));
+    if (data->has_simple_parameter_list) {
+        mapped_param_names.ensure_capacity(data->parameter_name_count);
+        for (size_t i = 0; i < data->parameter_name_count; ++i)
+            mapped_param_names.append(utf16_fly_from_ffi(data->parameter_names[i]));
     }
 
     auto shared = vm.heap().allocate<JS::SharedFunctionInstanceData>(
         vm,
-        static_cast<JS::FunctionKind>(function_kind),
+        static_cast<JS::FunctionKind>(data->function_kind),
         move(fn_name),
-        function_length,
-        formal_parameter_count,
-        strict,
-        is_arrow,
-        has_simple_parameter_list,
+        data->function_length,
+        data->formal_parameter_count,
+        data->strict,
+        data->is_arrow,
+        data->has_simple_parameter_list,
         move(mapped_param_names),
-        rust_function_ast);
+        data->rust_function_ast);
 
     // Set parsing insights that must be available before lazy compilation.
-    shared->m_uses_this = uses_this;
-    if (uses_this_from_environment)
+    shared->m_uses_this = data->uses_this;
+    if (data->uses_this_from_environment)
         shared->m_function_environment_needed = true;
 
     // Set source text as a view into the original source code.
     shared->m_source_code = &source_code;
-    if (source_text_len > 0) {
+    if (data->source_text_length > 0) {
         auto const& code_view = source_code.code_view();
-        shared->m_source_text = code_view.substring_view(source_text_offset, source_text_len);
+        shared->m_source_text = code_view.substring_view(data->source_text_offset, data->source_text_length);
     }
 
     return shared.ptr();

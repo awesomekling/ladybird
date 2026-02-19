@@ -169,6 +169,31 @@ void* rust_create_executable(
     void* const* compiled_regexes,
     size_t regex_count);
 
+// All the data needed to create a SharedFunctionInstanceData from Rust.
+struct FFISharedFunctionData {
+    // Function name (UTF-16)
+    uint16_t const* name;
+    size_t name_len;
+    // Metadata
+    uint8_t function_kind;
+    int32_t function_length;
+    uint32_t formal_parameter_count;
+    bool strict;
+    bool is_arrow;
+    bool has_simple_parameter_list;
+    // Parameter names for mapped arguments (only for simple parameter lists)
+    FFIUtf16Slice const* parameter_names;
+    size_t parameter_name_count;
+    // Source text range (for Function.prototype.toString)
+    size_t source_text_offset;
+    size_t source_text_length;
+    // Opaque Rust AST pointer (Box<FunctionData>)
+    void* rust_function_ast;
+    // Parsing insights needed before lazy compilation
+    bool uses_this;
+    bool uses_this_from_environment;
+};
+
 // Create a SharedFunctionInstanceData from pre-computed metadata (Rust pipeline).
 // Stores an opaque Rust AST pointer for lazy compilation.
 //
@@ -176,27 +201,7 @@ void* rust_create_executable(
 void* rust_create_sfd(
     void* vm_ptr,
     void const* source_code_ptr,
-    // Function name
-    uint16_t const* name,
-    size_t name_len,
-    // Metadata
-    uint8_t function_kind,
-    int32_t function_length,
-    uint32_t formal_parameter_count,
-    bool strict,
-    bool is_arrow,
-    bool has_simple_parameter_list,
-    // Parameter names for mapped arguments (only for simple parameter lists)
-    FFIUtf16Slice const* param_names,
-    size_t param_name_count,
-    // Source text range (for Function.prototype.toString)
-    size_t source_text_offset,
-    size_t source_text_len,
-    // Opaque Rust AST pointer (Box<FunctionData>)
-    void* rust_function_ast,
-    // Parsing insights needed before lazy compilation
-    bool uses_this,
-    bool uses_this_from_environment);
+    FFISharedFunctionData const* data);
 
 // Set class_field_initializer_name on a SharedFunctionInstanceData.
 // Called after rust_create_sfd for class field initializer functions.

@@ -88,6 +88,25 @@ pub struct FFIClassElement {
     pub literal_value_string_len: usize,
 }
 
+#[repr(C)]
+pub struct FFISharedFunctionData {
+    pub name: *const u16,
+    pub name_len: usize,
+    pub function_kind: u8,
+    pub function_length: i32,
+    pub formal_parameter_count: u32,
+    pub strict: bool,
+    pub is_arrow: bool,
+    pub has_simple_parameter_list: bool,
+    pub parameter_names: *const FFIUtf16Slice,
+    pub parameter_name_count: usize,
+    pub source_text_offset: usize,
+    pub source_text_length: usize,
+    pub rust_function_ast: *mut c_void,
+    pub uses_this: bool,
+    pub uses_this_from_environment: bool,
+}
+
 extern "C" {
     fn rust_create_executable(
         vm_ptr: *mut c_void,
@@ -129,21 +148,7 @@ extern "C" {
     pub fn rust_create_sfd(
         vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,
-        name: *const u16,
-        name_len: usize,
-        function_kind: u8,
-        function_length: i32,
-        formal_parameter_count: u32,
-        strict: bool,
-        is_arrow: bool,
-        has_simple_parameter_list: bool,
-        parameter_names: *const FFIUtf16Slice,
-        parameter_name_count: usize,
-        source_text_offset: usize,
-        source_text_len: usize,
-        rust_function_ast: *mut c_void,
-        uses_this: bool,
-        uses_this_from_environment: bool,
+        data: *const FFISharedFunctionData,
     ) -> *mut c_void;
 
     pub fn rust_sfd_set_class_field_initializer_name(
@@ -264,25 +269,25 @@ pub unsafe fn create_shared_function_data(
     let function_kind = function_data.kind as u8;
     let strict = function_data.is_strict_mode || is_strict;
 
-    let sfd_ptr = rust_create_sfd(
-        vm_ptr,
-        source_code_ptr,
-        name_ptr,
+    let ffi_data = FFISharedFunctionData {
+        name: name_ptr,
         name_len,
         function_kind,
-        function_data.function_length,
-        function_data.parameters.len() as u32,
+        function_length: function_data.function_length,
+        formal_parameter_count: function_data.parameters.len() as u32,
         strict,
-        function_data.is_arrow_function,
+        is_arrow: function_data.is_arrow_function,
         has_simple_parameter_list,
-        parameter_name_slices.as_ptr(),
-        parameter_name_slices.len(),
-        source_start,
-        source_text_len,
-        rust_ast_ptr,
-        function_data.parsing_insights.uses_this,
-        function_data.parsing_insights.uses_this_from_environment,
-    );
+        parameter_names: parameter_name_slices.as_ptr(),
+        parameter_name_count: parameter_name_slices.len(),
+        source_text_offset: source_start,
+        source_text_length: source_text_len,
+        rust_function_ast: rust_ast_ptr,
+        uses_this: function_data.parsing_insights.uses_this,
+        uses_this_from_environment: function_data.parsing_insights.uses_this_from_environment,
+    };
+
+    let sfd_ptr = rust_create_sfd(vm_ptr, source_code_ptr, &ffi_data);
 
     if sfd_ptr.is_null() {
         eprintln!("create_shared_function_data: rust_create_sfd returned null");
