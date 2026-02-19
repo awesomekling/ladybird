@@ -694,11 +694,11 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
         let mut parser = Parser::new(source_slice, ProgramType::Script);
         let program = parser.parse_program(true); // strict mode
 
-        parser.scope_collector.analyze(false);
-
         if check_errors(&mut parser) {
             return;
         }
+
+        parser.scope_collector.analyze(false);
 
         write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
