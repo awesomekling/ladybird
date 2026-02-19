@@ -576,6 +576,23 @@ impl Generator {
         self.basic_blocks.len()
     }
 
+    /// Terminate all unterminated blocks with Yield (no continuation).
+    /// Used for generator and async functions.
+    pub fn terminate_unterminated_blocks_with_yield(&mut self) {
+        let block_count = self.basic_block_count();
+        for i in 0..block_count {
+            if self.is_block_terminated(i) {
+                continue;
+            }
+            self.switch_to_basic_block(i);
+            let undef = self.add_constant_undefined();
+            self.emit(Instruction::Yield {
+                continuation_label: None,
+                value: undef.operand(),
+            });
+        }
+    }
+
     /// Is a specific block terminated?
     pub fn is_block_terminated(&self, index: usize) -> bool {
         self.basic_blocks[index].terminated

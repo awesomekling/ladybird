@@ -1297,18 +1297,7 @@ unsafe fn compile_module_as_async(
     }
 
     // Terminate all unterminated blocks with Yield.
-    let block_count = gen.basic_block_count();
-    for i in 0..block_count {
-        if gen.is_block_terminated(i) {
-            continue;
-        }
-        gen.switch_to_basic_block(i);
-        let undef = gen.add_constant_undefined();
-        gen.emit(Instruction::Yield {
-            continuation_label: None,
-            value: undef.operand(),
-        });
-    }
+    gen.terminate_unterminated_blocks_with_yield();
 
     let assembled = gen.assemble();
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
@@ -1736,18 +1725,7 @@ pub unsafe extern "C" fn rust_compile_function(
 
     // For generator/async functions, terminate all unterminated blocks with Yield.
     if gen.is_in_generator_or_async_function() {
-        let block_count = gen.basic_block_count();
-        for i in 0..block_count {
-            if gen.is_block_terminated(i) {
-                continue;
-            }
-            gen.switch_to_basic_block(i);
-            let undef = gen.add_constant_undefined();
-            gen.emit(bytecode::instruction::Instruction::Yield {
-                continuation_label: None,
-                value: undef.operand(),
-            });
-        }
+        gen.terminate_unterminated_blocks_with_yield();
     }
 
     let assembled = gen.assemble();
