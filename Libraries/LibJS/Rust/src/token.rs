@@ -10,134 +10,6 @@
 //! as `ENUMERATE_JS_TOKENS` in Token.h (alphabetical) because token
 //! type values are passed across the FFI boundary.
 
-/// Token types. Order must match `ENUMERATE_JS_TOKENS` in Token.h.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum TokenType {
-    Ampersand,
-    AmpersandEquals,
-    Arrow,
-    Asterisk,
-    AsteriskEquals,
-    Async,
-    Await,
-    BigIntLiteral,
-    BoolLiteral,
-    BracketClose,
-    BracketOpen,
-    Break,
-    Caret,
-    CaretEquals,
-    Case,
-    Catch,
-    Class,
-    Colon,
-    Comma,
-    Const,
-    Continue,
-    CurlyClose,
-    CurlyOpen,
-    Debugger,
-    Default,
-    Delete,
-    Do,
-    DoubleAmpersand,
-    DoubleAmpersandEquals,
-    DoubleAsterisk,
-    DoubleAsteriskEquals,
-    DoublePipe,
-    DoublePipeEquals,
-    DoubleQuestionMark,
-    DoubleQuestionMarkEquals,
-    Else,
-    Enum,
-    Eof,
-    Equals,
-    EqualsEquals,
-    EqualsEqualsEquals,
-    EscapedKeyword,
-    ExclamationMark,
-    ExclamationMarkEquals,
-    ExclamationMarkEqualsEquals,
-    Export,
-    Extends,
-    Finally,
-    For,
-    Function,
-    GreaterThan,
-    GreaterThanEquals,
-    Identifier,
-    If,
-    Implements,
-    Import,
-    In,
-    Instanceof,
-    Interface,
-    Invalid,
-    LessThan,
-    LessThanEquals,
-    Let,
-    Minus,
-    MinusEquals,
-    MinusMinus,
-    New,
-    NullLiteral,
-    NumericLiteral,
-    Package,
-    ParenClose,
-    ParenOpen,
-    Percent,
-    PercentEquals,
-    Period,
-    Pipe,
-    PipeEquals,
-    Plus,
-    PlusEquals,
-    PlusPlus,
-    Private,
-    PrivateIdentifier,
-    Protected,
-    Public,
-    QuestionMark,
-    QuestionMarkPeriod,
-    RegexFlags,
-    RegexLiteral,
-    Return,
-    Semicolon,
-    ShiftLeft,
-    ShiftLeftEquals,
-    ShiftRight,
-    ShiftRightEquals,
-    Slash,
-    SlashEquals,
-    Static,
-    StringLiteral,
-    Super,
-    Switch,
-    TemplateLiteralEnd,
-    TemplateLiteralExprEnd,
-    TemplateLiteralExprStart,
-    TemplateLiteralStart,
-    TemplateLiteralString,
-    This,
-    Throw,
-    Tilde,
-    TripleDot,
-    Trivia,
-    Try,
-    Typeof,
-    UnsignedShiftRight,
-    UnsignedShiftRightEquals,
-    UnterminatedRegexLiteral,
-    UnterminatedStringLiteral,
-    UnterminatedTemplateLiteral,
-    Var,
-    Void,
-    While,
-    With,
-    Yield,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenCategory {
     Invalid,
@@ -151,273 +23,160 @@ pub enum TokenCategory {
     Identifier,
 }
 
-// Computed from the last variant so adding new tokens triggers a
-// compile error if the lookup tables aren't updated.
-const TOKEN_COUNT: usize = TokenType::Yield as usize + 1;
+/// Generates the `TokenType` enum with `category()` and `name()` methods.
+/// Each entry maps a variant to its `TokenCategory`. The name is derived
+/// automatically via `stringify!`. Order must match `ENUMERATE_JS_TOKENS`
+/// in Token.h (alphabetical).
+macro_rules! define_tokens {
+    ( $( $variant:ident => $category:ident ),* $(,)? ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[repr(u8)]
+        pub enum TokenType {
+            $( $variant, )*
+        }
 
-use TokenCategory::*;
+        impl TokenType {
+            pub fn category(self) -> TokenCategory {
+                match self {
+                    $( TokenType::$variant => TokenCategory::$category, )*
+                }
+            }
 
-// Indexed by TokenType as u8. Order must match the TokenType enum.
-const TOKEN_CATEGORIES: [TokenCategory; TOKEN_COUNT] = [
-    Operator,        // Ampersand
-    Operator,        // AmpersandEquals
-    Operator,        // Arrow
-    Operator,        // Asterisk
-    Operator,        // AsteriskEquals
-    Keyword,         // Async
-    Keyword,         // Await
-    Number,          // BigIntLiteral
-    Keyword,         // BoolLiteral
-    Punctuation,     // BracketClose
-    Punctuation,     // BracketOpen
-    ControlKeyword,  // Break
-    Operator,        // Caret
-    Operator,        // CaretEquals
-    ControlKeyword,  // Case
-    ControlKeyword,  // Catch
-    Keyword,         // Class
-    Punctuation,     // Colon
-    Punctuation,     // Comma
-    Keyword,         // Const
-    ControlKeyword,  // Continue
-    Punctuation,     // CurlyClose
-    Punctuation,     // CurlyOpen
-    Keyword,         // Debugger
-    ControlKeyword,  // Default
-    Keyword,         // Delete
-    ControlKeyword,  // Do
-    Operator,        // DoubleAmpersand
-    Operator,        // DoubleAmpersandEquals
-    Operator,        // DoubleAsterisk
-    Operator,        // DoubleAsteriskEquals
-    Operator,        // DoublePipe
-    Operator,        // DoublePipeEquals
-    Operator,        // DoubleQuestionMark
-    Operator,        // DoubleQuestionMarkEquals
-    ControlKeyword,  // Else
-    Keyword,         // Enum
-    Invalid,         // Eof
-    Operator,        // Equals
-    Operator,        // EqualsEquals
-    Operator,        // EqualsEqualsEquals
-    Identifier,      // EscapedKeyword
-    Operator,        // ExclamationMark
-    Operator,        // ExclamationMarkEquals
-    Operator,        // ExclamationMarkEqualsEquals
-    Keyword,         // Export
-    Keyword,         // Extends
-    ControlKeyword,  // Finally
-    ControlKeyword,  // For
-    Keyword,         // Function
-    Operator,        // GreaterThan
-    Operator,        // GreaterThanEquals
-    Identifier,      // Identifier
-    ControlKeyword,  // If
-    Keyword,         // Implements
-    Keyword,         // Import
-    Keyword,         // In
-    Keyword,         // Instanceof
-    Keyword,         // Interface
-    Invalid,         // Invalid
-    Operator,        // LessThan
-    Operator,        // LessThanEquals
-    Keyword,         // Let
-    Operator,        // Minus
-    Operator,        // MinusEquals
-    Operator,        // MinusMinus
-    Keyword,         // New
-    Keyword,         // NullLiteral
-    Number,          // NumericLiteral
-    Keyword,         // Package
-    Punctuation,     // ParenClose
-    Punctuation,     // ParenOpen
-    Operator,        // Percent
-    Operator,        // PercentEquals
-    Operator,        // Period
-    Operator,        // Pipe
-    Operator,        // PipeEquals
-    Operator,        // Plus
-    Operator,        // PlusEquals
-    Operator,        // PlusPlus
-    Keyword,         // Private
-    Identifier,      // PrivateIdentifier
-    Keyword,         // Protected
-    Keyword,         // Public
-    Operator,        // QuestionMark
-    Operator,        // QuestionMarkPeriod
-    String,          // RegexFlags
-    String,          // RegexLiteral
-    ControlKeyword,  // Return
-    Punctuation,     // Semicolon
-    Operator,        // ShiftLeft
-    Operator,        // ShiftLeftEquals
-    Operator,        // ShiftRight
-    Operator,        // ShiftRightEquals
-    Operator,        // Slash
-    Operator,        // SlashEquals
-    Keyword,         // Static
-    String,          // StringLiteral
-    Keyword,         // Super
-    ControlKeyword,  // Switch
-    String,          // TemplateLiteralEnd
-    Punctuation,     // TemplateLiteralExprEnd
-    Punctuation,     // TemplateLiteralExprStart
-    String,          // TemplateLiteralStart
-    String,          // TemplateLiteralString
-    Keyword,         // This
-    ControlKeyword,  // Throw
-    Operator,        // Tilde
-    Operator,        // TripleDot
-    Trivia,          // Trivia
-    ControlKeyword,  // Try
-    Keyword,         // Typeof
-    Operator,        // UnsignedShiftRight
-    Operator,        // UnsignedShiftRightEquals
-    String,          // UnterminatedRegexLiteral
-    String,          // UnterminatedStringLiteral
-    String,          // UnterminatedTemplateLiteral
-    Keyword,         // Var
-    Keyword,         // Void
-    ControlKeyword,  // While
-    ControlKeyword,  // With
-    ControlKeyword,  // Yield
-];
+            pub fn name(self) -> &'static str {
+                match self {
+                    $( TokenType::$variant => stringify!($variant), )*
+                }
+            }
+        }
+    };
+}
 
-// Indexed by TokenType as u8. Order must match the TokenType enum.
-const TOKEN_NAMES: [&str; TOKEN_COUNT] = [
-    "Ampersand",
-    "AmpersandEquals",
-    "Arrow",
-    "Asterisk",
-    "AsteriskEquals",
-    "Async",
-    "Await",
-    "BigIntLiteral",
-    "BoolLiteral",
-    "BracketClose",
-    "BracketOpen",
-    "Break",
-    "Caret",
-    "CaretEquals",
-    "Case",
-    "Catch",
-    "Class",
-    "Colon",
-    "Comma",
-    "Const",
-    "Continue",
-    "CurlyClose",
-    "CurlyOpen",
-    "Debugger",
-    "Default",
-    "Delete",
-    "Do",
-    "DoubleAmpersand",
-    "DoubleAmpersandEquals",
-    "DoubleAsterisk",
-    "DoubleAsteriskEquals",
-    "DoublePipe",
-    "DoublePipeEquals",
-    "DoubleQuestionMark",
-    "DoubleQuestionMarkEquals",
-    "Else",
-    "Enum",
-    "Eof",
-    "Equals",
-    "EqualsEquals",
-    "EqualsEqualsEquals",
-    "EscapedKeyword",
-    "ExclamationMark",
-    "ExclamationMarkEquals",
-    "ExclamationMarkEqualsEquals",
-    "Export",
-    "Extends",
-    "Finally",
-    "For",
-    "Function",
-    "GreaterThan",
-    "GreaterThanEquals",
-    "Identifier",
-    "If",
-    "Implements",
-    "Import",
-    "In",
-    "Instanceof",
-    "Interface",
-    "Invalid",
-    "LessThan",
-    "LessThanEquals",
-    "Let",
-    "Minus",
-    "MinusEquals",
-    "MinusMinus",
-    "New",
-    "NullLiteral",
-    "NumericLiteral",
-    "Package",
-    "ParenClose",
-    "ParenOpen",
-    "Percent",
-    "PercentEquals",
-    "Period",
-    "Pipe",
-    "PipeEquals",
-    "Plus",
-    "PlusEquals",
-    "PlusPlus",
-    "Private",
-    "PrivateIdentifier",
-    "Protected",
-    "Public",
-    "QuestionMark",
-    "QuestionMarkPeriod",
-    "RegexFlags",
-    "RegexLiteral",
-    "Return",
-    "Semicolon",
-    "ShiftLeft",
-    "ShiftLeftEquals",
-    "ShiftRight",
-    "ShiftRightEquals",
-    "Slash",
-    "SlashEquals",
-    "Static",
-    "StringLiteral",
-    "Super",
-    "Switch",
-    "TemplateLiteralEnd",
-    "TemplateLiteralExprEnd",
-    "TemplateLiteralExprStart",
-    "TemplateLiteralStart",
-    "TemplateLiteralString",
-    "This",
-    "Throw",
-    "Tilde",
-    "TripleDot",
-    "Trivia",
-    "Try",
-    "Typeof",
-    "UnsignedShiftRight",
-    "UnsignedShiftRightEquals",
-    "UnterminatedRegexLiteral",
-    "UnterminatedStringLiteral",
-    "UnterminatedTemplateLiteral",
-    "Var",
-    "Void",
-    "While",
-    "With",
-    "Yield",
-];
+define_tokens! {
+    Ampersand                  => Operator,
+    AmpersandEquals            => Operator,
+    Arrow                      => Operator,
+    Asterisk                   => Operator,
+    AsteriskEquals             => Operator,
+    Async                      => Keyword,
+    Await                      => Keyword,
+    BigIntLiteral              => Number,
+    BoolLiteral                => Keyword,
+    BracketClose               => Punctuation,
+    BracketOpen                => Punctuation,
+    Break                      => ControlKeyword,
+    Caret                      => Operator,
+    CaretEquals                => Operator,
+    Case                       => ControlKeyword,
+    Catch                      => ControlKeyword,
+    Class                      => Keyword,
+    Colon                      => Punctuation,
+    Comma                      => Punctuation,
+    Const                      => Keyword,
+    Continue                   => ControlKeyword,
+    CurlyClose                 => Punctuation,
+    CurlyOpen                  => Punctuation,
+    Debugger                   => Keyword,
+    Default                    => ControlKeyword,
+    Delete                     => Keyword,
+    Do                         => ControlKeyword,
+    DoubleAmpersand            => Operator,
+    DoubleAmpersandEquals      => Operator,
+    DoubleAsterisk             => Operator,
+    DoubleAsteriskEquals       => Operator,
+    DoublePipe                 => Operator,
+    DoublePipeEquals           => Operator,
+    DoubleQuestionMark         => Operator,
+    DoubleQuestionMarkEquals   => Operator,
+    Else                       => ControlKeyword,
+    Enum                       => Keyword,
+    Eof                        => Invalid,
+    Equals                     => Operator,
+    EqualsEquals               => Operator,
+    EqualsEqualsEquals         => Operator,
+    EscapedKeyword             => Identifier,
+    ExclamationMark            => Operator,
+    ExclamationMarkEquals      => Operator,
+    ExclamationMarkEqualsEquals => Operator,
+    Export                     => Keyword,
+    Extends                    => Keyword,
+    Finally                    => ControlKeyword,
+    For                        => ControlKeyword,
+    Function                   => Keyword,
+    GreaterThan                => Operator,
+    GreaterThanEquals          => Operator,
+    Identifier                 => Identifier,
+    If                         => ControlKeyword,
+    Implements                 => Keyword,
+    Import                     => Keyword,
+    In                         => Keyword,
+    Instanceof                 => Keyword,
+    Interface                  => Keyword,
+    Invalid                    => Invalid,
+    LessThan                   => Operator,
+    LessThanEquals             => Operator,
+    Let                        => Keyword,
+    Minus                      => Operator,
+    MinusEquals                => Operator,
+    MinusMinus                 => Operator,
+    New                        => Keyword,
+    NullLiteral                => Keyword,
+    NumericLiteral             => Number,
+    Package                    => Keyword,
+    ParenClose                 => Punctuation,
+    ParenOpen                  => Punctuation,
+    Percent                    => Operator,
+    PercentEquals              => Operator,
+    Period                     => Operator,
+    Pipe                       => Operator,
+    PipeEquals                 => Operator,
+    Plus                       => Operator,
+    PlusEquals                 => Operator,
+    PlusPlus                   => Operator,
+    Private                    => Keyword,
+    PrivateIdentifier          => Identifier,
+    Protected                  => Keyword,
+    Public                     => Keyword,
+    QuestionMark               => Operator,
+    QuestionMarkPeriod         => Operator,
+    RegexFlags                 => String,
+    RegexLiteral               => String,
+    Return                     => ControlKeyword,
+    Semicolon                  => Punctuation,
+    ShiftLeft                  => Operator,
+    ShiftLeftEquals            => Operator,
+    ShiftRight                 => Operator,
+    ShiftRightEquals           => Operator,
+    Slash                      => Operator,
+    SlashEquals                => Operator,
+    Static                     => Keyword,
+    StringLiteral              => String,
+    Super                      => Keyword,
+    Switch                     => ControlKeyword,
+    TemplateLiteralEnd         => String,
+    TemplateLiteralExprEnd     => Punctuation,
+    TemplateLiteralExprStart   => Punctuation,
+    TemplateLiteralStart       => String,
+    TemplateLiteralString      => String,
+    This                       => Keyword,
+    Throw                      => ControlKeyword,
+    Tilde                      => Operator,
+    TripleDot                  => Operator,
+    Trivia                     => Trivia,
+    Try                        => ControlKeyword,
+    Typeof                     => Keyword,
+    UnsignedShiftRight         => Operator,
+    UnsignedShiftRightEquals   => Operator,
+    UnterminatedRegexLiteral   => String,
+    UnterminatedStringLiteral  => String,
+    UnterminatedTemplateLiteral => String,
+    Var                        => Keyword,
+    Void                       => Keyword,
+    While                      => ControlKeyword,
+    With                       => ControlKeyword,
+    Yield                      => ControlKeyword,
+}
 
 impl TokenType {
-    pub fn category(self) -> TokenCategory {
-        TOKEN_CATEGORIES[self as usize]
-    }
-
-    pub fn name(self) -> &'static str {
-        TOKEN_NAMES[self as usize]
-    }
-
     pub fn is_identifier_name(self) -> bool {
         self != TokenType::PrivateIdentifier
             && matches!(
@@ -442,7 +201,7 @@ pub struct Token {
     /// escape sequences (e.g. `l\u0065t` → `let`).
     pub identifier_value: Option<crate::ast::Utf16String>,
     /// Error message for Invalid tokens (e.g. "Unterminated multi-line comment").
-    pub message: Option<std::string::String>,
+    pub message: Option<String>,
 }
 
 impl Token {
