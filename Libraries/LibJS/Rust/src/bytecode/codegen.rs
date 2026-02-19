@@ -3680,6 +3680,18 @@ fn is_array_index(s: &[u16]) -> bool {
     value <= 0xFFFF_FFFE
 }
 
+/// If the property operand is a constant string that is not an array index,
+/// return a clone of its UTF-16 data. Used by the emit_*_by_value functions
+/// to optimize computed property access into ById instructions.
+fn try_extract_constant_string_key(gen: &Generator, property: &ScopedOperand) -> Option<Vec<u16>> {
+    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
+        if !is_array_index(&s.0) {
+            return Some(s.0.clone());
+        }
+    }
+    None
+}
+
 /// Emit a property read by value, optimizing constant string properties to GetById.
 fn emit_get_by_value(
     gen: &mut Generator,
@@ -3688,12 +3700,9 @@ fn emit_get_by_value(
     property: &ScopedOperand,
     base_identifier: Option<IdentifierTableIndex>,
 ) {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            let s = s.0.clone();
-            emit_get_by_id(gen, dst, base, &s, base_identifier);
-            return;
-        }
+    if let Some(s) = try_extract_constant_string_key(gen, property) {
+        emit_get_by_id(gen, dst, base, &s, base_identifier);
+        return;
     }
     gen.emit(Instruction::GetByValue {
         dst: dst.operand(),
@@ -3711,20 +3720,17 @@ fn emit_get_by_value_with_this(
     property: &ScopedOperand,
     this_value: &ScopedOperand,
 ) {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            let s = s.0.clone();
-            let key = gen.intern_property_key(&s);
-            let cache = gen.next_property_lookup_cache();
-            gen.emit(Instruction::GetByIdWithThis {
-                dst: dst.operand(),
-                base: base.operand(),
-                property: key,
-                this_value: this_value.operand(),
-                cache_index: cache,
-            });
-            return;
-        }
+    if let Some(s) = try_extract_constant_string_key(gen, property) {
+        let key = gen.intern_property_key(&s);
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::GetByIdWithThis {
+            dst: dst.operand(),
+            base: base.operand(),
+            property: key,
+            this_value: this_value.operand(),
+            cache_index: cache,
+        });
+        return;
     }
     gen.emit(Instruction::GetByValueWithThis {
         dst: dst.operand(),
@@ -3742,20 +3748,17 @@ fn emit_put_normal_by_value(
     src: &ScopedOperand,
     base_identifier: Option<IdentifierTableIndex>,
 ) {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            let s = s.0.clone();
-            let key = gen.intern_property_key(&s);
-            let cache = gen.next_property_lookup_cache();
-            gen.emit(Instruction::PutNormalById {
-                base: base.operand(),
-                property: key,
-                src: src.operand(),
-                cache_index: cache,
-                base_identifier,
-            });
-            return;
-        }
+    if let Some(s) = try_extract_constant_string_key(gen, property) {
+        let key = gen.intern_property_key(&s);
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::PutNormalById {
+            base: base.operand(),
+            property: key,
+            src: src.operand(),
+            cache_index: cache,
+            base_identifier,
+        });
+        return;
     }
     gen.emit(Instruction::PutNormalByValue {
         base: base.operand(),
@@ -3773,20 +3776,17 @@ fn emit_put_normal_by_value_with_this(
     this_value: &ScopedOperand,
     src: &ScopedOperand,
 ) {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            let s = s.0.clone();
-            let key = gen.intern_property_key(&s);
-            let cache = gen.next_property_lookup_cache();
-            gen.emit(Instruction::PutNormalByIdWithThis {
-                base: base.operand(),
-                this_value: this_value.operand(),
-                property: key,
-                src: src.operand(),
-                cache_index: cache,
-            });
-            return;
-        }
+    if let Some(s) = try_extract_constant_string_key(gen, property) {
+        let key = gen.intern_property_key(&s);
+        let cache = gen.next_property_lookup_cache();
+        gen.emit(Instruction::PutNormalByIdWithThis {
+            base: base.operand(),
+            this_value: this_value.operand(),
+            property: key,
+            src: src.operand(),
+            cache_index: cache,
+        });
+        return;
     }
     gen.emit(Instruction::PutNormalByValueWithThis {
         base: base.operand(),
@@ -3811,42 +3811,39 @@ fn emit_put_by_value(
     src: &ScopedOperand,
     kind: PutKind,
 ) {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            let s = s.0.clone();
-            let key = gen.intern_property_key(&s);
-            let cache = gen.next_property_lookup_cache();
-            match kind {
-                PutKind::Own => {
-                    gen.emit(Instruction::PutOwnById {
-                        base: base.operand(),
-                        property: key,
-                        src: src.operand(),
-                        cache_index: cache,
-                        base_identifier: None,
-                    });
-                }
-                PutKind::Getter => {
-                    gen.emit(Instruction::PutGetterById {
-                        base: base.operand(),
-                        property: key,
-                        src: src.operand(),
-                        cache_index: cache,
-                        base_identifier: None,
-                    });
-                }
-                PutKind::Setter => {
-                    gen.emit(Instruction::PutSetterById {
-                        base: base.operand(),
-                        property: key,
-                        src: src.operand(),
-                        cache_index: cache,
-                        base_identifier: None,
-                    });
-                }
+    if let Some(s) = try_extract_constant_string_key(gen, property) {
+        let key = gen.intern_property_key(&s);
+        let cache = gen.next_property_lookup_cache();
+        match kind {
+            PutKind::Own => {
+                gen.emit(Instruction::PutOwnById {
+                    base: base.operand(),
+                    property: key,
+                    src: src.operand(),
+                    cache_index: cache,
+                    base_identifier: None,
+                });
             }
-            return;
+            PutKind::Getter => {
+                gen.emit(Instruction::PutGetterById {
+                    base: base.operand(),
+                    property: key,
+                    src: src.operand(),
+                    cache_index: cache,
+                    base_identifier: None,
+                });
+            }
+            PutKind::Setter => {
+                gen.emit(Instruction::PutSetterById {
+                    base: base.operand(),
+                    property: key,
+                    src: src.operand(),
+                    cache_index: cache,
+                    base_identifier: None,
+                });
+            }
         }
+        return;
     }
     match kind {
         PutKind::Own => {
