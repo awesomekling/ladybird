@@ -104,6 +104,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(crate) fn parse_expression_any(&mut self) -> Expression {
+        self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none())
+    }
+
+    pub(crate) fn parse_assignment_expression(&mut self) -> Expression {
+        self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none())
+    }
+
     pub(crate) fn parse_expression(&mut self, min_precedence: i32, associativity: Associativity, forbidden: ForbiddenTokens) -> Expression {
         if self.match_unary_prefixed_expression() {
             let start = self.position();
@@ -194,7 +202,7 @@ impl<'a> Parser<'a> {
             let mut expressions = vec![expression];
             while self.match_token(TokenType::Comma) {
                 self.consume();
-                expressions.push(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none()));
+                expressions.push(self.parse_assignment_expression());
             }
             return self.expression(start, ExpressionKind::Sequence(expressions));
         }
@@ -220,7 +228,7 @@ impl<'a> Parser<'a> {
                     self.consume();
                     return (self.expression(start, ExpressionKind::Error), true);
                 }
-                let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression_any();
                 self.consume_token(TokenType::ParenClose);
                 (expression, true)
             }
@@ -381,13 +389,13 @@ impl<'a> Parser<'a> {
                     (self.expression(start, ExpressionKind::MetaProperty(MetaPropertyType::ImportMeta)), true)
                 } else if self.match_token(TokenType::ParenOpen) {
                     self.consume();
-                    let specifier = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                    let specifier = self.parse_assignment_expression();
                     let options = if self.match_token(TokenType::Comma) {
                         self.consume();
                         if self.match_token(TokenType::ParenClose) {
                             None
                         } else {
-                            let opts = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                            let opts = self.parse_assignment_expression();
                             if self.match_token(TokenType::Comma) {
                                 self.consume();
                             }
@@ -652,7 +660,7 @@ impl<'a> Parser<'a> {
             // === Ternary ===
             TokenType::QuestionMark => {
                 self.consume();
-                let consequent = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                let consequent = self.parse_assignment_expression();
                 self.consume_token(TokenType::Colon);
                 let alternate = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, forbidden);
                 (self.expression(start, ExpressionKind::Conditional {
@@ -704,7 +712,7 @@ impl<'a> Parser<'a> {
             // === Computed member access ===
             TokenType::BracketOpen => {
                 self.consume();
-                let property = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                let property = self.parse_expression_any();
                 self.consume_token(TokenType::BracketClose);
                 (self.expression(start, ExpressionKind::Member {
                     object: Box::new(lhs),
@@ -936,7 +944,7 @@ impl<'a> Parser<'a> {
 
         while !self.match_token(TokenType::ParenClose) && !self.done() {
             let is_spread = self.eat(TokenType::TripleDot);
-            let value = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+            let value = self.parse_assignment_expression();
             arguments.push(CallArgument { value, is_spread });
             if !self.match_token(TokenType::Comma) {
                 break;
@@ -975,7 +983,7 @@ impl<'a> Parser<'a> {
                     }
                     TokenType::BracketOpen => {
                         self.consume();
-                        let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                        let expression = self.parse_expression_any();
                         self.consume_token(TokenType::BracketClose);
                         references.push(OptionalChainReference::ComputedReference {
                             expression: Box::new(expression),
@@ -1063,7 +1071,7 @@ impl<'a> Parser<'a> {
                 break;
             } else if self.match_token(TokenType::BracketOpen) {
                 self.consume();
-                let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression_any();
                 self.consume_token(TokenType::BracketClose);
                 references.push(OptionalChainReference::ComputedReference {
                     expression: Box::new(expression),
@@ -1113,7 +1121,7 @@ impl<'a> Parser<'a> {
         }
 
         if is_yield_from || self.match_expression() || self.match_token(TokenType::Class) {
-            let argument = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+            let argument = self.parse_assignment_expression();
             self.expression(start, ExpressionKind::Yield {
                 argument: Some(Box::new(argument)),
                 is_yield_from,
@@ -1153,7 +1161,7 @@ impl<'a> Parser<'a> {
         while !self.match_token(TokenType::CurlyClose) && !self.done() {
             if self.match_token(TokenType::TripleDot) {
                 self.consume();
-                let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_assignment_expression();
                 // C++ uses object expression start position for all ObjectProperty nodes.
                 properties.push(ObjectProperty {
                     range: self.range_from(start),
@@ -1290,7 +1298,7 @@ impl<'a> Parser<'a> {
 
         if self.match_token(TokenType::Colon) {
             self.consume();
-            let value = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+            let value = self.parse_assignment_expression();
             let property_type = if is_proto { ObjectPropertyType::ProtoSetter } else { ObjectPropertyType::KeyValue };
             return ObjectProperty {
                 range: self.range_from(obj_start),
@@ -1322,7 +1330,7 @@ impl<'a> Parser<'a> {
                 // the object is used in expression context (e.g. as a member base).
                 self.syntax_error("Invalid property in object literal");
                 let saved_scope_state = self.scope_collector.save_state();
-                let _initializer = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                let _initializer = self.parse_assignment_expression();
                 self.scope_collector.load_state(saved_scope_state);
                 return ObjectProperty {
                     range: self.range_from(obj_start),
@@ -1396,7 +1404,7 @@ impl<'a> Parser<'a> {
         match self.current_token_type() {
             TokenType::BracketOpen => {
                 self.consume();
-                let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_assignment_expression();
                 self.consume_token(TokenType::BracketClose);
                 PropertyKey { expression, name: None, is_proto: false, is_computed: true, is_identifier: false }
             }
@@ -1487,11 +1495,11 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenType::TripleDot) {
                 self.consume();
-                let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_assignment_expression();
                 // C++ uses the array's rule_start ([ position) for SpreadExpression.
                 elements.push(Some(self.expression(start, ExpressionKind::Spread(Box::new(expression)))));
             } else {
-                elements.push(Some(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none())));
+                elements.push(Some(self.parse_assignment_expression()));
             }
             if !self.match_token(TokenType::Comma) {
                 break;
@@ -1571,7 +1579,7 @@ impl<'a> Parser<'a> {
                 }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
-                let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression_any();
                 expressions.push(expression);
                 self.consume_token(TokenType::TemplateLiteralExprEnd);
                 // After an expression, if no template string follows, insert empty.
@@ -1937,7 +1945,7 @@ impl<'a> Parser<'a> {
             });
             Some(self.expression(start, ExpressionKind::Function(function_id)))
         } else {
-            let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
+            let expression = self.parse_assignment_expression();
             // C++ uses rule_start (function start) for ReturnStatement and FunctionBody.
             let return_statement = Statement::new(self.range_from(start), StatementKind::Return(Some(Box::new(expression))));
             let scope = ScopeData::shared_with_children(vec![return_statement]);

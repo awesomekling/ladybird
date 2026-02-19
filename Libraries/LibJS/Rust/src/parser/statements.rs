@@ -110,7 +110,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("let followed by [ is not allowed in single-statement context");
         }
 
-        let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let expression = self.parse_expression_any();
         self.consume_or_insert_semicolon();
         self.statement(start, StatementKind::Expression(Box::new(expression)))
     }
@@ -139,7 +139,7 @@ impl<'a> Parser<'a> {
             return self.statement(start, StatementKind::Return(None));
         }
 
-        let argument = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let argument = self.parse_expression_any();
         self.consume_or_insert_semicolon();
         self.statement(start, StatementKind::Return(Some(Box::new(argument))))
     }
@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("No line break is allowed between 'throw' and its expression");
         }
 
-        let argument = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let argument = self.parse_expression_any();
         self.consume_or_insert_semicolon();
         self.statement(start, StatementKind::Throw(Box::new(argument)))
     }
@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::If);
         self.consume_token(TokenType::ParenOpen);
-        let predicate = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let predicate = self.parse_expression_any();
         self.consume_token(TokenType::ParenClose);
 
         let consequent = if !self.flags.strict_mode && self.match_token(TokenType::Function) {
@@ -302,7 +302,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::While);
         self.consume_token(TokenType::ParenOpen);
-        let test = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let test = self.parse_expression_any();
         self.consume_token(TokenType::ParenClose);
 
         let body = self.parse_loop_body();
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenType::While);
         self.consume_token(TokenType::ParenOpen);
-        let test = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let test = self.parse_expression_any();
         self.consume_token(TokenType::ParenClose);
 
         // Since ES 2015 a missing semicolon is inserted here, despite
@@ -405,7 +405,7 @@ impl<'a> Parser<'a> {
                 }
             }
             self.consume();
-            let rhs = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+            let rhs = self.parse_expression_any();
             self.consume_token(TokenType::ParenClose);
 
             let body = self.parse_loop_body();
@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.consume();
-                let rhs = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+                let rhs = self.parse_expression_any();
                 self.consume_token(TokenType::ParenClose);
 
                 let body = self.parse_loop_body();
@@ -522,14 +522,14 @@ impl<'a> Parser<'a> {
         let test = if self.match_token(TokenType::Semicolon) {
             None
         } else {
-            Some(Box::new(self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none())))
+            Some(Box::new(self.parse_expression_any()))
         };
         self.consume_token(TokenType::Semicolon);
 
         let update = if self.match_token(TokenType::ParenClose) {
             None
         } else {
-            Some(Box::new(self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none())))
+            Some(Box::new(self.parse_expression_any()))
         };
         self.consume_token(TokenType::ParenClose);
 
@@ -549,7 +549,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::With);
         self.consume_token(TokenType::ParenOpen);
-        let object = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let object = self.parse_expression_any();
         self.consume_token(TokenType::ParenClose);
         self.scope_collector.open_with_scope(None);
         let body = self.parse_statement(false);
@@ -566,7 +566,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         self.consume_token(TokenType::Switch);
         self.consume_token(TokenType::ParenOpen);
-        let discriminant = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
+        let discriminant = self.parse_expression_any();
         self.consume_token(TokenType::ParenClose);
 
         self.consume_token(TokenType::CurlyOpen);
@@ -608,7 +608,7 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let test = if self.match_token(TokenType::Case) {
             self.consume();
-            Some(self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none()))
+            Some(self.parse_expression_any())
         } else if self.match_token(TokenType::Default) {
             self.consume();
             None
