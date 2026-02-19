@@ -16,7 +16,7 @@ use std::rc::Rc;
 use super::basic_block::{BasicBlock, SourceMapEntry};
 use super::instruction::Instruction;
 use super::operand::*;
-use crate::ast::Utf16String;
+use crate::ast::{LocalType, Utf16String};
 
 /// Identifies an operand that auto-frees its register when the last
 /// clone is dropped.
@@ -394,6 +394,14 @@ impl Generator {
     /// Get a ScopedOperand for a local variable.
     pub fn local(&mut self, index: u32) -> ScopedOperand {
         self.scoped_operand(Operand::local(index))
+    }
+
+    /// Resolve a local binding (argument or variable) to a ScopedOperand.
+    pub fn resolve_local(&mut self, index: u32, local_type: LocalType) -> ScopedOperand {
+        match local_type {
+            LocalType::Argument => self.scoped_operand(Operand::argument(index)),
+            LocalType::Variable => self.local(index),
+        }
     }
 
     /// Get the accumulator register.

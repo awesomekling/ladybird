@@ -937,12 +937,7 @@ pub fn generate_statement(
             // for subsequent uses of the class name.
             if let (Some(name_ident), Some(val)) = (&data.name, &value) {
                 if name_ident.is_local() {
-                    let local_index = name_ident.local_index.get();
-                    let local = match name_ident.local_type.get() {
-                        Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-                        Some(LocalType::Variable) => gen.local(local_index),
-                        None => unreachable!(),
-                    };
+                    let local = gen.resolve_local(name_ident.local_index.get(), name_ident.local_type.get().unwrap());
                     gen.emit_mov(&local, val);
                 } else {
                     let id = gen.intern_identifier(&name_ident.name);
@@ -1626,11 +1621,7 @@ fn generate_identifier(
 ) -> Option<ScopedOperand> {
     if ident.is_local() {
         let local_index = ident.local_index.get();
-        let local = match ident.local_type.get() {
-            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-            Some(LocalType::Variable) => gen.local(local_index),
-            None => unreachable!(),
-        };
+        let local = gen.resolve_local(local_index, ident.local_type.get().unwrap());
         // Check TDZ for uninitialized bindings.
         // Arguments may need TDZ during default parameter evaluation;
         // for variable-type locals, only lexically-declared (let/const) need TDZ.
@@ -2524,11 +2515,7 @@ fn generate_variable_declaration(
                 let value = init_value.unwrap_or_else(|| gen.add_constant_undefined());
                 if ident.is_local() {
                     let local_index = ident.local_index.get();
-                    let local = match ident.local_type.get() {
-                        Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-                        Some(LocalType::Variable) => gen.local(local_index),
-                        None => unreachable!(),
-                    };
+                    let local = gen.resolve_local(local_index, ident.local_type.get().unwrap());
                     gen.emit_mov(&local, &value);
                     gen.mark_local_initialized(local_index);
                 } else {
@@ -2862,11 +2849,7 @@ fn generate_call_expression(
             ExpressionKind::Identifier(ident) if ident.is_local() => {
                 // Local identifier: use the local directly, with ThrowIfTDZ
                 // if not yet initialized (matching C++ CallExpression codegen).
-                let local = if ident.local_type.get() == Some(LocalType::Argument) {
-                    gen.scoped_operand(Operand::argument(ident.local_index.get()))
-                } else {
-                    gen.local(ident.local_index.get())
-                };
+                let local = gen.resolve_local(ident.local_index.get(), ident.local_type.get().unwrap());
                 let needs_tdz = if ident.local_type.get() == Some(LocalType::Argument) {
                     !gen.is_argument_initialized(ident.local_index.get())
                 } else {
@@ -3904,11 +3887,7 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             if gen.is_local_lexically_declared(local_index)
                 && !gen.is_local_initialized(local_index)
             {
-                let local = match ident.local_type.get() {
-                    Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-                    Some(LocalType::Variable) => gen.local(local_index),
-                    None => unreachable!(),
-                };
+                let local = gen.resolve_local(local_index, ident.local_type.get().unwrap());
                 gen.emit(Instruction::ThrowIfTDZ {
                     src: local.operand(),
                 });
@@ -3917,11 +3896,7 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             return;
         }
         let local_index = ident.local_index.get();
-        let local = match ident.local_type.get() {
-            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-            Some(LocalType::Variable) => gen.local(local_index),
-            None => unreachable!(),
-        };
+        let local = gen.resolve_local(local_index, ident.local_type.get().unwrap());
         // TDZ check: throw ReferenceError if assigning to an uninitialized let/const binding.
         // Matching C++ AssignmentExpression: check is_lexically_declared && !is_initialized.
         if gen.is_local_lexically_declared(local_index)
@@ -6490,12 +6465,7 @@ fn emit_set_variable_with_mode(
     mode: BindingMode,
 ) {
     if ident.is_local() {
-        let local_index = ident.local_index.get();
-        let local = match ident.local_type.get() {
-            Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
-            Some(LocalType::Variable) => gen.local(local_index),
-            None => unreachable!(),
-        };
+        let local = gen.resolve_local(ident.local_index.get(), ident.local_type.get().unwrap());
         gen.emit_mov(&local, value);
     } else {
         let id = gen.intern_identifier(&ident.name);
@@ -7748,10 +7718,7 @@ fn count_non_local_lexical_bindings(scope: &ScopeData) -> u32 {
 
 /// Create a ScopedOperand for a VarToInit's local variable (argument or variable).
 fn var_local_operand(gen: &mut Generator, local_type: LocalType, index: u32) -> ScopedOperand {
-    match local_type {
-        LocalType::Variable => gen.local(index),
-        LocalType::Argument => gen.scoped_operand(Operand::argument(index)),
-    }
+    gen.resolve_local(index, local_type)
 }
 
 /// Collect bound names from a binding pattern into the parameter_names list.
