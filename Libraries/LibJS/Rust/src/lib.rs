@@ -113,6 +113,31 @@ fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
     }
 }
 
+/// Write an AST dump string to FFI output pointers.
+///
+/// Produces a string dump of the program, leaks it as a `Box<[u8]>`, and
+/// writes the pointer and length to the provided out-parameters. The caller
+/// must free via `rust_free_string(ptr, len)`.
+///
+/// # Safety
+/// `output_ptr` and `output_len` must either both be null (no dump requested)
+/// or both be valid writable pointers.
+unsafe fn write_ast_dump_output(
+    program: &ast::Statement,
+    output_ptr: *mut *mut u8,
+    output_len: *mut usize,
+) {
+    if output_ptr.is_null() || output_len.is_null() {
+        return;
+    }
+    let dump_string = ast_dump::dump_program_to_string(program);
+    let mut boxed = dump_string.into_bytes().into_boxed_slice();
+    *output_ptr = boxed.as_mut_ptr();
+    *output_len = boxed.len();
+    // NB: Caller must free via rust_free_string(ptr, len).
+    std::mem::forget(boxed);
+}
+
 /// Create a UTF-16 slice from a raw pointer, returning None if the pointer is null.
 ///
 /// NB: C++ Vector<u16>::data() returns nullptr when the vector is empty (no allocation),
@@ -352,15 +377,7 @@ pub unsafe extern "C" fn rust_compile_script(
             ast_dump::dump_program(&program, use_color);
         }
 
-        // If caller wants an AST dump string, produce it.
-        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
-            let dump_string = ast_dump::dump_program_to_string(&program);
-            let mut boxed = dump_string.into_bytes().into_boxed_slice();
-            *ast_dump_output = boxed.as_mut_ptr();
-            *ast_dump_output_len = boxed.len();
-            // NB: Caller must free via rust_free_string(ptr, len).
-            std::mem::forget(boxed);
-        }
+        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
             (data.scope.clone(), data.is_strict_mode)
@@ -432,14 +449,7 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         parser.scope_collector.analyze(true);
 
-        // If caller wants an AST dump string, produce it.
-        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
-            let dump_string = ast_dump::dump_program_to_string(&program);
-            let mut boxed = dump_string.into_bytes().into_boxed_slice();
-            *ast_dump_output = boxed.as_mut_ptr();
-            *ast_dump_output_len = boxed.len();
-            std::mem::forget(boxed);
-        }
+        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
             (data.scope.clone(), data.is_strict_mode)
@@ -597,14 +607,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             return std::ptr::null_mut();
         }
 
-        // If caller wants an AST dump string, produce it.
-        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
-            let dump_string = ast_dump::dump_program_to_string(&program);
-            let mut boxed = dump_string.into_bytes().into_boxed_slice();
-            *ast_dump_output = boxed.as_mut_ptr();
-            *ast_dump_output_len = boxed.len();
-            std::mem::forget(boxed);
-        }
+        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 
         // Extract the FunctionExpression from the program.
         // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
@@ -691,14 +694,7 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
             return;
         }
 
-        // If caller wants an AST dump string, produce it.
-        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
-            let dump_string = ast_dump::dump_program_to_string(&program);
-            let mut boxed = dump_string.into_bytes().into_boxed_slice();
-            *ast_dump_output = boxed.as_mut_ptr();
-            *ast_dump_output_len = boxed.len();
-            std::mem::forget(boxed);
-        }
+        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 
         let scope_ref = if let StatementKind::Program(ref data) = program.inner {
             data.scope.clone()
@@ -879,14 +875,7 @@ pub unsafe extern "C" fn rust_compile_module(
 
         parser.scope_collector.analyze(false);
 
-        // If caller wants an AST dump string, produce it.
-        if !ast_dump_output.is_null() && !ast_dump_output_len.is_null() {
-            let dump_string = ast_dump::dump_program_to_string(&program);
-            let mut boxed = dump_string.into_bytes().into_boxed_slice();
-            *ast_dump_output = boxed.as_mut_ptr();
-            *ast_dump_output_len = boxed.len();
-            std::mem::forget(boxed);
-        }
+        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 
         let program_data = if let StatementKind::Program(ref data) = program.inner {
             data
