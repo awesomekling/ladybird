@@ -1,7 +1,7 @@
 Program (module) [strict] @1:1
 └─ ExportStatement @1:1
    ├─ entries
-   │  └─ ExportName: "default", LocalName: "cName"
+   │  └─ ExportName: "default", LocalName: "*default*"
    └─ statement
       └─ ClassExpression "cName" @1:17
          ├─ constructor
