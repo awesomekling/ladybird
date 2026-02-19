@@ -1164,7 +1164,8 @@ impl<'a> Lexer<'a> {
             if token_type == TokenType::CurlyOpen {
                 self.current_template_state_mut().open_bracket_count += 1;
             } else if token_type == TokenType::CurlyClose {
-                self.current_template_state_mut().open_bracket_count -= 1;
+                self.current_template_state_mut().open_bracket_count =
+                    self.current_template_state().open_bracket_count.saturating_sub(1);
             }
         }
 
