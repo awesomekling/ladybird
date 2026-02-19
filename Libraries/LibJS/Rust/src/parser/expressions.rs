@@ -303,7 +303,7 @@ impl<'a> Parser<'a> {
                         self.flags.string_legacy_octal_escape_sequence_in_scope = true;
                     }
                 }
-                (self.expression(after_string, ExpressionKind::StringLiteral(value.into())), true)
+                (self.expression(after_string, ExpressionKind::StringLiteral(value)), true)
             }
 
             TokenType::NullLiteral => {
@@ -1410,7 +1410,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let is_proto = value == proto_name;
-                let expression = self.expression(after_string, ExpressionKind::StringLiteral(value.clone().into()));
+                let expression = self.expression(after_string, ExpressionKind::StringLiteral(value.clone()));
                 PropertyKey { expression, name: Some(value), is_proto, is_computed: false, is_identifier: false }
             }
             TokenType::NumericLiteral => {
@@ -1432,7 +1432,7 @@ impl<'a> Parser<'a> {
             // It is a Syntax Error if the StringValue of PrivateIdentifier is "#constructor".
             TokenType::PrivateIdentifier => {
                 let token = self.consume();
-                let value = self.token_value(&token).to_vec();
+                let value = Utf16String::from(self.token_value(&token));
                 if value == utf16!("#constructor") {
                     self.syntax_error("Private property with name '#constructor' is not allowed");
                 }
@@ -1440,7 +1440,7 @@ impl<'a> Parser<'a> {
                 let key_start = ident_pos_override.unwrap_or(start);
                 let expression = self.expression(key_start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
                     range: self.range_from(key_start),
-                    name: value.clone().into(),
+                    name: value.clone(),
                 }));
                 PropertyKey { expression, name: Some(value), is_proto: false, is_computed: false, is_identifier: false }
             }
@@ -1451,11 +1451,11 @@ impl<'a> Parser<'a> {
                     // is not valid in class static blocks since await is not an identifier there.
                     let is_ident = self.match_identifier();
                     let token = self.consume();
-                    let value = self.token_value(&token).to_vec();
+                    let value = Utf16String::from(self.token_value(&token));
                     let is_proto = value == proto_name;
                     // C++ uses the object expression start position for identifier-name keys.
                     let key_start = ident_pos_override.unwrap_or(start);
-                    let expression = self.expression(key_start, ExpressionKind::StringLiteral(value.clone().into()));
+                    let expression = self.expression(key_start, ExpressionKind::StringLiteral(value.clone()));
                     PropertyKey { expression, name: Some(value), is_proto, is_computed: false, is_identifier: is_ident }
                 } else {
                     self.expected("property key");
@@ -1549,9 +1549,9 @@ impl<'a> Parser<'a> {
                 let raw = self.token_value(&token).to_vec();
                 if is_tagged {
                     let raw_value = raw_template_value(&raw);
-                    raw_strings.push(raw_value.into());
+                    raw_strings.push(raw_value);
                     match self.process_template_escape_sequences(&raw) {
-                        Some(cooked) => expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(cooked.into()))),
+                        Some(cooked) => expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(cooked))),
                         // C++ uses rule_start (template literal start) for NullLiteral.
                         None => expressions.push(self.expression(start, ExpressionKind::NullLiteral)),
                     }
@@ -1560,7 +1560,7 @@ impl<'a> Parser<'a> {
                     if has_octal {
                         self.syntax_error("Octal escape sequence not allowed in template literal");
                     }
-                    expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(value.into())));
+                    expressions.push(self.expression(string_pos, ExpressionKind::StringLiteral(value)));
                 }
             } else if self.match_token(TokenType::TemplateLiteralExprStart) {
                 self.consume();
@@ -1588,36 +1588,36 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn process_template_escape_sequences(&self, raw: &[u16]) -> Option<Vec<u16>> {
-        let mut result = Vec::with_capacity(raw.len());
+    fn process_template_escape_sequences(&self, raw: &[u16]) -> Option<Utf16String> {
+        let mut result = Utf16String(Vec::with_capacity(raw.len()));
         let mut i = 0;
         while i < raw.len() {
             if raw[i] == b'\\' as u16 && i + 1 < raw.len() {
                 i += 1;
                 match raw[i] {
-                    c if c == b'n' as u16 => result.push(b'\n' as u16),
-                    c if c == b'r' as u16 => result.push(b'\r' as u16),
-                    c if c == b't' as u16 => result.push(b'\t' as u16),
-                    c if c == b'b' as u16 => result.push(8),
-                    c if c == b'f' as u16 => result.push(12),
-                    c if c == b'v' as u16 => result.push(11),
+                    c if c == b'n' as u16 => result.0.push(b'\n' as u16),
+                    c if c == b'r' as u16 => result.0.push(b'\r' as u16),
+                    c if c == b't' as u16 => result.0.push(b'\t' as u16),
+                    c if c == b'b' as u16 => result.0.push(8),
+                    c if c == b'f' as u16 => result.0.push(12),
+                    c if c == b'v' as u16 => result.0.push(11),
                     c if c == b'0' as u16 => {
                         if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == b'8' as u16 || raw[i + 1] == b'9' as u16) {
                             return None;
                         }
-                        result.push(0);
+                        result.0.push(0);
                     }
                     c if c >= b'1' as u16 && c <= b'9' as u16 => {
                         return None;
                     }
                     c if c == b'x' as u16 => {
                         let (advance, ch) = parse_hex_escape(raw, i)?;
-                        result.push(ch);
+                        result.0.push(ch);
                         i += advance;
                     }
                     c if c == b'u' as u16 => {
                         let (advance, code_point) = parse_unicode_escape(raw, i)?;
-                        push_code_point(&mut result, code_point);
+                        push_code_point(&mut result.0, code_point);
                         i += advance;
                     }
                     c if c == b'\n' as u16 => { /* line continuation */ }
@@ -1627,15 +1627,15 @@ impl<'a> Parser<'a> {
                         }
                     }
                     c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
-                    c => result.push(c),
+                    c => result.0.push(c),
                 }
             } else if raw[i] == b'\r' as u16 {
-                result.push(b'\n' as u16);
+                result.0.push(b'\n' as u16);
                 if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
                     i += 1;
                 }
             } else {
-                result.push(raw[i]);
+                result.0.push(raw[i]);
             }
             i += 1;
         }
@@ -1644,68 +1644,68 @@ impl<'a> Parser<'a> {
 
     /// Parse a string literal token's value, processing escape sequences.
     /// Returns `(value, has_legacy_octal)`.
-    pub(crate) fn parse_string_value(&mut self, token: &Token) -> (Vec<u16>, bool) {
+    pub(crate) fn parse_string_value(&mut self, token: &Token) -> (Utf16String, bool) {
         let raw = self.token_value(token).to_vec();
         if raw.len() < 2 {
-            return (Vec::new(), false);
+            return (Utf16String::default(), false);
         }
         let inner = raw[1..raw.len() - 1].to_vec();
         self.process_escape_sequences(&inner)
     }
 
-    pub(crate) fn process_escape_sequences(&mut self, inner: &[u16]) -> (Vec<u16>, bool) {
-        let mut result = Vec::with_capacity(inner.len());
+    pub(crate) fn process_escape_sequences(&mut self, inner: &[u16]) -> (Utf16String, bool) {
+        let mut result = Utf16String(Vec::with_capacity(inner.len()));
         let mut has_legacy_octal = false;
         let mut i = 0;
         while i < inner.len() {
             if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
                 i += 1;
                 match inner[i] {
-                    c if c == b'n' as u16 => result.push(b'\n' as u16),
-                    c if c == b'r' as u16 => result.push(b'\r' as u16),
-                    c if c == b't' as u16 => result.push(b'\t' as u16),
-                    c if c == b'b' as u16 => result.push(8),
-                    c if c == b'f' as u16 => result.push(12),
-                    c if c == b'v' as u16 => result.push(11),
+                    c if c == b'n' as u16 => result.0.push(b'\n' as u16),
+                    c if c == b'r' as u16 => result.0.push(b'\r' as u16),
+                    c if c == b't' as u16 => result.0.push(b'\t' as u16),
+                    c if c == b'b' as u16 => result.0.push(8),
+                    c if c == b'f' as u16 => result.0.push(12),
+                    c if c == b'v' as u16 => result.0.push(11),
                     c if c == b'0' as u16 => {
                         if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
                             has_legacy_octal = true;
                             let (val, consumed) = parse_octal_escape(inner, i);
-                            result.push(val);
+                            result.0.push(val);
                             i += consumed;
                         } else if i + 1 < inner.len() && (inner[i + 1] == b'8' as u16 || inner[i + 1] == b'9' as u16) {
                             has_legacy_octal = true;
-                            result.push(0);
+                            result.0.push(0);
                         } else {
-                            result.push(0);
+                            result.0.push(0);
                         }
                     }
                     c if c >= b'1' as u16 && c <= b'7' as u16 => {
                         has_legacy_octal = true;
                         let (val, consumed) = parse_octal_escape(inner, i);
-                        result.push(val);
+                        result.0.push(val);
                         i += consumed;
                     }
                     c if c == b'8' as u16 || c == b'9' as u16 => {
                         has_legacy_octal = true;
-                        result.push(c);
+                        result.0.push(c);
                     }
                     c if c == b'x' as u16 => {
                         if let Some((advance, ch)) = parse_hex_escape(inner, i) {
-                            result.push(ch);
+                            result.0.push(ch);
                             i += advance;
                         } else {
                             self.syntax_error("Malformed hexadecimal escape sequence");
-                            result.push(inner[i]);
+                            result.0.push(inner[i]);
                         }
                     }
                     c if c == b'u' as u16 => {
                         if let Some((advance, code_point)) = parse_unicode_escape(inner, i) {
-                            push_code_point(&mut result, code_point);
+                            push_code_point(&mut result.0, code_point);
                             i += advance;
                         } else {
                             self.syntax_error("Malformed unicode escape sequence");
-                            result.push(inner[i]);
+                            result.0.push(inner[i]);
                         }
                     }
                     c if c == b'\n' as u16 => { /* skip */ }
@@ -1715,16 +1715,16 @@ impl<'a> Parser<'a> {
                         }
                     }
                     c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
-                    c => result.push(c),
+                    c => result.0.push(c),
                 }
             } else if inner[i] == b'\r' as u16 {
                 // Normalize \r\n and bare \r to \n per spec (12.9.6).
-                result.push(b'\n' as u16);
+                result.0.push(b'\n' as u16);
                 if i + 1 < inner.len() && inner[i + 1] == b'\n' as u16 {
                     i += 1;
                 }
             } else {
-                result.push(inner[i]);
+                result.0.push(inner[i]);
             }
             i += 1;
         }
@@ -2104,17 +2104,17 @@ fn push_code_point(result: &mut Vec<u16>, code_point: u32) {
     }
 }
 
-fn raw_template_value(raw: &[u16]) -> Vec<u16> {
-    let mut result = Vec::with_capacity(raw.len());
+fn raw_template_value(raw: &[u16]) -> Utf16String {
+    let mut result = Utf16String(Vec::with_capacity(raw.len()));
     let mut i = 0;
     while i < raw.len() {
         if raw[i] == b'\r' as u16 {
-            result.push(b'\n' as u16);
+            result.0.push(b'\n' as u16);
             if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
                 i += 1;
             }
         } else {
-            result.push(raw[i]);
+            result.0.push(raw[i]);
         }
         i += 1;
     }

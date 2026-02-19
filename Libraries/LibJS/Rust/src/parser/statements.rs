@@ -176,9 +176,9 @@ impl<'a> Parser<'a> {
             && self.match_identifier()
         {
             let token = self.consume();
-            let label_value = self.token_value(&token).to_vec();
+            let label_value = Utf16String::from(self.token_value(&token));
 
-            if !self.labels_in_scope.contains_key(&label_value) {
+            if !self.labels_in_scope.contains_key(label_value.as_slice()) {
                 let label_str = String::from_utf16_lossy(&label_value);
                 self.syntax_error(&format!("Label '{}' not found", label_str));
             }
@@ -194,7 +194,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("Unlabeled 'break' not allowed outside of a loop or switch statement");
         }
 
-        self.statement(start, StatementKind::Break { target_label: label.map(Into::into) })
+        self.statement(start, StatementKind::Break { target_label: label })
     }
 
     // https://tc39.es/ecma262/#sec-continue-statement
@@ -216,9 +216,9 @@ impl<'a> Parser<'a> {
             let label_line = self.current_token.line_number;
             let label_col = self.current_token.line_column;
             let token = self.consume();
-            let label_value = self.token_value(&token).to_vec();
+            let label_value = Utf16String::from(self.token_value(&token));
 
-            if let Some(entry) = self.labels_in_scope.get_mut(&label_value) {
+            if let Some(entry) = self.labels_in_scope.get_mut(label_value.as_slice()) {
                 *entry = Some((label_line, label_col));
             } else {
                 let label_str = String::from_utf16_lossy(&label_value);
@@ -232,7 +232,7 @@ impl<'a> Parser<'a> {
 
         self.consume_or_insert_semicolon();
 
-        self.statement(start, StatementKind::Continue { target_label: label.map(Into::into) })
+        self.statement(start, StatementKind::Continue { target_label: label })
     }
 
     fn parse_debugger_statement(&mut self) -> Statement {
@@ -744,7 +744,7 @@ impl<'a> Parser<'a> {
 
         self.save_state();
         let token = self.consume();
-        let label = self.token_value(&token).to_vec();
+        let label = Utf16String::from(self.token_value(&token));
 
         if !self.match_token(TokenType::Colon) {
             self.load_state();
@@ -763,7 +763,7 @@ impl<'a> Parser<'a> {
             self.syntax_error("'await' label is not allowed in async function context");
         }
 
-        if self.labels_in_scope.contains_key(&label) {
+        if self.labels_in_scope.contains_key(label.as_slice()) {
             let label_str = String::from_utf16_lossy(&label);
             self.syntax_error(&format!("Label '{}' has already been declared", label_str));
         }
@@ -805,19 +805,19 @@ impl<'a> Parser<'a> {
 
         let is_iteration = body_starts_iteration || self.last_inner_label_is_iteration;
         if !is_iteration {
-            if let Some(Some((line, col))) = self.labels_in_scope.get(&label) {
+            if let Some(Some((line, col))) = self.labels_in_scope.get(label.as_slice()) {
                 self.syntax_error_at(
                     "labelled continue statement cannot use non iterating statement",
                     *line, *col);
             }
         }
 
-        self.labels_in_scope.remove(&label);
+        self.labels_in_scope.remove(label.as_slice());
         self.flags.in_break_context = break_before;
         self.last_inner_label_is_iteration = is_iteration;
 
         Some(self.statement(start, StatementKind::Labelled {
-            label: label.into(),
+            label,
             item: Box::new(body),
         }))
     }

@@ -346,17 +346,17 @@ impl<'a> Parser<'a> {
 
         // Parse function name.
         let (name, fn_name) = if self.has_default_export_name && !self.match_identifier() {
-            let default_name = utf16!("*default*");
-            self.last_function_name = default_name.to_vec();
-            (Some(self.make_identifier(start, default_name)), default_name.to_vec())
+            let default_name = Utf16String::from(utf16!("*default*"));
+            self.last_function_name = default_name.clone();
+            (Some(self.make_identifier(start, default_name.clone())), default_name)
         } else if self.match_identifier() {
             let token = self.consume();
-            let value = self.token_value(&token).to_vec();
+            let value = Utf16String::from(self.token_value(&token));
             self.last_function_name = value.clone();
             (Some(self.make_identifier(start, value.clone())), value)
         } else {
-            self.last_function_name.clear();
-            (None, Vec::new())
+            self.last_function_name.0.clear();
+            (None, Utf16String::default())
         };
         self.last_function_kind = kind;
 
@@ -389,16 +389,16 @@ impl<'a> Parser<'a> {
         let is_generator = self.eat(TokenType::Asterisk);
         let kind = FunctionKind::from_async_generator(is_async, is_generator);
 
-        let mut fn_name_value: Vec<u16> = Vec::new();
+        let mut fn_name_value = Utf16String::default();
         let name = if self.match_identifier() {
             let token = self.consume();
-            fn_name_value = self.token_value(&token).to_vec();
+            fn_name_value = Utf16String::from(self.token_value(&token));
             Some(self.make_identifier(start, fn_name_value.clone()))
         } else if self.match_token(TokenType::Yield) || self.match_token(TokenType::Await) {
             // C++ explicitly allows yield/await as function expression names
             // even inside generator/async contexts, then validates after.
             let token = self.consume();
-            fn_name_value = self.token_value(&token).to_vec();
+            fn_name_value = Utf16String::from(self.token_value(&token));
             Some(self.make_identifier(start, fn_name_value.clone()))
         } else {
             None
@@ -517,20 +517,20 @@ impl<'a> Parser<'a> {
         let (name_id, name_value) = if expect_name || self.match_identifier() {
             if self.match_identifier() {
                 let token = self.consume();
-                let value = self.token_value(&token).to_vec();
+                let value = Utf16String::from(self.token_value(&token));
                 self.last_class_name = value.clone();
                 (Some(self.make_identifier(start, value.clone())), value)
             } else if expect_name {
                 self.expected("class name");
-                self.last_class_name.clear();
-                (None, Vec::new())
+                self.last_class_name.0.clear();
+                (None, Utf16String::default())
             } else {
-                self.last_class_name.clear();
-                (None, Vec::new())
+                self.last_class_name.0.clear();
+                (None, Utf16String::default())
             }
         } else {
-            self.last_class_name.clear();
-            (None, Vec::new())
+            self.last_class_name.0.clear();
+            (None, Utf16String::default())
         };
 
         let saved_class_name = self.last_class_name.clone();
@@ -555,7 +555,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenType::CurlyOpen);
         let mut elements: Vec<Node<ClassElement>> = Vec::new();
         let mut constructor: Option<Expression> = None;
-        let mut found_private_names: HashMap<Vec<u16>, (Option<ClassMethodKind>, bool)> = HashMap::new();
+        let mut found_private_names: HashMap<Utf16String, (Option<ClassMethodKind>, bool)> = HashMap::new();
 
         self.referenced_private_names_stack.push(HashSet::new());
 
@@ -656,7 +656,7 @@ impl<'a> Parser<'a> {
     //   - Derived class: constructor(...arguments) { super(...arguments); }
     fn synthesize_default_constructor(&mut self, start: Position, class_name: &[u16], has_super: bool) -> Expression {
         let ctor_name = if !class_name.is_empty() {
-            Some(self.make_identifier(start, class_name.to_vec()))
+            Some(self.make_identifier(start, Utf16String::from(class_name)))
         } else {
             None
         };
@@ -665,9 +665,9 @@ impl<'a> Parser<'a> {
         // is stored in the SFD and compiled lazily — scope analysis runs at that point.
 
         if has_super {
-            let arguments_name: Vec<u16> = "args".encode_utf16().collect();
+            let arguments_name = Utf16String::from(utf16!("args"));
 
-            let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone().into()));
+            let arguments_ref = Rc::new(Identifier::new(self.range_from(start), arguments_name.clone()));
             let arguments_expression = self.expression(start, ExpressionKind::Identifier(arguments_ref));
 
             let super_call = self.expression(start, ExpressionKind::SuperCall(SuperCallData {
@@ -679,7 +679,7 @@ impl<'a> Parser<'a> {
                 ScopeData::shared_with_children(vec![return_statement]),
             ));
 
-            let arguments_binding = Rc::new(Identifier::new(self.range_from(start), arguments_name.into()));
+            let arguments_binding = Rc::new(Identifier::new(self.range_from(start), arguments_name));
             let parameters = vec![FunctionParameter {
                 binding: FunctionParameterBinding::Identifier(arguments_binding),
                 default_value: None,
@@ -738,7 +738,7 @@ impl<'a> Parser<'a> {
     fn parse_class_element(
         &mut self,
         class_start: Position,
-        found_private_names: &mut HashMap<Vec<u16>, (Option<ClassMethodKind>, bool)>,
+        found_private_names: &mut HashMap<Utf16String, (Option<ClassMethodKind>, bool)>,
     ) -> (Option<Node<ClassElement>>, Option<Expression>) {
         // C++ lexes "static" as Identifier and checks original_value() == "static".
         let mut is_static = if self.match_identifier()
@@ -842,7 +842,7 @@ impl<'a> Parser<'a> {
             let expression = self.expression(class_start, ExpressionKind::StringLiteral(Utf16String(name.to_vec())));
             PropertyKey {
                 expression,
-                name: Some(name.to_vec()),
+                name: Some(Utf16String::from(name)),
                 is_proto: false,
                 is_computed: false,
                 is_identifier: false,
@@ -1076,7 +1076,7 @@ impl<'a> Parser<'a> {
         let mut has_seen_default = false;
         let mut has_seen_rest = false;
         let mut parameter_info: Vec<ParamInfo> = Vec::new();
-        let mut seen_parameter_names: HashSet<Vec<u16>> = HashSet::new();
+        let mut seen_parameter_names: HashSet<Utf16String> = HashSet::new();
 
         // C++ uses the position at the start of parse_formal_parameters for all
         // parameter identifiers (i.e., the position of the first parameter).
@@ -1109,7 +1109,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 let token = self.consume();
-                let value = self.token_value(&token).to_vec();
+                let value = Utf16String::from(self.token_value(&token));
                 self.check_identifier_name_for_assignment_validity(&value, false);
                 // https://tc39.es/ecma262/#sec-function-definitions-static-semantics-early-errors
                 // It is a Syntax Error if IsSimpleParameterList is false and
@@ -1131,13 +1131,13 @@ impl<'a> Parser<'a> {
                     }
                 }
                 seen_parameter_names.insert(value.clone());
-                let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone().into()));
-                parameter_info.push(ParamInfo { name: value.into(), is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
+                let id = Rc::new(Identifier::new(self.range_from(formal_parameters_start), value.clone()));
+                parameter_info.push(ParamInfo { name: value, is_rest: rest, is_from_pattern: false, identifier: Some(id.clone()) });
                 (FunctionParameterBinding::Identifier(id), false)
             } else if self.match_token(TokenType::CurlyOpen) || self.match_token(TokenType::BracketOpen) {
                 let pat = self.parse_binding_pattern();
                 for (n, id) in std::mem::take(&mut self.pattern_bound_names) {
-                    seen_parameter_names.insert(n.0.clone());
+                    seen_parameter_names.insert(n.clone());
                     parameter_info.push(ParamInfo { name: n, is_rest: rest, is_from_pattern: true, identifier: Some(id) });
                 }
                 (FunctionParameterBinding::BindingPattern(pat), true)
@@ -1768,7 +1768,7 @@ impl<'a> Parser<'a> {
         // Check for duplicate exported names.
         for entry in &entries {
             if let Some(ref name) = entry.export_name {
-                if !self.exported_names.insert(name.as_slice().to_vec()) {
+                if !self.exported_names.insert(name.clone()) {
                     self.syntax_error_at_position(
                         &format!(
                             "Duplicate export with name: '{}'",
@@ -1807,7 +1807,7 @@ impl<'a> Parser<'a> {
         }
         let token = self.consume();
         let (value, _) = self.parse_string_value(&token);
-        value.into()
+        value
     }
 
     fn parse_module_export_name(&mut self) -> (Utf16String, bool) {
@@ -1825,7 +1825,7 @@ impl<'a> Parser<'a> {
                     self.syntax_error("StringValue ending with unpaired high surrogate");
                 }
             }
-            (value.into(), true)
+            (value, true)
         } else {
             self.expected("export specifier (string or identifier)");
             (Utf16String::default(), false)
@@ -1847,7 +1847,7 @@ impl<'a> Parser<'a> {
             let key: Utf16String = if self.match_token(TokenType::StringLiteral) {
                 let token = self.consume();
                 let (value, _) = self.parse_string_value(&token);
-                value.into()
+                value
             } else if self.match_identifier_name() {
                 let token = self.consume();
                 self.token_value(&token).into()
@@ -1862,7 +1862,7 @@ impl<'a> Parser<'a> {
             if self.match_token(TokenType::StringLiteral) {
                 let token = self.consume();
                 let (value, _) = self.parse_string_value(&token);
-                attributes.push(ImportAttribute { key, value: value.into() });
+                attributes.push(ImportAttribute { key, value });
             } else {
                 self.expected("string as attribute value");
                 self.consume();

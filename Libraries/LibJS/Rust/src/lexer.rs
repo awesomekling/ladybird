@@ -34,6 +34,7 @@
 //! type, because escaped keywords have different semantics (they can be
 //! used as identifiers in some contexts).
 
+use crate::ast::Utf16String;
 use crate::token::{Token, TokenType};
 
 /// State for tracking template literal nesting.
@@ -562,9 +563,9 @@ impl<'a> Lexer<'a> {
 
     /// Re-scan the source from `scan_start` (1-based position) to `self.position`
     /// and build a decoded identifier value. Only called when escapes are present.
-    fn build_identifier_value(&self, scan_start: usize) -> Vec<u16> {
+    fn build_identifier_value(&self, scan_start: usize) -> Utf16String {
         let raw = &self.source[scan_start - 1 .. self.position - 1];
-        let mut result = Vec::with_capacity(raw.len());
+        let mut result = Utf16String(Vec::with_capacity(raw.len()));
         let mut i = 0;
         while i < raw.len() {
             if raw[i] == b'\\' as u16 {
@@ -581,7 +582,7 @@ impl<'a> Lexer<'a> {
                         if i < raw.len() {
                             i += 1; // skip '}'
                         }
-                        encode_utf16(cp, &mut result);
+                        encode_utf16(cp, &mut result.0);
                     } else {
                         let mut cp: u32 = 0;
                         for _ in 0..4 {
@@ -590,11 +591,11 @@ impl<'a> Lexer<'a> {
                                 i += 1;
                             }
                         }
-                        encode_utf16(cp, &mut result);
+                        encode_utf16(cp, &mut result.0);
                     }
                 }
             } else {
-                result.push(raw[i]);
+                result.0.push(raw[i]);
                 i += 1;
             }
         }
@@ -885,7 +886,7 @@ impl<'a> Lexer<'a> {
         let mut token_type = TokenType::Invalid;
         let did_consume_whitespace_or_comments = trivia_start != value_start;
 
-        let mut identifier_value: Option<Vec<u16>> = None;
+        let mut identifier_value: Option<Utf16String> = None;
 
         if self.current_token_type == TokenType::RegexLiteral
             && !self.is_eof()

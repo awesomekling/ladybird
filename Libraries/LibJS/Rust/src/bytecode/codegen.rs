@@ -969,13 +969,13 @@ pub fn generate_statement(
                     _ => {
                         // export default <expression>
                         // The child_statement wraps an Expression via StatementKind::Expression.
-                        let default_name: Vec<u16> = utf16!("default").to_vec();
+                        let default_name: Utf16String = Utf16String::from(utf16!("default"));
                         gen.pending_lhs_name = Some(gen.intern_identifier(&default_name));
                         let value = generate_statement(child_statement, gen, None);
                         gen.pending_lhs_name = None;
                         if let Some(value) = value {
                             let local_name = gen.intern_identifier(
-                                &utf16!("*default*").to_vec(),
+                                utf16!("*default*"),
                             );
                             gen.emit(Instruction::InitializeLexicalBinding {
                                 identifier: local_name,
@@ -3631,10 +3631,10 @@ fn is_array_index(s: &[u16]) -> bool {
 /// If the property operand is a constant string that is not an array index,
 /// return a clone of its UTF-16 data. Used by the emit_*_by_value functions
 /// to optimize computed property access into ById instructions.
-fn try_extract_constant_string_key(gen: &Generator, property: &ScopedOperand) -> Option<Vec<u16>> {
+fn try_extract_constant_string_key(gen: &Generator, property: &ScopedOperand) -> Option<Utf16String> {
     if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
         if !is_array_index(&s.0) {
-            return Some(s.0.clone());
+            return Some(s.clone());
         }
     }
     None
@@ -5465,11 +5465,10 @@ fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
     use crate::parser::{Parser, ProgramType};
 
     // Wrap in "function" keyword so it parses as a FunctionDeclaration.
-    let source: Vec<u16> = if has_super {
-        utf16!("function constructor(...arguments) { super(...arguments); }")
-            .to_vec()
+    let source: Utf16String = if has_super {
+        Utf16String::from(utf16!("function constructor(...arguments) { super(...arguments); }"))
     } else {
-        utf16!("function constructor() {}").to_vec()
+        Utf16String::from(utf16!("function constructor() {}"))
     };
 
     let mut parser = Parser::new(&source, ProgramType::Script);

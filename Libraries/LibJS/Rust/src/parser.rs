@@ -73,7 +73,7 @@ pub struct ParamInfo {
 /// Result of parsing a property key (object literal or class element).
 pub(crate) struct PropertyKey {
     pub expression: Expression,
-    pub name: Option<Vec<u16>>,
+    pub name: Option<Utf16String>,
     pub is_proto: bool,
     pub is_computed: bool,
     pub is_identifier: bool,
@@ -222,15 +222,15 @@ pub struct Parser<'a> {
 
     /// Labels currently in scope. Value is Some(line, col) if a `continue`
     /// statement referenced this label, None otherwise.
-    labels_in_scope: HashMap<Vec<u16>, Option<(u32, u32)>>,
+    labels_in_scope: HashMap<Utf16String, Option<(u32, u32)>>,
 
     /// Set by try_parse_labelled_statement to propagate iteration-ness
     /// through nested labels (e.g., `a: b: for(...)`).
     last_inner_label_is_iteration: bool,
 
-    last_function_name: Vec<u16>,
+    last_function_name: Utf16String,
     last_function_kind: FunctionKind,
-    last_class_name: Vec<u16>,
+    last_class_name: Utf16String,
 
     /// Bound names collected during parse_binding_pattern.
     /// Caller drains this after calling parse_binding_pattern.
@@ -256,7 +256,7 @@ pub struct Parser<'a> {
     /// Each class body pushes a new set. At the end of the class, any names
     /// not found in the class's declared private names are bubbled up to the
     /// outer class, or reported as errors if there is no outer class.
-    referenced_private_names_stack: Vec<HashSet<Vec<u16>>>,
+    referenced_private_names_stack: Vec<HashSet<Utf16String>>,
 
     /// Communication channel from `parse_variable_declaration` back to
     /// `parse_for_statement` when parsing `for (let/const/var ... ; ...)`.
@@ -269,7 +269,7 @@ pub struct Parser<'a> {
     pub scope_collector: ScopeCollector,
 
     /// Track exported names for duplicate detection in modules.
-    exported_names: HashSet<Vec<u16>>,
+    exported_names: HashSet<Utf16String>,
 }
 
 impl<'a> Parser<'a> {
@@ -295,9 +295,9 @@ impl<'a> Parser<'a> {
             in_eval_function_context: false,
             labels_in_scope: HashMap::new(),
             last_inner_label_is_iteration: false,
-            last_function_name: Vec::new(),
+            last_function_name: Utf16String::default(),
             last_function_kind: FunctionKind::Normal,
-            last_class_name: Vec::new(),
+            last_class_name: Utf16String::default(),
             pattern_bound_names: Vec::new(),
             allow_member_expressions: false,
             binding_pattern_start: None,
@@ -560,7 +560,7 @@ impl<'a> Parser<'a> {
     /// Returns false if we're outside all class bodies (always invalid).
     pub(crate) fn register_referenced_private_name(&mut self, name: &[u16]) -> bool {
         if let Some(set) = self.referenced_private_names_stack.last_mut() {
-            set.insert(name.to_vec());
+            set.insert(Utf16String::from(name));
             true
         } else {
             false
@@ -942,7 +942,7 @@ impl<'a> Parser<'a> {
         use crate::ast::*;
 
         // Collect all declared names at module level.
-        let mut declared_names: HashSet<Vec<u16>> = HashSet::new();
+        let mut declared_names: HashSet<Utf16String> = HashSet::new();
         for child in children {
             match &child.inner {
                 StatementKind::VariableDeclaration { declarations, .. } => {
@@ -952,17 +952,17 @@ impl<'a> Parser<'a> {
                 }
                 StatementKind::FunctionDeclaration(data) => {
                     if let Some(ref name) = data.name {
-                        declared_names.insert(name.name.as_slice().to_vec());
+                        declared_names.insert(name.name.clone());
                     }
                 }
                 StatementKind::ClassDeclaration(data) => {
                     if let Some(ref name) = data.name {
-                        declared_names.insert(name.name.as_slice().to_vec());
+                        declared_names.insert(name.name.clone());
                     }
                 }
                 StatementKind::Import(data) => {
                     for entry in &data.entries {
-                        declared_names.insert(entry.local_name.as_slice().to_vec());
+                        declared_names.insert(entry.local_name.clone());
                     }
                 }
                 StatementKind::Export(data) => {
@@ -975,12 +975,12 @@ impl<'a> Parser<'a> {
                             }
                             StatementKind::FunctionDeclaration(func_data) => {
                                 if let Some(ref name) = func_data.name {
-                                    declared_names.insert(name.name.as_slice().to_vec());
+                                    declared_names.insert(name.name.clone());
                                 }
                             }
                             StatementKind::ClassDeclaration(class_data) => {
                                 if let Some(ref name) = class_data.name {
-                                    declared_names.insert(name.name.as_slice().to_vec());
+                                    declared_names.insert(name.name.clone());
                                 }
                             }
                             _ => {}
@@ -1197,10 +1197,10 @@ fn is_use_strict(raw: &[u16]) -> bool {
 }
 
 /// Collect all binding names introduced by a variable declarator target.
-fn collect_binding_names(target: &crate::ast::VariableDeclaratorTarget, names: &mut HashSet<Vec<u16>>) {
+fn collect_binding_names(target: &crate::ast::VariableDeclaratorTarget, names: &mut HashSet<Utf16String>) {
     match target {
         crate::ast::VariableDeclaratorTarget::Identifier(identifier) => {
-            names.insert(identifier.name.as_slice().to_vec());
+            names.insert(identifier.name.clone());
         }
         crate::ast::VariableDeclaratorTarget::BindingPattern(pattern) => {
             collect_binding_pattern_names(pattern, names);
@@ -1209,12 +1209,12 @@ fn collect_binding_names(target: &crate::ast::VariableDeclaratorTarget, names: &
 }
 
 /// Collect all binding names from a binding pattern (object or array destructuring).
-fn collect_binding_pattern_names(pattern: &crate::ast::BindingPattern, names: &mut HashSet<Vec<u16>>) {
+fn collect_binding_pattern_names(pattern: &crate::ast::BindingPattern, names: &mut HashSet<Utf16String>) {
     for entry in &pattern.entries {
         if let Some(ref alias) = entry.alias {
             match alias {
                 crate::ast::BindingEntryAlias::Identifier(identifier) => {
-                    names.insert(identifier.name.as_slice().to_vec());
+                    names.insert(identifier.name.clone());
                 }
                 crate::ast::BindingEntryAlias::BindingPattern(nested) => {
                     collect_binding_pattern_names(nested, names);
@@ -1222,7 +1222,7 @@ fn collect_binding_pattern_names(pattern: &crate::ast::BindingPattern, names: &m
                 crate::ast::BindingEntryAlias::MemberExpression(_) => {}
             }
         } else if let Some(crate::ast::BindingEntryName::Identifier(identifier)) = &entry.name {
-            names.insert(identifier.name.as_slice().to_vec());
+            names.insert(identifier.name.clone());
         }
     }
 }

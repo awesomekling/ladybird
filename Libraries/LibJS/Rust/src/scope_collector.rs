@@ -159,14 +159,14 @@ struct IdentifierGroup {
 
 /// A function to hoist via Annex B.3.3.
 struct HoistableFunction {
-    name: Vec<u16>,
+    name: Utf16String,
     /// Reference to the block ScopeData that contains the function declaration.
     /// Used to set `is_hoisted = true` on the FunctionData when it's hoisted.
     block_scope_data: Option<Rc<RefCell<ScopeData>>>,
 }
 
 struct ParameterName {
-    name: Vec<u16>,
+    name: Utf16String,
     is_rest: bool,
 }
 
@@ -175,8 +175,8 @@ struct ScopeRecord {
     scope_level: ScopeLevel,
     scope_data: Option<Rc<RefCell<ScopeData>>>,
 
-    variables: HashMap<Vec<u16>, ScopeVariable>,
-    identifier_groups: HashMap<Vec<u16>, IdentifierGroup>,
+    variables: HashMap<Utf16String, ScopeVariable>,
+    identifier_groups: HashMap<Utf16String, IdentifierGroup>,
     functions_to_hoist: Vec<HoistableFunction>,
 
     // Parameter tracking
@@ -234,7 +234,7 @@ impl ScopeRecord {
 
     fn variable(&mut self, name: &[u16]) -> &mut ScopeVariable {
         if !self.variables.contains_key(name) {
-            self.variables.insert(name.to_vec(), ScopeVariable::default());
+            self.variables.insert(Utf16String::from(name), ScopeVariable::default());
         }
         self.variables.get_mut(name).unwrap()
     }
@@ -593,7 +593,7 @@ impl ScopeCollector {
             if !existing_flags.intersects(VarFlags::LEXICAL) {
                 let block_scope = self.records[index].scope_data.clone();
                 self.records[index].functions_to_hoist.push(HoistableFunction {
-                    name: name.to_vec(),
+                    name: Utf16String::from(name),
                     block_scope_data: block_scope,
                 });
             }
@@ -627,7 +627,7 @@ impl ScopeCollector {
     pub fn register_identifier(&mut self, id: Rc<Identifier>, name: &[u16], declaration_kind: Option<DeclarationKind>) {
         let index = self.current.expect("no current scope");
         self.records[index].identifier_groups
-            .entry(name.to_vec())
+            .entry(Utf16String::from(name))
             .and_modify(|group| {
                 group.identifiers.push(id.clone());
                 if declaration_kind.is_some() && group.declaration_kind.is_none() {
@@ -659,16 +659,16 @@ impl ScopeCollector {
                     // Placeholder for a pattern parameter — push an empty
                     // entry so subsequent parameters get the correct
                     // positional index. Don't register anything else.
-                    self.records[index].parameter_names.push(ParameterName { name: Vec::new(), is_rest: false });
+                    self.records[index].parameter_names.push(ParameterName { name: Utf16String::default(), is_rest: false });
                     continue;
                 }
             } else {
-                self.records[index].parameter_names.push(ParameterName { name: name.0.clone(), is_rest: *is_rest });
+                self.records[index].parameter_names.push(ParameterName { name: name.clone(), is_rest: *is_rest });
             }
             if let Some(id) = identifier {
                 self.register_identifier(id.clone(), name, None);
             }
-            let var = self.records[index].variables.entry(name.0.clone()).or_default();
+            let var = self.records[index].variables.entry(name.clone()).or_default();
             var.flags |= VarFlags::PARAMETER_CANDIDATE | VarFlags::FORBIDDEN_LEXICAL;
         }
 
@@ -677,7 +677,7 @@ impl ScopeCollector {
         // declares the same name, it must not be optimized to a local, since the
         // default expression needs to resolve it from the outer scope.
         if has_parameter_expressions {
-            let names_to_mark: Vec<Vec<u16>> = self.records[index].identifier_groups.keys()
+            let names_to_mark: Vec<Utf16String> = self.records[index].identifier_groups.keys()
                 .filter(|name| !self.records[index].has_flag(name, VarFlags::FORBIDDEN_LEXICAL))
                 .cloned()
                 .collect();
@@ -913,7 +913,7 @@ impl ScopeCollector {
         // (HashMap iteration order is arbitrary).
         let mut sorted_groups: Vec<_> = groups.into_iter().collect();
         sorted_groups.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut propagate_to_parent: Vec<(Vec<u16>, IdentifierGroup)> = Vec::new();
+        let mut propagate_to_parent: Vec<(Utf16String, IdentifierGroup)> = Vec::new();
         for (name, mut group) in sorted_groups {
             // Annotate each Identifier AST node with its declaration kind,
             // so the bytecode generator knows how to handle TDZ checks, etc.
@@ -1083,7 +1083,7 @@ impl ScopeCollector {
                                 } else {
                                     let lvi = sd.local_variables.len() as u32;
                                     sd.local_variables.push(LocalVariable {
-                                        name: name.clone().into(),
+                                        name: name.clone(),
                                         kind: LocalVarKind::Var,
                                     });
                                     for id in &group.identifiers {
@@ -1170,13 +1170,13 @@ impl ScopeCollector {
         // Build functions_to_initialize by scanning children for FunctionDeclarations.
         // Walk in reverse order, deduplicating by name.
         let mut functions_to_initialize: Vec<crate::ast::FunctionToInit> = Vec::new();
-        let mut seen_function_names: HashSet<Vec<u16>> = HashSet::new();
+        let mut seen_function_names: HashSet<Utf16String> = HashSet::new();
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
                 if let crate::ast::StatementKind::FunctionDeclaration(ref function_data) = sd.children[i].inner {
                     if let Some(ref name_ident) = function_data.name {
-                        if seen_function_names.insert(name_ident.name.to_vec()) {
+                        if seen_function_names.insert(name_ident.name.clone()) {
                             functions_to_initialize.push(crate::ast::FunctionToInit {
                                 child_index: i,
                             });
@@ -1191,7 +1191,7 @@ impl ScopeCollector {
                 continue;
             }
 
-            var_names.push(name.clone().into());
+            var_names.push(name.clone());
 
             let is_parameter = var.flags.intersects(VarFlags::FORBIDDEN_LEXICAL);
             let is_function_name = seen_function_names.contains(name);
@@ -1217,7 +1217,7 @@ impl ScopeCollector {
             }
 
             vars_to_initialize.push(VarToInit {
-                name: name.clone().into(),
+                name: name.clone(),
                 is_parameter,
                 is_function_name,
                 local: local_info,
@@ -1307,7 +1307,7 @@ impl ScopeCollector {
                 if let Some(ref scope_data) = records[index].scope_data {
                     let mut sd = scope_data.borrow_mut();
                     if !sd.annexb_function_names.iter().any(|n| *n == function.name) {
-                        sd.annexb_function_names.push(function.name.clone().into());
+                        sd.annexb_function_names.push(function.name.clone());
                     }
                 }
                 // Mark all function declarations with this name in the block
