@@ -792,7 +792,7 @@ pub fn generate_statement(
 
         // === Return ===
         StatementKind::Return(value) => {
-            let mut val = match value {
+            let val = match value {
                 Some(expression) => {
                     let v = generate_expression_or_undefined(expression, gen, None);
                     // Async functions implicitly await an explicit return value.

@@ -740,7 +740,6 @@ impl<'a> Parser<'a> {
         class_start: Position,
         found_private_names: &mut HashMap<Vec<u16>, (Option<ClassMethodKind>, bool)>,
     ) -> (Option<Node<ClassElement>>, Option<Expression>) {
-        let start = self.position();
         // C++ lexes "static" as Identifier and checks original_value() == "static".
         let mut is_static = if self.match_identifier()
             && self.token_original_value(&self.current_token) == utf16!("static") {
