@@ -194,6 +194,17 @@ fn check_errors_with_callback(
     false
 }
 
+/// Convert scope local variables to generator LocalVariable format.
+fn convert_local_variables(scope: &ast::ScopeData) -> Vec<bytecode::generator::LocalVariable> {
+    scope.local_variables.iter().map(|lv| {
+        bytecode::generator::LocalVariable {
+            name: lv.name.clone(),
+            is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
+            is_initialized_during_declaration_instantiation: false,
+        }
+    }).collect()
+}
+
 /// Create a Generator configured for program-level compilation.
 fn new_program_generator(
     strict: bool,
@@ -222,18 +233,7 @@ unsafe fn compile_program_body(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
 ) -> *mut c_void {
-    {
-        let scope = scope_ref.borrow();
-        gen.local_variables = scope
-            .local_variables
-            .iter()
-            .map(|lv| bytecode::generator::LocalVariable {
-                name: lv.name.clone(),
-                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-                is_initialized_during_declaration_instantiation: false,
-            })
-            .collect();
-    }
+    gen.local_variables = convert_local_variables(&scope_ref.borrow());
 
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
@@ -1263,13 +1263,7 @@ unsafe fn compile_module_as_async(
     // Extract local variables from the program scope so the executable has the
     // correct registers_and_locals_count. Without this, locals are not saved
     // across await suspension points, causing them to become undefined.
-    gen.local_variables = scope.local_variables.iter().map(|lv| {
-        bytecode::generator::LocalVariable {
-            name: lv.name.clone(),
-            is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-            is_initialized_during_declaration_instantiation: false,
-        }
-    }).collect();
+    gen.local_variables = convert_local_variables(&scope);
 
     let entry_block = gen.make_block();
     gen.switch_to_basic_block(entry_block);
@@ -1673,14 +1667,7 @@ pub unsafe extern "C" fn rust_compile_function(
     gen.enclosing_function_kind = function_data.kind;
 
     if let Some(scope) = body_scope {
-        let sd = scope.borrow();
-        gen.local_variables = sd.local_variables.iter().map(|lv| {
-            bytecode::generator::LocalVariable {
-                name: lv.name.clone(),
-                is_lexically_declared: lv.kind == ast::LocalVarKind::LetOrConst,
-                is_initialized_during_declaration_instantiation: false,
-            }
-        }).collect();
+        gen.local_variables = convert_local_variables(&scope.borrow());
     }
 
     let entry_block = gen.make_block();
