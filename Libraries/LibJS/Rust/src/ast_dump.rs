@@ -242,8 +242,7 @@ fn format_f64(value: f64) -> String {
     }
     let mut buffer = [0u8; 128];
     let length = unsafe { rust_format_double(value, buffer.as_mut_ptr(), buffer.len()) };
-    // SAFETY: C++ writes valid ASCII/UTF-8 decimal representations.
-    unsafe { std::str::from_utf8_unchecked(&buffer[..length]).to_string() }
+    std::str::from_utf8(&buffer[..length]).expect("C++ produced invalid UTF-8").to_string()
 }
 
 fn binary_op_to_string(op: BinaryOp) -> &'static str {
