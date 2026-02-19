@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
+use crate::lexer::ch;
 use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType, PropertyKey, PRECEDENCE_COMMA, PRECEDENCE_ASSIGNMENT};
 use crate::token::TokenType;
 
@@ -881,7 +882,7 @@ impl<'a> Parser<'a> {
         // It is a Syntax Error if PrivateBoundIdentifiers of ClassElementList contains
         // any duplicate entries, unless the name is used once for a getter and once for
         // a setter and in no other entries, and they are either both static or both non-static.
-        let is_private = key_value.as_ref().is_some_and(|v| v.first() == Some(&(b'#' as u16)));
+        let is_private = key_value.as_ref().is_some_and(|v| v.first() == Some(&ch(b'#')));
         if is_private {
             let name = key_value.as_ref().unwrap();
             let current_kind = if is_getter { Some(ClassMethodKind::Getter) } else if is_setter { Some(ClassMethodKind::Setter) } else { None };
@@ -1284,7 +1285,7 @@ impl<'a> Parser<'a> {
                         } else if self.match_token(TokenType::BigIntLiteral) {
                             let token = self.consume();
                             let value = self.token_value(&token).to_vec();
-                            let name_value = if value.last() == Some(&(b'n' as u16)) {
+                            let name_value = if value.last() == Some(&ch(b'n')) {
                                 value[..value.len() - 1].to_vec()
                             } else {
                                 value

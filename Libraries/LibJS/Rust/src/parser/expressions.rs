@@ -10,6 +10,7 @@
 use std::rc::Rc;
 
 use crate::ast::*;
+use crate::lexer::ch;
 use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, PropertyKey, is_strict_reserved_word, PRECEDENCE_COMMA, PRECEDENCE_ASSIGNMENT, PRECEDENCE_UNARY, PRECEDENCE_MEMBER};
 use crate::token::{Token, TokenType};
 
@@ -370,7 +371,7 @@ impl<'a> Parser<'a> {
                     self.consume();
                     let meta_token = self.current_token.clone();
                     self.consume_token(TokenType::Identifier);
-                    let meta_utf16: [u16; 4] = [b'm' as u16, b'e' as u16, b't' as u16, b'a' as u16];
+                    let meta_utf16: [u16; 4] = [ch(b'm'), ch(b'e'), ch(b't'), ch(b'a')];
                     if self.token_original_value(&meta_token) != meta_utf16 {
                         self.syntax_error("Expected 'meta' after 'import.'");
                     }
@@ -1601,43 +1602,43 @@ impl<'a> Parser<'a> {
             if raw[i] == b'\\' as u16 && i + 1 < raw.len() {
                 i += 1;
                 match raw[i] {
-                    c if c == b'n' as u16 => result.0.push(b'\n' as u16),
-                    c if c == b'r' as u16 => result.0.push(b'\r' as u16),
-                    c if c == b't' as u16 => result.0.push(b'\t' as u16),
-                    c if c == b'b' as u16 => result.0.push(8),
-                    c if c == b'f' as u16 => result.0.push(12),
-                    c if c == b'v' as u16 => result.0.push(11),
-                    c if c == b'0' as u16 => {
-                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == b'8' as u16 || raw[i + 1] == b'9' as u16) {
+                    c if c == ch(b'n') => result.0.push(ch(b'\n')),
+                    c if c == ch(b'r') => result.0.push(ch(b'\r')),
+                    c if c == ch(b't') => result.0.push(ch(b'\t')),
+                    c if c == ch(b'b') => result.0.push(8),
+                    c if c == ch(b'f') => result.0.push(12),
+                    c if c == ch(b'v') => result.0.push(11),
+                    c if c == ch(b'0') => {
+                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == ch(b'8') || raw[i + 1] == ch(b'9')) {
                             return None;
                         }
                         result.0.push(0);
                     }
-                    c if c >= b'1' as u16 && c <= b'9' as u16 => {
+                    c if c >= ch(b'1') && c <= ch(b'9') => {
                         return None;
                     }
-                    c if c == b'x' as u16 => {
+                    c if c == ch(b'x') => {
                         let (advance, ch) = parse_hex_escape(raw, i)?;
                         result.0.push(ch);
                         i += advance;
                     }
-                    c if c == b'u' as u16 => {
+                    c if c == ch(b'u') => {
                         let (advance, code_point) = parse_unicode_escape(raw, i)?;
                         push_code_point(&mut result.0, code_point);
                         i += advance;
                     }
-                    c if c == b'\n' as u16 => { /* line continuation */ }
-                    c if c == b'\r' as u16 => {
-                        if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+                    c if c == ch(b'\n') => { /* line continuation */ }
+                    c if c == ch(b'\r') => {
+                        if i + 1 < raw.len() && raw[i + 1] == ch(b'\n') {
                             i += 1;
                         }
                     }
                     c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
                     c => result.0.push(c),
                 }
-            } else if raw[i] == b'\r' as u16 {
-                result.0.push(b'\n' as u16);
-                if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+            } else if raw[i] == ch(b'\r') {
+                result.0.push(ch(b'\n'));
+                if i + 1 < raw.len() && raw[i + 1] == ch(b'\n') {
                     i += 1;
                 }
             } else {
@@ -1667,36 +1668,36 @@ impl<'a> Parser<'a> {
             if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
                 i += 1;
                 match inner[i] {
-                    c if c == b'n' as u16 => result.0.push(b'\n' as u16),
-                    c if c == b'r' as u16 => result.0.push(b'\r' as u16),
-                    c if c == b't' as u16 => result.0.push(b'\t' as u16),
-                    c if c == b'b' as u16 => result.0.push(8),
-                    c if c == b'f' as u16 => result.0.push(12),
-                    c if c == b'v' as u16 => result.0.push(11),
-                    c if c == b'0' as u16 => {
+                    c if c == ch(b'n') => result.0.push(ch(b'\n')),
+                    c if c == ch(b'r') => result.0.push(ch(b'\r')),
+                    c if c == ch(b't') => result.0.push(ch(b'\t')),
+                    c if c == ch(b'b') => result.0.push(8),
+                    c if c == ch(b'f') => result.0.push(12),
+                    c if c == ch(b'v') => result.0.push(11),
+                    c if c == ch(b'0') => {
                         if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
                             has_legacy_octal = true;
                             let (val, consumed) = parse_octal_escape(inner, i);
                             result.0.push(val);
                             i += consumed;
-                        } else if i + 1 < inner.len() && (inner[i + 1] == b'8' as u16 || inner[i + 1] == b'9' as u16) {
+                        } else if i + 1 < inner.len() && (inner[i + 1] == ch(b'8') || inner[i + 1] == ch(b'9')) {
                             has_legacy_octal = true;
                             result.0.push(0);
                         } else {
                             result.0.push(0);
                         }
                     }
-                    c if c >= b'1' as u16 && c <= b'7' as u16 => {
+                    c if c >= ch(b'1') && c <= ch(b'7') => {
                         has_legacy_octal = true;
                         let (val, consumed) = parse_octal_escape(inner, i);
                         result.0.push(val);
                         i += consumed;
                     }
-                    c if c == b'8' as u16 || c == b'9' as u16 => {
+                    c if c == ch(b'8') || c == ch(b'9') => {
                         has_legacy_octal = true;
                         result.0.push(c);
                     }
-                    c if c == b'x' as u16 => {
+                    c if c == ch(b'x') => {
                         if let Some((advance, ch)) = parse_hex_escape(inner, i) {
                             result.0.push(ch);
                             i += advance;
@@ -1705,7 +1706,7 @@ impl<'a> Parser<'a> {
                             result.0.push(inner[i]);
                         }
                     }
-                    c if c == b'u' as u16 => {
+                    c if c == ch(b'u') => {
                         if let Some((advance, code_point)) = parse_unicode_escape(inner, i) {
                             push_code_point(&mut result.0, code_point);
                             i += advance;
@@ -1714,19 +1715,19 @@ impl<'a> Parser<'a> {
                             result.0.push(inner[i]);
                         }
                     }
-                    c if c == b'\n' as u16 => { /* skip */ }
-                    c if c == b'\r' as u16 => {
-                        if i + 1 < inner.len() && inner[i + 1] == b'\n' as u16 {
+                    c if c == ch(b'\n') => { /* skip */ }
+                    c if c == ch(b'\r') => {
+                        if i + 1 < inner.len() && inner[i + 1] == ch(b'\n') {
                             i += 1;
                         }
                     }
                     c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
                     c => result.0.push(c),
                 }
-            } else if inner[i] == b'\r' as u16 {
+            } else if inner[i] == ch(b'\r') {
                 // Normalize \r\n and bare \r to \n per spec (12.9.6).
-                result.0.push(b'\n' as u16);
-                if i + 1 < inner.len() && inner[i + 1] == b'\n' as u16 {
+                result.0.push(ch(b'\n'));
+                if i + 1 < inner.len() && inner[i + 1] == ch(b'\n') {
                     i += 1;
                 }
             } else {
@@ -2038,20 +2039,20 @@ fn hex_digit(c: u16) -> Option<u16> {
 }
 
 fn is_octal_char(c: u16) -> bool {
-    c >= b'0' as u16 && c <= b'7' as u16
+    c >= ch(b'0') && c <= ch(b'7')
 }
 
 fn parse_octal_escape(inner: &[u16], i: usize) -> (u16, usize) {
-    let first = (inner[i] - b'0' as u16) as u32;
+    let first = (inner[i] - ch(b'0')) as u32;
     let mut value = first;
     let mut consumed = 0;
 
     if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
-        value = value * 8 + (inner[i + 1] - b'0' as u16) as u32;
+        value = value * 8 + (inner[i + 1] - ch(b'0')) as u32;
         consumed = 1;
 
         if i + 2 < inner.len() && is_octal_char(inner[i + 2]) && first <= 3 {
-            value = value * 8 + (inner[i + 2] - b'0' as u16) as u32;
+            value = value * 8 + (inner[i + 2] - ch(b'0')) as u32;
             consumed = 2;
         }
     }
@@ -2071,11 +2072,11 @@ fn parse_unicode_escape(raw: &[u16], i: usize) -> Option<(usize, u32)> {
     if i + 1 >= raw.len() {
         return None;
     }
-    if raw[i + 1] == b'{' as u16 {
+    if raw[i + 1] == ch(b'{') {
         let mut j = i + 2;
         let mut value: u32 = 0;
         let mut digits = 0;
-        while j < raw.len() && raw[j] != b'}' as u16 {
+        while j < raw.len() && raw[j] != ch(b'}') {
             let d = hex_digit(raw[j])? as u32;
             value = value * 16 + d;
             if value > 0x10FFFF {
@@ -2114,9 +2115,9 @@ fn raw_template_value(raw: &[u16]) -> Utf16String {
     let mut result = Utf16String(Vec::with_capacity(raw.len()));
     let mut i = 0;
     while i < raw.len() {
-        if raw[i] == b'\r' as u16 {
-            result.0.push(b'\n' as u16);
-            if i + 1 < raw.len() && raw[i + 1] == b'\n' as u16 {
+        if raw[i] == ch(b'\r') {
+            result.0.push(ch(b'\n'));
+            if i + 1 < raw.len() && raw[i + 1] == ch(b'\n') {
                 i += 1;
             }
         } else {

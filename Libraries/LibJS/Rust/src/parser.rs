@@ -40,7 +40,7 @@ use crate::ast::{
     BindingPattern, Expression, ExpressionKind, FunctionParameter, FunctionTable, Identifier,
     SourceRange, Statement, StatementKind, ScopeData, ProgramData, Utf16String,
 };
-use crate::lexer::Lexer;
+use crate::lexer::{ch, Lexer};
 use crate::scope_collector::{ScopeCollector, ScopeCollectorState};
 use crate::token::{Token, TokenType};
 
@@ -488,8 +488,8 @@ impl<'a> Parser<'a> {
             // https://tc39.es/ecma262/#sec-additional-syntax-numeric-literals
             // In strict mode, legacy octal literals (0-prefixed) are not permitted.
             let value = self.token_value(&token);
-            if value.len() > 1 && value[0] == b'0' as u16
-                && value[1] >= b'0' as u16 && value[1] <= b'9' as u16
+            if value.len() > 1 && value[0] == ch(b'0')
+                && value[1] >= ch(b'0') && value[1] <= ch(b'9')
             {
                 self.syntax_error("Unprefixed octal number not allowed in strict mode");
             }
@@ -605,18 +605,18 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn validate_regex_flags(&mut self, flags: &[u16]) {
-        let valid_flags: &[u16] = &[b'd' as u16, b'g' as u16, b'i' as u16, b'm' as u16, b's' as u16, b'u' as u16, b'v' as u16, b'y' as u16];
+        let valid_flags: &[u16] = &[ch(b'd'), ch(b'g'), ch(b'i'), ch(b'm'), ch(b's'), ch(b'u'), ch(b'v'), ch(b'y')];
         let mut seen = [false; 128];
-        for &ch in flags {
-            if ch >= 128 || !valid_flags.contains(&ch) {
-                self.syntax_error(&format!("Invalid RegExp flag '{}'", char::from_u32(ch as u32).unwrap_or('?')));
+        for &flag in flags {
+            if flag >= 128 || !valid_flags.contains(&flag) {
+                self.syntax_error(&format!("Invalid RegExp flag '{}'", char::from_u32(flag as u32).unwrap_or('?')));
                 return;
             }
-            if seen[ch as usize] {
-                self.syntax_error(&format!("Repeated RegExp flag '{}'", char::from_u32(ch as u32).unwrap_or('?')));
+            if seen[flag as usize] {
+                self.syntax_error(&format!("Repeated RegExp flag '{}'", char::from_u32(flag as u32).unwrap_or('?')));
                 return;
             }
-            seen[ch as usize] = true;
+            seen[flag as usize] = true;
         }
     }
 

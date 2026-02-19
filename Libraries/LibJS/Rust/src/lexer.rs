@@ -57,6 +57,8 @@ pub(crate) struct SavedLexerState {
 
 pub struct Lexer<'a> {
     source: &'a [u16],
+    /// 1-based index into `source`: always one past `current_code_unit`.
+    /// Subtract 1 to get the 0-based index of the current code unit.
     position: usize,
     current_code_unit: u16,
     eof: bool,
@@ -79,6 +81,11 @@ const LINE_SEPARATOR: u16 = 0x2028;
 const PARAGRAPH_SEPARATOR: u16 = 0x2029;
 const ZERO_WIDTH_NO_BREAK_SPACE: u16 = 0xFEFF;
 
+/// Convert an ASCII byte literal to a UTF-16 code unit.
+pub(crate) const fn ch(c: u8) -> u16 {
+    c as u16
+}
+
 fn is_ascii(cu: u16) -> bool {
     cu < 128
 }
@@ -88,7 +95,7 @@ fn is_ascii_alpha(cp: u32) -> bool {
 }
 
 fn is_ascii_digit(cu: u16) -> bool {
-    cu >= b'0' as u16 && cu <= b'9' as u16
+    cu >= ch(b'0') && cu <= ch(b'9')
 }
 
 fn is_ascii_digit_cp(cp: u32) -> bool {
@@ -96,7 +103,7 @@ fn is_ascii_digit_cp(cp: u32) -> bool {
 }
 
 fn is_ascii_hex_digit(cu: u16) -> bool {
-    is_ascii_digit(cu) || (cu >= b'a' as u16 && cu <= b'f' as u16) || (cu >= b'A' as u16 && cu <= b'F' as u16)
+    is_ascii_digit(cu) || (cu >= ch(b'a') && cu <= ch(b'f')) || (cu >= ch(b'A') && cu <= ch(b'F'))
 }
 
 fn is_ascii_alphanumeric(cp: u32) -> bool {
@@ -108,11 +115,11 @@ fn is_ascii_space(cu: u16) -> bool {
 }
 
 fn is_octal_digit(cu: u16) -> bool {
-    cu >= b'0' as u16 && cu <= b'7' as u16
+    cu >= ch(b'0') && cu <= ch(b'7')
 }
 
 fn is_binary_digit(cu: u16) -> bool {
-    cu == b'0' as u16 || cu == b'1' as u16
+    cu == ch(b'0') || cu == ch(b'1')
 }
 
 fn is_utf16_high_surrogate(cu: u16) -> bool {
@@ -414,8 +421,8 @@ impl<'a> Lexer<'a> {
 
         if self.is_line_terminator() {
             let second_char_of_crlf = self.position > 1
-                && self.source[self.position - 2] == b'\r' as u16
-                && self.current_code_unit == b'\n' as u16;
+                && self.source[self.position - 2] == ch(b'\r')
+                && self.current_code_unit == ch(b'\n');
 
             if !second_char_of_crlf {
                 self.line_number += 1;
@@ -456,7 +463,7 @@ impl<'a> Lexer<'a> {
 
     fn is_line_terminator(&self) -> bool {
         let cu = self.current_code_unit;
-        if cu == b'\n' as u16 || cu == b'\r' as u16 {
+        if cu == ch(b'\n') || cu == ch(b'\r') {
             return true;
         }
         if is_ascii(cu) {
@@ -495,7 +502,7 @@ impl<'a> Lexer<'a> {
         if pos >= self.source_len() {
             return None;
         }
-        if self.source[pos] != b'u' as u16 {
+        if self.source[pos] != ch(b'u') {
             return None;
         }
         let pos = pos + 1;
@@ -503,13 +510,13 @@ impl<'a> Lexer<'a> {
             return None;
         }
 
-        if self.source[pos] == b'{' as u16 {
+        if self.source[pos] == ch(b'{') {
             let mut cp: u32 = 0;
             let mut i = pos + 1;
             if i >= self.source_len() {
                 return None;
             }
-            while i < self.source_len() && self.source[i] != b'}' as u16 {
+            while i < self.source_len() && self.source[i] != ch(b'}') {
                 let cu = self.source[i];
                 if !is_ascii_hex_digit(cu) {
                     return None;
@@ -520,7 +527,7 @@ impl<'a> Lexer<'a> {
                 }
                 i += 1;
             }
-            if i >= self.source_len() || self.source[i] != b'}' as u16 {
+            if i >= self.source_len() || self.source[i] != ch(b'}') {
                 return None;
             }
             let consumed = i + 1 - (self.position - 1);
@@ -581,14 +588,14 @@ impl<'a> Lexer<'a> {
         let mut result = Utf16String(Vec::with_capacity(raw.len()));
         let mut i = 0;
         while i < raw.len() {
-            if raw[i] == b'\\' as u16 {
+            if raw[i] == ch(b'\\') {
                 i += 1; // skip '\'
-                if i < raw.len() && raw[i] == b'u' as u16 {
+                if i < raw.len() && raw[i] == ch(b'u') {
                     i += 1; // skip 'u'
-                    if i < raw.len() && raw[i] == b'{' as u16 {
+                    if i < raw.len() && raw[i] == ch(b'{') {
                         i += 1; // skip '{'
                         let mut cp: u32 = 0;
-                        while i < raw.len() && raw[i] != b'}' as u16 {
+                        while i < raw.len() && raw[i] != ch(b'}') {
                             cp = cp * 16 + hex_value(raw[i]);
                             i += 1;
                         }
@@ -685,7 +692,7 @@ impl<'a> Lexer<'a> {
         if self.position >= self.source_len() {
             return false;
         }
-        self.current_code_unit == b'_' as u16 && check(self.source[self.position])
+        self.current_code_unit == ch(b'_') && check(self.source[self.position])
     }
 
     // https://tc39.es/ecma262/#sec-comments
@@ -699,23 +706,23 @@ impl<'a> Lexer<'a> {
     // https://tc39.es/ecma262/#sec-hashbang
     // HashbangComment :: `#!` SingleLineCommentChars?
     fn is_line_comment_start(&self, line_has_token_yet: bool) -> bool {
-        self.match2(b'/' as u16, b'/' as u16)
-            || (self.allow_html_comments && self.match4(b'<' as u16, b'!' as u16, b'-' as u16, b'-' as u16))
-            || (self.allow_html_comments && !line_has_token_yet && self.match3(b'-' as u16, b'-' as u16, b'>' as u16))
-            || (self.match2(b'#' as u16, b'!' as u16) && self.position == 1)
+        self.match2(ch(b'/'), ch(b'/'))
+            || (self.allow_html_comments && self.match4(ch(b'<'), ch(b'!'), ch(b'-'), ch(b'-')))
+            || (self.allow_html_comments && !line_has_token_yet && self.match3(ch(b'-'), ch(b'-'), ch(b'>')))
+            || (self.match2(ch(b'#'), ch(b'!')) && self.position == 1)
     }
 
     fn is_block_comment_start(&self) -> bool {
-        self.match2(b'/' as u16, b'*' as u16)
+        self.match2(ch(b'/'), ch(b'*'))
     }
 
     fn is_block_comment_end(&self) -> bool {
-        self.match2(b'*' as u16, b'/' as u16)
+        self.match2(ch(b'*'), ch(b'/'))
     }
 
     fn is_numeric_literal_start(&self) -> bool {
         is_ascii_digit(self.current_code_unit)
-            || (self.current_code_unit == b'.' as u16
+            || (self.current_code_unit == ch(b'.')
                 && self.position < self.source_len()
                 && is_ascii_digit(self.source[self.position]))
     }
@@ -753,7 +760,7 @@ impl<'a> Lexer<'a> {
 
     fn consume_exponent(&mut self) -> bool {
         self.consume();
-        if self.current_code_unit == b'-' as u16 || self.current_code_unit == b'+' as u16 {
+        if self.current_code_unit == ch(b'-') || self.current_code_unit == ch(b'+') {
             self.consume();
         }
         if !is_ascii_digit(self.current_code_unit) {
@@ -785,7 +792,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn try_consume_bigint_suffix(&mut self, token_type: &mut TokenType) {
-        if self.current_code_unit == b'n' as u16 {
+        if self.current_code_unit == ch(b'n') {
             self.consume();
             *token_type = TokenType::BigIntLiteral;
         }
@@ -805,27 +812,27 @@ impl<'a> Lexer<'a> {
     fn consume_regex_literal(&mut self) -> TokenType {
         self.regex_is_in_character_class = false;
         while !self.is_eof() {
-            if self.is_line_terminator() || (!self.regex_is_in_character_class && self.current_code_unit == b'/' as u16) {
+            if self.is_line_terminator() || (!self.regex_is_in_character_class && self.current_code_unit == ch(b'/')) {
                 break;
             }
 
-            if self.current_code_unit == b'[' as u16 {
+            if self.current_code_unit == ch(b'[') {
                 self.regex_is_in_character_class = true;
-            } else if self.current_code_unit == b']' as u16 {
+            } else if self.current_code_unit == ch(b']') {
                 self.regex_is_in_character_class = false;
             }
 
-            if self.match2(b'\\' as u16, b'/' as u16)
-                || self.match2(b'\\' as u16, b'[' as u16)
-                || self.match2(b'\\' as u16, b'\\' as u16)
-                || (self.regex_is_in_character_class && self.match2(b'\\' as u16, b']' as u16))
+            if self.match2(ch(b'\\'), ch(b'/'))
+                || self.match2(ch(b'\\'), ch(b'['))
+                || self.match2(ch(b'\\'), ch(b'\\'))
+                || (self.regex_is_in_character_class && self.match2(ch(b'\\'), ch(b']')))
             {
                 self.consume();
             }
             self.consume();
         }
 
-        if self.current_code_unit == b'/' as u16 {
+        if self.current_code_unit == ch(b'/') {
             self.consume();
             TokenType::RegexLiteral
         } else {
@@ -910,7 +917,7 @@ impl<'a> Lexer<'a> {
             while !self.is_eof() && self.current_code_unit < 128 && (self.current_code_unit as u8 as char).is_ascii_alphabetic() {
                 self.consume();
             }
-        } else if self.current_code_unit == b'`' as u16 {
+        } else if self.current_code_unit == ch(b'`') {
             self.consume();
             if !in_template {
                 token_type = TokenType::TemplateLiteralStart;
@@ -931,7 +938,7 @@ impl<'a> Lexer<'a> {
         } else if in_template
             && self.current_template_state().in_expression
             && self.current_template_state().open_bracket_count == 0
-            && self.current_code_unit == b'}' as u16
+            && self.current_code_unit == ch(b'}')
         {
             self.consume();
             token_type = TokenType::TemplateLiteralExprEnd;
@@ -940,16 +947,16 @@ impl<'a> Lexer<'a> {
             if self.is_eof() {
                 token_type = TokenType::UnterminatedTemplateLiteral;
                 self.template_states.pop();
-            } else if self.match2(b'$' as u16, b'{' as u16) {
+            } else if self.match2(ch(b'$'), ch(b'{')) {
                 token_type = TokenType::TemplateLiteralExprStart;
                 self.consume();
                 self.consume();
                 self.current_template_state_mut().in_expression = true;
             } else {
-                while !self.match2(b'$' as u16, b'{' as u16) && self.current_code_unit != b'`' as u16 && !self.is_eof() {
-                    if self.match2(b'\\' as u16, b'$' as u16)
-                        || self.match2(b'\\' as u16, b'`' as u16)
-                        || self.match2(b'\\' as u16, b'\\' as u16)
+                while !self.match2(ch(b'$'), ch(b'{')) && self.current_code_unit != ch(b'`') && !self.is_eof() {
+                    if self.match2(ch(b'\\'), ch(b'$'))
+                        || self.match2(ch(b'\\'), ch(b'`'))
+                        || self.match2(ch(b'\\'), ch(b'\\'))
                     {
                         self.consume();
                     }
@@ -961,7 +968,7 @@ impl<'a> Lexer<'a> {
                     token_type = TokenType::TemplateLiteralString;
                 }
             }
-        } else if self.current_code_unit == b'#' as u16 {
+        } else if self.current_code_unit == ch(b'#') {
             self.consume();
             if let Some((_cp, len)) = self.is_identifier_start() {
                 let has_escape = self.scan_identifier_body(len);
@@ -999,28 +1006,28 @@ impl<'a> Lexer<'a> {
         } else if self.is_numeric_literal_start() {
             token_type = TokenType::NumericLiteral;
             let mut is_invalid = false;
-            if self.current_code_unit == b'0' as u16 {
+            if self.current_code_unit == ch(b'0') {
                 self.consume();
-                if self.current_code_unit == b'.' as u16 {
+                if self.current_code_unit == ch(b'.') {
                     self.consume();
                     while is_ascii_digit(self.current_code_unit) {
                         self.consume();
                     }
-                    if self.current_code_unit == b'e' as u16 || self.current_code_unit == b'E' as u16 {
+                    if self.current_code_unit == ch(b'e') || self.current_code_unit == ch(b'E') {
                         is_invalid = !self.consume_exponent();
                     }
-                } else if self.current_code_unit == b'e' as u16 || self.current_code_unit == b'E' as u16 {
+                } else if self.current_code_unit == ch(b'e') || self.current_code_unit == ch(b'E') {
                     is_invalid = !self.consume_exponent();
-                } else if self.current_code_unit == b'o' as u16 || self.current_code_unit == b'O' as u16 {
+                } else if self.current_code_unit == ch(b'o') || self.current_code_unit == ch(b'O') {
                     is_invalid = !self.consume_octal_number();
                     self.try_consume_bigint_suffix(&mut token_type);
-                } else if self.current_code_unit == b'b' as u16 || self.current_code_unit == b'B' as u16 {
+                } else if self.current_code_unit == ch(b'b') || self.current_code_unit == ch(b'B') {
                     is_invalid = !self.consume_binary_number();
                     self.try_consume_bigint_suffix(&mut token_type);
-                } else if self.current_code_unit == b'x' as u16 || self.current_code_unit == b'X' as u16 {
+                } else if self.current_code_unit == ch(b'x') || self.current_code_unit == ch(b'X') {
                     is_invalid = !self.consume_hexadecimal_number();
                     self.try_consume_bigint_suffix(&mut token_type);
-                } else if self.current_code_unit == b'n' as u16 {
+                } else if self.current_code_unit == ch(b'n') {
                     self.try_consume_bigint_suffix(&mut token_type);
                 } else if is_ascii_digit(self.current_code_unit) {
                     // Legacy octal without 0o prefix
@@ -1035,20 +1042,20 @@ impl<'a> Lexer<'a> {
                 while is_ascii_digit(self.current_code_unit) || self.match_numeric_literal_separator_followed_by(is_ascii_digit) {
                     self.consume();
                 }
-                if self.current_code_unit == b'n' as u16 {
+                if self.current_code_unit == ch(b'n') {
                     self.consume();
                     token_type = TokenType::BigIntLiteral;
                 } else {
-                    if self.current_code_unit == b'.' as u16 {
+                    if self.current_code_unit == ch(b'.') {
                         self.consume();
-                        if self.current_code_unit == b'_' as u16 {
+                        if self.current_code_unit == ch(b'_') {
                             is_invalid = true;
                         }
                         while is_ascii_digit(self.current_code_unit) || self.match_numeric_literal_separator_followed_by(is_ascii_digit) {
                             self.consume();
                         }
                     }
-                    if self.current_code_unit == b'e' as u16 || self.current_code_unit == b'E' as u16 {
+                    if self.current_code_unit == ch(b'e') || self.current_code_unit == ch(b'E') {
                         is_invalid = is_invalid || !self.consume_exponent();
                     }
                 }
@@ -1057,19 +1064,19 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::Invalid;
                 token_message = Some("Invalid numeric literal".to_string());
             }
-        } else if self.current_code_unit == b'"' as u16 || self.current_code_unit == b'\'' as u16 {
+        } else if self.current_code_unit == ch(b'"') || self.current_code_unit == ch(b'\'') {
             let stop_char = self.current_code_unit;
             self.consume();
             while self.current_code_unit != stop_char
-                && self.current_code_unit != b'\r' as u16
-                && self.current_code_unit != b'\n' as u16
+                && self.current_code_unit != ch(b'\r')
+                && self.current_code_unit != ch(b'\n')
                 && !self.is_eof()
             {
-                if self.current_code_unit == b'\\' as u16 {
+                if self.current_code_unit == ch(b'\\') {
                     self.consume();
-                    if self.current_code_unit == b'\r' as u16
+                    if self.current_code_unit == ch(b'\r')
                         && self.position < self.source_len()
-                        && self.source[self.position] == b'\n' as u16
+                        && self.source[self.position] == ch(b'\n')
                     {
                         self.consume();
                     }
@@ -1082,7 +1089,7 @@ impl<'a> Lexer<'a> {
                 self.consume();
                 token_type = TokenType::StringLiteral;
             }
-        } else if self.current_code_unit == b'/' as u16 && !self.slash_means_division() {
+        } else if self.current_code_unit == ch(b'/') && !self.slash_means_division() {
             self.consume();
             token_type = self.consume_regex_literal();
         } else if self.eof {
@@ -1095,7 +1102,7 @@ impl<'a> Lexer<'a> {
         } else {
             let mut found_token = false;
 
-            if self.match4(b'>' as u16, b'>' as u16, b'>' as u16, b'=' as u16) {
+            if self.match4(ch(b'>'), ch(b'>'), ch(b'>'), ch(b'=')) {
                 found_token = true;
                 token_type = TokenType::UnsignedShiftRightEquals;
                 self.consume();
@@ -1166,7 +1173,7 @@ impl<'a> Lexer<'a> {
         let trivia_has_line_terminator = if trivia_start > 0 && value_start > trivia_start {
             self.source[trivia_start - 1..value_start - 1]
                 .iter()
-                .any(|&cu| cu == b'\n' as u16 || cu == b'\r' as u16 || cu == LINE_SEPARATOR || cu == PARAGRAPH_SEPARATOR)
+                .any(|&cu| cu == ch(b'\n') || cu == ch(b'\r') || cu == LINE_SEPARATOR || cu == PARAGRAPH_SEPARATOR)
         } else {
             false
         };
@@ -1254,7 +1261,7 @@ impl<'a> Lexer<'a> {
         if has_equals {
             value_start -= 1;
             self.position -= 1;
-            self.current_code_unit = b'=' as u16;
+            self.current_code_unit = ch(b'=');
             token_line_column -= 1;
         }
 

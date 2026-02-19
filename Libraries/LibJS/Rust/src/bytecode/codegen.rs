@@ -19,6 +19,7 @@ use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use crate::ast::*;
+use crate::lexer::ch;
 
 use super::generator::{choose_dst, constant_to_boolean, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
@@ -3617,15 +3618,15 @@ pub(crate) fn is_array_index(s: &[u16]) -> bool {
         return false;
     }
     // Must not have leading zeros (except "0" itself)
-    if s.len() > 1 && s[0] == b'0' as u16 {
+    if s.len() > 1 && s[0] == ch(b'0') {
         return false;
     }
     let mut value: u64 = 0;
-    for &ch in s {
-        if ch < b'0' as u16 || ch > b'9' as u16 {
+    for &c in s {
+        if c < ch(b'0') || c > ch(b'9') {
             return false;
         }
-        value = value * 10 + (ch - b'0' as u16) as u64;
+        value = value * 10 + (c - ch(b'0')) as u64;
     }
     value <= 0xFFFF_FFFE
 }
@@ -7815,17 +7816,17 @@ fn is_numeric_index_key(key: &[u16]) -> bool {
         return false;
     }
     // Exclude leading zeros in multi-digit strings (e.g., "01")
-    if key[0] == b'0' as u16 && key.len() > 1 {
+    if key[0] == ch(b'0') && key.len() > 1 {
         return false;
     }
     // Must be all ASCII digits
-    if !key.iter().all(|&c| c >= b'0' as u16 && c <= b'9' as u16) {
+    if !key.iter().all(|&c| c >= ch(b'0') && c <= ch(b'9')) {
         return false;
     }
     // Parse as u64 first to avoid overflow, then check < u32::MAX
     let mut n: u64 = 0;
     for &c in key {
-        n = n * 10 + (c - b'0' as u16) as u64;
+        n = n * 10 + (c - ch(b'0')) as u64;
         if n > u32::MAX as u64 {
             return false;
         }
