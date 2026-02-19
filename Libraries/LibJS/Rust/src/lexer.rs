@@ -84,7 +84,7 @@ fn is_ascii(cu: u16) -> bool {
 }
 
 fn is_ascii_alpha(cp: u32) -> bool {
-    (cp as u8).is_ascii_alphabetic() && cp < 128
+    cp < 128 && (cp as u8).is_ascii_alphabetic()
 }
 
 fn is_ascii_digit(cu: u16) -> bool {
@@ -268,6 +268,7 @@ fn keyword_from_str(s: &[u16]) -> Option<TokenType> {
 }
 
 fn single_char_token(ch: u16) -> TokenType {
+    debug_assert!(ch < 128);
     match ch as u8 {
         b'&' => TokenType::Ampersand,
         b'*' => TokenType::Asterisk,
@@ -298,6 +299,7 @@ fn single_char_token(ch: u16) -> TokenType {
 }
 
 fn parse_two_char_token(ch0: u16, ch1: u16) -> TokenType {
+    debug_assert!(ch0 < 128 && ch1 < 128);
     match (ch0 as u8, ch1 as u8) {
         (b'=', b'>') => TokenType::Arrow,
         (b'=', b'=') => TokenType::EqualsEquals,
@@ -326,6 +328,7 @@ fn parse_two_char_token(ch0: u16, ch1: u16) -> TokenType {
 }
 
 fn parse_three_char_token(ch0: u16, ch1: u16, ch2: u16) -> TokenType {
+    debug_assert!(ch0 < 128 && ch1 < 128 && ch2 < 128);
     match (ch0 as u8, ch1 as u8, ch2 as u8) {
         (b'<', b'<', b'=') => TokenType::ShiftLeftEquals,
         (b'>', b'>', b'=') => TokenType::ShiftRightEquals,
@@ -376,6 +379,14 @@ impl<'a> Lexer<'a> {
         };
         lexer.consume();
         lexer
+    }
+
+    fn current_template_state(&self) -> &TemplateState {
+        self.template_states.last().expect("template_states must not be empty")
+    }
+
+    fn current_template_state_mut(&mut self) -> &mut TemplateState {
+        self.template_states.last_mut().expect("template_states must not be empty")
     }
 
     // https://tc39.es/ecma262/#sec-html-like-comments
@@ -451,7 +462,8 @@ impl<'a> Lexer<'a> {
         if is_ascii(cu) {
             return false;
         }
-        is_line_terminator_cp(self.current_code_point())
+        // All line terminators are BMP, so no surrogate pair decoding needed.
+        is_line_terminator_cp(self.current_code_unit as u32)
     }
 
     fn is_whitespace(&self) -> bool {
@@ -461,7 +473,8 @@ impl<'a> Lexer<'a> {
         if is_ascii(self.current_code_unit) {
             return false;
         }
-        is_whitespace_cp(self.current_code_point())
+        // All whitespace characters are BMP, so no surrogate pair decoding needed.
+        is_whitespace_cp(self.current_code_unit as u32)
     }
 
     /// Try to parse a unicode escape sequence at the current position.
@@ -828,7 +841,7 @@ impl<'a> Lexer<'a> {
         let mut unterminated_comment = false;
         let mut token_message: Option<String> = None;
 
-        if !in_template || self.template_states.last().expect("template_states must not be empty").in_expression {
+        if !in_template || self.current_template_state().in_expression {
             loop {
                 if self.is_line_terminator() {
                     line_has_token_yet = false;
@@ -905,7 +918,7 @@ impl<'a> Lexer<'a> {
                     in_expression: false,
                     open_bracket_count: 0,
                 });
-            } else if self.template_states.last().expect("template_states must not be empty").in_expression {
+            } else if self.current_template_state().in_expression {
                 self.template_states.push(TemplateState {
                     in_expression: false,
                     open_bracket_count: 0,
@@ -916,14 +929,14 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralEnd;
             }
         } else if in_template
-            && self.template_states.last().expect("template_states must not be empty").in_expression
-            && self.template_states.last().expect("template_states must not be empty").open_bracket_count == 0
+            && self.current_template_state().in_expression
+            && self.current_template_state().open_bracket_count == 0
             && self.current_code_unit == b'}' as u16
         {
             self.consume();
             token_type = TokenType::TemplateLiteralExprEnd;
-            self.template_states.last_mut().expect("template_states must not be empty").in_expression = false;
-        } else if in_template && !self.template_states.last().expect("template_states must not be empty").in_expression {
+            self.current_template_state_mut().in_expression = false;
+        } else if in_template && !self.current_template_state().in_expression {
             if self.is_eof() {
                 token_type = TokenType::UnterminatedTemplateLiteral;
                 self.template_states.pop();
@@ -931,7 +944,7 @@ impl<'a> Lexer<'a> {
                 token_type = TokenType::TemplateLiteralExprStart;
                 self.consume();
                 self.consume();
-                self.template_states.last_mut().expect("template_states must not be empty").in_expression = true;
+                self.current_template_state_mut().in_expression = true;
             } else {
                 while !self.match2(b'$' as u16, b'{' as u16) && self.current_code_unit != b'`' as u16 && !self.is_eof() {
                     if self.match2(b'\\' as u16, b'$' as u16)
@@ -1140,11 +1153,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if !self.template_states.is_empty() && self.template_states.last().expect("template_states must not be empty").in_expression {
+        if !self.template_states.is_empty() && self.current_template_state().in_expression {
             if token_type == TokenType::CurlyOpen {
-                self.template_states.last_mut().expect("template_states must not be empty").open_bracket_count += 1;
+                self.current_template_state_mut().open_bracket_count += 1;
             } else if token_type == TokenType::CurlyClose {
-                self.template_states.last_mut().expect("template_states must not be empty").open_bracket_count -= 1;
+                self.current_template_state_mut().open_bracket_count -= 1;
             }
         }
 
