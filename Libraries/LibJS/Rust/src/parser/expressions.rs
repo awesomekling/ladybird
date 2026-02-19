@@ -1312,6 +1312,11 @@ impl<'a> Parser<'a> {
                 self.scope_collector.register_identifier(id.clone(), &id.name, None);
                 let value = self.expression(obj_start, ExpressionKind::Identifier(id));
                 self.consume(); // consume '='
+                // NB: Add a syntax error for CoverInitializedName. This error will
+                // be cleared by synthesize_binding_pattern if the containing object
+                // is reinterpreted as a destructuring pattern, but will persist if
+                // the object is used in expression context (e.g. as a member base).
+                self.syntax_error("Invalid property in object literal");
                 let saved_scope_state = self.scope_collector.save_state();
                 let _initializer = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
                 self.scope_collector.load_state(saved_scope_state);
