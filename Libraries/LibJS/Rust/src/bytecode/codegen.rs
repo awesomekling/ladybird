@@ -8634,7 +8634,7 @@ fn format_double_for_display(n: f64) -> String {
         return "NaN".to_string();
     }
     if n.is_infinite() {
-        return if n > 0.0 { "inf" } else { "-inf" }.to_string();
+        return if n > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
     }
     if n == 0.0 {
         return "0".to_string();
