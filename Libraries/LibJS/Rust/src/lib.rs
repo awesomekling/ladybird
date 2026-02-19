@@ -1220,18 +1220,11 @@ unsafe fn extract_requested_modules(
             }
             StatementKind::Export(export_data) => {
                 if let Some(ref mr) = export_data.module_request {
-                    // Only add if there are actual module-request entries.
-                    let has_module_entry = export_data
-                        .entries
-                        .iter()
-                        .any(|e| e.kind != ast::ExportEntryKind::EmptyNamedExport);
-                    if has_module_entry || !export_data.entries.is_empty() {
-                        modules.push(RequestedModule {
-                            source_offset: child.range.start.offset,
-                            specifier: mr.module_specifier.clone(),
-                            attributes: mr.attributes.clone(),
-                        });
-                    }
+                    modules.push(RequestedModule {
+                        source_offset: child.range.start.offset,
+                        specifier: mr.module_specifier.clone(),
+                        attributes: mr.attributes.clone(),
+                    });
                 }
             }
             _ => {}
