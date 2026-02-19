@@ -1028,6 +1028,11 @@ impl CompiledRegex {
     /// Take ownership of the compiled regex handle, leaving null behind
     /// so the Rc destructor won't free it.
     pub fn take(&self) -> *mut c_void {
+        debug_assert!(
+            Rc::strong_count(&self.0) == 1,
+            "CompiledRegex::take() called with {} outstanding references",
+            Rc::strong_count(&self.0)
+        );
         self.0.0.replace(std::ptr::null_mut())
     }
 }
