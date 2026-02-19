@@ -783,17 +783,11 @@ fn build_attribute_slices(
 ) -> (Vec<bytecode::ffi::FFIUtf16Slice>, Vec<bytecode::ffi::FFIUtf16Slice>) {
     let keys: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
         .iter()
-        .map(|a| bytecode::ffi::FFIUtf16Slice {
-            data: a.key.as_ptr(),
-            length: a.key.len(),
-        })
+        .map(|a| bytecode::ffi::FFIUtf16Slice::from(a.key.as_ref()))
         .collect();
     let values: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
         .iter()
-        .map(|a| bytecode::ffi::FFIUtf16Slice {
-            data: a.value.as_ptr(),
-            length: a.value.len(),
-        })
+        .map(|a| bytecode::ffi::FFIUtf16Slice::from(a.value.as_ref()))
         .collect();
     (keys, values)
 }

@@ -35,6 +35,18 @@ pub struct FFIUtf16Slice {
     pub length: usize,
 }
 
+impl From<&[u16]> for FFIUtf16Slice {
+    fn from(slice: &[u16]) -> Self {
+        Self { data: slice.as_ptr(), length: slice.len() }
+    }
+}
+
+impl From<&Utf16String> for FFIUtf16Slice {
+    fn from(s: &Utf16String) -> Self {
+        Self { data: s.as_ptr(), length: s.len() }
+    }
+}
+
 #[repr(C)]
 pub struct FFIClassElement {
     pub kind: u8, // ClassElementKind
@@ -210,10 +222,7 @@ pub unsafe fn create_shared_function_data(
             .iter()
             .map(|p| {
                 if let FunctionParameterBinding::Identifier(ref id) = p.binding {
-                    FFIUtf16Slice {
-                        data: id.name.as_ptr(),
-                        length: id.name.len(),
-                    }
+                    FFIUtf16Slice::from(id.name.as_ref())
                 } else {
                     unreachable!()
                 }
@@ -334,28 +343,19 @@ pub unsafe fn create_executable(
     let ident_slices: Vec<FFIUtf16Slice> = gen
         .identifier_table
         .iter()
-        .map(|s| FFIUtf16Slice {
-            data: s.as_ptr(),
-            length: s.len(),
-        })
+        .map(|s| FFIUtf16Slice::from(s.as_ref()))
         .collect();
 
     let property_key_slices: Vec<FFIUtf16Slice> = gen
         .property_key_table
         .iter()
-        .map(|s| FFIUtf16Slice {
-            data: s.as_ptr(),
-            length: s.len(),
-        })
+        .map(|s| FFIUtf16Slice::from(s.as_ref()))
         .collect();
 
     let string_slices: Vec<FFIUtf16Slice> = gen
         .string_table
         .iter()
-        .map(|s| FFIUtf16Slice {
-            data: s.as_ptr(),
-            length: s.len(),
-        })
+        .map(|s| FFIUtf16Slice::from(s.as_ref()))
         .collect();
 
     // Encode constants
@@ -387,10 +387,7 @@ pub unsafe fn create_executable(
     let local_var_slices: Vec<FFIUtf16Slice> = gen
         .local_variables
         .iter()
-        .map(|v| FFIUtf16Slice {
-            data: v.name.as_ptr(),
-            length: v.name.len(),
-        })
+        .map(|v| FFIUtf16Slice::from(v.name.as_ref()))
         .collect();
 
     // Collect shared function data pointers
