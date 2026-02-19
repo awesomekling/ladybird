@@ -1509,9 +1509,25 @@ pub fn constant_to_boolean(value: &ConstantValue) -> Option<bool> {
         ConstantValue::Null | ConstantValue::Undefined | ConstantValue::Empty => Some(false),
         ConstantValue::Number(n) => Some(*n != 0.0 && !n.is_nan()),
         ConstantValue::String(s) => Some(!s.is_empty()),
-        ConstantValue::BigInt(s) => Some(s != "0"),
+        ConstantValue::BigInt(s) => parse_bigint(s).map(|bi| bi != num_bigint::BigInt::ZERO),
         ConstantValue::RawValue(_) => None,
     }
+}
+
+/// Parse a BigInt string to an arbitrary-precision BigInt.
+/// Handles decimal, 0b binary, 0o octal, and 0x hex prefixes.
+pub fn parse_bigint(s: &str) -> Option<num_bigint::BigInt> {
+    use num_bigint::BigInt;
+    if s.len() > 2 {
+        let (prefix, rest) = s.split_at(2);
+        match prefix {
+            "0b" | "0B" => return BigInt::parse_bytes(rest.as_bytes(), 2),
+            "0o" | "0O" => return BigInt::parse_bytes(rest.as_bytes(), 8),
+            "0x" | "0X" => return BigInt::parse_bytes(rest.as_bytes(), 16),
+            _ => {}
+        }
+    }
+    s.parse::<BigInt>().ok()
 }
 
 /// Use `preferred_dst` if available, otherwise allocate a fresh register.

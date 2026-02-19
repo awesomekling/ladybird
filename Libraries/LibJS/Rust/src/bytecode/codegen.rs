@@ -21,7 +21,7 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 use crate::ast::*;
 use crate::lexer::ch;
 
-use super::generator::{choose_dst, constant_to_boolean, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
+use super::generator::{choose_dst, constant_to_boolean, parse_bigint, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
 use super::operand::*;
 
@@ -7886,20 +7886,7 @@ fn try_constant_fold_unary(
             Some(gen.add_constant_number((!to_int32(n)) as f64))
         }
         UnaryOp::Not => {
-            let as_bool = match constant {
-                ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
-                ConstantValue::Boolean(b) => *b,
-                ConstantValue::Null | ConstantValue::Undefined => false,
-                ConstantValue::String(s) => !s.is_empty(),
-                ConstantValue::BigInt(s) => {
-                    if let Some(bi) = parse_bigint(s) {
-                        !bi.is_zero()
-                    } else {
-                        return None;
-                    }
-                }
-                _ => return None,
-            };
+            let as_bool = constant_to_boolean(constant)?;
             Some(gen.add_constant_boolean(!as_bool))
         }
         _ => None,
@@ -7912,20 +7899,7 @@ fn try_constant_fold_to_boolean(
     operand: &ScopedOperand,
 ) -> Option<ScopedOperand> {
     let constant = gen.get_constant(operand)?;
-    let as_bool = match constant {
-        ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
-        ConstantValue::Boolean(b) => *b,
-        ConstantValue::Null | ConstantValue::Undefined => false,
-        ConstantValue::String(s) => !s.is_empty(),
-        ConstantValue::BigInt(s) => {
-            if let Some(bi) = parse_bigint(s) {
-                !bi.is_zero()
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
-    };
+    let as_bool = constant_to_boolean(constant)?;
     Some(gen.add_constant_boolean(as_bool))
 }
 
@@ -8040,22 +8014,6 @@ fn string_to_bigint(s: &Utf16String) -> Option<BigInt> {
     }
     let bi = BigInt::parse_bytes(digits.as_bytes(), 10)?;
     Some(if is_negative { -bi } else { bi })
-}
-
-/// Parse a BigInt string to an arbitrary-precision BigInt.
-/// Handles decimal, 0b binary, 0o octal, and 0x hex prefixes.
-fn parse_bigint(s: &str) -> Option<BigInt> {
-    use num_bigint::BigInt;
-    if s.len() > 2 {
-        let (prefix, rest) = s.split_at(2);
-        match prefix {
-            "0b" | "0B" => return BigInt::parse_bytes(rest.as_bytes(), 2),
-            "0o" | "0O" => return BigInt::parse_bytes(rest.as_bytes(), 8),
-            "0x" | "0X" => return BigInt::parse_bytes(rest.as_bytes(), 16),
-            _ => {}
-        }
-    }
-    s.parse::<BigInt>().ok()
 }
 
 /// Constant-fold a binary operation on two BigInt operands.
