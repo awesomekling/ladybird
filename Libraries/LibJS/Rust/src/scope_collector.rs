@@ -107,6 +107,7 @@ impl VarFlags {
     const FORBIDDEN_VAR: Self = Self(1 << 5);
     const BOUND: Self = Self(1 << 6);
     const PARAMETER_CANDIDATE: Self = Self(1 << 7);
+    const REFERENCED_IN_FORMAL_PARAMETERS: Self = Self(1 << 8);
 
     const fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
@@ -192,6 +193,7 @@ struct ScopeRecord {
     uses_this: bool,
     is_arrow_function: bool,
     is_function_declaration: bool,
+    has_parameter_expressions: bool,
 
     // Tree (indices into ScopeCollector::records)
     parent: Option<usize>,
@@ -219,6 +221,7 @@ impl ScopeRecord {
             uses_this: false,
             is_arrow_function: false,
             is_function_declaration: false,
+            has_parameter_expressions: false,
             parent: None,
             top_level: None,
             children: Vec::new(),
@@ -644,9 +647,11 @@ impl ScopeCollector {
     pub fn set_function_parameters(
         &mut self,
         entries: &[(Utf16String, Option<Rc<Identifier>>, bool, bool, bool)],
+        has_parameter_expressions: bool,
     ) {
         let index = self.current.expect("no current scope");
         self.records[index].has_function_parameters = true;
+        self.records[index].has_parameter_expressions = has_parameter_expressions;
 
         for (name, identifier, is_rest, is_from_pattern, is_first_from_pattern) in entries {
             if *is_from_pattern {
@@ -665,6 +670,20 @@ impl ScopeCollector {
             }
             let var = self.records[index].variables.entry(name.0.clone()).or_default();
             var.flags |= VarFlags::PARAMETER_CANDIDATE | VarFlags::FORBIDDEN_LEXICAL;
+        }
+
+        // Mark non-parameter names that were referenced during formal parameter
+        // parsing (i.e. in default value expressions). If a body var later
+        // declares the same name, it must not be optimized to a local, since the
+        // default expression needs to resolve it from the outer scope.
+        if has_parameter_expressions {
+            let names_to_mark: Vec<Vec<u16>> = self.records[index].identifier_groups.keys()
+                .filter(|name| !self.records[index].has_flag(name, VarFlags::FORBIDDEN_LEXICAL))
+                .cloned()
+                .collect();
+            for name in names_to_mark {
+                self.records[index].variable(&name).flags |= VarFlags::REFERENCED_IN_FORMAL_PARAMETERS;
+            }
         }
     }
 
@@ -936,6 +955,32 @@ impl ScopeCollector {
                 local_var_kind = Some(LocalVarKind::CatchClauseParameter);
             }
 
+            // When a function has parameter expressions (default values, etc.), body
+            // var declarations live in a separate Variable Environment from the
+            // parameter scope. If the same name is also referenced in a default
+            // parameter expression, it must not be a local: the default expression
+            // needs to resolve it from the outer scope via the environment chain,
+            // not read the (uninitialized) local.
+            // We also mark the name as captured in the parent scope, so that the
+            // outer binding is not optimized to a local register either.
+            if var_flags.intersects(VarFlags::REFERENCED_IN_FORMAL_PARAMETERS)
+                && var_flags.intersects(VarFlags::VAR)
+                && !var_flags.intersects(VarFlags::FORBIDDEN_LEXICAL)
+            {
+                if let Some(parent_index) = records[index].parent {
+                    records[parent_index].identifier_groups
+                        .entry(name.clone())
+                        .or_insert_with(|| IdentifierGroup {
+                            captured_by_nested_function: false,
+                            used_inside_with_statement: false,
+                            identifiers: Vec::new(),
+                            declaration_kind: None,
+                        })
+                        .captured_by_nested_function = true;
+                }
+                continue;
+            }
+
             let hoistable = records[index].has_hoistable_function_named(&name);
 
             // ClassDeclaration with IsBound: skip entirely.
@@ -987,6 +1032,28 @@ impl ScopeCollector {
             } else if local_var_kind.is_some() || is_function_parameter {
                 if hoistable {
                     continue;
+                }
+
+                // When a function has parameter expressions and a nested function in a
+                // default expression captures a name that is also a body var, propagate
+                // the capture to the parent scope so the outer binding stays in the
+                // environment (not optimized to a local register).
+                if records[index].has_parameter_expressions
+                    && group.captured_by_nested_function
+                    && var_flags.intersects(VarFlags::VAR)
+                    && !var_flags.intersects(VarFlags::FORBIDDEN_LEXICAL)
+                {
+                    if let Some(parent_index) = records[index].parent {
+                        records[parent_index].identifier_groups
+                            .entry(name.clone())
+                            .or_insert_with(|| IdentifierGroup {
+                                captured_by_nested_function: false,
+                                used_inside_with_statement: false,
+                                identifiers: Vec::new(),
+                                declaration_kind: None,
+                            })
+                            .captured_by_nested_function = true;
+                    }
                 }
 
                 if !group.captured_by_nested_function && !group.used_inside_with_statement {

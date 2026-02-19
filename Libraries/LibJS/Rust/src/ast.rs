@@ -423,6 +423,25 @@ pub struct BindingPattern {
     pub entries: Vec<BindingEntry>,
 }
 
+impl BindingPattern {
+    pub fn contains_expression(&self) -> bool {
+        for entry in &self.entries {
+            if matches!(entry.name, Some(BindingEntryName::Expression(_))) {
+                return true;
+            }
+            if entry.initializer.is_some() {
+                return true;
+            }
+            if let Some(BindingEntryAlias::BindingPattern(ref nested)) = entry.alias {
+                if nested.contains_expression() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingPatternKind {
     Array,

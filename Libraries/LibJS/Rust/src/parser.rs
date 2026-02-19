@@ -338,8 +338,12 @@ impl<'a> Parser<'a> {
     ) {
         use crate::ast::FunctionParameterBinding;
         let mut entries: Vec<(Utf16String, Option<Rc<Identifier>>, bool, bool, bool)> = Vec::new();
+        let mut has_parameter_expressions = false;
         let mut info_index = 0;
         for parameter in parameters {
+            if parameter.default_value.is_some() {
+                has_parameter_expressions = true;
+            }
             match &parameter.binding {
                 FunctionParameterBinding::Identifier(id) => {
                     let (name, is_rest, is_from_pattern) = if info_index < parameter_info.len() {
@@ -351,7 +355,10 @@ impl<'a> Parser<'a> {
                     };
                     entries.push((name, Some(id.clone()), is_rest, is_from_pattern, false));
                 }
-                FunctionParameterBinding::BindingPattern(_pat) => {
+                FunctionParameterBinding::BindingPattern(pattern) => {
+                    if pattern.contains_expression() {
+                        has_parameter_expressions = true;
+                    }
                     // Push a placeholder entry for the pattern parameter itself
                     // so subsequent parameters get correct positional indices.
                     entries.push((Utf16String::default(), None, false, true, true));
@@ -364,7 +371,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        self.scope_collector.set_function_parameters(&entries);
+        self.scope_collector.set_function_parameters(&entries, has_parameter_expressions);
     }
 
     // === Token access ===
