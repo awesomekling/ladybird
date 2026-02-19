@@ -7920,19 +7920,17 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
         (ConstantValue::BigInt(a), ConstantValue::BigInt(b)) => return Some(a == b),
         _ => {}
     }
-    // Cross-type comparisons: both sides get coerced to numbers.
-    // Boolean → Number first, then retry.
-    let lhs_num = match lhs {
-        ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
-        _ => lhs,
-    };
-    let rhs_num = match rhs {
-        ConstantValue::Boolean(b) => &ConstantValue::Number(if *b { 1.0 } else { 0.0 }),
-        _ => rhs,
-    };
-    // If Boolean conversion changed something, retry.
-    if !std::ptr::eq(lhs_num, lhs) || !std::ptr::eq(rhs_num, rhs) {
-        return try_constant_loosely_equals(lhs_num, rhs_num);
+    // Cross-type comparisons: Boolean → Number first, then retry.
+    match (lhs, rhs) {
+        (ConstantValue::Boolean(b), _) => {
+            let coerced = ConstantValue::Number(if *b { 1.0 } else { 0.0 });
+            return try_constant_loosely_equals(&coerced, rhs);
+        }
+        (_, ConstantValue::Boolean(b)) => {
+            let coerced = ConstantValue::Number(if *b { 1.0 } else { 0.0 });
+            return try_constant_loosely_equals(lhs, &coerced);
+        }
+        _ => {}
     }
     // Number == String → compare ToNumber(string) to number.
     // String == Number → compare number to ToNumber(string).
