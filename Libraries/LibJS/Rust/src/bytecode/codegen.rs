@@ -3027,6 +3027,37 @@ fn generate_call_expression(
 // Update expression (++/--)
 // =============================================================================
 
+/// Emit the increment/decrement operation for an update expression.
+/// Returns the result operand: `value` for prefix, a new `dst` for postfix.
+fn emit_update_op(
+    gen: &mut Generator,
+    op: UpdateOp,
+    prefixed: bool,
+    value: &ScopedOperand,
+    preferred_dst: Option<&ScopedOperand>,
+) -> ScopedOperand {
+    if prefixed {
+        match op {
+            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
+            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
+        }
+        value.clone()
+    } else {
+        let dst = choose_dst(gen, preferred_dst);
+        match op {
+            UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
+                dst: dst.operand(),
+                src: value.operand(),
+            }),
+            UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
+                dst: dst.operand(),
+                src: value.operand(),
+            }),
+        }
+        dst
+    }
+}
+
 fn generate_update_expression(
     gen: &mut Generator,
     op: UpdateOp,
@@ -3039,28 +3070,9 @@ fn generate_update_expression(
     match &argument.inner {
         ExpressionKind::Identifier(ident) => {
             let value = generate_identifier(ident, gen, None)?;
-            if prefixed {
-                match op {
-                    UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                    UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                }
-                emit_set_variable(gen, ident, &value);
-                Some(value)
-            } else {
-                let dst = choose_dst(gen, preferred_dst);
-                match op {
-                    UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    }),
-                    UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                        dst: dst.operand(),
-                        src: value.operand(),
-                    }),
-                }
-                emit_set_variable(gen, ident, &value);
-                Some(dst)
-            }
+            let result = emit_update_op(gen, op, prefixed, &value, preferred_dst);
+            emit_set_variable(gen, ident, &value);
+            Some(result)
         }
         ExpressionKind::Member { object, property, computed } => {
             let is_super = matches!(object.inner, ExpressionKind::Super);
@@ -3093,28 +3105,9 @@ fn generate_update_expression(
                         cache_index: cache,
                     });
                 }
-                if prefixed {
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                    }
-                    emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
-                    Some(value)
-                } else {
-                    let dst = choose_dst(gen, preferred_dst);
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                            dst: dst.operand(),
-                            src: value.operand(),
-                        }),
-                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                            dst: dst.operand(),
-                            src: value.operand(),
-                        }),
-                    }
-                    emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
-                    Some(dst)
-                }
+                let result = emit_update_op(gen, op, prefixed, &value, preferred_dst);
+                emit_super_put(gen, &base, property, *computed, &this_value, &value, computed_key.as_ref());
+                Some(result)
             } else {
                 // Non-super member update expression.
                 let base = generate_expression(object, gen, None)?;
@@ -3129,62 +3122,17 @@ fn generate_update_expression(
                 // Drop property to free its register, matching C++ where property
                 // is a local in emit_load_from_reference and freed on return.
                 drop(property);
-                if prefixed {
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                        UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                    }
-                    emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
-                    Some(value)
-                } else {
-                    let dst = choose_dst(gen, preferred_dst);
-                    match op {
-                        UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                            dst: dst.operand(),
-                            src: value.operand(),
-                        }),
-                        UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                            dst: dst.operand(),
-                            src: value.operand(),
-                        }),
-                    }
-                    emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
-                    // Match C++ ReferenceOperands destruction order: loaded_value
-                    // (value) is freed before referenced_name (saved_property).
-                    drop(value);
-                    Some(dst)
-                }
+                let result = emit_update_op(gen, op, prefixed, &value, preferred_dst);
+                emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
+                // Match C++ ReferenceOperands destruction order: loaded_value
+                // (value) is freed before referenced_name (saved_property).
+                if !prefixed { drop(value); }
+                Some(result)
                 } else if let ExpressionKind::Identifier(property_ident) = &property.inner {
                     let value = gen.allocate_register();
                     emit_get_by_id(gen, &value, &base, &property_ident.name, base_id);
                     let key = gen.intern_property_key(&property_ident.name);
-                    if prefixed {
-                        match op {
-                            UpdateOp::Increment => gen.emit(Instruction::Increment { dst: value.operand() }),
-                            UpdateOp::Decrement => gen.emit(Instruction::Decrement { dst: value.operand() }),
-                        }
-                    } else {
-                        let dst = choose_dst(gen, preferred_dst);
-                        match op {
-                            UpdateOp::Increment => gen.emit(Instruction::PostfixIncrement {
-                                dst: dst.operand(),
-                                src: value.operand(),
-                            }),
-                            UpdateOp::Decrement => gen.emit(Instruction::PostfixDecrement {
-                                dst: dst.operand(),
-                                src: value.operand(),
-                            }),
-                        }
-                        let cache2 = gen.next_property_lookup_cache();
-                        gen.emit(Instruction::PutNormalById {
-                            base: base.operand(),
-                            property: key,
-                            src: value.operand(),
-                            cache_index: cache2,
-                            base_identifier: None,
-                        });
-                        return Some(dst);
-                    }
+                    let result = emit_update_op(gen, op, prefixed, &value, preferred_dst);
                     let cache2 = gen.next_property_lookup_cache();
                     gen.emit(Instruction::PutNormalById {
                         base: base.operand(),
@@ -3193,7 +3141,7 @@ fn generate_update_expression(
                         cache_index: cache2,
                         base_identifier: None,
                     });
-                    Some(value)
+                    Some(result)
                 } else {
                     // Fallback: just evaluate, no store-back
                     let value = gen.allocate_register();
