@@ -918,6 +918,7 @@ pub fn generate_statement(
                 dst: error.operand(),
                 error_string: msg,
             });
+            gen.perform_needed_unwinds();
             gen.emit(Instruction::Throw { src: error.operand() });
             // Switch to a dead block so subsequent codegen doesn't crash.
             let dead = gen.make_block();
@@ -2393,6 +2394,20 @@ fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &Sc
                                 });
                             }
                         }
+                    }
+                }
+            }
+            StatementKind::UsingDeclaration { declarations } => {
+                for declaration in declarations {
+                    let mut names = Vec::new();
+                    collect_target_names(&declaration.target, &mut names);
+                    for (name, _) in &names {
+                        let id = gen.intern_identifier(name);
+                        gen.emit(Instruction::CreateImmutableBinding {
+                            environment: environment.operand(),
+                            identifier: id,
+                            strict_binding: true,
+                        });
                     }
                 }
             }
