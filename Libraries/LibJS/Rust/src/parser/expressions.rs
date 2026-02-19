@@ -279,7 +279,10 @@ impl<'a> Parser<'a> {
                 let token = self.consume();
                 let value = self.token_value(&token);
                 // Store the raw value including the 'n' suffix, matching C++.
-                let value_utf8: String = value.iter().map(|&c| c as u8 as char).collect();
+                let value_utf8: String = value.iter().map(|&c| {
+                    debug_assert!(c < 128, "BigIntLiteral should only contain ASCII characters");
+                    c as u8 as char
+                }).collect();
                 (self.expression(start, ExpressionKind::BigIntLiteral(value_utf8)), true)
             }
 
@@ -1424,7 +1427,10 @@ impl<'a> Parser<'a> {
                 let token = self.consume();
                 let value = self.token_value(&token);
                 // Store the raw value including the 'n' suffix, matching C++.
-                let value_utf8: String = value.iter().map(|&c| c as u8 as char).collect();
+                let value_utf8: String = value.iter().map(|&c| {
+                    debug_assert!(c < 128, "BigIntLiteral should only contain ASCII characters");
+                    c as u8 as char
+                }).collect();
                 let expression = self.expression(start, ExpressionKind::BigIntLiteral(value_utf8));
                 PropertyKey { expression, name: None, is_proto: false, is_computed: false, is_identifier: false }
             }

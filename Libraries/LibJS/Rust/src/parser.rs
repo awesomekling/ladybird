@@ -348,7 +348,8 @@ impl<'a> Parser<'a> {
         parameter_info: &[ParamInfo],
     ) {
         use crate::ast::FunctionParameterBinding;
-        let mut entries: Vec<(Utf16String, Option<Rc<Identifier>>, bool, bool, bool)> = Vec::new();
+        use crate::scope_collector::ParameterEntry;
+        let mut entries: Vec<ParameterEntry> = Vec::new();
         let mut has_parameter_expressions = false;
         let mut info_index = 0;
         for parameter in parameters {
@@ -364,7 +365,7 @@ impl<'a> Parser<'a> {
                     } else {
                         (id.name.clone(), parameter.is_rest, false)
                     };
-                    entries.push((name, Some(id.clone()), is_rest, is_from_pattern, false));
+                    entries.push(ParameterEntry { name, identifier: Some(id.clone()), is_rest, is_from_pattern, is_first_from_pattern: false });
                 }
                 FunctionParameterBinding::BindingPattern(pattern) => {
                     if pattern.contains_expression() {
@@ -372,11 +373,11 @@ impl<'a> Parser<'a> {
                     }
                     // Push a placeholder entry for the pattern parameter itself
                     // so subsequent parameters get correct positional indices.
-                    entries.push((Utf16String::default(), None, false, true, true));
+                    entries.push(ParameterEntry { name: Utf16String::default(), identifier: None, is_rest: false, is_from_pattern: true, is_first_from_pattern: true });
                     // Then push bound names from this pattern.
                     while info_index < parameter_info.len() && parameter_info[info_index].is_from_pattern {
                         let pi = &parameter_info[info_index];
-                        entries.push((pi.name.clone(), pi.identifier.clone(), pi.is_rest, true, false));
+                        entries.push(ParameterEntry { name: pi.name.clone(), identifier: pi.identifier.clone(), is_rest: pi.is_rest, is_from_pattern: true, is_first_from_pattern: false });
                         info_index += 1;
                     }
                 }

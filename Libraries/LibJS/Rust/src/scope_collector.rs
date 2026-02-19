@@ -170,6 +170,15 @@ struct ParameterName {
     is_rest: bool,
 }
 
+/// Entry describing a single parameter binding for scope analysis.
+pub struct ParameterEntry {
+    pub name: Utf16String,
+    pub identifier: Option<Rc<Identifier>>,
+    pub is_rest: bool,
+    pub is_from_pattern: bool,
+    pub is_first_from_pattern: bool,
+}
+
 struct ScopeRecord {
     scope_type: ScopeType,
     scope_level: ScopeLevel,
@@ -422,10 +431,10 @@ impl ScopeCollector {
                 let c = &self.records[index];
                 let arguments = c.contains_access_to_arguments_object_in_non_strict_mode;
                 let eval = c.contains_direct_call_to_eval;
-                let aw = c.contains_await_expression;
+                let contains_await = c.contains_await_expression;
                 self.records[parent_index].contains_access_to_arguments_object_in_non_strict_mode |= arguments;
                 self.records[parent_index].contains_direct_call_to_eval |= eval;
-                self.records[parent_index].contains_await_expression |= aw;
+                self.records[parent_index].contains_await_expression |= contains_await;
             }
         }
 
@@ -646,16 +655,16 @@ impl ScopeCollector {
 
     pub fn set_function_parameters(
         &mut self,
-        entries: &[(Utf16String, Option<Rc<Identifier>>, bool, bool, bool)],
+        entries: &[ParameterEntry],
         has_parameter_expressions: bool,
     ) {
         let index = self.current.expect("no current scope");
         self.records[index].has_function_parameters = true;
         self.records[index].has_parameter_expressions = has_parameter_expressions;
 
-        for (name, identifier, is_rest, is_from_pattern, is_first_from_pattern) in entries {
-            if *is_from_pattern {
-                if *is_first_from_pattern {
+        for entry in entries {
+            if entry.is_from_pattern {
+                if entry.is_first_from_pattern {
                     // Placeholder for a pattern parameter — push an empty
                     // entry so subsequent parameters get the correct
                     // positional index. Don't register anything else.
@@ -663,12 +672,12 @@ impl ScopeCollector {
                     continue;
                 }
             } else {
-                self.records[index].parameter_names.push(ParameterName { name: name.clone(), is_rest: *is_rest });
+                self.records[index].parameter_names.push(ParameterName { name: entry.name.clone(), is_rest: entry.is_rest });
             }
-            if let Some(id) = identifier {
-                self.register_identifier(id.clone(), name, None);
+            if let Some(ref id) = entry.identifier {
+                self.register_identifier(id.clone(), &entry.name, None);
             }
-            let var = self.records[index].variables.entry(name.clone()).or_default();
+            let var = self.records[index].variables.entry(entry.name.clone()).or_default();
             var.flags |= VarFlags::PARAMETER_CANDIDATE | VarFlags::FORBIDDEN_LEXICAL;
         }
 

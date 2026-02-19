@@ -159,14 +159,13 @@ type ParseErrorCallback =
     unsafe extern "C" fn(ctx: *mut c_void, message: *const u8, message_len: usize, line: u32, column: u32);
 
 /// Log parser and scope collector errors, returning true if any were found.
-fn check_errors(parser: &mut Parser, context: &str) -> bool {
-    check_errors_with_callback(parser, context, std::ptr::null_mut(), None)
+fn check_errors(parser: &mut Parser) -> bool {
+    check_errors_with_callback(parser, std::ptr::null_mut(), None)
 }
 
 /// Check for errors, optionally reporting them via a C++ callback.
 fn check_errors_with_callback(
     parser: &mut Parser,
-    _context: &str,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
 ) -> bool {
@@ -311,7 +310,7 @@ pub unsafe extern "C" fn rust_compile_program(
 
         let program = parser.parse_program(starts_in_strict_mode);
 
-        if check_errors(&mut parser, "rust_compile_program") {
+        if check_errors(&mut parser) {
             return std::ptr::null_mut();
         }
 
@@ -368,7 +367,7 @@ pub unsafe extern "C" fn rust_compile_script(
 
         let program = parser.parse_program(false);
 
-        if check_errors_with_callback(&mut parser, "rust_compile_script", error_context, error_callback) {
+        if check_errors_with_callback(&mut parser, error_context, error_callback) {
             return std::ptr::null_mut();
         }
 
@@ -446,7 +445,7 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         let program = parser.parse_program(starts_in_strict_mode);
 
-        if check_errors_with_callback(&mut parser, "rust_compile_eval", error_context, error_callback) {
+        if check_errors_with_callback(&mut parser, error_context, error_callback) {
             return std::ptr::null_mut();
         }
 
@@ -550,7 +549,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             validate_src.extend_from_slice(utf16!("\n) {}"));
             let mut parser = Parser::new(&validate_src, ProgramType::Script);
             parser.parse_program(false);
-            if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
+            if check_errors_with_callback(&mut parser, error_context, error_callback) {
                 return std::ptr::null_mut();
             }
         }
@@ -579,7 +578,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
                 _ => {}
             }
             parser.parse_program(false);
-            if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
+            if check_errors_with_callback(&mut parser, error_context, error_callback) {
                 return std::ptr::null_mut();
             }
         }
@@ -590,7 +589,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         let mut parser = Parser::new(full_slice, ProgramType::Script);
         let program = parser.parse_program(false);
 
-        if check_errors_with_callback(&mut parser, "rust_compile_dynamic_function", error_context, error_callback) {
+        if check_errors_with_callback(&mut parser, error_context, error_callback) {
             return std::ptr::null_mut();
         }
 
@@ -697,7 +696,7 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
 
         parser.scope_collector.analyze(false);
 
-        if check_errors(&mut parser, "rust_compile_builtin_file") {
+        if check_errors(&mut parser) {
             return;
         }
 
@@ -875,7 +874,7 @@ pub unsafe extern "C" fn rust_compile_module(
         let mut parser = Parser::new(source_slice, ProgramType::Module);
         let program = parser.parse_program(false);
 
-        if check_errors_with_callback(&mut parser, "rust_compile_module", error_context, error_callback) {
+        if check_errors_with_callback(&mut parser, error_context, error_callback) {
             return std::ptr::null_mut();
         }
 

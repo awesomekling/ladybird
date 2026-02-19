@@ -445,7 +445,7 @@ pub unsafe fn create_executable(
         .collect();
 
     // Collect class blueprint pointers
-    let bp_ptrs: Vec<*mut c_void> = gen.class_blueprints.clone();
+    let bp_ptrs = &gen.class_blueprints;
 
     let ffi_data = FFIExecutableData {
         bytecode: assembled.bytecode.as_ptr(),

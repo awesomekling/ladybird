@@ -1708,43 +1708,43 @@ fn emit_binary_op(
     lhs: &ScopedOperand,
     rhs: &ScopedOperand,
 ) {
-    let d = dst.operand();
-    let l = lhs.operand();
-    let r = rhs.operand();
+    let dst_op = dst.operand();
+    let lhs_op = lhs.operand();
+    let rhs_op = rhs.operand();
     match op {
-        BinaryOp::Addition => gen.emit(Instruction::Add { dst: d, lhs: l, rhs: r }),
-        BinaryOp::Subtraction => gen.emit(Instruction::Sub { dst: d, lhs: l, rhs: r }),
-        BinaryOp::Multiplication => gen.emit(Instruction::Mul { dst: d, lhs: l, rhs: r }),
-        BinaryOp::Division => gen.emit(Instruction::Div { dst: d, lhs: l, rhs: r }),
-        BinaryOp::Modulo => gen.emit(Instruction::Mod { dst: d, lhs: l, rhs: r }),
-        BinaryOp::Exponentiation => gen.emit(Instruction::Exp { dst: d, lhs: l, rhs: r }),
-        BinaryOp::StrictlyEquals => gen.emit(Instruction::StrictlyEquals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::StrictlyInequals => gen.emit(Instruction::StrictlyInequals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::LooselyEquals => gen.emit(Instruction::LooselyEquals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::LooselyInequals => gen.emit(Instruction::LooselyInequals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::GreaterThan => gen.emit(Instruction::GreaterThan { dst: d, lhs: l, rhs: r }),
-        BinaryOp::GreaterThanEquals => gen.emit(Instruction::GreaterThanEquals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::LessThan => gen.emit(Instruction::LessThan { dst: d, lhs: l, rhs: r }),
-        BinaryOp::LessThanEquals => gen.emit(Instruction::LessThanEquals { dst: d, lhs: l, rhs: r }),
-        BinaryOp::BitwiseAnd => gen.emit(Instruction::BitwiseAnd { dst: d, lhs: l, rhs: r }),
+        BinaryOp::Addition => gen.emit(Instruction::Add { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::Subtraction => gen.emit(Instruction::Sub { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::Multiplication => gen.emit(Instruction::Mul { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::Division => gen.emit(Instruction::Div { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::Modulo => gen.emit(Instruction::Mod { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::Exponentiation => gen.emit(Instruction::Exp { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::StrictlyEquals => gen.emit(Instruction::StrictlyEquals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::StrictlyInequals => gen.emit(Instruction::StrictlyInequals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::LooselyEquals => gen.emit(Instruction::LooselyEquals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::LooselyInequals => gen.emit(Instruction::LooselyInequals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::GreaterThan => gen.emit(Instruction::GreaterThan { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::GreaterThanEquals => gen.emit(Instruction::GreaterThanEquals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::LessThan => gen.emit(Instruction::LessThan { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::LessThanEquals => gen.emit(Instruction::LessThanEquals { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::BitwiseAnd => gen.emit(Instruction::BitwiseAnd { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
         BinaryOp::BitwiseOr => {
             // OPTIMIZATION: x | 0 == ToInt32(x) (matches C++)
             if let Some(ConstantValue::Number(n)) = gen.get_constant(rhs) {
                 if *n == 0.0 && n.is_sign_positive() {
-                    gen.emit(Instruction::ToInt32 { dst: d, value: l });
+                    gen.emit(Instruction::ToInt32 { dst: dst_op, value: lhs_op });
                 } else {
-                    gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r });
+                    gen.emit(Instruction::BitwiseOr { dst: dst_op, lhs: lhs_op, rhs: rhs_op });
                 }
             } else {
-                gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r });
+                gen.emit(Instruction::BitwiseOr { dst: dst_op, lhs: lhs_op, rhs: rhs_op });
             }
         }
-        BinaryOp::BitwiseXor => gen.emit(Instruction::BitwiseXor { dst: d, lhs: l, rhs: r }),
-        BinaryOp::LeftShift => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
-        BinaryOp::RightShift => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
-        BinaryOp::UnsignedRightShift => gen.emit(Instruction::UnsignedRightShift { dst: d, lhs: l, rhs: r }),
-        BinaryOp::In => gen.emit(Instruction::In { dst: d, lhs: l, rhs: r }),
-        BinaryOp::InstanceOf => gen.emit(Instruction::InstanceOf { dst: d, lhs: l, rhs: r }),
+        BinaryOp::BitwiseXor => gen.emit(Instruction::BitwiseXor { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::LeftShift => gen.emit(Instruction::LeftShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::RightShift => gen.emit(Instruction::RightShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::UnsignedRightShift => gen.emit(Instruction::UnsignedRightShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::In => gen.emit(Instruction::In { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        BinaryOp::InstanceOf => gen.emit(Instruction::InstanceOf { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
     }
 }
 
@@ -4155,22 +4155,22 @@ fn emit_compound_assignment(
     lhs: &ScopedOperand,
     rhs: &ScopedOperand,
 ) {
-    let d = dst.operand();
-    let l = lhs.operand();
-    let r = rhs.operand();
+    let dst_op = dst.operand();
+    let lhs_op = lhs.operand();
+    let rhs_op = rhs.operand();
     match op {
-        AssignmentOp::AdditionAssignment => gen.emit(Instruction::Add { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::SubtractionAssignment => gen.emit(Instruction::Sub { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::MultiplicationAssignment => gen.emit(Instruction::Mul { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::DivisionAssignment => gen.emit(Instruction::Div { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::ModuloAssignment => gen.emit(Instruction::Mod { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::ExponentiationAssignment => gen.emit(Instruction::Exp { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::BitwiseAndAssignment => gen.emit(Instruction::BitwiseAnd { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::BitwiseOrAssignment => gen.emit(Instruction::BitwiseOr { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::BitwiseXorAssignment => gen.emit(Instruction::BitwiseXor { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::LeftShiftAssignment => gen.emit(Instruction::LeftShift { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::RightShiftAssignment => gen.emit(Instruction::RightShift { dst: d, lhs: l, rhs: r }),
-        AssignmentOp::UnsignedRightShiftAssignment => gen.emit(Instruction::UnsignedRightShift { dst: d, lhs: l, rhs: r }),
+        AssignmentOp::AdditionAssignment => gen.emit(Instruction::Add { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::SubtractionAssignment => gen.emit(Instruction::Sub { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::MultiplicationAssignment => gen.emit(Instruction::Mul { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::DivisionAssignment => gen.emit(Instruction::Div { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::ModuloAssignment => gen.emit(Instruction::Mod { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::ExponentiationAssignment => gen.emit(Instruction::Exp { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::BitwiseAndAssignment => gen.emit(Instruction::BitwiseAnd { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::BitwiseOrAssignment => gen.emit(Instruction::BitwiseOr { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::BitwiseXorAssignment => gen.emit(Instruction::BitwiseXor { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::LeftShiftAssignment => gen.emit(Instruction::LeftShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::RightShiftAssignment => gen.emit(Instruction::RightShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
+        AssignmentOp::UnsignedRightShiftAssignment => gen.emit(Instruction::UnsignedRightShift { dst: dst_op, lhs: lhs_op, rhs: rhs_op }),
         AssignmentOp::AndAssignment | AssignmentOp::OrAssignment | AssignmentOp::NullishAssignment => {
             unreachable!("logical assignment in compound path")
         }
@@ -8056,12 +8056,11 @@ fn try_constant_fold_bigint_binary(
             }
             // BigInt division truncates toward zero.
             use num_integer::Integer;
-            let (quotient, remainder) = a.div_rem(&b);
+            let (quotient, _) = a.div_rem(&b);
             // Rust's div_rem rounds toward zero for BigInt, matching JS spec.
             // However, for negative dividends with positive divisors (or vice versa),
             // we need to ensure truncation toward zero. num-bigint's div_rem already
             // does this (it uses truncated division), so just use the quotient.
-            let _ = remainder;
             Some(gen.add_constant_bigint(quotient.to_string()))
         }
         BinaryOp::Modulo => {
