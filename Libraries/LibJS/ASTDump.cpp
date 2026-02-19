@@ -1052,7 +1052,7 @@ String ASTNode::dump_to_string() const
     ASTDumpState state;
     state.output = &builder;
     dump(state);
-    return builder.to_string_without_validation();
+    return String::from_utf8_with_replacement_character(builder.string_view());
 }
 
 }

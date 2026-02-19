@@ -206,28 +206,11 @@ fn color_flag(state: &DumpState, flag: &str) -> String {
     format!("{}[{}]{}", DIM, flag, RESET)
 }
 
-/// Convert UTF-16 to a string, preserving lone surrogates as CESU-8 bytes
-/// to match C++ output (which uses WTF-8 encoding for surrogates).
+/// Convert UTF-16 to a valid UTF-8 string, replacing lone surrogates with U+FFFD.
 fn utf16_to_string(s: &[u16]) -> String {
-    let mut buf = String::with_capacity(s.len());
-    for result in char::decode_utf16(s.iter().copied()) {
-        match result {
-            Ok(c) => buf.push(c),
-            Err(err) => {
-                // Lone surrogate: encode as CESU-8 (3 bytes) to match C++.
-                let surr = err.unpaired_surrogate() as u32;
-                let bytes = [
-                    0xE0 | (surr >> 12) as u8,
-                    0x80 | ((surr >> 6) & 0x3F) as u8,
-                    0x80 | (surr & 0x3F) as u8,
-                ];
-                // SAFETY: CESU-8 surrogates are technically invalid UTF-8 but
-                // match C++ WTF-8 output exactly. Only used for AST dump text.
-                unsafe { buf.as_mut_vec().extend_from_slice(&bytes); }
-            }
-        }
-    }
-    buf
+    char::decode_utf16(s.iter().copied())
+        .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 /// Format f64 matching the C++ AK::Formatter<double> output exactly.
