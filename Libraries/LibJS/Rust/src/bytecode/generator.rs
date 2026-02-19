@@ -674,11 +674,12 @@ impl Generator {
     ) {
         // OPTIMIZATION: If condition is a constant, emit an unconditional jump.
         if let Some(constant) = self.get_constant(condition) {
-            let is_truthy = constant_to_boolean(constant);
-            self.emit(Instruction::Jump {
-                target: if is_truthy { true_target } else { false_target },
-            });
-            return;
+            if let Some(is_truthy) = constant_to_boolean(constant) {
+                self.emit(Instruction::Jump {
+                    target: if is_truthy { true_target } else { false_target },
+                });
+                return;
+            }
         }
 
         // OPTIMIZATION: If the condition is a register with ref_count == 1 and the last
@@ -1500,14 +1501,16 @@ pub enum ConstantValue {
 }
 
 /// Convert a constant value to a boolean, matching JS `ToBoolean`.
-pub fn constant_to_boolean(value: &ConstantValue) -> bool {
+/// Returns `None` for opaque `RawValue` constants whose truthiness
+/// cannot be determined at compile time.
+pub fn constant_to_boolean(value: &ConstantValue) -> Option<bool> {
     match value {
-        ConstantValue::Boolean(b) => *b,
-        ConstantValue::Null | ConstantValue::Undefined | ConstantValue::Empty => false,
-        ConstantValue::Number(n) => *n != 0.0 && !n.is_nan(),
-        ConstantValue::String(s) => !s.is_empty(),
-        ConstantValue::BigInt(s) => s != "0",
-        ConstantValue::RawValue(_) => true,
+        ConstantValue::Boolean(b) => Some(*b),
+        ConstantValue::Null | ConstantValue::Undefined | ConstantValue::Empty => Some(false),
+        ConstantValue::Number(n) => Some(*n != 0.0 && !n.is_nan()),
+        ConstantValue::String(s) => Some(!s.is_empty()),
+        ConstantValue::BigInt(s) => Some(s != "0"),
+        ConstantValue::RawValue(_) => None,
     }
 }
 

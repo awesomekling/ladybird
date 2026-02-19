@@ -1765,22 +1765,23 @@ fn generate_logical(
     // Constant-fold: if LHS is a constant, we can statically determine the branch.
     if let Some(constant) = gen.get_constant(&lhs_val) {
         let is_nullish = matches!(constant, ConstantValue::Null | ConstantValue::Undefined);
-        let is_truthy = constant_to_boolean(constant);
-        let take_rhs = match op {
-            LogicalOp::And => is_truthy,
-            LogicalOp::Or => !is_truthy,
-            LogicalOp::NullishCoalescing => is_nullish,
-        };
-        if take_rhs {
-            let dst = choose_dst(gen, preferred_dst);
-            let rhs_val = generate_expression(rhs, gen, Some(&dst))?;
-            if rhs_val.operand().is_constant() {
-                return Some(rhs_val);
+        if let Some(is_truthy) = constant_to_boolean(constant) {
+            let take_rhs = match op {
+                LogicalOp::And => is_truthy,
+                LogicalOp::Or => !is_truthy,
+                LogicalOp::NullishCoalescing => is_nullish,
+            };
+            if take_rhs {
+                let dst = choose_dst(gen, preferred_dst);
+                let rhs_val = generate_expression(rhs, gen, Some(&dst))?;
+                if rhs_val.operand().is_constant() {
+                    return Some(rhs_val);
+                }
+                gen.emit_mov(&dst, &rhs_val);
+                return Some(dst);
             }
-            gen.emit_mov(&dst, &rhs_val);
-            return Some(dst);
+            return Some(lhs_val);
         }
-        return Some(lhs_val);
     }
 
     let dst = choose_dst(gen, preferred_dst);
@@ -1837,10 +1838,12 @@ fn generate_conditional(
 
     // OPTIMIZATION: if the predicate is always true/false, only generate the taken expression.
     if let Some(constant) = gen.get_constant(&predicate) {
-        if constant_to_boolean(constant) {
-            return generate_expression(consequent, gen, preferred_dst);
+        if let Some(is_truthy) = constant_to_boolean(constant) {
+            if is_truthy {
+                return generate_expression(consequent, gen, preferred_dst);
+            }
+            return generate_expression(alternate, gen, preferred_dst);
         }
-        return generate_expression(alternate, gen, preferred_dst);
     }
 
     let true_block = gen.make_block();
@@ -1925,16 +1928,17 @@ fn generate_if_statement(
 
     // OPTIMIZATION: if the predicate is always true/false, only build the taken branch.
     if let Some(constant) = gen.get_constant(&pred) {
-        let is_truthy = constant_to_boolean(constant);
-        // Pass the completion register as preferred_dst so nested
-        // if-statements reuse the same register (matching C++).
-        let child_dst = completion.as_ref().or(preferred_dst);
-        if is_truthy {
-            generate_with_completion(consequent, gen, &completion, child_dst);
-        } else if let Some(alt) = alternate {
-            generate_with_completion(alt, gen, &completion, child_dst);
+        if let Some(is_truthy) = constant_to_boolean(constant) {
+            // Pass the completion register as preferred_dst so nested
+            // if-statements reuse the same register (matching C++).
+            let child_dst = completion.as_ref().or(preferred_dst);
+            if is_truthy {
+                generate_with_completion(consequent, gen, &completion, child_dst);
+            } else if let Some(alt) = alternate {
+                generate_with_completion(alt, gen, &completion, child_dst);
+            }
+            return completion;
         }
-        return completion;
     }
 
     let true_block = gen.make_block();
@@ -2013,7 +2017,7 @@ fn generate_while_statement(
 
     // OPTIMIZATION: If predicate is always false, ignore body and exit early.
     if let Some(constant) = gen.get_constant(&test_val) {
-        if !constant_to_boolean(constant) {
+        if constant_to_boolean(constant) == Some(false) {
             return completion;
         }
     }
@@ -2179,7 +2183,7 @@ fn generate_for_statement(
 
         // OPTIMIZATION: test value is always falsey, skip body entirely.
         if let Some(constant) = gen.get_constant(&test_val) {
-            if !constant_to_boolean(constant) {
+            if constant_to_boolean(constant) == Some(false) {
                 gen.emit(Instruction::Jump {
                     target: end_block,
                 });
