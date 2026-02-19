@@ -526,7 +526,7 @@ pub fn generate_expression(
 
                 generate_yield(
                     gen,
-                    Label(continuation_block as u32),
+                    continuation_block,
                     &value,
                     &received_completion,
                     &received_completion_type,
@@ -558,7 +558,7 @@ pub fn generate_expression(
                     lhs: received_completion_type.operand(),
                     rhs: normal_type.operand(),
                 });
-                gen.emit_jump_if(&type_is_normal, Label(normal_block as u32), Label(throw_cont as u32));
+                gen.emit_jump_if(&type_is_normal, normal_block, throw_cont);
 
                 let throw_value_block = gen.make_block();
                 let return_value_block = gen.make_block();
@@ -571,7 +571,7 @@ pub fn generate_expression(
                     lhs: received_completion_type.operand(),
                     rhs: throw_type.operand(),
                 });
-                gen.emit_jump_if(&type_is_throw, Label(throw_value_block as u32), Label(return_value_block as u32));
+                gen.emit_jump_if(&type_is_throw, throw_value_block, return_value_block);
 
                 gen.switch_to_basic_block(throw_value_block);
                 gen.emit(Instruction::Throw {
@@ -1085,7 +1085,7 @@ fn generate_await_with_completions(
 ) -> ScopedOperand {
     let continuation = gen.make_block();
     gen.emit(Instruction::Await {
-        continuation_label: Label(continuation as u32),
+        continuation_label: continuation,
         argument: argument.operand(),
     });
     gen.switch_to_basic_block(continuation);
@@ -1107,7 +1107,7 @@ fn generate_await_with_completions(
         lhs: received_completion_type.operand(),
         rhs: normal_type.operand(),
     });
-    gen.emit_jump_if(&is_normal, Label(normal_block as u32), Label(throw_block as u32));
+    gen.emit_jump_if(&is_normal, normal_block, throw_block);
 
     gen.switch_to_basic_block(throw_block);
     gen.emit(Instruction::Throw {
@@ -1157,7 +1157,7 @@ fn generate_yield_from(
     let continuation_block = gen.make_block();
     let loop_end_block = gen.make_block();
     gen.emit(Instruction::Jump {
-        target: Label(loop_block as u32),
+        target: loop_block,
     });
     gen.switch_to_basic_block(loop_block);
 
@@ -1170,7 +1170,7 @@ fn generate_yield_from(
         lhs: received_completion_type.operand(),
         rhs: normal_const.operand(),
     });
-    gen.emit_jump_if(&is_normal, Label(type_is_normal_block as u32), Label(is_type_throw_block as u32));
+    gen.emit_jump_if(&is_normal, type_is_normal_block, is_type_throw_block);
 
     // =========================================================================
     // a. If received.[[Type]] is normal, then
@@ -1212,13 +1212,13 @@ fn generate_yield_from(
     // v. If done is true, then return ? IteratorValue(innerResult).
     let type_is_normal_done_block = gen.make_block();
     let type_is_normal_not_done_block = gen.make_block();
-    gen.emit_jump_if(&done, Label(type_is_normal_done_block as u32), Label(type_is_normal_not_done_block as u32));
+    gen.emit_jump_if(&done, type_is_normal_done_block, type_is_normal_not_done_block);
 
     gen.switch_to_basic_block(type_is_normal_done_block);
     let return_value = gen.allocate_register();
     emit_get_by_id(gen, &return_value, &inner_result, utf16!("value"), None);
     gen.emit(Instruction::Jump {
-        target: Label(loop_end_block as u32),
+        target: loop_end_block,
     });
 
     // vi/vii. Yield IteratorValue(innerResult), receive new completion.
@@ -1229,7 +1229,7 @@ fn generate_yield_from(
 
         generate_yield(
             gen,
-            Label(continuation_block as u32),
+            continuation_block,
             &current_value,
             &received_completion,
             &received_completion_type,
@@ -1251,7 +1251,7 @@ fn generate_yield_from(
         lhs: received_completion_type.operand(),
         rhs: throw_const.operand(),
     });
-    gen.emit_jump_if(&is_throw, Label(type_is_throw_block as u32), Label(type_is_return_block as u32));
+    gen.emit_jump_if(&is_throw, type_is_throw_block, type_is_return_block);
 
     gen.switch_to_basic_block(type_is_throw_block);
 
@@ -1269,8 +1269,8 @@ fn generate_yield_from(
     let throw_method_undefined_block = gen.make_block();
     gen.emit(Instruction::JumpUndefined {
         condition: throw_method.operand(),
-        true_target: Label(throw_method_undefined_block as u32),
-        false_target: Label(throw_method_defined_block as u32),
+        true_target: throw_method_undefined_block,
+        false_target: throw_method_defined_block,
     });
 
     gen.switch_to_basic_block(throw_method_defined_block);
@@ -1308,12 +1308,12 @@ fn generate_yield_from(
     // 6. If done is true, return ? IteratorValue(innerResult).
     let type_is_throw_done_block = gen.make_block();
     let type_is_throw_not_done_block = gen.make_block();
-    gen.emit_jump_if(&done, Label(type_is_throw_done_block as u32), Label(type_is_throw_not_done_block as u32));
+    gen.emit_jump_if(&done, type_is_throw_done_block, type_is_throw_not_done_block);
 
     gen.switch_to_basic_block(type_is_throw_done_block);
     emit_get_by_id(gen, &return_value, &inner_result, utf16!("value"), None);
     gen.emit(Instruction::Jump {
-        target: Label(loop_end_block as u32),
+        target: loop_end_block,
     });
 
     // 7/8. Yield IteratorValue(innerResult), receive new completion.
@@ -1323,7 +1323,7 @@ fn generate_yield_from(
         emit_get_by_id(gen, &yield_value, &inner_result, utf16!("value"), None);
         generate_yield(
             gen,
-            Label(continuation_block as u32),
+            continuation_block,
             &yield_value,
             &received_completion,
             &received_completion_type,
@@ -1349,8 +1349,8 @@ fn generate_yield_from(
         let after_close = gen.make_block();
         gen.emit(Instruction::JumpUndefined {
             condition: return_method.operand(),
-            true_target: Label(after_close as u32),
-            false_target: Label(call_return_block as u32),
+            true_target: after_close,
+            false_target: call_return_block,
         });
         gen.switch_to_basic_block(call_return_block);
 
@@ -1376,7 +1376,7 @@ fn generate_yield_from(
         });
 
         gen.emit(Instruction::Jump {
-            target: Label(after_close as u32),
+            target: after_close,
         });
         gen.switch_to_basic_block(after_close);
     } else {
@@ -1421,8 +1421,8 @@ fn generate_yield_from(
     let return_is_defined_block = gen.make_block();
     gen.emit(Instruction::JumpUndefined {
         condition: return_method.operand(),
-        true_target: Label(return_is_undefined_block as u32),
-        false_target: Label(return_is_defined_block as u32),
+        true_target: return_is_undefined_block,
+        false_target: return_is_defined_block,
     });
 
     gen.switch_to_basic_block(return_is_undefined_block);
@@ -1475,7 +1475,7 @@ fn generate_yield_from(
     // viii. If done is true, return IteratorValue(innerReturnResult).
     let type_is_return_done_block = gen.make_block();
     let type_is_return_not_done_block = gen.make_block();
-    gen.emit_jump_if(&done, Label(type_is_return_done_block as u32), Label(type_is_return_not_done_block as u32));
+    gen.emit_jump_if(&done, type_is_return_done_block, type_is_return_not_done_block);
 
     gen.switch_to_basic_block(type_is_return_done_block);
     let inner_return_result_value = gen.allocate_register();
@@ -1488,7 +1488,7 @@ fn generate_yield_from(
     emit_get_by_id(gen, &received, &inner_return_result, utf16!("value"), None);
     generate_yield(
         gen,
-        Label(continuation_block as u32),
+        continuation_block,
         &received,
         &received_completion,
         &received_completion_type,
@@ -1508,7 +1508,7 @@ fn generate_yield_from(
         completion: received_completion.operand(),
     });
     gen.emit(Instruction::Jump {
-        target: Label(loop_block as u32),
+        target: loop_block,
     });
 
     // =========================================================================
@@ -1554,7 +1554,7 @@ fn generate_yield(
     // Yield, then UnwrapYieldResumption.
     let unwrap_block = gen.make_block();
     gen.emit(Instruction::Yield {
-        continuation_label: Some(Label(unwrap_block as u32)),
+        continuation_label: Some(unwrap_block),
         value: argument.operand(),
     });
     gen.switch_to_basic_block(unwrap_block);
@@ -1576,7 +1576,7 @@ fn generate_yield(
         lhs: received_completion_type.operand(),
         rhs: return_type.operand(),
     });
-    gen.emit_jump_if(&is_not_return, continuation_label, Label(return_block as u32));
+    gen.emit_jump_if(&is_not_return, continuation_label, return_block);
 
     // Return path: Await(resumptionValue.[[Value]]).
     gen.switch_to_basic_block(return_block);
@@ -1597,7 +1597,7 @@ fn generate_yield(
         lhs: received_completion_type.operand(),
         rhs: throw_type.operand(),
     });
-    gen.emit_jump_if(&is_throw, continuation_label, Label(awaited_normal_block as u32));
+    gen.emit_jump_if(&is_throw, continuation_label, awaited_normal_block);
 
     // awaited.[[Type]] is normal: set type to Return and jump to continuation.
     gen.switch_to_basic_block(awaited_normal_block);
@@ -1790,17 +1790,17 @@ fn generate_logical(
     match op {
         LogicalOp::And => {
             // If lhs is falsy, short-circuit to end
-            gen.emit_jump_if(&lhs_val, Label(rhs_block as u32), Label(end_block as u32));
+            gen.emit_jump_if(&lhs_val, rhs_block, end_block);
         }
         LogicalOp::Or => {
             // If lhs is truthy, short-circuit to end
-            gen.emit_jump_if(&lhs_val, Label(end_block as u32), Label(rhs_block as u32));
+            gen.emit_jump_if(&lhs_val, end_block, rhs_block);
         }
         LogicalOp::NullishCoalescing => {
             gen.emit(Instruction::JumpNullish {
                 condition: lhs_val.operand(),
-                true_target: Label(rhs_block as u32),
-                false_target: Label(end_block as u32),
+                true_target: rhs_block,
+                false_target: end_block,
             });
         }
     }
@@ -1812,7 +1812,7 @@ fn generate_logical(
     }
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+            target: end_block,
         });
     }
 
@@ -1845,7 +1845,7 @@ fn generate_conditional(
     let false_block = gen.make_block();
     let end_block = gen.make_block();
 
-    gen.emit_jump_if(&predicate, Label(true_block as u32), Label(false_block as u32));
+    gen.emit_jump_if(&predicate, true_block, false_block);
 
     let dst = choose_dst(gen, preferred_dst);
 
@@ -1856,7 +1856,7 @@ fn generate_conditional(
     }
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+            target: end_block,
         });
     }
 
@@ -1867,7 +1867,7 @@ fn generate_conditional(
     }
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+            target: end_block,
         });
     }
 
@@ -1940,7 +1940,7 @@ fn generate_if_statement(
     let has_alternate = alternate.is_some();
     let end_block = if has_alternate { gen.make_block() } else { false_block };
 
-    gen.emit_jump_if(&pred, Label(true_block as u32), Label(false_block as u32));
+    gen.emit_jump_if(&pred, true_block, false_block);
 
     // Pass completion as preferred_dst to children so nested if-else chains
     // reuse the same completion register, matching C++ behavior.
@@ -1958,7 +1958,7 @@ fn generate_if_statement(
             gen.emit_mov(c, val);
         }
         gen.emit(Instruction::Jump {
-            target: Label(end_block as u32),
+            target: end_block,
         });
     }
     // Drop cons_result before generating alternate to match C++ register
@@ -1978,7 +1978,7 @@ fn generate_if_statement(
                 gen.emit_mov(c, val);
             }
             gen.emit(Instruction::Jump {
-                target: Label(end_block as u32),
+                target: end_block,
             });
         }
         gen.current_completion_register = saved_completion;
@@ -2003,7 +2003,7 @@ fn generate_while_statement(
     let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
-        target: Label(test_block as u32),
+        target: test_block,
     });
 
     gen.switch_to_basic_block(test_block);
@@ -2019,12 +2019,12 @@ fn generate_while_statement(
     let body_block = gen.make_block();
     let end_block = gen.make_block();
 
-    gen.emit_jump_if(&test_val, Label(body_block as u32), Label(end_block as u32));
+    gen.emit_jump_if(&test_val, body_block, end_block);
 
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    gen.begin_continuable_scope(test_block, labels.clone(), completion.clone());
+    gen.begin_breakable_scope(end_block, labels, completion.clone());
 
     generate_with_completion(body, gen, &completion, preferred_dst);
 
@@ -2032,7 +2032,7 @@ fn generate_while_statement(
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(test_block as u32),
+            target: test_block,
         });
     }
 
@@ -2058,7 +2058,7 @@ fn generate_do_while_statement(
     let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
-        target: Label(body_block as u32),
+        target: body_block,
     });
 
     // Generate test FIRST, matching C++ which keeps the test ScopedOperand
@@ -2067,15 +2067,15 @@ fn generate_do_while_statement(
     let test_val = generate_expression_or_undefined(test, gen, None);
     gen.emit_jump_if(
         &test_val,
-        Label(body_block as u32),
-        Label(load_result_and_jump_to_end_block as u32),
+        body_block,
+        load_result_and_jump_to_end_block,
     );
 
     // Generate body SECOND (test_val still alive, matching C++ register allocation).
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(test_block as u32), labels.clone(), completion.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    gen.begin_continuable_scope(test_block, labels.clone(), completion.clone());
+    gen.begin_breakable_scope(end_block, labels, completion.clone());
 
     generate_with_completion(body, gen, &completion, preferred_dst);
 
@@ -2083,13 +2083,13 @@ fn generate_do_while_statement(
     gen.end_continuable_scope();
     if !gen.is_current_block_terminated() {
         gen.emit(Instruction::Jump {
-            target: Label(test_block as u32),
+            target: test_block,
         });
     }
 
     gen.switch_to_basic_block(load_result_and_jump_to_end_block);
     gen.emit(Instruction::Jump {
-        target: Label(end_block as u32),
+        target: end_block,
     });
 
     gen.switch_to_basic_block(end_block);
@@ -2167,7 +2167,7 @@ fn generate_for_statement(
     let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
-        target: Label(test_block as u32),
+        target: test_block,
     });
 
     // Test
@@ -2179,7 +2179,7 @@ fn generate_for_statement(
         if let Some(constant) = gen.get_constant(&test_val) {
             if !constant_to_boolean(constant) {
                 gen.emit(Instruction::Jump {
-                    target: Label(end_block as u32),
+                    target: end_block,
                 });
                 gen.switch_to_basic_block(end_block);
                 if has_lexical_environment {
@@ -2193,7 +2193,7 @@ fn generate_for_statement(
             }
         }
 
-        gen.emit_jump_if(&test_val, Label(body_block as u32), Label(end_block as u32));
+        gen.emit_jump_if(&test_val, body_block, end_block);
     }
 
     // Update
@@ -2201,7 +2201,7 @@ fn generate_for_statement(
         gen.switch_to_basic_block(update_block);
         generate_expression(update_expression, gen, None);
         gen.emit(Instruction::Jump {
-            target: Label(test_block as u32),
+            target: test_block,
         });
     }
 
@@ -2209,8 +2209,8 @@ fn generate_for_statement(
     gen.switch_to_basic_block(body_block);
     let labels = std::mem::take(&mut gen.pending_labels);
     let continue_target = if update.is_some() { update_block } else { test_block };
-    gen.begin_continuable_scope(Label(continue_target as u32), labels.clone(), completion.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    gen.begin_continuable_scope(continue_target, labels.clone(), completion.clone());
+    gen.begin_breakable_scope(end_block, labels, completion.clone());
 
     generate_with_completion(body, gen, &completion, preferred_dst);
 
@@ -2221,11 +2221,11 @@ fn generate_for_statement(
         emit_per_iteration_bindings(gen, &per_iteration_binding_names);
         if update.is_some() {
             gen.emit(Instruction::Jump {
-                target: Label(update_block as u32),
+                target: update_block,
             });
         } else {
             gen.emit(Instruction::Jump {
-                target: Label(test_block as u32),
+                target: test_block,
             });
         }
     }
@@ -3193,16 +3193,16 @@ fn generate_assignment_expression(
                     let end_block = gen.make_block();
                     match op {
                         AssignmentOp::AndAssignment => {
-                            gen.emit_jump_if(&lhs_val, Label(rhs_block as u32), Label(lhs_block as u32));
+                            gen.emit_jump_if(&lhs_val, rhs_block, lhs_block);
                         }
                         AssignmentOp::OrAssignment => {
-                            gen.emit_jump_if(&lhs_val, Label(lhs_block as u32), Label(rhs_block as u32));
+                            gen.emit_jump_if(&lhs_val, lhs_block, rhs_block);
                         }
                         AssignmentOp::NullishAssignment => {
                             gen.emit(Instruction::JumpNullish {
                                 condition: lhs_val.operand(),
-                                true_target: Label(rhs_block as u32),
-                                false_target: Label(lhs_block as u32),
+                                true_target: rhs_block,
+                                false_target: lhs_block,
                             });
                         }
                         _ => unreachable!(),
@@ -3220,11 +3220,11 @@ fn generate_assignment_expression(
                     };
                     gen.emit_mov(&dst, &rhs_val);
                     emit_set_variable(gen, ident, &dst);
-                    gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                    gen.emit(Instruction::Jump { target: end_block });
                     // LHS block: keep original value.
                     gen.switch_to_basic_block(lhs_block);
                     gen.emit_mov(&dst, &lhs_val);
-                    gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                    gen.emit(Instruction::Jump { target: end_block });
                     gen.switch_to_basic_block(end_block);
                     return Some(dst);
                 }
@@ -3299,10 +3299,10 @@ fn generate_assignment_expression(
                         let dst = choose_dst(gen, preferred_dst);
                         gen.emit_mov(&dst, &rhs_val);
                         emit_super_put(gen, &base, property, *computed, &super_this, &dst, computed_key.as_ref());
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(end_block);
                         return Some(dst);
                     }
@@ -3357,10 +3357,10 @@ fn generate_assignment_expression(
                         let dst = choose_dst(gen, preferred_dst);
                         gen.emit_mov(&dst, &rhs_val);
                         emit_put_normal_by_value(gen, &base, &saved_property, &dst, None);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(end_block);
                         // Match C++ destruction order: rhs drops first, then
                         // reference_operands (loaded_value before referenced_name).
@@ -3400,10 +3400,10 @@ fn generate_assignment_expression(
                             cache_index: cache2,
                             base_identifier: None,
                         });
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(end_block);
                         return Some(dst);
                     }
@@ -3443,10 +3443,10 @@ fn generate_assignment_expression(
                             property: id2,
                             src: dst.operand(),
                         });
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(lhs_block);
                         gen.emit_mov(&dst, &old_val);
-                        gen.emit(Instruction::Jump { target: Label(end_block as u32) });
+                        gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(end_block);
                         return Some(dst);
                     }
@@ -3486,7 +3486,7 @@ fn emit_resolve_this_binding(gen: &mut Generator) -> ScopedOperand {
 
 /// Emit ResolveThisBinding only if not already resolved in the current or entry block.
 fn emit_resolve_this_if_needed(gen: &mut Generator) {
-    let index = gen.current_block_index();
+    let index = gen.current_block_index().basic_block_index();
     if gen.basic_blocks[index].resolved_this {
         return;
     }
@@ -3495,7 +3495,7 @@ fn emit_resolve_this_if_needed(gen: &mut Generator) {
         return;
     }
     gen.emit(Instruction::ResolveThisBinding);
-    let index = gen.current_block_index();
+    let index = gen.current_block_index().basic_block_index();
     gen.basic_blocks[index].resolved_this = true;
 }
 
@@ -4125,19 +4125,19 @@ fn emit_store_to_reference(
 }
 
 /// Emit the conditional jump for a logical assignment (&&=, ||=, ??=).
-fn emit_logical_jump(gen: &mut Generator, op: AssignmentOp, condition: &ScopedOperand, rhs_block: usize, lhs_block: usize) {
+fn emit_logical_jump(gen: &mut Generator, op: AssignmentOp, condition: &ScopedOperand, rhs_block: Label, lhs_block: Label) {
     match op {
         AssignmentOp::AndAssignment => {
-            gen.emit_jump_if(condition, Label(rhs_block as u32), Label(lhs_block as u32));
+            gen.emit_jump_if(condition, rhs_block, lhs_block);
         }
         AssignmentOp::OrAssignment => {
-            gen.emit_jump_if(condition, Label(lhs_block as u32), Label(rhs_block as u32));
+            gen.emit_jump_if(condition, lhs_block, rhs_block);
         }
         AssignmentOp::NullishAssignment => {
             gen.emit(Instruction::JumpNullish {
                 condition: condition.operand(),
-                true_target: Label(rhs_block as u32),
-                false_target: Label(lhs_block as u32),
+                true_target: rhs_block,
+                false_target: lhs_block,
             });
         }
         _ => unreachable!(),
@@ -4382,11 +4382,11 @@ fn generate_switch_statement(
     // Create first test block and jump to it (matching C++ structure).
     let first_test_block = gen.make_block();
     gen.emit(Instruction::Jump {
-        target: Label(first_test_block as u32),
+        target: first_test_block,
     });
 
     // Pre-allocate test blocks for each case with a test expression.
-    let mut test_blocks: Vec<usize> = Vec::new();
+    let mut test_blocks: Vec<Label> = Vec::new();
     for case in &data.cases {
         if case.test.is_some() {
             test_blocks.push(gen.make_block());
@@ -4398,7 +4398,7 @@ fn generate_switch_statement(
     // This matches C++ block creation order: test blocks interleaved with
     // case body blocks.
     let mut next_test_block = first_test_block;
-    let mut case_blocks: Vec<usize> = Vec::new();
+    let mut case_blocks: Vec<Label> = Vec::new();
     let mut default_block = None;
     let mut test_block_index = 0;
 
@@ -4416,7 +4416,7 @@ fn generate_switch_statement(
             });
             next_test_block = test_blocks[test_block_index];
             test_block_index += 1;
-            gen.emit_jump_if(&cmp, Label(case_block as u32), Label(next_test_block as u32));
+            gen.emit_jump_if(&cmp, case_block, next_test_block);
         } else {
             default_block = Some(case_block);
         }
@@ -4431,10 +4431,10 @@ fn generate_switch_statement(
     // Jump to default case or end block.
     let fallthrough_target = default_block.unwrap_or(end_block);
     gen.emit(Instruction::Jump {
-        target: Label(fallthrough_target as u32),
+        target: fallthrough_target,
     });
 
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    gen.begin_breakable_scope(end_block, labels, completion.clone());
 
     // Emit case bodies (fall-through by default).
     for (i, case) in data.cases.iter().enumerate() {
@@ -4485,11 +4485,11 @@ fn generate_switch_statement(
         // Fall through to next case
         if !gen.is_current_block_terminated() && i + 1 < case_blocks.len() {
             gen.emit(Instruction::Jump {
-                target: Label(case_blocks[i + 1] as u32),
+                target: case_blocks[i + 1],
             });
         } else if !gen.is_current_block_terminated() {
             gen.emit(Instruction::Jump {
-                target: Label(end_block as u32),
+                target: end_block,
             });
         }
     }
@@ -4942,8 +4942,8 @@ fn generate_optional_chain_inner(
             let not_nullish_block = gen.make_block();
             gen.emit(Instruction::JumpNullish {
                 condition: current_value.operand(),
-                true_target: Label(load_undefined_block as u32),
-                false_target: Label(not_nullish_block as u32),
+                true_target: load_undefined_block,
+                false_target: not_nullish_block,
             });
             gen.switch_to_basic_block(not_nullish_block);
         }
@@ -4983,14 +4983,14 @@ fn generate_optional_chain_inner(
     }
 
     gen.emit(Instruction::Jump {
-        target: Label(end_block as u32),
+        target: end_block,
     });
 
     gen.switch_to_basic_block(load_undefined_block);
     let undef = gen.add_constant_undefined();
     gen.emit_mov(current_value, &undef);
     gen.emit(Instruction::Jump {
-        target: Label(end_block as u32),
+        target: end_block,
     });
 
     gen.switch_to_basic_block(end_block);
@@ -5729,13 +5729,13 @@ fn generate_for_in_statement(
     let continue_block = gen.make_block();
     gen.emit(Instruction::JumpNullish {
         condition: object.operand(),
-        true_target: Label(nullish_block as u32),
-        false_target: Label(continue_block as u32),
+        true_target: nullish_block,
+        false_target: continue_block,
     });
 
     gen.switch_to_basic_block(nullish_block);
     gen.emit(Instruction::Jump {
-        target: Label(end_block as u32),
+        target: end_block,
     });
 
     gen.switch_to_basic_block(continue_block);
@@ -5754,7 +5754,7 @@ fn generate_for_in_statement(
     let completion = gen.allocate_completion_register();
 
     gen.emit(Instruction::Jump {
-        target: Label(update_block as u32),
+        target: update_block,
     });
 
     // Update: get next value
@@ -5770,7 +5770,7 @@ fn generate_for_in_statement(
     });
 
     let loop_continue_block = gen.make_block();
-    gen.emit_jump_if(&done, Label(end_block as u32), Label(loop_continue_block as u32));
+    gen.emit_jump_if(&done, end_block, loop_continue_block);
     gen.switch_to_basic_block(loop_continue_block);
 
     // Create per-iteration lexical environment for let/const declarations.
@@ -5783,8 +5783,8 @@ fn generate_for_in_statement(
 
     // Body — break/continue handle environment restoration via LeaveLexicalEnvironment boundary.
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_continuable_scope(Label(update_block as u32), labels.clone(), completion.clone());
-    gen.begin_breakable_scope(Label(end_block as u32), labels, completion.clone());
+    gen.begin_continuable_scope(update_block, labels.clone(), completion.clone());
+    gen.begin_breakable_scope(end_block, labels, completion.clone());
     if needs_lexical_env {
         gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
     }
@@ -5806,7 +5806,7 @@ fn generate_for_in_statement(
     gen.end_continuable_scope();
 
     if !gen.is_current_block_terminated() {
-        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        gen.emit(Instruction::Jump { target: update_block });
     }
 
     gen.switch_to_basic_block(end_block);
@@ -5863,12 +5863,12 @@ fn generate_labelled_statement(
     } else {
         // Non-iteration: wrap in a breakable scope so `break label;` works.
         let end_block = gen.make_block();
-        gen.begin_breakable_scope(Label(end_block as u32), labels, None);
+        gen.begin_breakable_scope(end_block, labels, None);
         let result = generate_statement(inner, gen, preferred_dst);
         gen.end_breakable_scope();
         if !gen.is_current_block_terminated() {
             gen.emit(Instruction::Jump {
-                target: Label(end_block as u32),
+                target: end_block,
             });
         }
         gen.switch_to_basic_block(end_block);
@@ -5933,8 +5933,8 @@ fn generate_for_of_statement_inner(
     gen.push_finally_context(FinallyContext {
         completion_type: close_completion_type.clone(),
         completion_value: close_completion_value.clone(),
-        finally_body: Label(iterator_close_body_block as u32),
-        exception_preamble: Label(exception_preamble_block as u32),
+        finally_body: iterator_close_body_block,
+        exception_preamble: exception_preamble_block,
         parent_index,
         registered_jumps: Vec::new(),
         next_jump_index: FinallyContext::FIRST_JUMP_INDEX,
@@ -5943,11 +5943,11 @@ fn generate_for_of_statement_inner(
 
     // Break scope wraps the ReturnToFinally so break hits ReturnToFinally first.
     let labels = std::mem::take(&mut gen.pending_labels);
-    gen.begin_breakable_scope(Label(end_block as u32), labels.clone(), completion.clone());
+    gen.begin_breakable_scope(end_block, labels.clone(), completion.clone());
     gen.start_boundary(BlockBoundaryType::ReturnToFinally);
 
     gen.emit(Instruction::Jump {
-        target: Label(update_block as u32),
+        target: update_block,
     });
 
     // Update: get next value
@@ -5984,7 +5984,7 @@ fn generate_for_of_statement_inner(
         emit_get_by_id(gen, &done, &next_result, utf16!("done"), None);
 
         let loop_continue_block = gen.make_block();
-        gen.emit_jump_if(&done, Label(end_block as u32), Label(loop_continue_block as u32));
+        gen.emit_jump_if(&done, end_block, loop_continue_block);
         gen.switch_to_basic_block(loop_continue_block);
 
         // IteratorValue — get .value property
@@ -5999,7 +5999,7 @@ fn generate_for_of_statement_inner(
         });
 
         let loop_continue_block = gen.make_block();
-        gen.emit_jump_if(&done, Label(end_block as u32), Label(loop_continue_block as u32));
+        gen.emit_jump_if(&done, end_block, loop_continue_block);
         gen.switch_to_basic_block(loop_continue_block);
     }
 
@@ -6009,7 +6009,7 @@ fn generate_for_of_statement_inner(
     gen.current_unwind_handler = Some(exception_preamble_block);
     let loop_body_block = gen.make_block();
     gen.emit(Instruction::Jump {
-        target: Label(loop_body_block as u32),
+        target: loop_body_block,
     });
     gen.switch_to_basic_block(loop_body_block);
 
@@ -6024,7 +6024,7 @@ fn generate_for_of_statement_inner(
     assign_to_for_in_of_lhs(gen, lhs, &next_value);
 
     // Body
-    gen.begin_continuable_scope(Label(update_block as u32), labels, completion.clone());
+    gen.begin_continuable_scope(update_block, labels, completion.clone());
 
     generate_with_completion(body, gen, &completion, preferred_dst);
 
@@ -6049,7 +6049,7 @@ fn generate_for_of_statement_inner(
             let parent = parent_env.as_ref().expect("parent_env must be set when restoring lexical environment");
             gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
         }
-        gen.emit(Instruction::Jump { target: Label(update_block as u32) });
+        gen.emit(Instruction::Jump { target: update_block });
     }
 
     // --- Exception preamble: catch thrown exception, route to iterator close ---
@@ -6065,7 +6065,7 @@ fn generate_for_of_statement_inner(
     let throw_const = gen.add_constant_i32(FinallyContext::THROW);
     gen.emit_mov(&close_completion_type, &throw_const);
     gen.emit(Instruction::Jump {
-        target: Label(iterator_close_body_block as u32),
+        target: iterator_close_body_block,
     });
 
     // --- Iterator close body: dispatch based on completion type ---
@@ -6078,8 +6078,8 @@ fn generate_for_of_statement_inner(
     gen.emit(Instruction::JumpStrictlyEquals {
         lhs: close_completion_type.operand(),
         rhs: throw_check_const.operand(),
-        true_target: Label(throw_close_block as u32),
-        false_target: Label(non_throw_close_block as u32),
+        true_target: throw_close_block,
+        false_target: non_throw_close_block,
     });
 
     // Non-throw close: close the iterator with Normal completion, then dispatch.
@@ -6100,8 +6100,8 @@ fn generate_for_of_statement_inner(
         let call_return_block = gen.make_block();
         gen.emit(Instruction::JumpUndefined {
             condition: return_method.operand(),
-            true_target: Label(after_close as u32),
-            false_target: Label(call_return_block as u32),
+            true_target: after_close,
+            false_target: call_return_block,
         });
         gen.switch_to_basic_block(call_return_block);
 
@@ -6124,7 +6124,7 @@ fn generate_for_of_statement_inner(
             gen, &inner_result, &rc, &rct, &rcv,
         );
         gen.emit(Instruction::ThrowIfNotObject { src: awaited.operand() });
-        gen.emit(Instruction::Jump { target: Label(after_close as u32) });
+        gen.emit(Instruction::Jump { target: after_close });
         gen.switch_to_basic_block(after_close);
     } else {
         let undef = gen.add_constant_undefined();
@@ -6146,7 +6146,7 @@ fn generate_for_of_statement_inner(
             lhs: close_completion_type.operand(),
             rhs: jump_const.operand(),
             true_target: jump.target,
-            false_target: Label(after_check as u32),
+            false_target: after_check,
         });
         gen.switch_to_basic_block(after_check);
     }
@@ -6158,8 +6158,8 @@ fn generate_for_of_statement_inner(
     gen.emit(Instruction::JumpStrictlyEquals {
         lhs: close_completion_type.operand(),
         rhs: return_const.operand(),
-        true_target: Label(return_block as u32),
-        false_target: Label(unreachable_block as u32),
+        true_target: return_block,
+        false_target: unreachable_block,
     });
 
     gen.switch_to_basic_block(return_block);
@@ -6203,7 +6203,7 @@ fn generate_for_of_statement_inner(
         // Jump to a block created inside the unwind context so that
         // GetMethod/Call/Await all have the exception handler set.
         let close_try_block = gen.make_block();
-        gen.emit(Instruction::Jump { target: Label(close_try_block as u32) });
+        gen.emit(Instruction::Jump { target: close_try_block });
         gen.switch_to_basic_block(close_try_block);
 
         let return_method = gen.allocate_register();
@@ -6217,8 +6217,8 @@ fn generate_for_of_statement_inner(
         let call_return_block = gen.make_block();
         gen.emit(Instruction::JumpUndefined {
             condition: return_method.operand(),
-            true_target: Label(rethrow_block as u32),
-            false_target: Label(call_return_block as u32),
+            true_target: rethrow_block,
+            false_target: call_return_block,
         });
         gen.switch_to_basic_block(call_return_block);
 
@@ -6240,7 +6240,7 @@ fn generate_for_of_statement_inner(
         generate_await_with_completions(gen, &inner_result, &rc, &rct, &rcv);
 
         // Even if close succeeded, rethrow original (spec step 5).
-        gen.emit(Instruction::Jump { target: Label(rethrow_block as u32) });
+        gen.emit(Instruction::Jump { target: rethrow_block });
 
         // Free registers in C++ destructor order (reverse declaration):
         // rcv, rct, rc, inner_result, return_method.
@@ -6256,7 +6256,7 @@ fn generate_for_of_statement_inner(
         gen.switch_to_basic_block(close_catch_block);
         let discarded = gen.allocate_register();
         gen.emit(Instruction::Catch { dst: discarded.operand() });
-        gen.emit(Instruction::Jump { target: Label(rethrow_block as u32) });
+        gen.emit(Instruction::Jump { target: rethrow_block });
 
         gen.switch_to_basic_block(rethrow_block);
         gen.emit(Instruction::Throw { src: close_completion_value.operand() });
@@ -6506,7 +6506,7 @@ fn generate_array_binding_pattern(
                 let if_not_exhausted = gen.make_block();
                 let continuation = gen.make_block();
 
-                gen.emit_jump_if(&is_exhausted, Label(if_exhausted as u32), Label(if_not_exhausted as u32));
+                gen.emit_jump_if(&is_exhausted, if_exhausted, if_not_exhausted);
 
                 value = gen.allocate_register();
 
@@ -6517,7 +6517,7 @@ fn generate_array_binding_pattern(
                     elements: Vec::new(),
                 });
                 gen.emit(Instruction::Jump {
-                    target: Label(continuation as u32),
+                    target: continuation,
                 });
 
                 gen.switch_to_basic_block(if_not_exhausted);
@@ -6528,7 +6528,7 @@ fn generate_array_binding_pattern(
                     iterator_done_property: iterator_done.operand(),
                 });
                 gen.emit(Instruction::Jump {
-                    target: Label(continuation as u32),
+                    target: continuation,
                 });
 
                 gen.switch_to_basic_block(continuation);
@@ -6558,7 +6558,7 @@ fn generate_array_binding_pattern(
 
         if !first {
             let not_exhausted_block = gen.make_block();
-            gen.emit_jump_if(&is_exhausted, Label(exhausted_block as u32), Label(not_exhausted_block as u32));
+            gen.emit_jump_if(&is_exhausted, exhausted_block, not_exhausted_block);
             gen.switch_to_basic_block(not_exhausted_block);
         }
 
@@ -6573,12 +6573,12 @@ fn generate_array_binding_pattern(
 
         // Check if iterator got exhausted by this step.
         let no_bail_block = gen.make_block();
-        gen.emit_jump_if(&is_exhausted, Label(exhausted_block as u32), Label(no_bail_block as u32));
+        gen.emit_jump_if(&is_exhausted, exhausted_block, no_bail_block);
 
         gen.switch_to_basic_block(no_bail_block);
         let create_binding_block = gen.make_block();
         gen.emit(Instruction::Jump {
-            target: Label(create_binding_block as u32),
+            target: create_binding_block,
         });
 
         // Exhausted: load undefined.
@@ -6586,7 +6586,7 @@ fn generate_array_binding_pattern(
         let undef = gen.add_constant_undefined();
         gen.emit_mov(&value, &undef);
         gen.emit(Instruction::Jump {
-            target: Label(create_binding_block as u32),
+            target: create_binding_block,
         });
 
         gen.switch_to_basic_block(create_binding_block);
@@ -6597,8 +6597,8 @@ fn generate_array_binding_pattern(
             let if_not_undefined = gen.make_block();
             gen.emit(Instruction::JumpUndefined {
                 condition: value.operand(),
-                true_target: Label(if_undefined as u32),
-                false_target: Label(if_not_undefined as u32),
+                true_target: if_undefined,
+                false_target: if_not_undefined,
             });
             gen.switch_to_basic_block(if_undefined);
             set_pending_lhs_name_for_entry(gen, entry);
@@ -6606,7 +6606,7 @@ fn generate_array_binding_pattern(
                 gen.emit_mov(&value, &default_value);
             }
             gen.emit(Instruction::Jump {
-                target: Label(if_not_undefined as u32),
+                target: if_not_undefined,
             });
             gen.switch_to_basic_block(if_not_undefined);
         }
@@ -6625,7 +6625,7 @@ fn generate_array_binding_pattern(
     // Close iterator if not exhausted.
     let done_block = gen.make_block();
     let not_done_block = gen.make_block();
-    gen.emit_jump_if(&is_exhausted, Label(done_block as u32), Label(not_done_block as u32));
+    gen.emit_jump_if(&is_exhausted, done_block, not_done_block);
     gen.switch_to_basic_block(not_done_block);
     let undef = gen.add_constant_undefined();
     gen.emit(Instruction::IteratorClose {
@@ -6636,7 +6636,7 @@ fn generate_array_binding_pattern(
         completion_value: undef.operand(),
     });
     gen.emit(Instruction::Jump {
-        target: Label(done_block as u32),
+        target: done_block,
     });
     gen.switch_to_basic_block(done_block);
 }
@@ -6708,8 +6708,8 @@ fn generate_object_binding_pattern(
             let if_not_undefined = gen.make_block();
             gen.emit(Instruction::JumpUndefined {
                 condition: value.operand(),
-                true_target: Label(if_undefined as u32),
-                false_target: Label(if_not_undefined as u32),
+                true_target: if_undefined,
+                false_target: if_not_undefined,
             });
             gen.switch_to_basic_block(if_undefined);
             set_pending_lhs_name_for_entry(gen, entry);
@@ -6717,7 +6717,7 @@ fn generate_object_binding_pattern(
                 gen.emit_mov(&value, &default_value);
             }
             gen.emit(Instruction::Jump {
-                target: Label(if_not_undefined as u32),
+                target: if_not_undefined,
             });
             gen.switch_to_basic_block(if_not_undefined);
         }
@@ -6737,12 +6737,12 @@ fn generate_try_statement(
     // Save lexical environment for restoration in catch/exception handler.
     let saved_env = gen.current_lexical_environment();
 
-    let mut next_block: Option<usize> = None;
+    let mut next_block: Option<Label> = None;
     let mut completion: Option<ScopedOperand> = None;
 
     // --- Set up FinallyContext if we have a finalizer ---
     let has_finally = data.finalizer.is_some();
-    let mut finally_body_block: Option<usize> = None;
+    let mut finally_body_block: Option<Label> = None;
 
     if has_finally {
         let completion_type = gen.allocate_register();
@@ -6757,8 +6757,8 @@ fn generate_try_statement(
         gen.push_finally_context(FinallyContext {
             completion_type,
             completion_value,
-            finally_body: Label(fb_block as u32),
-            exception_preamble: Label(exception_preamble_block as u32),
+            finally_body: fb_block,
+            exception_preamble: exception_preamble_block,
             parent_index,
             registered_jumps: Vec::new(),
             next_jump_index: FinallyContext::FIRST_JUMP_INDEX,
@@ -6781,7 +6781,7 @@ fn generate_try_statement(
         let throw_const = gen.add_constant_i32(FinallyContext::THROW);
         gen.emit_mov(&ct, &throw_const);
         gen.emit(Instruction::Jump {
-            target: Label(fb_block as u32),
+            target: fb_block,
         });
 
         // Set exception_preamble as default handler for blocks created below.
@@ -6791,7 +6791,7 @@ fn generate_try_statement(
     }
 
     // --- Generate catch handler block (if present) ---
-    let mut handler_block: Option<usize> = None;
+    let mut handler_block: Option<Label> = None;
     if let Some(catch) = &data.handler {
         let hb = gen.make_block();
         handler_block = Some(hb);
@@ -6911,7 +6911,7 @@ fn generate_try_statement(
                     next_block = Some(gen.make_block());
                 }
                 gen.emit(Instruction::Jump {
-                    target: Label(next_block.expect("next_block must be set") as u32),
+                    target: next_block.expect("next_block must be set"),
                 });
             }
         }
@@ -6932,9 +6932,7 @@ fn generate_try_statement(
         gen.current_unwind_handler = Some(hb);
     } else if has_finally {
         if let Some(ctx_index) = gen.current_finally_context {
-            let ep = match gen.finally_contexts[ctx_index].exception_preamble {
-                Label(index) => index as usize,
-            };
+            let ep = gen.finally_contexts[ctx_index].exception_preamble;
             gen.current_unwind_handler = Some(ep);
         }
     }
@@ -6942,7 +6940,7 @@ fn generate_try_statement(
     let try_body_block = gen.make_block();
     gen.switch_to_basic_block(saved_block);
     gen.emit(Instruction::Jump {
-        target: Label(try_body_block as u32),
+        target: try_body_block,
     });
 
     if has_finally {
@@ -6993,7 +6991,7 @@ fn generate_try_statement(
                 next_block = Some(gen.make_block());
             }
             gen.emit(Instruction::Jump {
-                target: Label(next_block.expect("next_block must be set") as u32),
+                target: next_block.expect("next_block must be set"),
             });
         }
     }
@@ -7048,8 +7046,8 @@ fn generate_try_statement(
             gen.emit(Instruction::JumpStrictlyEquals {
                 lhs: ctx_ct.operand(),
                 rhs: normal_const.operand(),
-                true_target: Label(nb as u32),
-                false_target: Label(after_normal_check as u32),
+                true_target: nb,
+                false_target: after_normal_check,
             });
             gen.switch_to_basic_block(after_normal_check);
 
@@ -7062,7 +7060,7 @@ fn generate_try_statement(
                     lhs: ctx_ct.operand(),
                     rhs: jump_const.operand(),
                     true_target: jump.target,
-                    false_target: Label(after_jump_check as u32),
+                    false_target: after_jump_check,
                 });
                 gen.switch_to_basic_block(after_jump_check);
             }
@@ -7074,8 +7072,8 @@ fn generate_try_statement(
             gen.emit(Instruction::JumpStrictlyEquals {
                 lhs: ctx_ct.operand(),
                 rhs: return_const.operand(),
-                true_target: Label(return_block as u32),
-                false_target: Label(rethrow_block as u32),
+                true_target: return_block,
+                false_target: rethrow_block,
             });
 
             // Generate return block.
@@ -7312,8 +7310,8 @@ pub fn emit_function_declaration_instantiation(
 
             gen.emit(Instruction::JumpUndefined {
                 condition: Operand::argument(parameter_index),
-                true_target: Label(if_undefined_block as u32),
-                false_target: Label(if_not_undefined_block as u32),
+                true_target: if_undefined_block,
+                false_target: if_not_undefined_block,
             });
 
             gen.switch_to_basic_block(if_undefined_block);
@@ -7321,7 +7319,7 @@ pub fn emit_function_declaration_instantiation(
                 gen.emit_mov_raw(Operand::argument(parameter_index), value.operand());
             }
             gen.emit(Instruction::Jump {
-                target: Label(if_not_undefined_block as u32),
+                target: if_not_undefined_block,
             });
 
             gen.switch_to_basic_block(if_not_undefined_block);

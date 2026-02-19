@@ -142,7 +142,7 @@ unsafe fn write_ast_dump_output(
 ///
 /// NB: C++ Vector<u16>::data() returns nullptr when the vector is empty (no allocation),
 /// so we must handle len == 0 with a null pointer as a valid empty slice.
-unsafe fn source_from_raw(source: *const u16, len: usize) -> Option<&'static [u16]> {
+unsafe fn source_from_raw<'a>(source: *const u16, len: usize) -> Option<&'a [u16]> {
     if len == 0 {
         return Some(&[]);
     }
@@ -1249,7 +1249,7 @@ unsafe fn compile_module_as_async(
 ) -> *mut c_void {
     use bytecode::generator::Generator;
     use bytecode::instruction::Instruction;
-    use bytecode::operand::{Label, Operand, Register};
+    use bytecode::operand::{Operand, Register};
 
     let scope = scope_ref.borrow();
     let mut gen = Generator::new();
@@ -1272,7 +1272,7 @@ unsafe fn compile_module_as_async(
     let start_block = gen.make_block();
     let undef = gen.add_constant_undefined();
     gen.emit(Instruction::Yield {
-        continuation_label: Some(Label(start_block as u32)),
+        continuation_label: Some(start_block),
         value: undef.operand(),
     });
     gen.switch_to_basic_block(start_block);
@@ -1670,7 +1670,7 @@ pub unsafe extern "C" fn rust_compile_function(
         let start_block = gen.make_block();
         let undef = gen.add_constant_undefined();
         gen.emit(bytecode::instruction::Instruction::Yield {
-            continuation_label: Some(bytecode::operand::Label(start_block as u32)),
+            continuation_label: Some(start_block),
             value: undef.operand(),
         });
         gen.switch_to_basic_block(start_block);
@@ -1698,7 +1698,7 @@ pub unsafe extern "C" fn rust_compile_function(
         let start_block = gen.make_block();
         let undef = gen.add_constant_undefined();
         gen.emit(bytecode::instruction::Instruction::Yield {
-            continuation_label: Some(bytecode::operand::Label(start_block as u32)),
+            continuation_label: Some(start_block),
             value: undef.operand(),
         });
         gen.switch_to_basic_block(start_block);

@@ -122,7 +122,7 @@ pub struct LocalVariable {
 pub struct Generator {
     // --- Basic block management ---
     pub basic_blocks: Vec<BasicBlock>,
-    current_block_index: usize,
+    current_block_index: Label,
 
     // --- Register allocation ---
     next_register: u32,
@@ -207,7 +207,7 @@ pub struct Generator {
 
     // --- Unwind context ---
     // When set, newly created basic blocks inherit this handler index.
-    pub current_unwind_handler: Option<usize>,
+    pub current_unwind_handler: Option<Label>,
 
     // --- AnnexB function names ---
     // Names approved for AnnexB.3.3 hoisting by the scope collector.
@@ -278,7 +278,7 @@ impl Generator {
 
         Self {
             basic_blocks: Vec::new(),
-            current_block_index: 0,
+            current_block_index: Label(0),
             next_register: Register::RESERVED_COUNT,
             constants: Vec::new(),
             true_constant: None,
@@ -542,8 +542,8 @@ impl Generator {
 
     // --- Basic block management ---
 
-    /// Create a new basic block and return its index.
-    pub fn make_block(&mut self) -> usize {
+    /// Create a new basic block and return its label.
+    pub fn make_block(&mut self) -> Label {
         let index = self.basic_blocks.len();
         let mut block = BasicBlock::new(index as u32);
 
@@ -553,22 +553,22 @@ impl Generator {
         }
 
         self.basic_blocks.push(block);
-        index
+        Label(index as u32)
     }
 
     /// Switch emission to the given basic block.
-    pub fn switch_to_basic_block(&mut self, block_index: usize) {
-        self.current_block_index = block_index;
+    pub fn switch_to_basic_block(&mut self, label: Label) {
+        self.current_block_index = label;
     }
 
-    /// Get the current basic block's index.
-    pub fn current_block_index(&self) -> usize {
+    /// Get the current basic block's label.
+    pub fn current_block_index(&self) -> Label {
         self.current_block_index
     }
 
     /// Is the current block terminated?
     pub fn is_current_block_terminated(&self) -> bool {
-        self.basic_blocks[self.current_block_index].terminated
+        self.basic_blocks[self.current_block_index.basic_block_index()].terminated
     }
 
     /// Number of basic blocks.
@@ -581,10 +581,11 @@ impl Generator {
     pub fn terminate_unterminated_blocks_with_yield(&mut self) {
         let block_count = self.basic_block_count();
         for i in 0..block_count {
-            if self.is_block_terminated(i) {
+            let label = Label(i as u32);
+            if self.is_block_terminated(label) {
                 continue;
             }
-            self.switch_to_basic_block(i);
+            self.switch_to_basic_block(label);
             let undef = self.add_constant_undefined();
             self.emit(Instruction::Yield {
                 continuation_label: None,
@@ -594,8 +595,8 @@ impl Generator {
     }
 
     /// Is a specific block terminated?
-    pub fn is_block_terminated(&self, index: usize) -> bool {
-        self.basic_blocks[index].terminated
+    pub fn is_block_terminated(&self, label: Label) -> bool {
+        self.basic_blocks[label.basic_block_index()].terminated
     }
 
     // --- Instruction emission ---
@@ -610,7 +611,7 @@ impl Generator {
             source_start: self.current_source_start,
             source_end: self.current_source_end,
         };
-        let block = &mut self.basic_blocks[self.current_block_index];
+        let block = &mut self.basic_blocks[self.current_block_index.basic_block_index()];
         block.append(instruction, source_map);
     }
 
@@ -652,7 +653,7 @@ impl Generator {
         if condition.operand().is_register()
             && std::rc::Rc::strong_count(&condition.inner) == 1
         {
-            let block = &mut self.basic_blocks[self.current_block_index];
+            let block = &mut self.basic_blocks[self.current_block_index.basic_block_index()];
             if let Some((last_instruction, _)) = block.instructions.last() {
                 let fused = match last_instruction {
                     Instruction::LessThan { dst, lhs, rhs } if *dst == condition.operand() => {
@@ -875,7 +876,7 @@ impl Generator {
     /// For break/continue through nested finally: create a trampoline block.
     fn emit_trampoline_through_finally(&mut self) {
         let trampoline_block = self.make_block();
-        self.register_jump_in_finally_context(Label(trampoline_block as u32));
+        self.register_jump_in_finally_context(trampoline_block);
         self.switch_to_basic_block(trampoline_block);
         // Pop to the parent FinallyContext (simulating the inner finally completing).
         let index = self.current_finally_context.expect("no active finally context");
@@ -1396,11 +1397,11 @@ impl Generator {
             }
 
             // Close exception handler range
-            if let Some(handler_block) = handler {
+            if let Some(handler_label) = handler {
                 exception_handlers.push(ExceptionHandler {
                     start_offset: block_start as u32,
                     end_offset: bytecode.len() as u32,
-                    handler_offset: block_offsets[handler_block] as u32,
+                    handler_offset: block_offsets[handler_label.basic_block_index()] as u32,
                 });
             }
         }

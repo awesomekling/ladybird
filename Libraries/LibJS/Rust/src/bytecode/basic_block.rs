@@ -5,6 +5,7 @@
  */
 
 use super::instruction::Instruction;
+use super::operand::Label;
 
 /// A source map entry mapping a bytecode offset to a source range.
 #[derive(Debug, Clone, Copy)]
@@ -22,7 +23,7 @@ pub struct SourceMapEntry {
 pub struct BasicBlock {
     pub index: u32,
     pub instructions: Vec<(Instruction, SourceMapEntry)>,
-    pub handler: Option<usize>,
+    pub handler: Option<Label>,
     pub terminated: bool,
     pub resolved_this: bool,
 }
