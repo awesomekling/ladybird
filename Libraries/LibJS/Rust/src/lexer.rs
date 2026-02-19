@@ -1056,7 +1056,9 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     if self.current_code_unit == ch(b'e') || self.current_code_unit == ch(b'E') {
-                        is_invalid = is_invalid || !self.consume_exponent();
+                        if !self.consume_exponent() {
+                            is_invalid = true;
+                        }
                     }
                 }
             }
