@@ -526,6 +526,33 @@ impl Generator {
     define_intern_method!(intern_identifier, IdentifierTableIndex, identifier_table, identifier_table_index);
     define_intern_method!(intern_property_key, PropertyKeyTableIndex, property_key_table, property_key_table_index);
 
+    /// If `operand` is a constant string that is not an array index, intern it
+    /// as a property key and return the index. Uses split borrows to avoid
+    /// cloning the string when it is already interned (the common case).
+    pub fn try_constant_string_to_property_key(
+        &mut self,
+        operand: &ScopedOperand,
+    ) -> Option<PropertyKeyTableIndex> {
+        if !operand.operand().is_constant() {
+            return None;
+        }
+        let idx = operand.operand().index() as usize;
+        let s: &[u16] = match self.constants.get(idx) {
+            Some(ConstantValue::String(s)) if !super::codegen::is_array_index(&s.0) => &s.0,
+            _ => return None,
+        };
+        // Split borrow: s borrows self.constants, get() borrows self.property_key_table_index
+        if let Some(&key_index) = self.property_key_table_index.get(s) {
+            return Some(key_index);
+        }
+        // Cold path: not yet interned, must clone
+        let owned = Utf16String(s.to_vec());
+        let key_index = PropertyKeyTableIndex(self.property_key_table.len() as u32);
+        self.property_key_table.push(owned.clone());
+        self.property_key_table_index.insert(owned, key_index);
+        Some(key_index)
+    }
+
     /// Register a SharedFunctionInstanceData (opaque pointer) and return its index.
     pub fn register_shared_function_data(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
         let index = self.shared_function_data.len() as u32;

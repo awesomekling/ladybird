@@ -3612,7 +3612,7 @@ fn emit_invalid_lhs_error(gen: &mut Generator) {
 /// Check if a UTF-16 string is a canonical array index (non-negative integer < 2^32 - 1).
 /// Matches the behavior of C++ to_property_key: these strings become integer PropertyKeys,
 /// not string PropertyKeys, so they must NOT be optimized to GetById/PutById.
-fn is_array_index(s: &[u16]) -> bool {
+pub(crate) fn is_array_index(s: &[u16]) -> bool {
     if s.is_empty() || s.len() > 10 {
         return false;
     }
@@ -3630,18 +3630,6 @@ fn is_array_index(s: &[u16]) -> bool {
     value <= 0xFFFF_FFFE
 }
 
-/// If the property operand is a constant string that is not an array index,
-/// return a clone of its UTF-16 data. Used by the emit_*_by_value functions
-/// to optimize computed property access into ById instructions.
-fn try_extract_constant_string_key(gen: &Generator, property: &ScopedOperand) -> Option<Utf16String> {
-    if let Some(ConstantValue::String(s)) = gen.get_constant(property) {
-        if !is_array_index(&s.0) {
-            return Some(s.clone());
-        }
-    }
-    None
-}
-
 /// Emit a property read by value, optimizing constant string properties to GetById.
 fn emit_get_by_value(
     gen: &mut Generator,
@@ -3650,8 +3638,26 @@ fn emit_get_by_value(
     property: &ScopedOperand,
     base_identifier: Option<IdentifierTableIndex>,
 ) {
-    if let Some(s) = try_extract_constant_string_key(gen, property) {
-        emit_get_by_id(gen, dst, base, &s, base_identifier);
+    if let Some(key) = gen.try_constant_string_to_property_key(property) {
+        if gen.property_key_table[key.0 as usize].0 == utf16!("length") {
+            gen.length_identifier = Some(key);
+            let cache = gen.next_property_lookup_cache();
+            gen.emit(Instruction::GetLength {
+                dst: dst.operand(),
+                base: base.operand(),
+                base_identifier,
+                cache_index: cache,
+            });
+        } else {
+            let cache = gen.next_property_lookup_cache();
+            gen.emit(Instruction::GetById {
+                dst: dst.operand(),
+                base: base.operand(),
+                property: key,
+                base_identifier,
+                cache_index: cache,
+            });
+        }
         return;
     }
     gen.emit(Instruction::GetByValue {
@@ -3670,8 +3676,7 @@ fn emit_get_by_value_with_this(
     property: &ScopedOperand,
     this_value: &ScopedOperand,
 ) {
-    if let Some(s) = try_extract_constant_string_key(gen, property) {
-        let key = gen.intern_property_key(&s);
+    if let Some(key) = gen.try_constant_string_to_property_key(property) {
         let cache = gen.next_property_lookup_cache();
         gen.emit(Instruction::GetByIdWithThis {
             dst: dst.operand(),
@@ -3698,8 +3703,7 @@ fn emit_put_normal_by_value(
     src: &ScopedOperand,
     base_identifier: Option<IdentifierTableIndex>,
 ) {
-    if let Some(s) = try_extract_constant_string_key(gen, property) {
-        let key = gen.intern_property_key(&s);
+    if let Some(key) = gen.try_constant_string_to_property_key(property) {
         let cache = gen.next_property_lookup_cache();
         gen.emit(Instruction::PutNormalById {
             base: base.operand(),
@@ -3726,8 +3730,7 @@ fn emit_put_normal_by_value_with_this(
     this_value: &ScopedOperand,
     src: &ScopedOperand,
 ) {
-    if let Some(s) = try_extract_constant_string_key(gen, property) {
-        let key = gen.intern_property_key(&s);
+    if let Some(key) = gen.try_constant_string_to_property_key(property) {
         let cache = gen.next_property_lookup_cache();
         gen.emit(Instruction::PutNormalByIdWithThis {
             base: base.operand(),
@@ -3761,8 +3764,7 @@ fn emit_put_by_value(
     src: &ScopedOperand,
     kind: PutKind,
 ) {
-    if let Some(s) = try_extract_constant_string_key(gen, property) {
-        let key = gen.intern_property_key(&s);
+    if let Some(key) = gen.try_constant_string_to_property_key(property) {
         let cache = gen.next_property_lookup_cache();
         match kind {
             PutKind::Own => {
