@@ -958,6 +958,28 @@ impl<'a> Parser<'a> {
                         declared_names.insert(entry.local_name.as_slice().to_vec());
                     }
                 }
+                StatementKind::Export(data) => {
+                    if let Some(ref statement) = data.statement {
+                        match &statement.inner {
+                            StatementKind::VariableDeclaration { declarations, .. } => {
+                                for decl in declarations {
+                                    collect_binding_names(&decl.target, &mut declared_names);
+                                }
+                            }
+                            StatementKind::FunctionDeclaration(func_data) => {
+                                if let Some(ref name) = func_data.name {
+                                    declared_names.insert(name.name.as_slice().to_vec());
+                                }
+                            }
+                            StatementKind::ClassDeclaration(class_data) => {
+                                if let Some(ref name) = class_data.name {
+                                    declared_names.insert(name.name.as_slice().to_vec());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
