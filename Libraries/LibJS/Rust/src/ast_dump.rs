@@ -69,6 +69,13 @@ struct DumpState {
     is_root: bool,
     use_color: bool,
     output: Option<Rc<RefCell<String>>>,
+    function_table: *const FunctionTable,
+}
+
+impl DumpState {
+    fn function_table(&self) -> &FunctionTable {
+        unsafe { &*self.function_table }
+    }
 }
 
 fn print_node(state: &DumpState, text: &str) {
@@ -112,6 +119,7 @@ fn child_state(state: &DumpState, is_last: bool) -> DumpState {
         is_root: false,
         use_color: state.use_color,
         output: state.output.clone(),
+        function_table: state.function_table,
     }
 }
 
@@ -298,19 +306,20 @@ fn dump_labeled_statement(label: &str, statement: &Statement, is_last: bool, sta
 // Entry point
 // ============================================================================
 
-pub fn dump_program(program: &Statement, use_color: bool) {
+pub fn dump_program(program: &Statement, use_color: bool, function_table: &FunctionTable) {
     let state = DumpState {
         prefix: String::new(),
         is_last: false,
         is_root: true,
         use_color,
         output: None,
+        function_table,
     };
     dump_statement(program, &state);
     println!();
 }
 
-pub fn dump_program_to_string(program: &Statement) -> String {
+pub fn dump_program_to_string(program: &Statement, function_table: &FunctionTable) -> String {
     let output = Rc::new(RefCell::new(String::new()));
     {
         let state = DumpState {
@@ -319,6 +328,7 @@ pub fn dump_program_to_string(program: &Statement) -> String {
             is_root: true,
             use_color: false,
             output: Some(output.clone()),
+            function_table,
         };
         dump_statement(program, &state);
     }
@@ -520,7 +530,8 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
             }
         }
 
-        StatementKind::FunctionDeclaration(function_data) => {
+        StatementKind::FunctionDeclaration { function_id, .. } => {
+            let function_data = state.function_table().get(*function_id);
             dump_function(function_data, "FunctionDeclaration", &statement.range, state);
         }
 
@@ -817,7 +828,8 @@ fn dump_expression(expression: &Expression, state: &DumpState) {
             dump_node!(state, "SuperExpression", &expression.range);
         }
 
-        ExpressionKind::Function(function_data) => {
+        ExpressionKind::Function(function_id) => {
+            let function_data = state.function_table().get(*function_id);
             dump_function(function_data, "FunctionExpression", &expression.range, state);
         }
 

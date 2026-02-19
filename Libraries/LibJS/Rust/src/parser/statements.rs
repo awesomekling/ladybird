@@ -787,8 +787,8 @@ impl<'a> Parser<'a> {
         self.last_inner_label_is_iteration = false;
         let body = if self.match_token(TokenType::Function) {
             let fn_decl = self.parse_function_declaration();
-            if let StatementKind::FunctionDeclaration(ref f) = fn_decl.inner {
-                match f.kind {
+            if let StatementKind::FunctionDeclaration { kind, .. } = fn_decl.inner {
+                match kind {
                     FunctionKind::Generator | FunctionKind::AsyncGenerator => {
                         self.syntax_error("Generator functions cannot be defined in labelled statements");
                     }

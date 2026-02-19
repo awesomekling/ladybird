@@ -227,6 +227,11 @@ pub struct Generator {
     pub source_code_ptr: *const std::ffi::c_void,
     pub source: *const u16,
     pub source_len: usize,
+
+    // --- Function table ---
+    // Side table owning all FunctionData from the parser. Codegen
+    // takes ownership of individual entries via `take()`.
+    pub function_table: crate::ast::FunctionTable,
 }
 
 macro_rules! singleton_constant {
@@ -340,6 +345,7 @@ impl Generator {
             source_code_ptr: std::ptr::null(),
             source: std::ptr::null(),
             source_len: 0,
+            function_table: crate::ast::FunctionTable::new(),
             free_register_pool,
         }
     }

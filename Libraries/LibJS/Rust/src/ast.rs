@@ -27,6 +27,411 @@ use std::fmt;
 use std::rc::Rc;
 
 // =============================================================================
+// Function table (side table for FunctionData)
+// =============================================================================
+
+/// Opaque handle into the `FunctionTable`. Copy + Clone so AST nodes can
+/// freely duplicate it without cloning the underlying `FunctionData`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FunctionId(u32);
+
+/// Flat side table that owns all `FunctionData` produced during parsing.
+///
+/// The parser inserts `FunctionData` via `insert()` and receives a
+/// `FunctionId`. Later consumers (ast_dump, scope collector, codegen)
+/// either borrow via `get()` or take ownership via `take()`.
+///
+/// `take()` replaces the slot with `None` so each `FunctionData` is
+/// moved out exactly once (during codegen / GDI). This eliminates the
+/// deep clone that was previously required in `create_shared_function_data`.
+pub struct FunctionTable(Vec<Option<Box<FunctionData>>>);
+
+impl Default for FunctionTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FunctionTable {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Insert a `FunctionData`, returning a `FunctionId` handle.
+    pub fn insert(&mut self, data: FunctionData) -> FunctionId {
+        let id = FunctionId(self.0.len() as u32);
+        self.0.push(Some(Box::new(data)));
+        id
+    }
+
+    /// Borrow the data (for read-only access like ast_dump).
+    ///
+    /// # Panics
+    /// Panics if the slot was already taken.
+    pub fn get(&self, id: FunctionId) -> &FunctionData {
+        self.0[id.0 as usize]
+            .as_ref()
+            .expect("FunctionTable::get: slot already taken")
+    }
+
+    /// Take ownership of the data (for codegen / GDI).
+    ///
+    /// # Panics
+    /// Panics if the slot was already taken.
+    pub fn take(&mut self, id: FunctionId) -> Box<FunctionData> {
+        let idx = id.0 as usize;
+        if idx >= self.0.len() {
+            panic!(
+                "FunctionTable::take: index {} out of bounds (table len {})",
+                idx,
+                self.0.len()
+            );
+        }
+        self.0[idx]
+            .take()
+            .expect("FunctionTable::take: slot already taken")
+    }
+
+    /// Take ownership if the slot is still present; returns None if already taken.
+    fn try_take(&mut self, id: FunctionId) -> Option<Box<FunctionData>> {
+        self.0.get_mut(id.0 as usize).and_then(|slot| slot.take())
+    }
+
+    /// Insert a `Box<FunctionData>` at a specific id, growing the table if needed.
+    fn insert_at(&mut self, id: FunctionId, data: Box<FunctionData>) {
+        let idx = id.0 as usize;
+        if idx >= self.0.len() {
+            self.0.resize_with(idx + 1, || None);
+        }
+        self.0[idx] = Some(data);
+    }
+
+    /// Extract a subtable containing all `FunctionId`s reachable from the
+    /// given function body and parameters. This recursively takes nested
+    /// functions so that the returned subtable has everything needed to
+    /// compile the function.
+    pub fn extract_reachable(&mut self, data: &FunctionData) -> FunctionTable {
+        let mut subtable = FunctionTable::new();
+        // Walk parameters first (default values can contain functions).
+        for param in &data.parameters {
+            if let Some(ref default) = param.default_value {
+                self.collect_from_expression(default, &mut subtable);
+            }
+            if let FunctionParameterBinding::BindingPattern(ref pat) = param.binding {
+                self.collect_from_pattern(pat, &mut subtable);
+            }
+        }
+        self.collect_from_statement(&data.body, &mut subtable);
+        subtable
+    }
+
+    fn transfer(&mut self, id: FunctionId, result: &mut FunctionTable) {
+        if let Some(data) = self.try_take(id) {
+            // Walk parameters (default values / binding patterns can contain functions).
+            for param in &data.parameters {
+                if let Some(ref default) = param.default_value {
+                    self.collect_from_expression(default, result);
+                }
+                if let FunctionParameterBinding::BindingPattern(ref pat) = param.binding {
+                    self.collect_from_pattern(pat, result);
+                }
+            }
+            // Walk the function body.
+            self.collect_from_statement(&data.body, result);
+            result.insert_at(id, data);
+        }
+    }
+
+    fn collect_from_statement(&mut self, stmt: &Statement, result: &mut FunctionTable) {
+        match &stmt.inner {
+            StatementKind::FunctionDeclaration { function_id, .. } => {
+                self.transfer(*function_id, result);
+            }
+            StatementKind::Expression(expr) => self.collect_from_expression(expr, result),
+            StatementKind::Block(scope) | StatementKind::FunctionBody { scope, .. } => {
+                for child in &scope.borrow().children {
+                    self.collect_from_statement(child, result);
+                }
+            }
+            StatementKind::Program(data) => {
+                for child in &data.scope.borrow().children {
+                    self.collect_from_statement(child, result);
+                }
+            }
+            StatementKind::If { test, consequent, alternate } => {
+                self.collect_from_expression(test, result);
+                self.collect_from_statement(consequent, result);
+                if let Some(alt) = alternate {
+                    self.collect_from_statement(alt, result);
+                }
+            }
+            StatementKind::While { test, body } => {
+                self.collect_from_expression(test, result);
+                self.collect_from_statement(body, result);
+            }
+            StatementKind::DoWhile { test, body } => {
+                self.collect_from_statement(body, result);
+                self.collect_from_expression(test, result);
+            }
+            StatementKind::For { init, test, update, body } => {
+                if let Some(init) = init {
+                    match init {
+                        ForInit::Expression(expr) => self.collect_from_expression(expr, result),
+                        ForInit::Declaration(decl) => self.collect_from_statement(decl, result),
+                    }
+                }
+                if let Some(test) = test { self.collect_from_expression(test, result); }
+                if let Some(update) = update { self.collect_from_expression(update, result); }
+                self.collect_from_statement(body, result);
+            }
+            StatementKind::ForInOf { lhs, rhs, body, .. } => {
+                match lhs {
+                    ForInOfLhs::Declaration(decl) => self.collect_from_statement(decl, result),
+                    ForInOfLhs::Expression(expr) => self.collect_from_expression(expr, result),
+                    ForInOfLhs::Pattern(pattern) => self.collect_from_pattern(pattern, result),
+                }
+                self.collect_from_expression(rhs, result);
+                self.collect_from_statement(body, result);
+            }
+            StatementKind::Switch(data) => {
+                self.collect_from_expression(&data.discriminant, result);
+                for case in &data.cases {
+                    if let Some(ref test) = case.test {
+                        self.collect_from_expression(test, result);
+                    }
+                    for child in &case.scope.borrow().children {
+                        self.collect_from_statement(child, result);
+                    }
+                }
+            }
+            StatementKind::With { object, body } => {
+                self.collect_from_expression(object, result);
+                self.collect_from_statement(body, result);
+            }
+            StatementKind::Labelled { item, .. } => {
+                self.collect_from_statement(item, result);
+            }
+            StatementKind::Return(arg) => {
+                if let Some(expr) = arg { self.collect_from_expression(expr, result); }
+            }
+            StatementKind::Throw(expr) => {
+                self.collect_from_expression(expr, result);
+            }
+            StatementKind::Try(data) => {
+                self.collect_from_statement(&data.block, result);
+                if let Some(ref handler) = data.handler {
+                    if let Some(CatchBinding::BindingPattern(ref pat)) = handler.parameter {
+                        self.collect_from_pattern(pat, result);
+                    }
+                    self.collect_from_statement(&handler.body, result);
+                }
+                if let Some(ref finalizer) = data.finalizer {
+                    self.collect_from_statement(finalizer, result);
+                }
+            }
+            StatementKind::VariableDeclaration { declarations, .. } => {
+                for decl in declarations {
+                    self.collect_from_target(&decl.target, result);
+                    if let Some(ref init) = decl.init {
+                        self.collect_from_expression(init, result);
+                    }
+                }
+            }
+            StatementKind::UsingDeclaration { declarations } => {
+                for decl in declarations {
+                    self.collect_from_target(&decl.target, result);
+                    if let Some(ref init) = decl.init {
+                        self.collect_from_expression(init, result);
+                    }
+                }
+            }
+            StatementKind::ClassDeclaration(class_data) => {
+                self.collect_from_class(class_data, result);
+            }
+            StatementKind::Export(data) => {
+                if let Some(ref stmt) = data.statement {
+                    self.collect_from_statement(stmt, result);
+                }
+            }
+            StatementKind::ClassFieldInitializer { expression, .. } => {
+                self.collect_from_expression(expression, result);
+            }
+            StatementKind::Empty
+            | StatementKind::Debugger
+            | StatementKind::Break { .. }
+            | StatementKind::Continue { .. }
+            | StatementKind::Import(_)
+            | StatementKind::Error
+            | StatementKind::ErrorDeclaration => {}
+        }
+    }
+
+    fn collect_from_expression(&mut self, expr: &Expression, result: &mut FunctionTable) {
+        match &expr.inner {
+            ExpressionKind::Function(function_id) => {
+                self.transfer(*function_id, result);
+            }
+            ExpressionKind::Class(class_data) => {
+                self.collect_from_class(class_data, result);
+            }
+            ExpressionKind::Binary { lhs, rhs, .. }
+            | ExpressionKind::Logical { lhs, rhs, .. } => {
+                self.collect_from_expression(lhs, result);
+                self.collect_from_expression(rhs, result);
+            }
+            ExpressionKind::Unary { operand, .. } => {
+                self.collect_from_expression(operand, result);
+            }
+            ExpressionKind::Update { argument, .. } => {
+                self.collect_from_expression(argument, result);
+            }
+            ExpressionKind::Assignment { lhs, rhs, .. } => {
+                match lhs {
+                    AssignmentLhs::Expression(expr) => self.collect_from_expression(expr, result),
+                    AssignmentLhs::Pattern(pat) => self.collect_from_pattern(pat, result),
+                }
+                self.collect_from_expression(rhs, result);
+            }
+            ExpressionKind::Conditional { test, consequent, alternate } => {
+                self.collect_from_expression(test, result);
+                self.collect_from_expression(consequent, result);
+                self.collect_from_expression(alternate, result);
+            }
+            ExpressionKind::Sequence(exprs) => {
+                for expr in exprs { self.collect_from_expression(expr, result); }
+            }
+            ExpressionKind::Member { object, property, .. } => {
+                self.collect_from_expression(object, result);
+                self.collect_from_expression(property, result);
+            }
+            ExpressionKind::OptionalChain { base, references } => {
+                self.collect_from_expression(base, result);
+                for reference in references {
+                    match reference {
+                        OptionalChainReference::Call { arguments, .. } => {
+                            for arg in arguments { self.collect_from_expression(&arg.value, result); }
+                        }
+                        OptionalChainReference::ComputedReference { expression, .. } => {
+                            self.collect_from_expression(expression, result);
+                        }
+                        OptionalChainReference::MemberReference { .. }
+                        | OptionalChainReference::PrivateMemberReference { .. } => {}
+                    }
+                }
+            }
+            ExpressionKind::Call(data) | ExpressionKind::New(data) => {
+                self.collect_from_expression(&data.callee, result);
+                for arg in &data.arguments { self.collect_from_expression(&arg.value, result); }
+            }
+            ExpressionKind::SuperCall(data) => {
+                for arg in &data.arguments { self.collect_from_expression(&arg.value, result); }
+            }
+            ExpressionKind::Spread(expr) | ExpressionKind::Await(expr) => {
+                self.collect_from_expression(expr, result);
+            }
+            ExpressionKind::Array(elements) => {
+                for elem in elements {
+                    if let Some(expr) = elem { self.collect_from_expression(expr, result); }
+                }
+            }
+            ExpressionKind::Object(properties) => {
+                for prop in properties {
+                    self.collect_from_expression(&prop.key, result);
+                    if let Some(ref val) = prop.value {
+                        self.collect_from_expression(val, result);
+                    }
+                }
+            }
+            ExpressionKind::TemplateLiteral(data) => {
+                for expr in &data.expressions { self.collect_from_expression(expr, result); }
+            }
+            ExpressionKind::TaggedTemplateLiteral { tag, template_literal } => {
+                self.collect_from_expression(tag, result);
+                self.collect_from_expression(template_literal, result);
+            }
+            ExpressionKind::Yield { argument, .. } => {
+                if let Some(expr) = argument { self.collect_from_expression(expr, result); }
+            }
+            ExpressionKind::ImportCall { specifier, options } => {
+                self.collect_from_expression(specifier, result);
+                if let Some(opts) = options { self.collect_from_expression(opts, result); }
+            }
+            ExpressionKind::NumericLiteral(_)
+            | ExpressionKind::StringLiteral(_)
+            | ExpressionKind::BooleanLiteral(_)
+            | ExpressionKind::NullLiteral
+            | ExpressionKind::BigIntLiteral(_)
+            | ExpressionKind::RegExpLiteral(_)
+            | ExpressionKind::Identifier(_)
+            | ExpressionKind::PrivateIdentifier(_)
+            | ExpressionKind::This
+            | ExpressionKind::Super
+            | ExpressionKind::MetaProperty(_)
+            | ExpressionKind::Error => {}
+        }
+    }
+
+    fn collect_from_class(&mut self, class_data: &ClassData, result: &mut FunctionTable) {
+        if let Some(ref super_class) = class_data.super_class {
+            self.collect_from_expression(super_class, result);
+        }
+        if let Some(ref constructor) = class_data.constructor {
+            self.collect_from_expression(constructor, result);
+        }
+        for element in &class_data.elements {
+            match &element.inner {
+                ClassElement::Method { key, function, .. } => {
+                    self.collect_from_expression(key, result);
+                    self.collect_from_expression(function, result);
+                }
+                ClassElement::Field { key, initializer, .. } => {
+                    self.collect_from_expression(key, result);
+                    if let Some(init) = initializer {
+                        self.collect_from_expression(init, result);
+                    }
+                }
+                ClassElement::StaticInitializer { body } => {
+                    self.collect_from_statement(body, result);
+                }
+            }
+        }
+    }
+
+    fn collect_from_pattern(&mut self, pattern: &BindingPattern, result: &mut FunctionTable) {
+        for entry in &pattern.entries {
+            if let Some(ref name) = entry.name {
+                if let BindingEntryName::Expression(expr) = name {
+                    self.collect_from_expression(expr, result);
+                }
+            }
+            if let Some(ref alias) = entry.alias {
+                match alias {
+                    BindingEntryAlias::BindingPattern(sub) => self.collect_from_pattern(sub, result),
+                    BindingEntryAlias::MemberExpression(expr) => self.collect_from_expression(expr, result),
+                    BindingEntryAlias::Identifier(_) => {}
+                }
+            }
+            if let Some(ref init) = entry.initializer {
+                self.collect_from_expression(init, result);
+            }
+        }
+    }
+
+    fn collect_from_target(&mut self, target: &VariableDeclaratorTarget, result: &mut FunctionTable) {
+        if let VariableDeclaratorTarget::BindingPattern(pat) = target {
+            self.collect_from_pattern(pat, result);
+        }
+    }
+}
+
+/// Bundles a `FunctionData` with a subtable of all nested functions
+/// reachable from its body. Stored as the raw pointer in C++ SFDs.
+pub struct FunctionPayload {
+    pub data: FunctionData,
+    pub function_table: FunctionTable,
+}
+
+// =============================================================================
 // Source location
 // =============================================================================
 
@@ -357,7 +762,7 @@ pub enum FunctionParameterBinding {
 }
 
 /// Shared data for FunctionDeclaration and FunctionExpression.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FunctionData {
     pub name: Option<Rc<Identifier>>,
     pub source_text_start: u32,
@@ -369,7 +774,6 @@ pub struct FunctionData {
     pub is_strict_mode: bool,
     pub is_arrow_function: bool,
     pub parsing_insights: FunctionParsingInsights,
-    pub is_hoisted: bool,
 }
 
 // =============================================================================
@@ -941,7 +1345,7 @@ pub enum ExpressionKind {
     Super,
 
     // Functions
-    Function(Box<FunctionData>),
+    Function(FunctionId),
 
     // Classes
     Class(Box<ClassData>),
@@ -1050,7 +1454,12 @@ pub enum StatementKind {
     UsingDeclaration {
         declarations: Vec<VariableDeclarator>,
     },
-    FunctionDeclaration(Box<FunctionData>),
+    FunctionDeclaration {
+        function_id: FunctionId,
+        name: Option<Rc<Identifier>>,
+        kind: FunctionKind,
+        is_hoisted: Cell<bool>,
+    },
     ClassDeclaration(Box<ClassData>),
     ErrorDeclaration,
 

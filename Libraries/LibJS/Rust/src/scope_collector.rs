@@ -1174,8 +1174,8 @@ impl ScopeCollector {
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
-                if let crate::ast::StatementKind::FunctionDeclaration(ref function_data) = sd.children[i].inner {
-                    if let Some(ref name_ident) = function_data.name {
+                if let crate::ast::StatementKind::FunctionDeclaration { ref name, .. } = sd.children[i].inner {
+                    if let Some(ref name_ident) = name {
                         if seen_function_names.insert(name_ident.name.clone()) {
                             functions_to_initialize.push(crate::ast::FunctionToInit {
                                 child_index: i,
@@ -1313,13 +1313,14 @@ impl ScopeCollector {
                 // Mark all function declarations with this name in the block
                 // as hoisted, so they emit GetBinding + SetVariableBinding.
                 if let Some(ref block_scope) = function.block_scope_data {
-                    let mut bs = block_scope.borrow_mut();
-                    for child in &mut bs.children {
-                        if let crate::ast::StatementKind::FunctionDeclaration(ref mut fd)
-                            = child.inner
+                    let bs = block_scope.borrow();
+                    for child in &bs.children {
+                        if let crate::ast::StatementKind::FunctionDeclaration {
+                            ref name, ref is_hoisted, ..
+                        } = child.inner
                         {
-                            if fd.name.as_ref().is_some_and(|n| n.name == function.name) {
-                                fd.is_hoisted = true;
+                            if name.as_ref().is_some_and(|n| n.name == function.name) {
+                                is_hoisted.set(true);
                             }
                         }
                     }

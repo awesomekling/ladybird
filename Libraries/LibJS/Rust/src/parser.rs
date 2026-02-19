@@ -37,7 +37,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{
-    BindingPattern, Expression, ExpressionKind, FunctionParameter, Identifier,
+    BindingPattern, Expression, ExpressionKind, FunctionParameter, FunctionTable, Identifier,
     SourceRange, Statement, StatementKind, ScopeData, ProgramData, Utf16String,
 };
 use crate::lexer::Lexer;
@@ -270,6 +270,9 @@ pub struct Parser<'a> {
 
     /// Track exported names for duplicate detection in modules.
     exported_names: HashSet<Utf16String>,
+
+    /// Side table owning all FunctionData produced during parsing.
+    pub function_table: FunctionTable,
 }
 
 impl<'a> Parser<'a> {
@@ -310,6 +313,7 @@ impl<'a> Parser<'a> {
             for_loop_declaration_is_var: false,
             scope_collector: ScopeCollector::new(),
             exported_names: HashSet::new(),
+            function_table: FunctionTable::new(),
         }
     }
 
@@ -950,8 +954,8 @@ impl<'a> Parser<'a> {
                         collect_binding_names(&decl.target, &mut declared_names);
                     }
                 }
-                StatementKind::FunctionDeclaration(data) => {
-                    if let Some(ref name) = data.name {
+                StatementKind::FunctionDeclaration { ref name, .. } => {
+                    if let Some(ref name) = name {
                         declared_names.insert(name.name.clone());
                     }
                 }
@@ -973,8 +977,8 @@ impl<'a> Parser<'a> {
                                     collect_binding_names(&decl.target, &mut declared_names);
                                 }
                             }
-                            StatementKind::FunctionDeclaration(func_data) => {
-                                if let Some(ref name) = func_data.name {
+                            StatementKind::FunctionDeclaration { ref name, .. } => {
+                                if let Some(ref name) = name {
                                     declared_names.insert(name.name.clone());
                                 }
                             }

@@ -261,7 +261,8 @@ pub fn generate_expression(
         }
 
         // === Function expressions ===
-        ExpressionKind::Function(data) => {
+        ExpressionKind::Function(function_id) => {
+            let data = gen.function_table.take(*function_id);
             let has_name = data.name.is_some();
             let mut name_id = None;
 
@@ -857,11 +858,11 @@ pub fn generate_statement(
         }
 
         // === FunctionDeclaration ===
-        StatementKind::FunctionDeclaration(function_data) => {
-            if function_data.is_hoisted {
+        StatementKind::FunctionDeclaration { ref name, ref is_hoisted, .. } => {
+            if is_hoisted.get() {
                 // Annex B.3.3: Copy the function from the lexical (block) scope
                 // to the var scope.
-                if let Some(ref name_ident) = function_data.name {
+                if let Some(ref name_ident) = name {
                     let id = gen.intern_identifier(&name_ident.name);
                     let value = gen.allocate_register();
                     gen.emit(Instruction::GetBinding {
@@ -963,7 +964,7 @@ pub fn generate_statement(
                 }
             } else if let Some(ref child_statement) = export_data.statement {
                 match &child_statement.inner {
-                    StatementKind::FunctionDeclaration(_) | StatementKind::ClassDeclaration(_) => {
+                    StatementKind::FunctionDeclaration { .. } | StatementKind::ClassDeclaration(_) => {
                         generate_statement(child_statement, gen, None)
                     }
                     _ => {
@@ -2414,8 +2415,8 @@ fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &Sc
                     }
                 }
             }
-            StatementKind::FunctionDeclaration(function_data) => {
-                if let Some(ref name_ident) = function_data.name {
+            StatementKind::FunctionDeclaration { function_id, ref name, .. } => {
+                if let Some(ref name_ident) = name {
                     // a. Create binding.
                     if !name_ident.is_local() {
                         let id = gen.intern_identifier(&name_ident.name);
@@ -2426,6 +2427,7 @@ fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &Sc
                         });
                     }
                     // b. Instantiate function object.
+                    let function_data = gen.function_table.take(*function_id);
                     let sfd_index = emit_new_function(gen, function_data, None);
                     let fo = gen.allocate_register();
                     gen.emit(Instruction::NewFunction {
@@ -4450,8 +4452,8 @@ fn generate_switch_statement(
             // For function declarations in switch cases: emit AnnexB hoisting
             // only if the scope collector approved it (name is in annexb_function_names).
             if did_create_env {
-                if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-                    if let Some(ref name_ident) = function_data.name {
+                if let StatementKind::FunctionDeclaration { ref name, .. } = child.inner {
+                    if let Some(ref name_ident) = name {
                         if gen.annexb_function_names.contains(&name_ident.name) {
                             let id = gen.intern_identifier(&name_ident.name);
                             let value = gen.allocate_register();
@@ -4523,7 +4525,7 @@ fn emit_switch_block_declaration_instantiation(
     // Check if we need a lexical environment.
     // Only needed if there are non-local lexical declarations.
     let needs_env = all_children.iter().any(|child| match &child.inner {
-        StatementKind::FunctionDeclaration(_) => true,
+        StatementKind::FunctionDeclaration { .. } => true,
         StatementKind::VariableDeclaration { kind, declarations } => {
             if *kind == DeclarationKind::Let || *kind == DeclarationKind::Const {
                 declarations.iter().any(|declaration| {
@@ -5145,7 +5147,8 @@ fn generate_class_expression(
     // Create SharedFunctionInstanceData for constructor
     let constructor_sfd_index = if let Some(ctor_expression) = &data.constructor {
         // Explicit constructor — extract FunctionData from the expression
-        if let ExpressionKind::Function(function_data) = &ctor_expression.inner {
+        if let ExpressionKind::Function(function_id) = &ctor_expression.inner {
+            let function_data = gen.function_table.take(*function_id);
             emit_new_function(gen, function_data, None)
         } else {
             // Fallback: synthesize a default constructor
@@ -5179,7 +5182,8 @@ fn generate_class_expression(
                 // Don't set the method name here — the runtime's update_function_name
                 // in construct_class sets it from the evaluated property key, which
                 // correctly handles computed keys (Symbols, etc).
-                let sfd_index = if let ExpressionKind::Function(function_data) = &function.inner {
+                let sfd_index = if let ExpressionKind::Function(function_id) = &function.inner {
+                    let function_data = gen.function_table.take(*function_id);
                     super::ffi::FFIOptionalU32::some(emit_new_function(
                         gen,
                         function_data,
@@ -5286,7 +5290,7 @@ fn generate_class_expression(
                         );
 
                         // Class bodies are always strict mode.
-                        let function_data = FunctionData {
+                        let function_data = Box::new(FunctionData {
                             name: None,
                             source_text_start: init_expression.range.start.offset,
                             source_text_end: init_expression.range.end.offset,
@@ -5301,9 +5305,8 @@ fn generate_class_expression(
                                 uses_this_from_environment: true,
                                 ..Default::default()
                             },
-                            is_hoisted: false,
-                        };
-                        let index = emit_new_function(gen, &function_data, Some(utf16!("field")));
+                        });
+                        let index = emit_new_function(gen, function_data, Some(utf16!("field")));
 
                         // Set class_field_initializer_name on the SFD.
                         let sfd_ptr = gen.shared_function_data[index as usize];
@@ -5363,7 +5366,7 @@ fn generate_class_expression(
             ClassElement::StaticInitializer { body } => {
                 // Wrap the static block body in a function.
                 // Class bodies are always strict mode.
-                let function_data = FunctionData {
+                let function_data = Box::new(FunctionData {
                     name: None,
                     source_text_start: body.range.start.offset,
                     source_text_end: body.range.end.offset,
@@ -5378,9 +5381,8 @@ fn generate_class_expression(
                         uses_this_from_environment: true,
                         ..Default::default()
                     },
-                    is_hoisted: false,
-                };
-                let sfd_index = super::ffi::FFIOptionalU32::some(emit_new_function(gen, &function_data, None));
+                });
+                let sfd_index = super::ffi::FFIOptionalU32::some(emit_new_function(gen, function_data, None));
 
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: ClassElementKind::StaticInitializer as u8,
@@ -5484,11 +5486,11 @@ fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
     );
 
     // Extract FunctionData from the parsed program.
-    let function_data = if let StatementKind::Program(ref data) = program.inner {
+    let function_id = if let StatementKind::Program(ref data) = program.inner {
         let scope = data.scope.borrow();
         scope.children.iter().find_map(|child| {
-            if let StatementKind::FunctionDeclaration(fd) = &child.inner {
-                Some(fd.as_ref().clone())
+            if let StatementKind::FunctionDeclaration { function_id, .. } = &child.inner {
+                Some(*function_id)
             } else {
                 None
             }
@@ -5497,16 +5499,19 @@ fn emit_default_constructor(gen: &mut Generator, has_super: bool) -> u32 {
         None
     };
 
-    let mut function_data = function_data.expect("default constructor: no FunctionDeclaration found");
+    let function_id = function_id.expect("default constructor: no FunctionDeclaration found");
+    let mut function_data = parser.function_table.take(function_id);
 
     // Zero out source text range since this is synthetic source,
     // not part of the original source code buffer.
     function_data.source_text_start = 0;
     function_data.source_text_end = 0;
 
+    let subtable = parser.function_table.extract_reachable(&function_data);
     let sfd_ptr = unsafe {
         super::ffi::create_shared_function_data(
-            &function_data,
+            function_data,
+            subtable,
             gen.vm_ptr,
             gen.source_code_ptr,
             gen.strict,
@@ -7140,7 +7145,7 @@ fn generate_try_statement(
 /// Returns the shared_function_data_index for use in NewFunction instructions.
 fn emit_new_function(
     gen: &mut Generator,
-    data: &FunctionData,
+    data: Box<FunctionData>,
     name_override: Option<&[u16]>,
 ) -> u32 {
     assert!(
@@ -7151,9 +7156,11 @@ fn emit_new_function(
         gen.source_len
     );
 
+    let subtable = gen.function_table.extract_reachable(&data);
     let sfd_ptr = unsafe {
         super::ffi::create_shared_function_data(
             data,
+            subtable,
             gen.vm_ptr,
             gen.source_code_ptr,
             gen.strict,
@@ -7545,11 +7552,12 @@ pub fn emit_function_declaration_instantiation(
     if let Some(fsd) = function_scope_data {
         for function_to_init in &fsd.functions_to_initialize {
             let child = &body_scope.children[function_to_init.child_index];
-            if let StatementKind::FunctionDeclaration(ref inner_function_data) = child.inner {
+            if let StatementKind::FunctionDeclaration { function_id, ref name, .. } = child.inner {
+                let inner_function_data = gen.function_table.take(function_id);
                 let sfd_index = emit_new_function(gen, inner_function_data, None);
 
                 // Check if the function name identifier is local.
-                if let Some(ref name_ident) = inner_function_data.name {
+                if let Some(ref name_ident) = name {
                     if name_ident.is_local() {
                         let local_index = name_ident.local_index.get();
                         let local = gen.local(local_index);
@@ -7595,7 +7603,7 @@ fn is_for_loop(statement: &Statement) -> bool {
 fn needs_block_declaration_instantiation(scope: &ScopeData) -> bool {
     for child in &scope.children {
         match &child.inner {
-            StatementKind::FunctionDeclaration(_) => {
+            StatementKind::FunctionDeclaration { .. } => {
                 return true;
             }
             StatementKind::VariableDeclaration { kind, declarations } => {

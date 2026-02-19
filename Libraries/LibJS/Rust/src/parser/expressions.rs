@@ -1883,7 +1883,7 @@ impl<'a> Parser<'a> {
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
-            Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
+            let function_id = self.function_table.insert(FunctionData {
                 name: None,
                 source_text_start: src_start,
                 source_text_end: self.source_text_end_offset(),
@@ -1894,8 +1894,8 @@ impl<'a> Parser<'a> {
                 is_strict_mode: self.flags.strict_mode || has_use_strict,
                 is_arrow_function: true,
                 parsing_insights: insights,
-                is_hoisted: false,
-            }))))
+            });
+            Some(self.expression(start, ExpressionKind::Function(function_id)))
         } else {
             let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
             // C++ uses rule_start (function start) for ReturnStatement and FunctionBody.
@@ -1921,7 +1921,7 @@ impl<'a> Parser<'a> {
             self.flags.await_expression_is_valid = saved_await_body;
             self.flags.in_class_static_init_block = saved_static_init;
             self.flags.in_formal_parameter_context = saved_formal_parameter_ctx;
-            Some(self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
+            let function_id = self.function_table.insert(FunctionData {
                 name: None,
                 source_text_start: src_start,
                 source_text_end: self.source_text_end_offset(),
@@ -1932,8 +1932,8 @@ impl<'a> Parser<'a> {
                 is_strict_mode: self.flags.strict_mode,
                 is_arrow_function: true,
                 parsing_insights: insights,
-                is_hoisted: false,
-            }))))
+            });
+            Some(self.expression(start, ExpressionKind::Function(function_id)))
         }
     }
 
@@ -2006,7 +2006,7 @@ impl<'a> Parser<'a> {
             insights.uses_this_from_environment = true;
         }
 
-        self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
+        let function_id = self.function_table.insert(FunctionData {
             name: None,
             source_text_start: function_start.offset,
             source_text_end: self.source_text_end_offset(),
@@ -2017,8 +2017,8 @@ impl<'a> Parser<'a> {
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: insights,
-            is_hoisted: false,
-        })))
+        });
+        self.expression(start, ExpressionKind::Function(function_id))
     }
 }
 

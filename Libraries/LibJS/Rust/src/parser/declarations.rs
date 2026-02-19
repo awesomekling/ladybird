@@ -6,6 +6,7 @@
 
 //! Declaration parsing: variables, functions, classes, imports, exports.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -39,8 +40,8 @@ fn get_declaration_export_names(statement: &Statement) -> Vec<Utf16String> {
             }
             names
         }
-        StatementKind::FunctionDeclaration(function) => {
-            if let Some(ref name) = function.name {
+        StatementKind::FunctionDeclaration { ref name, .. } => {
+            if let Some(ref name) = name {
                 vec![name.name.clone()]
             } else {
                 Vec::new()
@@ -371,7 +372,15 @@ impl<'a> Parser<'a> {
         self.scope_collector.set_is_function_declaration();
 
         let fd = self.parse_function_common(&name, &fn_name, kind, is_async, is_generator, start, saved_might_need_arguments);
-        self.statement(start, StatementKind::FunctionDeclaration(Box::new(fd)))
+        let decl_name = fd.name.clone();
+        let decl_kind = fd.kind;
+        let function_id = self.function_table.insert(fd);
+        self.statement(start, StatementKind::FunctionDeclaration {
+            function_id,
+            name: decl_name,
+            kind: decl_kind,
+            is_hoisted: Cell::new(false),
+        })
     }
 
     // https://tc39.es/ecma262/#sec-function-definitions
@@ -417,7 +426,8 @@ impl<'a> Parser<'a> {
         self.scope_collector.open_function_scope(fn_name_for_scope);
 
         let fd = self.parse_function_common(&name, &fn_name_value, kind, is_async, is_generator, start, saved_might_need_arguments);
-        self.expression(start, ExpressionKind::Function(Box::new(fd)))
+        let function_id = self.function_table.insert(fd);
+        self.expression(start, ExpressionKind::Function(function_id))
     }
 
     /// Shared logic for parsing formal parameters, function body, and constructing
@@ -496,7 +506,6 @@ impl<'a> Parser<'a> {
             is_strict_mode: self.flags.strict_mode || has_use_strict,
             is_arrow_function: false,
             parsing_insights: insights,
-            is_hoisted: false,
         }
     }
 
@@ -686,7 +695,7 @@ impl<'a> Parser<'a> {
                 is_rest: true,
             }];
 
-            self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
+            let function_id = self.function_table.insert(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
@@ -701,14 +710,14 @@ impl<'a> Parser<'a> {
                     uses_this_from_environment: true,
                     ..FunctionParsingInsights::default()
                 },
-                is_hoisted: false,
-            })))
+            });
+            self.expression(start, ExpressionKind::Function(function_id))
         } else {
             let body = self.statement(start, StatementKind::Block(
                 ScopeData::shared_with_children(Vec::new()),
             ));
 
-            self.expression(start, ExpressionKind::Function(Box::new(FunctionData {
+            let function_id = self.function_table.insert(FunctionData {
                 name: ctor_name,
                 source_text_start: start.offset,
                 source_text_end: self.source_text_end_offset(),
@@ -723,8 +732,8 @@ impl<'a> Parser<'a> {
                     uses_this_from_environment: true,
                     ..FunctionParsingInsights::default()
                 },
-                is_hoisted: false,
-            })))
+            });
+            self.expression(start, ExpressionKind::Function(function_id))
         }
     }
 
@@ -1603,8 +1612,8 @@ impl<'a> Parser<'a> {
                 let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
                 let declaration = self.parse_function_declaration_for_export(has_default_name);
                 if !has_default_name {
-                    if let StatementKind::FunctionDeclaration(ref function) = declaration.inner {
-                        if let Some(ref name_id) = function.name {
+                    if let StatementKind::FunctionDeclaration { ref name, .. } = declaration.inner {
+                        if let Some(ref name_id) = name {
                             local_name = Some(name_id.name.clone());
                         }
                     }

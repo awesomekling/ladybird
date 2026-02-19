@@ -217,7 +217,8 @@ extern "C" {
 /// Create a SharedFunctionInstanceData from a FunctionData.
 ///
 /// Computes has_simple_parameter_list, builds parameter name slices,
-/// clones the AST into a Box, and calls rust_create_sfd.
+/// transfers ownership of the Box to C++ via `Box::into_raw`, and
+/// calls `rust_create_sfd`.
 ///
 /// Used by both `emit_new_function` in codegen.rs (for function
 /// expressions/declarations) and `create_sfd_for_gdi` below (for
@@ -226,7 +227,8 @@ extern "C" {
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
 pub unsafe fn create_shared_function_data(
-    function_data: &crate::ast::FunctionData,
+    function_data: Box<crate::ast::FunctionData>,
+    subtable: crate::ast::FunctionTable,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     is_strict: bool,
@@ -268,28 +270,36 @@ pub unsafe fn create_shared_function_data(
         Vec::new()
     };
 
-    let cloned = Box::new(function_data.clone());
-    let rust_ast_ptr = Box::into_raw(cloned) as *mut c_void;
-
     let function_kind = function_data.kind as u8;
     let strict = function_data.is_strict_mode || is_strict;
+    let function_length = function_data.function_length;
+    let formal_parameter_count = function_data.parameters.len() as u32;
+    let is_arrow = function_data.is_arrow_function;
+    let uses_this = function_data.parsing_insights.uses_this;
+    let uses_this_from_environment = function_data.parsing_insights.uses_this_from_environment;
+
+    let payload = Box::new(crate::ast::FunctionPayload {
+        data: *function_data,
+        function_table: subtable,
+    });
+    let rust_ast_ptr = Box::into_raw(payload) as *mut c_void;
 
     let ffi_data = FFISharedFunctionData {
         name: name_ptr,
         name_len,
         function_kind,
-        function_length: function_data.function_length,
-        formal_parameter_count: function_data.parameters.len() as u32,
+        function_length,
+        formal_parameter_count,
         strict,
-        is_arrow: function_data.is_arrow_function,
+        is_arrow,
         has_simple_parameter_list,
         parameter_names: parameter_name_slices.as_ptr(),
         parameter_name_count: parameter_name_slices.len(),
         source_text_offset: source_start,
         source_text_length: source_text_len,
         rust_function_ast: rust_ast_ptr,
-        uses_this: function_data.parsing_insights.uses_this,
-        uses_this_from_environment: function_data.parsing_insights.uses_this_from_environment,
+        uses_this,
+        uses_this_from_environment,
     };
 
     let sfd_ptr = rust_create_sfd(vm_ptr, source_code_ptr, &ffi_data);
@@ -305,12 +315,13 @@ pub unsafe fn create_shared_function_data(
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
 pub unsafe fn create_sfd_for_gdi(
-    function_data: &crate::ast::FunctionData,
+    function_data: Box<crate::ast::FunctionData>,
+    subtable: crate::ast::FunctionTable,
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     is_strict: bool,
 ) -> *mut c_void {
-    create_shared_function_data(function_data, vm_ptr, source_code_ptr, is_strict, None)
+    create_shared_function_data(function_data, subtable, vm_ptr, source_code_ptr, is_strict, None)
 }
 
 /// Constant tags for the FFI constant buffer (ABI-compatible with BytecodeFactory).

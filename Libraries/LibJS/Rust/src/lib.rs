@@ -124,13 +124,14 @@ fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
 /// or both be valid writable pointers.
 unsafe fn write_ast_dump_output(
     program: &ast::Statement,
+    function_table: &ast::FunctionTable,
     output_ptr: *mut *mut u8,
     output_len: *mut usize,
 ) {
     if output_ptr.is_null() || output_len.is_null() {
         return;
     }
-    let dump_string = ast_dump::dump_program_to_string(program);
+    let dump_string = ast_dump::dump_program_to_string(program, function_table);
     let mut boxed = dump_string.into_bytes().into_boxed_slice();
     *output_ptr = boxed.as_mut_ptr();
     *output_len = boxed.len();
@@ -323,6 +324,7 @@ pub unsafe extern "C" fn rust_compile_program(
         };
 
         let mut gen = new_program_generator(starts_in_strict_mode, vm_ptr, source_code_ptr, source, source_len);
+        gen.function_table = std::mem::take(&mut parser.function_table);
         compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
     })
 }
@@ -374,10 +376,10 @@ pub unsafe extern "C" fn rust_compile_script(
 
         // Dump AST if requested (after scope analysis so identifier metadata is populated).
         if dump_ast {
-            ast_dump::dump_program(&program, use_color);
+            ast_dump::dump_program(&program, use_color, &parser.function_table);
         }
 
-        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
+        write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
             (data.scope.clone(), data.is_strict_mode)
@@ -386,12 +388,13 @@ pub unsafe extern "C" fn rust_compile_script(
         };
 
         let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
+        gen.function_table = std::mem::take(&mut parser.function_table);
         let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
         if exec_ptr.is_null() {
             return std::ptr::null_mut();
         }
 
-        extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+        extract_script_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context, &mut gen.function_table);
 
         exec_ptr
     })
@@ -449,7 +452,7 @@ pub unsafe extern "C" fn rust_compile_eval(
 
         parser.scope_collector.analyze(true);
 
-        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
+        write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
         let (scope_ref, is_strict) = if let StatementKind::Program(ref data) = program.inner {
             (data.scope.clone(), data.is_strict_mode)
@@ -458,12 +461,13 @@ pub unsafe extern "C" fn rust_compile_eval(
         };
 
         let mut gen = new_program_generator(is_strict, vm_ptr, source_code_ptr, source, source_len);
+        gen.function_table = std::mem::take(&mut parser.function_table);
         let exec_ptr = compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr);
         if exec_ptr.is_null() {
             return std::ptr::null_mut();
         }
 
-        extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context);
+        extract_eval_gdi(&scope_ref.borrow(), is_strict, vm_ptr, source_code_ptr, gdi_context, &mut gen.function_table);
 
         exec_ptr
     })
@@ -607,22 +611,22 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             return std::ptr::null_mut();
         }
 
-        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
+        write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
         // Extract the FunctionExpression from the program.
         // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
-        let function_data = if let StatementKind::Program(ref data) = program.inner {
+        let function_id = if let StatementKind::Program(ref data) = program.inner {
             let scope = data.scope.borrow();
-            let mut found: Option<ast::FunctionData> = None;
+            let mut found: Option<ast::FunctionId> = None;
             for child in &scope.children {
                 match &child.inner {
-                    StatementKind::FunctionDeclaration(fd) => {
-                        found = Some(fd.as_ref().clone());
+                    StatementKind::FunctionDeclaration { function_id, .. } => {
+                        found = Some(*function_id);
                         break;
                     }
                     StatementKind::Expression(expression) => {
-                        if let ast::ExpressionKind::Function(fd) = &expression.inner {
-                            found = Some(fd.as_ref().clone());
+                        if let ast::ExpressionKind::Function(function_id) = &expression.inner {
+                            found = Some(*function_id);
                             break;
                         }
                     }
@@ -634,7 +638,7 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             None
         };
 
-        let Some(mut function_data) = function_data else {
+        let Some(function_id) = function_id else {
             if let Some(cb) = error_callback {
                 let msg = "Failed to parse dynamic function";
                 unsafe {
@@ -644,13 +648,16 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
             return std::ptr::null_mut();
         };
 
+        let mut function_data = parser.function_table.take(function_id);
+
         // Dynamic functions always need an arguments object, matching the C++
         // path in FunctionConstructor::create_dynamic_function.
         function_data.parsing_insights.might_need_arguments_object = true;
 
         let is_strict = function_data.is_strict_mode;
+        let subtable = parser.function_table.extract_reachable(&function_data);
 
-        bytecode::ffi::create_sfd_for_gdi(&function_data, vm_ptr, source_code_ptr, is_strict)
+        bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, is_strict)
     })
 }
 
@@ -694,7 +701,7 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
             return;
         }
 
-        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
+        write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
         let scope_ref = if let StatementKind::Program(ref data) = program.inner {
             data.scope.clone()
@@ -704,15 +711,18 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
 
         let scope = scope_ref.borrow();
         for child in &scope.children {
-            if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
+            if let StatementKind::FunctionDeclaration { function_id, ref name, .. } = child.inner {
+                let function_data = parser.function_table.take(function_id);
+                let subtable = parser.function_table.extract_reachable(&function_data);
                 let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(
                     function_data,
+                    subtable,
                     vm_ptr,
                     source_code_ptr,
                     true, // strict
                 );
                 if !sfd_ptr.is_null() {
-                    if let Some(ref name_ident) = function_data.name {
+                    if let Some(ref name_ident) = name {
                         push_function(
                             ctx,
                             sfd_ptr,
@@ -873,10 +883,10 @@ pub unsafe extern "C" fn rust_compile_module(
 
         // Dump AST if requested (after scope analysis so identifier metadata is populated).
         if dump_ast {
-            ast_dump::dump_program(&program, use_color);
+            ast_dump::dump_program(&program, use_color, &parser.function_table);
         }
 
-        write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
+        write_ast_dump_output(&program, &parser.function_table, ast_dump_output, ast_dump_output_len);
 
         let program_data = if let StatementKind::Program(ref data) = program.inner {
             data
@@ -887,6 +897,8 @@ pub unsafe extern "C" fn rust_compile_module(
         let scope_ref = program_data.scope.clone();
         let has_top_level_await = program_data.has_top_level_await;
 
+        let mut function_table = std::mem::take(&mut parser.function_table);
+
         // 2. Report has_top_level_await.
         (cb.set_has_top_level_await)(module_context, has_top_level_await);
 
@@ -895,7 +907,7 @@ pub unsafe extern "C" fn rust_compile_module(
 
         // 4. Extract var declared names and lexical bindings.
         extract_module_declarations(
-            &scope_ref.borrow(), vm_ptr, source_code_ptr, module_context, cb,
+            &scope_ref.borrow(), vm_ptr, source_code_ptr, module_context, cb, &mut function_table,
         );
 
         // 5. Compute requested modules (sorted by source offset).
@@ -905,7 +917,7 @@ pub unsafe extern "C" fn rust_compile_module(
         if has_top_level_await {
             // Compile as an async wrapper function.
             let exec_ptr = compile_module_as_async(
-                &program, &scope_ref, vm_ptr, source_code_ptr, source, source_len,
+                &program, &scope_ref, vm_ptr, source_code_ptr, source, source_len, function_table,
             );
             if !tla_executable_out.is_null() {
                 *tla_executable_out = exec_ptr;
@@ -917,6 +929,7 @@ pub unsafe extern "C" fn rust_compile_module(
                 *tla_executable_out = std::ptr::null_mut();
             }
             let mut gen = new_program_generator(true, vm_ptr, source_code_ptr, source, source_len);
+            gen.function_table = function_table;
             compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
         }
     })
@@ -982,7 +995,7 @@ unsafe fn extract_module_metadata(
                 let is_declaration = export_data.statement.as_ref().is_some_and(|s| {
                     matches!(
                         s.inner,
-                        StatementKind::FunctionDeclaration(_) | StatementKind::ClassDeclaration(_)
+                        StatementKind::FunctionDeclaration { .. } | StatementKind::ClassDeclaration(_)
                     )
                 });
                 if !is_declaration {
@@ -1058,6 +1071,7 @@ unsafe fn extract_module_declarations(
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
     cb: &ModuleCallbacks,
+    function_table: &mut ast::FunctionTable,
 ) {
     use ast::StatementKind;
 
@@ -1083,16 +1097,18 @@ unsafe fn extract_module_declarations(
         };
 
         match declaration {
-            StatementKind::FunctionDeclaration(function_data) => {
+            StatementKind::FunctionDeclaration { function_id, ref name, .. } => {
                 let is_default = is_exported
-                    && function_data.name.as_ref().is_some_and(|n| n.name == default_name);
+                    && name.as_ref().is_some_and(|n| n.name == default_name);
 
+                let function_data = function_table.take(*function_id);
+                let subtable = function_table.extract_reachable(&function_data);
                 let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(
-                    function_data, vm_ptr, source_code_ptr, true,
+                    function_data, subtable, vm_ptr, source_code_ptr, true,
                 );
 
                 // Get the binding name from the AST (e.g., "*default*" for anonymous defaults).
-                let binding_name = if let Some(ref name_ident) = function_data.name {
+                let binding_name = if let Some(ref name_ident) = name {
                     name_ident.name.clone()
                 } else {
                     continue;
@@ -1250,6 +1266,7 @@ unsafe fn compile_module_as_async(
     source_code_ptr: *const c_void,
     source: *const u16,
     source_len: usize,
+    function_table: ast::FunctionTable,
 ) -> *mut c_void {
     use bytecode::generator::Generator;
     use bytecode::instruction::Instruction;
@@ -1258,6 +1275,7 @@ unsafe fn compile_module_as_async(
     let scope = scope_ref.borrow();
     let mut gen = Generator::new();
     gen.strict = true;
+    gen.function_table = function_table;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
@@ -1350,34 +1368,37 @@ fn extract_gdi_common(
     push_var_scoped_name: &mut dyn FnMut(&[u16]),
     push_annex_b_name: &mut dyn FnMut(&[u16]),
     push_lexical_binding: &mut dyn FnMut(&[u16], bool),
+    function_table: &mut ast::FunctionTable,
 ) {
     use ast::{DeclarationKind, StatementKind};
 
     // Var names (var declarations at any nesting level + top-level function declarations)
     for child in &scope.children {
         collect_var_names_recursive(&child.inner, push_var_name);
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name) = function_data.name {
-                push_var_name(&name.name);
+        if let StatementKind::FunctionDeclaration { ref name, .. } = child.inner {
+            if let Some(ref name_ident) = name {
+                push_var_name(&name_ident.name);
             }
         }
     }
 
     // Functions to initialize (reverse order, deduplicated by name).
     let mut seen_names: HashSet<ast::Utf16String> = HashSet::new();
-    let mut functions_to_init: Vec<(&ast::FunctionData, ast::Utf16String)> = Vec::new();
+    let mut functions_to_init: Vec<(ast::FunctionId, ast::Utf16String)> = Vec::new();
     for child in scope.children.iter().rev() {
-        if let StatementKind::FunctionDeclaration(function_data) = &child.inner {
-            if let Some(ref name_ident) = function_data.name {
+        if let StatementKind::FunctionDeclaration { function_id, ref name, .. } = child.inner {
+            if let Some(ref name_ident) = name {
                 if seen_names.insert(name_ident.name.clone()) {
-                    functions_to_init.push((function_data, name_ident.name.clone()));
+                    functions_to_init.push((function_id, name_ident.name.clone()));
                 }
             }
         }
     }
-    for (function_data, name) in &functions_to_init {
+    for (function_id, name) in &functions_to_init {
+        let function_data = function_table.take(*function_id);
+        let subtable = function_table.extract_reachable(&function_data);
         let sfd_ptr = unsafe {
-            bytecode::ffi::create_sfd_for_gdi(function_data, vm_ptr, source_code_ptr, is_strict)
+            bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, is_strict)
         };
         push_function(sfd_ptr, name);
     }
@@ -1428,6 +1449,7 @@ unsafe fn extract_eval_gdi(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
+    function_table: &mut ast::FunctionTable,
 ) {
     use bytecode::ffi::{
         eval_gdi_push_annex_b_name, eval_gdi_push_function, eval_gdi_push_lexical_binding,
@@ -1443,6 +1465,7 @@ unsafe fn extract_eval_gdi(
         &mut |name| eval_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len()),
         &mut |name| eval_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len()),
         &mut |name, is_const| eval_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const),
+        function_table,
     );
 }
 
@@ -1454,6 +1477,7 @@ unsafe fn extract_script_gdi(
     vm_ptr: *mut c_void,
     source_code_ptr: *const c_void,
     ctx: *mut c_void,
+    function_table: &mut ast::FunctionTable,
 ) {
     use ast::{DeclarationKind, StatementKind};
     use bytecode::ffi::{
@@ -1496,6 +1520,7 @@ unsafe fn extract_script_gdi(
         &mut |name| script_gdi_push_var_scoped_name(ctx, name.as_ptr(), name.len()),
         &mut |name| script_gdi_push_annex_b_name(ctx, name.as_ptr(), name.len()),
         &mut |name, is_const| script_gdi_push_lexical_binding(ctx, name.as_ptr(), name.len(), is_const),
+        function_table,
     );
 }
 
@@ -1594,7 +1619,7 @@ fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnM
 pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
     abort_on_panic(|| {
         if !ast.is_null() {
-            drop(Box::from_raw(ast as *mut ast::FunctionData));
+            drop(Box::from_raw(ast as *mut ast::FunctionPayload));
         }
     });
 }
@@ -1637,7 +1662,8 @@ pub unsafe extern "C" fn rust_compile_function(
     if rust_function_ast.is_null() {
         return std::ptr::null_mut();
     }
-    let function_data = Box::from_raw(rust_function_ast as *mut ast::FunctionData);
+    let payload = Box::from_raw(rust_function_ast as *mut ast::FunctionPayload);
+    let function_data = Box::new(payload.data);
 
     let body_scope = match &function_data.body.inner {
         StatementKind::FunctionBody { ref scope, .. } => Some(scope),
@@ -1653,6 +1679,7 @@ pub unsafe extern "C" fn rust_compile_function(
     gen.strict = function_data.is_strict_mode;
     gen.function_environment_needed = sfd_metadata.function_environment_needed;
     gen.builtin_abstract_operations_enabled = builtin_abstract_operations_enabled;
+    gen.function_table = payload.function_table;
     gen.vm_ptr = vm_ptr;
     gen.source_code_ptr = source_code_ptr;
     gen.source = source;
