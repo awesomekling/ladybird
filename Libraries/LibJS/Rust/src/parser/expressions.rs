@@ -1601,39 +1601,55 @@ impl<'a> Parser<'a> {
         while i < raw.len() {
             if raw[i] == b'\\' as u16 && i + 1 < raw.len() {
                 i += 1;
+                const N: u16 = ch(b'n');
+                const R: u16 = ch(b'r');
+                const T: u16 = ch(b't');
+                const B: u16 = ch(b'b');
+                const F: u16 = ch(b'f');
+                const V: u16 = ch(b'v');
+                const ZERO: u16 = ch(b'0');
+                const ONE: u16 = ch(b'1');
+                const EIGHT: u16 = ch(b'8');
+                const NINE: u16 = ch(b'9');
+                const X: u16 = ch(b'x');
+                const U: u16 = ch(b'u');
+                const LF: u16 = ch(b'\n');
+                const CR: u16 = ch(b'\r');
+                const LS: u16 = 0x2028;
+                const PS: u16 = 0x2029;
                 match raw[i] {
-                    c if c == ch(b'n') => result.0.push(ch(b'\n')),
-                    c if c == ch(b'r') => result.0.push(ch(b'\r')),
-                    c if c == ch(b't') => result.0.push(ch(b'\t')),
-                    c if c == ch(b'b') => result.0.push(8),
-                    c if c == ch(b'f') => result.0.push(12),
-                    c if c == ch(b'v') => result.0.push(11),
-                    c if c == ch(b'0') => {
-                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == ch(b'8') || raw[i + 1] == ch(b'9')) {
+                    N => result.0.push(ch(b'\n')),
+                    R => result.0.push(ch(b'\r')),
+                    T => result.0.push(ch(b'\t')),
+                    B => result.0.push(8),
+                    F => result.0.push(12),
+                    V => result.0.push(11),
+                    ZERO => {
+                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == EIGHT || raw[i + 1] == NINE) {
                             return None;
                         }
                         result.0.push(0);
                     }
-                    c if c >= ch(b'1') && c <= ch(b'9') => {
+                    ONE..=NINE => {
                         return None;
                     }
-                    c if c == ch(b'x') => {
+                    X => {
                         let (advance, ch) = parse_hex_escape(raw, i)?;
                         result.0.push(ch);
                         i += advance;
                     }
-                    c if c == ch(b'u') => {
+                    U => {
                         let (advance, code_point) = parse_unicode_escape(raw, i)?;
                         push_code_point(&mut result.0, code_point);
                         i += advance;
                     }
-                    c if c == ch(b'\n') => { /* line continuation */ }
-                    c if c == ch(b'\r') => {
-                        if i + 1 < raw.len() && raw[i + 1] == ch(b'\n') {
+                    LF => { /* line continuation */ }
+                    CR => {
+                        if i + 1 < raw.len() && raw[i + 1] == LF {
                             i += 1;
                         }
                     }
-                    c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
+                    LS | PS => { /* skip LS/PS */ }
                     c => result.0.push(c),
                 }
             } else if raw[i] == ch(b'\r') {
@@ -1667,37 +1683,54 @@ impl<'a> Parser<'a> {
         while i < inner.len() {
             if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
                 i += 1;
+                const N: u16 = ch(b'n');
+                const R: u16 = ch(b'r');
+                const T: u16 = ch(b't');
+                const B: u16 = ch(b'b');
+                const F: u16 = ch(b'f');
+                const V: u16 = ch(b'v');
+                const ZERO: u16 = ch(b'0');
+                const ONE: u16 = ch(b'1');
+                const SEVEN: u16 = ch(b'7');
+                const EIGHT: u16 = ch(b'8');
+                const NINE: u16 = ch(b'9');
+                const X: u16 = ch(b'x');
+                const U: u16 = ch(b'u');
+                const LF: u16 = ch(b'\n');
+                const CR: u16 = ch(b'\r');
+                const LS: u16 = 0x2028;
+                const PS: u16 = 0x2029;
                 match inner[i] {
-                    c if c == ch(b'n') => result.0.push(ch(b'\n')),
-                    c if c == ch(b'r') => result.0.push(ch(b'\r')),
-                    c if c == ch(b't') => result.0.push(ch(b'\t')),
-                    c if c == ch(b'b') => result.0.push(8),
-                    c if c == ch(b'f') => result.0.push(12),
-                    c if c == ch(b'v') => result.0.push(11),
-                    c if c == ch(b'0') => {
+                    N => result.0.push(ch(b'\n')),
+                    R => result.0.push(ch(b'\r')),
+                    T => result.0.push(ch(b'\t')),
+                    B => result.0.push(8),
+                    F => result.0.push(12),
+                    V => result.0.push(11),
+                    ZERO => {
                         if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
                             has_legacy_octal = true;
                             let (val, consumed) = parse_octal_escape(inner, i);
                             result.0.push(val);
                             i += consumed;
-                        } else if i + 1 < inner.len() && (inner[i + 1] == ch(b'8') || inner[i + 1] == ch(b'9')) {
+                        } else if i + 1 < inner.len() && (inner[i + 1] == EIGHT || inner[i + 1] == NINE) {
                             has_legacy_octal = true;
                             result.0.push(0);
                         } else {
                             result.0.push(0);
                         }
                     }
-                    c if c >= ch(b'1') && c <= ch(b'7') => {
+                    ONE..=SEVEN => {
                         has_legacy_octal = true;
                         let (val, consumed) = parse_octal_escape(inner, i);
                         result.0.push(val);
                         i += consumed;
                     }
-                    c if c == ch(b'8') || c == ch(b'9') => {
+                    EIGHT | NINE => {
                         has_legacy_octal = true;
-                        result.0.push(c);
+                        result.0.push(inner[i]);
                     }
-                    c if c == ch(b'x') => {
+                    X => {
                         if let Some((advance, ch)) = parse_hex_escape(inner, i) {
                             result.0.push(ch);
                             i += advance;
@@ -1706,7 +1739,7 @@ impl<'a> Parser<'a> {
                             result.0.push(inner[i]);
                         }
                     }
-                    c if c == ch(b'u') => {
+                    U => {
                         if let Some((advance, code_point)) = parse_unicode_escape(inner, i) {
                             push_code_point(&mut result.0, code_point);
                             i += advance;
@@ -1715,13 +1748,13 @@ impl<'a> Parser<'a> {
                             result.0.push(inner[i]);
                         }
                     }
-                    c if c == ch(b'\n') => { /* skip */ }
-                    c if c == ch(b'\r') => {
-                        if i + 1 < inner.len() && inner[i + 1] == ch(b'\n') {
+                    LF => { /* skip */ }
+                    CR => {
+                        if i + 1 < inner.len() && inner[i + 1] == LF {
                             i += 1;
                         }
                     }
-                    c if c == 0x2028 || c == 0x2029 => { /* skip LS/PS */ }
+                    LS | PS => { /* skip LS/PS */ }
                     c => result.0.push(c),
                 }
             } else if inner[i] == ch(b'\r') {
