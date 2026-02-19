@@ -846,6 +846,8 @@ pub unsafe extern "C" fn rust_compile_module(
     source_code_ptr: *const c_void,
     module_context: *mut c_void,
     callbacks: *const ModuleCallbacks,
+    dump_ast: bool,
+    use_color: bool,
     error_context: *mut c_void,
     error_callback: Option<ParseErrorCallback>,
     tla_executable_out: *mut *mut c_void,
@@ -868,6 +870,11 @@ pub unsafe extern "C" fn rust_compile_module(
         }
 
         parser.scope_collector.analyze(false);
+
+        // Dump AST if requested (after scope analysis so identifier metadata is populated).
+        if dump_ast {
+            ast_dump::dump_program(&program, use_color);
+        }
 
         write_ast_dump_output(&program, ast_dump_output, ast_dump_output_len);
 

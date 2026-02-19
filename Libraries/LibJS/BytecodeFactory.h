@@ -411,6 +411,8 @@ void* rust_compile_module(
     void const* source_code_ptr,
     void* module_context,
     ModuleCallbacks const* callbacks,
+    bool dump_ast,
+    bool use_color,
     void* error_context,
     RustParseErrorCallback error_callback,
     void** tla_executable_out,

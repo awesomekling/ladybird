@@ -19,6 +19,7 @@
 #include <LibJS/Runtime/ModuleEnvironment.h>
 #include <LibJS/Runtime/PromiseCapability.h>
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
+#include <LibJS/Script.h>
 #include <LibJS/SourceCode.h>
 #include <LibJS/SourceTextModule.h>
 
@@ -416,6 +417,7 @@ Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(S
             exec_ptr = rust_compile_module(utf16_buf.data(), length,
                 &realm.vm(), source_code.ptr(),
                 &builder, &callbacks,
+                g_dump_ast, g_dump_ast_use_color,
                 &errors, error_callback,
                 &tla_executable,
                 rust_ast_data_ptr, rust_ast_len_ptr);
@@ -424,6 +426,7 @@ Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(S
             exec_ptr = rust_compile_module(reinterpret_cast<u16 const*>(utf16.data()), length,
                 &realm.vm(), source_code.ptr(),
                 &builder, &callbacks,
+                g_dump_ast, g_dump_ast_use_color,
                 &errors, error_callback,
                 &tla_executable,
                 rust_ast_data_ptr, rust_ast_len_ptr);
