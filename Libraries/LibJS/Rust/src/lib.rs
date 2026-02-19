@@ -907,11 +907,15 @@ pub unsafe extern "C" fn rust_compile_module(
             let exec_ptr = compile_module_as_async(
                 &program, &scope_ref, vm_ptr, source_code_ptr, source, source_len,
             );
-            *tla_executable_out = exec_ptr;
+            if !tla_executable_out.is_null() {
+                *tla_executable_out = exec_ptr;
+            }
             std::ptr::null_mut()
         } else {
             // Compile as a regular program.
-            *tla_executable_out = std::ptr::null_mut();
+            if !tla_executable_out.is_null() {
+                *tla_executable_out = std::ptr::null_mut();
+            }
             let mut gen = new_program_generator(true, vm_ptr, source_code_ptr, source, source_len);
             compile_program_body(&mut gen, &program, &scope_ref, vm_ptr, source_code_ptr)
         }
