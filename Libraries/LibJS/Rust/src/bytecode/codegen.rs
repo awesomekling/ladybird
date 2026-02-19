@@ -3205,15 +3205,7 @@ fn generate_update_expression(
             // Invalid update target (e.g. foo()++). Per spec, evaluate the
             // expression first, then throw ReferenceError.
             generate_expression(argument, gen, None);
-            let exception = gen.allocate_register();
-            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
-            gen.emit(Instruction::NewReferenceError {
-                dst: exception.operand(),
-                error_string,
-            });
-            gen.emit(Instruction::Throw { src: exception.operand() });
-            let dead_block = gen.make_block();
-            gen.switch_to_basic_block(dead_block);
+            emit_invalid_lhs_error(gen);
             Some(gen.add_constant_undefined())
         }
     }
@@ -3526,15 +3518,7 @@ fn generate_assignment_expression(
             // Per spec 13.15.2 step 1b, evaluate the LHS, then throw ReferenceError
             // before evaluating the RHS.
             generate_expression(lhs_expression, gen, None);
-            let exception = gen.allocate_register();
-            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
-            gen.emit(Instruction::NewReferenceError {
-                dst: exception.operand(),
-                error_string,
-            });
-            gen.emit(Instruction::Throw { src: exception.operand() });
-            let dead_block = gen.make_block();
-            gen.switch_to_basic_block(dead_block);
+            emit_invalid_lhs_error(gen);
             Some(gen.add_constant_undefined())
         }
         AssignmentLhs::Pattern(pattern) => {
@@ -3659,6 +3643,20 @@ fn emit_get_by_id(
             cache_index: cache,
         });
     }
+}
+
+/// Emit a "Invalid left-hand side in assignment" ReferenceError followed by Throw,
+/// then switch to a dead block for subsequent codegen.
+fn emit_invalid_lhs_error(gen: &mut Generator) {
+    let exception = gen.allocate_register();
+    let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
+    gen.emit(Instruction::NewReferenceError {
+        dst: exception.operand(),
+        error_string,
+    });
+    gen.emit(Instruction::Throw { src: exception.operand() });
+    let dead_block = gen.make_block();
+    gen.switch_to_basic_block(dead_block);
 }
 
 /// Check if a UTF-16 string is a canonical array index (non-negative integer < 2^32 - 1).
@@ -4176,15 +4174,7 @@ fn emit_store_to_reference(
         _ => {
             // Evaluate the expression for side effects, then throw ReferenceError.
             generate_expression(target, gen, None);
-            let exception = gen.allocate_register();
-            let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
-            gen.emit(Instruction::NewReferenceError {
-                dst: exception.operand(),
-                error_string,
-            });
-            gen.emit(Instruction::Throw { src: exception.operand() });
-            let dead_block = gen.make_block();
-            gen.switch_to_basic_block(dead_block);
+            emit_invalid_lhs_error(gen);
         }
     }
 }
