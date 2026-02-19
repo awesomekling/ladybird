@@ -16,17 +16,17 @@ pub type ExecutableHandle = *mut c_void;
 
 // FFI types matching BytecodeFactory.h
 #[repr(C)]
-struct FFIExceptionHandler {
-    start_offset: u32,
-    end_offset: u32,
-    handler_offset: u32,
+pub struct FFIExceptionHandler {
+    pub start_offset: u32,
+    pub end_offset: u32,
+    pub handler_offset: u32,
 }
 
 #[repr(C)]
-struct FFISourceMapEntry {
-    bytecode_offset: u32,
-    source_start: u32,
-    source_end: u32,
+pub struct FFISourceMapEntry {
+    pub bytecode_offset: u32,
+    pub source_start: u32,
+    pub source_end: u32,
 }
 
 #[repr(C)]
@@ -107,42 +107,47 @@ pub struct FFISharedFunctionData {
     pub uses_this_from_environment: bool,
 }
 
+#[repr(C)]
+pub struct FFIExecutableData {
+    pub bytecode: *const u8,
+    pub bytecode_length: usize,
+    pub identifier_table: *const FFIUtf16Slice,
+    pub identifier_count: usize,
+    pub property_key_table: *const FFIUtf16Slice,
+    pub property_key_count: usize,
+    pub string_table: *const FFIUtf16Slice,
+    pub string_count: usize,
+    pub constants_data: *const u8,
+    pub constants_data_length: usize,
+    pub constants_count: usize,
+    pub exception_handlers: *const FFIExceptionHandler,
+    pub exception_handler_count: usize,
+    pub source_map: *const FFISourceMapEntry,
+    pub source_map_count: usize,
+    pub basic_block_offsets: *const usize,
+    pub basic_block_count: usize,
+    pub local_variable_names: *const FFIUtf16Slice,
+    pub local_variable_count: usize,
+    pub property_lookup_cache_count: u32,
+    pub global_variable_cache_count: u32,
+    pub template_object_cache_count: u32,
+    pub object_shape_cache_count: u32,
+    pub number_of_registers: u32,
+    pub is_strict: bool,
+    pub length_identifier: FFIOptionalU32,
+    pub shared_function_data: *const *const c_void,
+    pub shared_function_data_count: usize,
+    pub class_blueprints: *const *mut c_void,
+    pub class_blueprint_count: usize,
+    pub compiled_regexes: *const *mut c_void,
+    pub regex_count: usize,
+}
+
 extern "C" {
     fn rust_create_executable(
         vm_ptr: *mut c_void,
         source_code_ptr: *const c_void,
-        bytecode: *const u8,
-        bytecode_len: usize,
-        identifier_table: *const FFIUtf16Slice,
-        identifier_count: usize,
-        property_key_table: *const FFIUtf16Slice,
-        property_key_count: usize,
-        string_table: *const FFIUtf16Slice,
-        string_count: usize,
-        constants_data: *const u8,
-        constants_data_len: usize,
-        constants_count: usize,
-        exception_handlers: *const FFIExceptionHandler,
-        exception_handler_count: usize,
-        source_map: *const FFISourceMapEntry,
-        source_map_count: usize,
-        basic_block_offsets: *const usize,
-        basic_block_count: usize,
-        local_var_names: *const FFIUtf16Slice,
-        local_var_count: usize,
-        property_lookup_cache_count: u32,
-        global_variable_cache_count: u32,
-        template_object_cache_count: u32,
-        object_shape_cache_count: u32,
-        number_of_registers: u32,
-        is_strict: bool,
-        length_identifier: FFIOptionalU32,
-        shared_function_data: *const *const c_void,
-        shared_function_data_count: usize,
-        class_blueprints: *const *mut c_void,
-        class_blueprint_count: usize,
-        compiled_regexes: *const *mut c_void,
-        regex_count: usize,
+        data: *const FFIExecutableData,
     ) -> *mut c_void;
 
     pub fn rust_create_sfd(
@@ -431,42 +436,42 @@ pub unsafe fn create_executable(
     // Collect class blueprint pointers
     let bp_ptrs: Vec<*mut c_void> = gen.class_blueprints.clone();
 
-    rust_create_executable(
-        vm_ptr,
-        source_code_ptr,
-        assembled.bytecode.as_ptr(),
-        assembled.bytecode.len(),
-        ident_slices.as_ptr(),
-        ident_slices.len(),
-        property_key_slices.as_ptr(),
-        property_key_slices.len(),
-        string_slices.as_ptr(),
-        string_slices.len(),
-        constants_buffer.as_ptr(),
-        constants_buffer.len(),
-        gen.constants.len(),
-        ffi_handlers.as_ptr(),
-        ffi_handlers.len(),
-        ffi_source_map.as_ptr(),
-        ffi_source_map.len(),
-        assembled.basic_block_start_offsets.as_ptr(),
-        assembled.basic_block_start_offsets.len(),
-        local_var_slices.as_ptr(),
-        local_var_slices.len(),
-        gen.next_property_lookup_cache,
-        gen.next_global_variable_cache,
-        gen.next_template_object_cache,
-        gen.next_object_shape_cache,
-        assembled.number_of_registers,
-        gen.strict,
-        FFIOptionalU32::from(gen.length_identifier.map(|index| index.0)),
-        sfd_ptrs.as_ptr(),
-        sfd_ptrs.len(),
-        bp_ptrs.as_ptr(),
-        bp_ptrs.len(),
-        gen.compiled_regexes.as_ptr(),
-        gen.compiled_regexes.len(),
-    )
+    let ffi_data = FFIExecutableData {
+        bytecode: assembled.bytecode.as_ptr(),
+        bytecode_length: assembled.bytecode.len(),
+        identifier_table: ident_slices.as_ptr(),
+        identifier_count: ident_slices.len(),
+        property_key_table: property_key_slices.as_ptr(),
+        property_key_count: property_key_slices.len(),
+        string_table: string_slices.as_ptr(),
+        string_count: string_slices.len(),
+        constants_data: constants_buffer.as_ptr(),
+        constants_data_length: constants_buffer.len(),
+        constants_count: gen.constants.len(),
+        exception_handlers: ffi_handlers.as_ptr(),
+        exception_handler_count: ffi_handlers.len(),
+        source_map: ffi_source_map.as_ptr(),
+        source_map_count: ffi_source_map.len(),
+        basic_block_offsets: assembled.basic_block_start_offsets.as_ptr(),
+        basic_block_count: assembled.basic_block_start_offsets.len(),
+        local_variable_names: local_var_slices.as_ptr(),
+        local_variable_count: local_var_slices.len(),
+        property_lookup_cache_count: gen.next_property_lookup_cache,
+        global_variable_cache_count: gen.next_global_variable_cache,
+        template_object_cache_count: gen.next_template_object_cache,
+        object_shape_cache_count: gen.next_object_shape_cache,
+        number_of_registers: assembled.number_of_registers,
+        is_strict: gen.strict,
+        length_identifier: FFIOptionalU32::from(gen.length_identifier.map(|index| index.0)),
+        shared_function_data: sfd_ptrs.as_ptr(),
+        shared_function_data_count: sfd_ptrs.len(),
+        class_blueprints: bp_ptrs.as_ptr(),
+        class_blueprint_count: bp_ptrs.len(),
+        compiled_regexes: gen.compiled_regexes.as_ptr(),
+        regex_count: gen.compiled_regexes.len(),
+    };
+
+    rust_create_executable(vm_ptr, source_code_ptr, &ffi_data)
 }
 
 /// Convert a JS number to its UTF-16 string representation using the

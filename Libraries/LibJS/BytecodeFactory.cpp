@@ -113,78 +113,47 @@ static JS::Value decode_constant(JS::VM& vm, uint8_t const*& cursor, uint8_t con
 extern "C" void* rust_create_executable(
     void* vm_ptr,
     void* source_code_ptr,
-    uint8_t const* bytecode,
-    size_t bytecode_len,
-    FFIUtf16Slice const* identifier_table_entries,
-    size_t identifier_count,
-    FFIUtf16Slice const* property_key_table_entries,
-    size_t property_key_count,
-    FFIUtf16Slice const* string_table_entries,
-    size_t string_count,
-    uint8_t const* constants_data,
-    size_t constants_data_len,
-    size_t constants_count,
-    FFIExceptionHandler const* exception_handlers,
-    size_t exception_handler_count,
-    FFISourceMapEntry const* source_map,
-    size_t source_map_count,
-    size_t const* basic_block_offsets,
-    size_t basic_block_count,
-    FFIUtf16Slice const* local_var_names,
-    size_t local_var_count,
-    uint32_t property_lookup_cache_count,
-    uint32_t global_variable_cache_count,
-    uint32_t template_object_cache_count,
-    uint32_t object_shape_cache_count,
-    uint32_t number_of_registers,
-    bool is_strict,
-    FFIOptionalU32 length_identifier,
-    void const* const* shared_function_data,
-    size_t shared_function_data_count,
-    void* const* class_blueprints,
-    size_t class_blueprint_count,
-    void* const* compiled_regexes,
-    size_t regex_count)
+    FFIExecutableData const* data)
 {
     auto& vm = *static_cast<JS::VM*>(vm_ptr);
     auto& source_code = *static_cast<JS::SourceCode const*>(source_code_ptr);
 
     // Build bytecode vector
     Vector<u8> bytecode_vec;
-    bytecode_vec.append(bytecode, bytecode_len);
+    bytecode_vec.append(data->bytecode, data->bytecode_length);
 
     // Build identifier table
     auto ident_table = make<JS::Bytecode::IdentifierTable>();
-    for (size_t i = 0; i < identifier_count; ++i) {
-        ident_table->insert(utf16_fly_from_ffi(identifier_table_entries[i]));
+    for (size_t i = 0; i < data->identifier_count; ++i) {
+        ident_table->insert(utf16_fly_from_ffi(data->identifier_table[i]));
     }
 
     // Build property key table
     auto prop_key_table = make<JS::Bytecode::PropertyKeyTable>();
-    for (size_t i = 0; i < property_key_count; ++i) {
-        prop_key_table->insert(utf16_fly_from_ffi(property_key_table_entries[i]));
+    for (size_t i = 0; i < data->property_key_count; ++i) {
+        prop_key_table->insert(utf16_fly_from_ffi(data->property_key_table[i]));
     }
 
     // Build string table
     auto str_table = make<JS::Bytecode::StringTable>();
-    for (size_t i = 0; i < string_count; ++i) {
-        str_table->insert(utf16_from_ffi(string_table_entries[i]));
+    for (size_t i = 0; i < data->string_count; ++i) {
+        str_table->insert(utf16_from_ffi(data->string_table[i]));
     }
 
     // Build regex table from pre-compiled regex objects
     auto regex_tbl = make<JS::Bytecode::RegexTable>();
-    for (size_t i = 0; i < regex_count; ++i) {
-        auto* cr = static_cast<RustCompiledRegex*>(compiled_regexes[i]);
+    for (size_t i = 0; i < data->regex_count; ++i) {
+        auto* cr = static_cast<RustCompiledRegex*>(data->compiled_regexes[i]);
         regex_tbl->insert(JS::Bytecode::ParsedRegex { move(cr->parsed_regex), move(cr->parsed_pattern), cr->flags });
         delete cr;
     }
 
     // Decode constants
     Vector<JS::Value> constants_vec;
-    constants_vec.ensure_capacity(constants_count);
-    auto const* cursor = constants_data;
-    auto const* end = constants_data + constants_data_len;
-    for (size_t i = 0; i < constants_count; ++i) {
+    constants_vec.ensure_capacity(data->constants_count);
+    auto const* cursor = data->constants_data;
+    auto const* end = data->constants_data + data->constants_data_length;
+    for (size_t i = 0; i < data->constants_count; ++i) {
         constants_vec.append(decode_constant(vm, cursor, end));
     }
     VERIFY(cursor == end);
@@ -198,63 +167,63 @@ extern "C" void* rust_create_executable(
         move(regex_tbl),
         move(constants_vec),
         source_code,
-        property_lookup_cache_count,
-        global_variable_cache_count,
-        template_object_cache_count,
-        object_shape_cache_count,
-        number_of_registers,
-        is_strict ? JS::Strict::Yes : JS::Strict::No);
+        data->property_lookup_cache_count,
+        data->global_variable_cache_count,
+        data->template_object_cache_count,
+        data->object_shape_cache_count,
+        data->number_of_registers,
+        data->is_strict ? JS::Strict::Yes : JS::Strict::No);
 
     // Set exception handlers
-    for (size_t i = 0; i < exception_handler_count; ++i) {
+    for (size_t i = 0; i < data->exception_handler_count; ++i) {
         executable->exception_handlers.append({
-            exception_handlers[i].start_offset,
-            exception_handlers[i].end_offset,
-            exception_handlers[i].handler_offset,
+            data->exception_handlers[i].start_offset,
+            data->exception_handlers[i].end_offset,
+            data->exception_handlers[i].handler_offset,
         });
     }
 
     // Set source map
-    for (size_t i = 0; i < source_map_count; ++i) {
+    for (size_t i = 0; i < data->source_map_count; ++i) {
         executable->source_map.append({
-            source_map[i].bytecode_offset,
-            { source_map[i].source_start, source_map[i].source_end },
+            data->source_map[i].bytecode_offset,
+            { data->source_map[i].source_start, data->source_map[i].source_end },
         });
     }
 
     // Set basic block offsets
-    for (size_t i = 0; i < basic_block_count; ++i) {
-        executable->basic_block_start_offsets.append(basic_block_offsets[i]);
+    for (size_t i = 0; i < data->basic_block_count; ++i) {
+        executable->basic_block_start_offsets.append(data->basic_block_offsets[i]);
     }
 
     // Set local variable names
-    for (size_t i = 0; i < local_var_count; ++i) {
+    for (size_t i = 0; i < data->local_variable_count; ++i) {
         executable->local_variable_names.append({
-            .name = utf16_fly_from_ffi(local_var_names[i]),
+            .name = utf16_fly_from_ffi(data->local_variable_names[i]),
             .declaration_kind = JS::LocalVariable::DeclarationKind::Var,
         });
     }
 
     // Set layout indices
-    executable->local_index_base = number_of_registers;
-    executable->argument_index_base = number_of_registers + local_var_count + constants_count;
-    executable->registers_and_locals_count = number_of_registers + local_var_count;
-    executable->registers_and_locals_and_constants_count = number_of_registers + local_var_count + constants_count;
+    executable->local_index_base = data->number_of_registers;
+    executable->argument_index_base = data->number_of_registers + data->local_variable_count + data->constants_count;
+    executable->registers_and_locals_count = data->number_of_registers + data->local_variable_count;
+    executable->registers_and_locals_and_constants_count = data->number_of_registers + data->local_variable_count + data->constants_count;
 
     // Set length identifier (for GetLength optimization)
-    if (length_identifier.has_value)
-        executable->length_identifier = JS::Bytecode::PropertyKeyTableIndex(length_identifier.value);
+    if (data->length_identifier.has_value)
+        executable->length_identifier = JS::Bytecode::PropertyKeyTableIndex(data->length_identifier.value);
 
     // Set shared function data (inner function definitions)
-    for (size_t i = 0; i < shared_function_data_count; ++i) {
-        auto* data = const_cast<JS::SharedFunctionInstanceData*>(
-            static_cast<JS::SharedFunctionInstanceData const*>(shared_function_data[i]));
-        executable->shared_function_data.append(data);
+    for (size_t i = 0; i < data->shared_function_data_count; ++i) {
+        auto* sfd = const_cast<JS::SharedFunctionInstanceData*>(
+            static_cast<JS::SharedFunctionInstanceData const*>(data->shared_function_data[i]));
+        executable->shared_function_data.append(sfd);
     }
 
     // Set class blueprints (move from heap-allocated objects)
-    for (size_t i = 0; i < class_blueprint_count; ++i) {
-        auto* bp = static_cast<JS::Bytecode::ClassBlueprint*>(class_blueprints[i]);
+    for (size_t i = 0; i < data->class_blueprint_count; ++i) {
+        auto* bp = static_cast<JS::Bytecode::ClassBlueprint*>(data->class_blueprints[i]);
         executable->class_blueprints.append(move(*bp));
         delete bp;
     }
