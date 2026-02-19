@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType, PropertyKey};
+use crate::parser::{Associativity, DeclarationKind, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, ProgramType, PropertyKey, PRECEDENCE_COMMA, PRECEDENCE_ASSIGNMENT};
 use crate::token::TokenType;
 
 fn expression_into_identifier(expression: Expression) -> Rc<Identifier> {
@@ -218,7 +218,7 @@ impl<'a> Parser<'a> {
                 } else {
                     ForbiddenTokens::none()
                 };
-                Some(self.parse_expression(2, Associativity::Right, forbidden))
+                Some(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, forbidden))
             } else {
                 None
             };
@@ -288,9 +288,9 @@ impl<'a> Parser<'a> {
             let init = if self.match_token(TokenType::Equals) {
                 self.consume();
                 if is_for_loop {
-                    Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in()))
+                    Some(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::with_in()))
                 } else {
-                    Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none()))
+                    Some(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none()))
                 }
             } else if !is_for_loop {
                 self.consume_token(TokenType::Equals);
@@ -556,7 +556,7 @@ impl<'a> Parser<'a> {
 
         let super_class = if self.match_token(TokenType::Extends) {
             self.consume();
-            Some(Box::new(self.parse_expression(0, Associativity::Right, ForbiddenTokens::none())))
+            Some(Box::new(self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none())))
         } else {
             None
         };
@@ -971,7 +971,7 @@ impl<'a> Parser<'a> {
             self.flags.in_class_field_initializer = true;
             self.flags.allow_super_property_lookup = true;
             self.scope_collector.open_class_field_scope(None);
-            let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+            let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
             self.scope_collector.close_scope();
             self.flags.in_class_field_initializer = saved_field_init;
             self.flags.allow_super_property_lookup = saved_super_lookup;
@@ -1162,7 +1162,7 @@ impl<'a> Parser<'a> {
                 has_seen_default = true;
                 let saved_in_function = self.flags.in_function_context;
                 self.flags.in_function_context = true;
-                let expr = self.parse_expression(2, Associativity::Right, ForbiddenTokens::with_in());
+                let expr = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::with_in());
                 self.flags.in_function_context = saved_in_function;
                 Some(expr)
             } else {
@@ -1244,7 +1244,7 @@ impl<'a> Parser<'a> {
             if is_object {
                 if self.allow_member_expressions && is_rest {
                     // Destructuring assignment: rest target can be MemberExpression or Identifier.
-                    let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                    let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                     if Self::is_member_expression(&expression) {
                         entry_alias = Some(BindingEntryAlias::MemberExpression(Box::new(expression)));
                     } else if Self::is_identifier(&expression) {
@@ -1306,7 +1306,7 @@ impl<'a> Parser<'a> {
                         self.flags.in_property_key_context = saved_prop_key_ctx;
                     } else if self.match_token(TokenType::BracketOpen) {
                         self.consume();
-                        let expression = self.parse_expression(0, Associativity::Right, ForbiddenTokens::none());
+                        let expression = self.parse_expression(PRECEDENCE_COMMA, Associativity::Right, ForbiddenTokens::none());
                         entry_name = Some(BindingEntryName::Expression(Box::new(expression)));
                         self.consume_token(TokenType::BracketClose);
                     } else {
@@ -1318,7 +1318,7 @@ impl<'a> Parser<'a> {
                         self.consume();
                         if self.allow_member_expressions {
                             let expression_start = self.position();
-                            let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                            let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                             if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                                 if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
                                     entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(pattern)));
@@ -1360,7 +1360,7 @@ impl<'a> Parser<'a> {
                 }
             } else if self.allow_member_expressions {
                 let expression_start = self.position();
-                let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
+                let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none().forbid(&[TokenType::Equals]));
                 if Self::is_object_expression(&expression) || Self::is_array_expression(&expression) {
                     if let Some(pattern) = self.synthesize_binding_pattern(expression_start) {
                         entry_alias = Some(BindingEntryAlias::BindingPattern(Box::new(pattern)));
@@ -1395,7 +1395,7 @@ impl<'a> Parser<'a> {
                     self.syntax_error("Unexpected initializer after rest element");
                 }
                 self.consume();
-                Some(self.parse_expression(2, Associativity::Right, ForbiddenTokens::none()))
+                Some(self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none()))
             } else {
                 None
             };
@@ -1632,7 +1632,7 @@ impl<'a> Parser<'a> {
                 } else {
                     // Unnamed class declaration - don't consume semicolon,
                     // matching the C++ parser's special_case_declaration_without_name.
-                    let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                    let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
                     let expression_range = expression.range;
                     statement = Some(Box::new(Statement::new(expression_range, StatementKind::Expression(Box::new(expression)))));
                 }
@@ -1645,7 +1645,7 @@ impl<'a> Parser<'a> {
                         let next = self.next_token();
                         next.token_type == TokenType::Function && !next.trivia_has_line_terminator
                     });
-                let expression = self.parse_expression(2, Associativity::Right, ForbiddenTokens::none());
+                let expression = self.parse_expression(PRECEDENCE_ASSIGNMENT, Associativity::Right, ForbiddenTokens::none());
                 if !special_case_declaration_without_name {
                     self.consume_or_insert_semicolon();
                 }

@@ -54,6 +54,13 @@ pub use crate::ast::FunctionKind;
 pub use crate::ast::ProgramType;
 pub use crate::ast::FunctionParsingInsights;
 
+// Named precedence levels for parse_expression().
+// These correspond to the operator precedence table in ECMA-262.
+pub(crate) const PRECEDENCE_COMMA: i32 = 0;
+pub(crate) const PRECEDENCE_ASSIGNMENT: i32 = 2;
+pub(crate) const PRECEDENCE_UNARY: i32 = 17;
+pub(crate) const PRECEDENCE_MEMBER: i32 = 19;
+
 /// Result of parsing a function's formal parameter list.
 pub struct ParsedParameters {
     pub parameters: Vec<FunctionParameter>,
