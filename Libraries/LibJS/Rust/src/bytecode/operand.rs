@@ -66,18 +66,19 @@ impl Operand {
     }
 
     pub fn is_register(self) -> bool {
-        self.operand_type() == OperandType::Register
+        !self.is_invalid() && self.operand_type() == OperandType::Register
     }
 
     pub fn is_local(self) -> bool {
-        self.operand_type() == OperandType::Local
+        !self.is_invalid() && self.operand_type() == OperandType::Local
     }
 
     pub fn is_constant(self) -> bool {
-        self.operand_type() == OperandType::Constant
+        !self.is_invalid() && self.operand_type() == OperandType::Constant
     }
 
     pub fn operand_type(self) -> OperandType {
+        debug_assert!(!self.is_invalid(), "operand_type() called on INVALID operand");
         match (self.0 >> Self::TYPE_SHIFT) & 0x7 {
             0 => OperandType::Register,
             1 => OperandType::Local,
