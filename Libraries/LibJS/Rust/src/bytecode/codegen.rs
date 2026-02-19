@@ -3898,6 +3898,21 @@ fn emit_put_by_value(
 fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOperand) {
     if ident.is_local() {
         if ident.declaration_kind.get() == Some(DeclarationKind::Const) {
+            // Emit TDZ check before const assignment error, matching C++ which
+            // calls emit_tdz_check_if_needed() in the caller before emit_set_variable().
+            let local_index = ident.local_index.get();
+            if gen.is_local_lexically_declared(local_index)
+                && !gen.is_local_initialized(local_index)
+            {
+                let local = match ident.local_type.get() {
+                    Some(LocalType::Argument) => gen.scoped_operand(Operand::argument(local_index)),
+                    Some(LocalType::Variable) => gen.local(local_index),
+                    None => unreachable!(),
+                };
+                gen.emit(Instruction::ThrowIfTDZ {
+                    src: local.operand(),
+                });
+            }
             gen.emit(Instruction::ThrowConstAssignment {});
             return;
         }
@@ -6370,15 +6385,23 @@ fn assign_to_for_in_of_lhs(
     match lhs {
         ForInOfLhs::Declaration(statement) => {
             // UsingDeclaration: disposal semantics not yet implemented.
+            // Match C++ behavior: UsingDeclaration is not recognized as a
+            // VariableDeclaration in for_in_of_head_evaluation, so C++ treats
+            // it as Assignment lhs_kind. emit_store_to_reference then calls
+            // UsingDeclaration::generate_bytecode (producing NewTypeError +
+            // Throw) and follows with NewReferenceError + Throw (dead code).
             if matches!(statement.inner, StatementKind::UsingDeclaration { .. }) {
-                let error = gen.allocate_register();
-                let msg = gen.intern_string(utf16!("TODO: UsingDeclaration"));
-                gen.emit(Instruction::NewTypeError {
-                    dst: error.operand(),
-                    error_string: msg,
+                generate_statement(statement, gen, None);
+                let exception = gen.allocate_register();
+                let error_string = gen.intern_string(utf16!("Invalid left-hand side in assignment"));
+                gen.emit(Instruction::NewReferenceError {
+                    dst: exception.operand(),
+                    error_string,
                 });
-                gen.emit(Instruction::Throw { src: error.operand() });
-                // Switch to a dead block so subsequent codegen doesn't crash.
+                gen.perform_needed_unwinds();
+                gen.emit(Instruction::Throw { src: exception.operand() });
+                // Switch to a dead block so the caller can continue
+                // generating body code (matching C++ emit_store_to_reference).
                 let dead = gen.make_block();
                 gen.switch_to_basic_block(dead);
                 return;
