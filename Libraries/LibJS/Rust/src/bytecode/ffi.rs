@@ -4,7 +4,24 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! FFI bridge for creating a `Bytecode::Executable` from assembled bytecode.
+//! FFI bridge between Rust codegen and C++ runtime.
+//!
+//! This module handles the boundary between the Rust bytecode generator
+//! and the C++ `Bytecode::Executable` / `SharedFunctionInstanceData` types.
+//!
+//! ## Key operations
+//!
+//! - `create_executable()` -- packages assembled bytecode, tables, and
+//!   metadata into a C++ `Bytecode::Executable` via `rust_create_executable()`
+//! - `create_shared_function_data()` -- creates a C++ `SharedFunctionInstanceData`
+//!   for a parsed function, transferring ownership of the Rust AST
+//! - `compile_regex()` -- delegates regex compilation to the C++ regex engine
+//!
+//! ## FFI types
+//!
+//! All `FFI*` structs are `#[repr(C)]` and must match their counterparts
+//! in `BytecodeFactory.h`. Changes to field order or types here require
+//! corresponding changes on the C++ side.
 
 use std::ffi::c_void;
 
@@ -14,7 +31,9 @@ use crate::ast::Utf16String;
 /// Opaque pointer returned from rust_create_executable.
 pub type ExecutableHandle = *mut c_void;
 
-// FFI types matching BytecodeFactory.h
+// FFI types matching BytecodeFactory.h.
+
+/// Exception handler range (C++ `BytecodeFactory::ExceptionHandlerData`).
 #[repr(C)]
 pub struct FFIExceptionHandler {
     pub start_offset: u32,
@@ -22,6 +41,7 @@ pub struct FFIExceptionHandler {
     pub handler_offset: u32,
 }
 
+/// Source map entry mapping bytecode offset to source range.
 #[repr(C)]
 pub struct FFISourceMapEntry {
     pub bytecode_offset: u32,
@@ -29,6 +49,8 @@ pub struct FFISourceMapEntry {
     pub source_end: u32,
 }
 
+/// A borrowed UTF-16 string slice for passing across FFI.
+/// Points into Rust-owned memory; valid only for the duration of the FFI call.
 #[repr(C)]
 pub struct FFIUtf16Slice {
     pub data: *const u16,
@@ -47,6 +69,7 @@ impl From<&Utf16String> for FFIUtf16Slice {
     }
 }
 
+/// C-compatible `Optional<u32>` (C++ doesn't have a standard Optional ABI).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FFIOptionalU32 {
@@ -73,6 +96,8 @@ impl From<Option<u32>> for FFIOptionalU32 {
     }
 }
 
+/// Class element descriptor for ClassBlueprint creation
+/// (C++ `BytecodeFactory::ClassElementData`).
 #[repr(C)]
 pub struct FFIClassElement {
     pub kind: u8, // ClassElementKind
@@ -88,6 +113,8 @@ pub struct FFIClassElement {
     pub literal_value_string_len: usize,
 }
 
+/// Data for creating a C++ `SharedFunctionInstanceData`.
+/// Passed to `rust_create_sfd()`.
 #[repr(C)]
 pub struct FFISharedFunctionData {
     pub name: *const u16,
@@ -107,6 +134,8 @@ pub struct FFISharedFunctionData {
     pub uses_this_from_environment: bool,
 }
 
+/// All data needed to create a C++ `Bytecode::Executable`.
+/// Passed to `rust_create_executable()`.
 #[repr(C)]
 pub struct FFIExecutableData {
     pub bytecode: *const u8,

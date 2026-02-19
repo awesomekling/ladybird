@@ -94,6 +94,10 @@ use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
 /// Catch any Rust panics to prevent undefined behavior from unwinding across
 /// the FFI boundary. Aborts the process on panic.
 fn abort_on_panic<F: FnOnce() -> R, R>(f: F) -> R {
@@ -262,6 +266,10 @@ unsafe fn compile_program_body(
     let assembled = gen.assemble();
     bytecode::ffi::create_executable(gen, &assembled, vm_ptr, source_code_ptr)
 }
+
+// =============================================================================
+// FFI entry points: program compilation
+// =============================================================================
 
 /// Compile a JavaScript program using the Rust parser and bytecode generator.
 ///
@@ -472,6 +480,10 @@ pub unsafe extern "C" fn rust_compile_eval(
     })
 }
 
+// =============================================================================
+// FFI entry point: dynamic function (new Function())
+// =============================================================================
+
 /// Compile a dynamically-created function (new Function()).
 /// https://tc39.es/ecma262/#sec-createdynamicfunction
 ///
@@ -660,6 +672,10 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
     })
 }
 
+// =============================================================================
+// FFI entry point: builtin file compilation
+// =============================================================================
+
 /// Callback type for reporting builtin file functions to C++.
 type BuiltinFunctionCallback =
     unsafe extern "C" fn(ctx: *mut c_void, sfd_ptr: *mut c_void, name: *const u16, name_len: usize);
@@ -734,6 +750,10 @@ pub unsafe extern "C" fn rust_compile_builtin_file(
         }
     });
 }
+
+// =============================================================================
+// FFI entry point: module compilation
+// =============================================================================
 
 /// Callback types for module compilation.
 type ModuleBoolCallback = unsafe extern "C" fn(ctx: *mut c_void, value: bool);
@@ -1321,6 +1341,10 @@ extern "C" {
     fn module_sfd_set_name(sfd_ptr: *mut c_void, name: *const u16, name_len: usize);
 }
 
+// =============================================================================
+// GDI/EDI metadata extraction
+// =============================================================================
+
 /// Recursively collect var-declared names from a statement and all nested
 /// statements, excluding function/class bodies (which create new var scopes).
 fn collect_var_names_recursive(
@@ -1603,6 +1627,10 @@ fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnM
     }
 }
 
+// =============================================================================
+// FFI entry points: memory management and function compilation
+// =============================================================================
+
 /// Free a Rust `Box<FunctionData>` stored in a C++ SharedFunctionInstanceData.
 ///
 /// Called from the SFD's `finalize()` or `clear_compile_inputs()` when the
@@ -1761,6 +1789,10 @@ pub unsafe extern "C" fn rust_compile_function(
     bytecode::ffi::create_executable(&gen, &assembled, vm_ptr, source_code_ptr)
     })
 }
+
+// =============================================================================
+// SFD metadata computation (ECMA-262 section 10.2.11)
+// =============================================================================
 
 /// Metadata computed from scope analysis for a SharedFunctionInstanceData.
 struct SfdMetadata {

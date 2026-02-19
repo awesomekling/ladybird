@@ -6,12 +6,37 @@
 
 //! Bytecode generation from Rust AST.
 //!
-//! This module walks the Rust AST and emits bytecode instructions via
-//! the `Generator`.
+//! This is the largest module in the Rust parser -- it walks the AST
+//! and emits bytecode instructions via the `Generator`.
+//!
+//! ## Conventions
 //!
 //! Each AST node's codegen returns `Option<ScopedOperand>`:
 //! - `Some(op)` if the node produces a value (expressions)
 //! - `None` for statements that don't produce values
+//!
+//! The `preferred_dst` parameter is a register hint: when the caller
+//! already has a destination register (e.g. the LHS of an assignment),
+//! codegen writes directly there instead of allocating a temporary.
+//!
+//! ## File organization
+//!
+//! The file is organized by AST node type, with section headers:
+//!
+//! - **Top-level entry points**: `generate_expression`, `generate_statement`
+//! - **Literals and identifiers**: numeric, string, boolean, regexp, identifier
+//! - **Await/yield**: async/generator control flow helpers
+//! - **Operators**: binary, logical, conditional, update, assignment
+//! - **Control flow**: if, while, do-while, for, for-in/of, switch, labelled
+//! - **Blocks and scopes**: block statements, function bodies, scope children
+//! - **Declarations**: variable declarations, using declarations
+//! - **Calls**: regular calls, super calls, optional chains, builtin detection
+//! - **Templates**: template literals, tagged templates
+//! - **Objects and classes**: object expressions, class expressions
+//! - **Patterns**: binding pattern destructuring (array and object)
+//! - **Try/catch/finally**: try statement codegen
+//! - **Functions**: `emit_new_function`, `emit_function_declaration_instantiation`
+//! - **Helpers**: constant folding, NaN-boxing, error message utilities
 
 use std::collections::HashSet;
 
@@ -718,6 +743,8 @@ pub fn generate_expression(
     result
 }
 
+/// Generate bytecode for an expression, returning `undefined` if the
+/// expression produces no value (e.g. the block was already terminated).
 fn generate_expression_or_undefined(
     expression: &Expression,
     gen: &mut Generator,
@@ -1616,6 +1643,12 @@ fn generate_yield(
 // Identifier codegen
 // =============================================================================
 
+/// Generate bytecode for an identifier reference.
+///
+/// Scope analysis determines how the identifier is resolved:
+/// - **Local**: direct register/local access (with TDZ check for let/const)
+/// - **Global**: GetGlobal instruction (with inline cache)
+/// - **Environment**: GetBinding/GetInitializedBinding (with environment coordinate cache)
 fn generate_identifier(
     ident: &Identifier,
     gen: &mut Generator,
@@ -2762,6 +2795,14 @@ fn try_generate_builtin_constant(gen: &mut Generator, name: &Utf16String) -> Opt
     None
 }
 
+/// Generate bytecode for a call expression (`f()`) or new expression (`new C()`).
+///
+/// Handles several special forms:
+/// - Direct `eval()` calls (CallWithArgumentArray with IsDirectEval flag)
+/// - Member calls (`obj.f()`) that need to pass `this`
+/// - Super calls (`super()`)
+/// - Spread arguments (CallWithArgumentArray)
+/// - Builtin abstract operation detection for built-in JS files
 fn generate_call_expression(
     gen: &mut Generator,
     data: &CallExpressionData,
@@ -3170,6 +3211,11 @@ fn generate_update_expression(
 // Assignment expression
 // =============================================================================
 
+/// Generate bytecode for all forms of assignment: simple (`=`), compound
+/// (`+=`, `-=`, etc.), and logical (`&&=`, `||=`, `??=`).
+///
+/// Handles identifiers (local, global, environment), member expressions
+/// (by-id, by-value, super, private), and destructuring patterns.
 fn generate_assignment_expression(
     gen: &mut Generator,
     op: AssignmentOp,
@@ -4562,13 +4608,14 @@ fn emit_switch_block_declaration_instantiation(
 }
 
 // =============================================================================
-// Try statement
-// =============================================================================
-
-// =============================================================================
 // Object expression
 // =============================================================================
 
+/// Generate bytecode for an object literal expression.
+///
+/// Objects whose shape can be determined at compile time (only simple
+/// key-value properties with identifier or non-numeric string keys)
+/// get shape caching for faster allocation.
 fn generate_object_expression(
     gen: &mut Generator,
     properties: &[ObjectProperty],
@@ -5056,6 +5103,11 @@ fn generate_arguments_array(
 // Class expression
 // =============================================================================
 
+/// Generate bytecode for a class expression or declaration.
+///
+/// Creates a ClassBlueprint via FFI containing the constructor SFD,
+/// class elements (methods, fields, accessors, static initializers),
+/// and then emits a NewClass instruction that creates the class at runtime.
 fn generate_class_expression(
     gen: &mut Generator,
     data: &ClassData,
@@ -6737,6 +6789,18 @@ fn generate_object_binding_pattern(
     }
 }
 
+// =============================================================================
+// Try statement
+// =============================================================================
+
+/// Generate bytecode for a try/catch/finally statement.
+///
+/// The structure is:
+/// 1. Set up FinallyContext (if finally block exists)
+/// 2. Set up exception handler pointing to catch/exception preamble
+/// 3. Generate try body
+/// 4. Generate catch block (if present)
+/// 5. Generate finally block (if present) with LeaveFinally dispatch
 fn generate_try_statement(
     gen: &mut Generator,
     data: &TryStatementData,
@@ -7861,6 +7925,10 @@ fn is_numeric_index_key(key: &[u16]) -> bool {
     (n as u32) < u32::MAX
 }
 
+// =============================================================================
+// Constant folding
+// =============================================================================
+
 /// Try to constant-fold a unary operation when the operand is a constant.
 fn try_constant_fold_unary(
     gen: &mut Generator,
@@ -8462,6 +8530,10 @@ fn try_constant_fold_binary(
     }
 }
 
+// =============================================================================
+// NaN-boxing helpers
+// =============================================================================
+
 // NanBoxed Value encoding helpers (ABI-compatible with GC::NanBoxedValue).
 // Used by NewPrimitiveArray to encode constant primitive values inline.
 const NANBOX_TAG_SHIFT: u64 = 48;
@@ -8500,7 +8572,10 @@ fn nanboxed_empty() -> u64 {
     NANBOX_EMPTY_TAG << NANBOX_TAG_SHIFT
 }
 
-/// Approximate a source expression as a string for error messages.
+// =============================================================================
+// Error message utilities
+// =============================================================================
+
 /// Intern the base expression as an identifier for error messages like
 /// "Cannot access property X on null object Y".
 fn intern_base_identifier(gen: &mut Generator, base: &Expression) -> Option<IdentifierTableIndex> {
