@@ -7709,6 +7709,29 @@ struct FdiParameterName {
     is_local: bool,
 }
 
+// Builtin IDs matching JS_ENUMERATE_BUILTINS in Builtins.h.
+const BUILTIN_MATH_ABS: u8 = 0;
+const BUILTIN_MATH_LOG: u8 = 1;
+const BUILTIN_MATH_POW: u8 = 2;
+const BUILTIN_MATH_EXP: u8 = 3;
+const BUILTIN_MATH_CEIL: u8 = 4;
+const BUILTIN_MATH_FLOOR: u8 = 5;
+const BUILTIN_MATH_IMUL: u8 = 6;
+const BUILTIN_MATH_RANDOM: u8 = 7;
+const BUILTIN_MATH_ROUND: u8 = 8;
+const BUILTIN_MATH_SQRT: u8 = 9;
+const BUILTIN_MATH_SIN: u8 = 10;
+const BUILTIN_MATH_COS: u8 = 11;
+const BUILTIN_MATH_TAN: u8 = 12;
+const BUILTIN_REGEXP_PROTOTYPE_EXEC: u8 = 13;
+const BUILTIN_REGEXP_PROTOTYPE_REPLACE: u8 = 14;
+const BUILTIN_REGEXP_PROTOTYPE_SPLIT: u8 = 15;
+const BUILTIN_ORDINARY_HAS_INSTANCE: u8 = 16;
+const BUILTIN_ARRAY_ITERATOR_PROTOTYPE_NEXT: u8 = 17;
+const BUILTIN_MAP_ITERATOR_PROTOTYPE_NEXT: u8 = 18;
+const BUILTIN_SET_ITERATOR_PROTOTYPE_NEXT: u8 = 19;
+const BUILTIN_STRING_ITERATOR_PROTOTYPE_NEXT: u8 = 20;
+
 /// Detect known builtin methods from a callee expression (e.g. Math.abs).
 /// Returns the Builtin enum value as u8, matching C++ Builtins.h ordering.
 fn get_builtin(callee: &Expression) -> Option<u8> {
@@ -7726,27 +7749,27 @@ fn get_builtin(callee: &Expression) -> Option<u8> {
     };
     // Must match JS_ENUMERATE_BUILTINS order in Builtins.h.
     static BUILTINS: &[(&[u16], &[u16], u8)] = &[
-        (utf16!("Math"), utf16!("abs"), 0),
-        (utf16!("Math"), utf16!("log"), 1),
-        (utf16!("Math"), utf16!("pow"), 2),
-        (utf16!("Math"), utf16!("exp"), 3),
-        (utf16!("Math"), utf16!("ceil"), 4),
-        (utf16!("Math"), utf16!("floor"), 5),
-        (utf16!("Math"), utf16!("imul"), 6),
-        (utf16!("Math"), utf16!("random"), 7),
-        (utf16!("Math"), utf16!("round"), 8),
-        (utf16!("Math"), utf16!("sqrt"), 9),
-        (utf16!("Math"), utf16!("sin"), 10),
-        (utf16!("Math"), utf16!("cos"), 11),
-        (utf16!("Math"), utf16!("tan"), 12),
-        (utf16!("RegExpPrototype"), utf16!("exec"), 13),
-        (utf16!("RegExpPrototype"), utf16!("replace"), 14),
-        (utf16!("RegExpPrototype"), utf16!("split"), 15),
-        (utf16!("InternalBuiltin"), utf16!("ordinary_has_instance"), 16),
-        (utf16!("ArrayIteratorPrototype"), utf16!("next"), 17),
-        (utf16!("MapIteratorPrototype"), utf16!("next"), 18),
-        (utf16!("SetIteratorPrototype"), utf16!("next"), 19),
-        (utf16!("StringIteratorPrototype"), utf16!("next"), 20),
+        (utf16!("Math"), utf16!("abs"), BUILTIN_MATH_ABS),
+        (utf16!("Math"), utf16!("log"), BUILTIN_MATH_LOG),
+        (utf16!("Math"), utf16!("pow"), BUILTIN_MATH_POW),
+        (utf16!("Math"), utf16!("exp"), BUILTIN_MATH_EXP),
+        (utf16!("Math"), utf16!("ceil"), BUILTIN_MATH_CEIL),
+        (utf16!("Math"), utf16!("floor"), BUILTIN_MATH_FLOOR),
+        (utf16!("Math"), utf16!("imul"), BUILTIN_MATH_IMUL),
+        (utf16!("Math"), utf16!("random"), BUILTIN_MATH_RANDOM),
+        (utf16!("Math"), utf16!("round"), BUILTIN_MATH_ROUND),
+        (utf16!("Math"), utf16!("sqrt"), BUILTIN_MATH_SQRT),
+        (utf16!("Math"), utf16!("sin"), BUILTIN_MATH_SIN),
+        (utf16!("Math"), utf16!("cos"), BUILTIN_MATH_COS),
+        (utf16!("Math"), utf16!("tan"), BUILTIN_MATH_TAN),
+        (utf16!("RegExpPrototype"), utf16!("exec"), BUILTIN_REGEXP_PROTOTYPE_EXEC),
+        (utf16!("RegExpPrototype"), utf16!("replace"), BUILTIN_REGEXP_PROTOTYPE_REPLACE),
+        (utf16!("RegExpPrototype"), utf16!("split"), BUILTIN_REGEXP_PROTOTYPE_SPLIT),
+        (utf16!("InternalBuiltin"), utf16!("ordinary_has_instance"), BUILTIN_ORDINARY_HAS_INSTANCE),
+        (utf16!("ArrayIteratorPrototype"), utf16!("next"), BUILTIN_ARRAY_ITERATOR_PROTOTYPE_NEXT),
+        (utf16!("MapIteratorPrototype"), utf16!("next"), BUILTIN_MAP_ITERATOR_PROTOTYPE_NEXT),
+        (utf16!("SetIteratorPrototype"), utf16!("next"), BUILTIN_SET_ITERATOR_PROTOTYPE_NEXT),
+        (utf16!("StringIteratorPrototype"), utf16!("next"), BUILTIN_STRING_ITERATOR_PROTOTYPE_NEXT),
     ];
     for &(base, property, id) in BUILTINS {
         if base_ident.name == base && property_ident.name == property {
@@ -7759,27 +7782,27 @@ fn get_builtin(callee: &Expression) -> Option<u8> {
 fn builtin_argument_count(builtin: u8) -> usize {
     // Must match JS_ENUMERATE_BUILTINS argument counts in Builtins.h.
     match builtin {
-        0 => 1,  // MathAbs
-        1 => 1,  // MathLog
-        2 => 2,  // MathPow
-        3 => 1,  // MathExp
-        4 => 1,  // MathCeil
-        5 => 1,  // MathFloor
-        6 => 2,  // MathImul
-        7 => 0,  // MathRandom
-        8 => 1,  // MathRound
-        9 => 1,  // MathSqrt
-        10 => 1, // MathSin
-        11 => 1, // MathCos
-        12 => 1, // MathTan
-        13 => 1, // RegExpPrototypeExec
-        14 => 2, // RegExpPrototypeReplace
-        15 => 2, // RegExpPrototypeSplit
-        16 => 1, // OrdinaryHasInstance
-        17 => 0, // ArrayIteratorPrototypeNext
-        18 => 0, // MapIteratorPrototypeNext
-        19 => 0, // SetIteratorPrototypeNext
-        20 => 0, // StringIteratorPrototypeNext
+        BUILTIN_MATH_ABS => 1,
+        BUILTIN_MATH_LOG => 1,
+        BUILTIN_MATH_POW => 2,
+        BUILTIN_MATH_EXP => 1,
+        BUILTIN_MATH_CEIL => 1,
+        BUILTIN_MATH_FLOOR => 1,
+        BUILTIN_MATH_IMUL => 2,
+        BUILTIN_MATH_RANDOM => 0,
+        BUILTIN_MATH_ROUND => 1,
+        BUILTIN_MATH_SQRT => 1,
+        BUILTIN_MATH_SIN => 1,
+        BUILTIN_MATH_COS => 1,
+        BUILTIN_MATH_TAN => 1,
+        BUILTIN_REGEXP_PROTOTYPE_EXEC => 1,
+        BUILTIN_REGEXP_PROTOTYPE_REPLACE => 2,
+        BUILTIN_REGEXP_PROTOTYPE_SPLIT => 2,
+        BUILTIN_ORDINARY_HAS_INSTANCE => 1,
+        BUILTIN_ARRAY_ITERATOR_PROTOTYPE_NEXT => 0,
+        BUILTIN_MAP_ITERATOR_PROTOTYPE_NEXT => 0,
+        BUILTIN_SET_ITERATOR_PROTOTYPE_NEXT => 0,
+        BUILTIN_STRING_ITERATOR_PROTOTYPE_NEXT => 0,
         _ => usize::MAX,
     }
 }

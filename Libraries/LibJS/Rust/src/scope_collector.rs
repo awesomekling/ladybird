@@ -94,7 +94,7 @@ impl ScopeLevel {
 // A single name can accumulate multiple flags (e.g., a `var` that
 // shadows a parameter gets both VAR and FORBIDDEN_LEXICAL).
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct VarFlags(u16);
 
 impl VarFlags {
@@ -131,7 +131,7 @@ impl std::ops::BitOrAssign for VarFlags {
 
 /// A declared name within a scope. Multiple declaration forms can share
 /// the same name (e.g., `var x` and `function x`), so flags are ORed together.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ScopeVariable {
     /// Bit flags describing how this name was declared.
     flags: VarFlags,
@@ -143,6 +143,7 @@ struct ScopeVariable {
 /// Groups all Identifier AST nodes that share the same name within a scope.
 /// During analysis, the group is resolved to a local variable, parameter,
 /// or propagated to the parent scope if unresolved.
+#[derive(Debug)]
 struct IdentifierGroup {
     /// True if any identifier in this group is referenced from a nested
     /// function (prevents local variable optimization).
@@ -158,6 +159,7 @@ struct IdentifierGroup {
 }
 
 /// A function to hoist via Annex B.3.3.
+#[derive(Debug)]
 struct HoistableFunction {
     name: Utf16String,
     /// Reference to the block ScopeData that contains the function declaration.
@@ -165,6 +167,7 @@ struct HoistableFunction {
     block_scope_data: Option<Rc<RefCell<ScopeData>>>,
 }
 
+#[derive(Debug)]
 struct ParameterName {
     name: Utf16String,
     is_rest: bool,
@@ -179,6 +182,7 @@ pub struct ParameterEntry {
     pub is_first_from_pattern: bool,
 }
 
+#[derive(Debug)]
 struct ScopeRecord {
     scope_type: ScopeType,
     scope_level: ScopeLevel,
