@@ -250,6 +250,21 @@ macro_rules! next_cache_method {
     };
 }
 
+macro_rules! define_intern_method {
+    ($method_name:ident, $index_type:ident, $table:ident, $cache:ident) => {
+        pub fn $method_name(&mut self, s: &[u16]) -> $index_type {
+            if let Some(&index) = self.$cache.get(s) {
+                return index;
+            }
+            let index = $index_type(self.$table.len() as u32);
+            let key = Utf16String(s.to_vec());
+            self.$table.push(key.clone());
+            self.$cache.insert(key, index);
+            index
+        }
+    };
+}
+
 impl Default for Generator {
     fn default() -> Self {
         Self::new()
@@ -493,38 +508,9 @@ impl Generator {
 
     // --- Table interning ---
 
-    pub fn intern_string(&mut self, s: &[u16]) -> StringTableIndex {
-        if let Some(&index) = self.string_table_index.get(s) {
-            return index;
-        }
-        let index = StringTableIndex(self.string_table.len() as u32);
-        let key = Utf16String(s.to_vec());
-        self.string_table.push(key.clone());
-        self.string_table_index.insert(key, index);
-        index
-    }
-
-    pub fn intern_identifier(&mut self, s: &[u16]) -> IdentifierTableIndex {
-        if let Some(&index) = self.identifier_table_index.get(s) {
-            return index;
-        }
-        let index = IdentifierTableIndex(self.identifier_table.len() as u32);
-        let key = Utf16String(s.to_vec());
-        self.identifier_table.push(key.clone());
-        self.identifier_table_index.insert(key, index);
-        index
-    }
-
-    pub fn intern_property_key(&mut self, s: &[u16]) -> PropertyKeyTableIndex {
-        if let Some(&index) = self.property_key_table_index.get(s) {
-            return index;
-        }
-        let index = PropertyKeyTableIndex(self.property_key_table.len() as u32);
-        let key = Utf16String(s.to_vec());
-        self.property_key_table.push(key.clone());
-        self.property_key_table_index.insert(key, index);
-        index
-    }
+    define_intern_method!(intern_string, StringTableIndex, string_table, string_table_index);
+    define_intern_method!(intern_identifier, IdentifierTableIndex, identifier_table, identifier_table_index);
+    define_intern_method!(intern_property_key, PropertyKeyTableIndex, property_key_table, property_key_table_index);
 
     /// Register a SharedFunctionInstanceData (opaque pointer) and return its index.
     pub fn register_shared_function_data(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
