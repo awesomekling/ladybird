@@ -5756,7 +5756,9 @@ fn generate_for_in_statement(
         if let StatementKind::VariableDeclaration { kind: DeclarationKind::Var, declarations } = &statement.inner {
             if let Some(declaration) = declarations.first() {
                 if let (VariableDeclaratorTarget::Identifier(ident), Some(init)) = (&declaration.target, &declaration.init) {
+                    gen.pending_lhs_name = Some(gen.intern_identifier(&ident.name));
                     let value = generate_expression_or_undefined(init, gen, None);
+                    gen.pending_lhs_name = None;
                     emit_set_variable(gen, ident, &value);
                 }
             }
