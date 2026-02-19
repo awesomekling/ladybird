@@ -46,6 +46,12 @@ struct FFIUtf16Slice {
     size_t length;
 };
 
+// An optional uint32_t for FFI (replaces -1 sentinel values).
+struct FFIOptionalU32 {
+    uint32_t value;
+    bool has_value;
+};
+
 // Class element descriptor for FFI (matches ClassElementDescriptor::Kind).
 // Kind values: 0=Method, 1=Getter, 2=Setter, 3=Field, 4=StaticInitializer
 struct FFIClassElement {
@@ -54,7 +60,7 @@ struct FFIClassElement {
     bool is_private;
     uint16_t const* private_identifier;
     size_t private_identifier_len;
-    int32_t shared_function_data_index; // -1 for none
+    FFIOptionalU32 shared_function_data_index;
     bool has_initializer;
     uint8_t literal_value_kind; // 0=none, 1=number, 2=boolean_true, 3=boolean_false, 4=null, 5=string
     double literal_value_number;
@@ -150,8 +156,8 @@ void* rust_create_executable(
     // Register and mode
     uint32_t number_of_registers,
     bool is_strict,
-    // Length identifier: PropertyKeyTableIndex for "length", or -1
-    int32_t length_identifier,
+    // Length identifier: PropertyKeyTableIndex for "length"
+    FFIOptionalU32 length_identifier,
     // Shared function data (inner functions)
     // Array of SharedFunctionInstanceData* cast to void*.
     void const* const* shared_function_data,

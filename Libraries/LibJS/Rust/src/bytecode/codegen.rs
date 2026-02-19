@@ -5270,13 +5270,13 @@ fn generate_class_expression(
                 // in construct_class sets it from the evaluated property key, which
                 // correctly handles computed keys (Symbols, etc).
                 let sfd_index = if let ExpressionKind::Function(function_data) = &function.inner {
-                    emit_new_function(
+                    super::ffi::FFIOptionalU32::some(emit_new_function(
                         gen,
                         function_data,
                         None,
-                    ) as i32
+                    ))
                 } else {
-                    -1i32
+                    super::ffi::FFIOptionalU32::none()
                 };
 
                 // Handle computed vs static keys
@@ -5310,7 +5310,7 @@ fn generate_class_expression(
                 let mut literal_value_kind = LiteralValueKind::None as u8;
                 let mut literal_value_number: f64 = 0.0;
                 let mut literal_value_string = Utf16String::new();
-                let mut sfd_index: i32 = -1;
+                let mut sfd_index = super::ffi::FFIOptionalU32::none();
 
                 if let Some(init_expression) = initializer {
                     let is_literal = match &init_expression.inner {
@@ -5419,7 +5419,7 @@ fn generate_class_expression(
                             }
                         }
 
-                        sfd_index = index as i32;
+                        sfd_index = super::ffi::FFIOptionalU32::some(index);
                     }
                 }
 
@@ -5470,7 +5470,7 @@ fn generate_class_expression(
                     },
                     is_hoisted: false,
                 };
-                let sfd_index = emit_new_function(gen, &function_data, None) as i32;
+                let sfd_index = super::ffi::FFIOptionalU32::some(emit_new_function(gen, &function_data, None));
 
                 ffi_elements.push(super::ffi::FFIClassElement {
                     kind: ClassElementKind::StaticInitializer as u8,

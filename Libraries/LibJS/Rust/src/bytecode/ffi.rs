@@ -48,13 +48,39 @@ impl From<&Utf16String> for FFIUtf16Slice {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FFIOptionalU32 {
+    pub value: u32,
+    pub has_value: bool,
+}
+
+impl FFIOptionalU32 {
+    pub fn none() -> Self {
+        Self { value: 0, has_value: false }
+    }
+
+    pub fn some(value: u32) -> Self {
+        Self { value, has_value: true }
+    }
+}
+
+impl From<Option<u32>> for FFIOptionalU32 {
+    fn from(opt: Option<u32>) -> Self {
+        match opt {
+            Some(value) => Self::some(value),
+            None => Self::none(),
+        }
+    }
+}
+
+#[repr(C)]
 pub struct FFIClassElement {
     pub kind: u8, // ClassElementKind
     pub is_static: bool,
     pub is_private: bool,
     pub private_identifier: *const u16,
     pub private_identifier_len: usize,
-    pub shared_function_data_index: i32, // -1 for none
+    pub shared_function_data_index: FFIOptionalU32,
     pub has_initializer: bool,
     pub literal_value_kind: u8, // LiteralValueKind
     pub literal_value_number: f64,
@@ -91,7 +117,7 @@ extern "C" {
         object_shape_cache_count: u32,
         number_of_registers: u32,
         is_strict: bool,
-        length_identifier: i32, // -1 for none, otherwise PropertyKeyTableIndex
+        length_identifier: FFIOptionalU32,
         shared_function_data: *const *const c_void,
         shared_function_data_count: usize,
         class_blueprints: *const *mut c_void,
@@ -428,7 +454,7 @@ pub unsafe fn create_executable(
         gen.next_object_shape_cache,
         assembled.number_of_registers,
         gen.strict,
-        gen.length_identifier.map_or(-1i32, |index| index.0 as i32),
+        FFIOptionalU32::from(gen.length_identifier.map(|index| index.0)),
         sfd_ptrs.as_ptr(),
         sfd_ptrs.len(),
         bp_ptrs.as_ptr(),

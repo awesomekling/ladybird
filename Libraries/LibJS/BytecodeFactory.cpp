@@ -138,7 +138,7 @@ extern "C" void* rust_create_executable(
     uint32_t object_shape_cache_count,
     uint32_t number_of_registers,
     bool is_strict,
-    int32_t length_identifier, // -1 for none
+    FFIOptionalU32 length_identifier,
     void const* const* shared_function_data,
     size_t shared_function_data_count,
     void* const* class_blueprints,
@@ -242,8 +242,8 @@ extern "C" void* rust_create_executable(
     executable->registers_and_locals_and_constants_count = number_of_registers + local_var_count + constants_count;
 
     // Set length identifier (for GetLength optimization)
-    if (length_identifier >= 0)
-        executable->length_identifier = JS::Bytecode::PropertyKeyTableIndex(static_cast<u32>(length_identifier));
+    if (length_identifier.has_value)
+        executable->length_identifier = JS::Bytecode::PropertyKeyTableIndex(length_identifier.value);
 
     // Set shared function data (inner function definitions)
     for (size_t i = 0; i < shared_function_data_count; ++i) {
@@ -389,8 +389,8 @@ extern "C" void* rust_create_class_blueprint(
         desc.is_private = elem.is_private;
         if (elem.private_identifier_len > 0)
             desc.private_identifier = Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(elem.private_identifier), elem.private_identifier_len));
-        if (elem.shared_function_data_index >= 0)
-            desc.shared_function_data_index = static_cast<u32>(elem.shared_function_data_index);
+        if (elem.shared_function_data_index.has_value)
+            desc.shared_function_data_index = elem.shared_function_data_index.value;
         desc.has_initializer = elem.has_initializer;
         switch (elem.literal_value_kind) {
         case 0: // none
