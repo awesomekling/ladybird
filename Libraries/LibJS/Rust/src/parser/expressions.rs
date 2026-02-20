@@ -14,6 +14,14 @@ use crate::lexer::ch;
 use crate::parser::{Associativity, ForbiddenTokens, FunctionKind, MethodKind, ParamInfo, ParsedParameters, Parser, Position, PropertyKey, is_strict_reserved_word, PRECEDENCE_COMMA, PRECEDENCE_ASSIGNMENT, PRECEDENCE_UNARY, PRECEDENCE_MEMBER};
 use crate::token::{Token, TokenType};
 
+#[derive(PartialEq, Eq)]
+enum EscapeMode {
+    /// Tagged template literals: invalid escapes produce `undefined` cooked value.
+    TaggedTemplate,
+    /// String literals: invalid escapes emit syntax errors, legacy octals are tracked.
+    StringLiteral,
+}
+
 impl<'a> Parser<'a> {
     pub(crate) fn match_expression(&mut self) -> bool {
         match self.current_token_type() {
@@ -1556,73 +1564,8 @@ impl<'a> Parser<'a> {
     }
 
     fn process_template_escape_sequences(&self, raw: &[u16]) -> Option<Utf16String> {
-        let mut result = Utf16String(Vec::with_capacity(raw.len()));
-        let mut i = 0;
-        while i < raw.len() {
-            if raw[i] == b'\\' as u16 && i + 1 < raw.len() {
-                i += 1;
-                const N: u16 = ch(b'n');
-                const R: u16 = ch(b'r');
-                const T: u16 = ch(b't');
-                const B: u16 = ch(b'b');
-                const F: u16 = ch(b'f');
-                const V: u16 = ch(b'v');
-                const ZERO: u16 = ch(b'0');
-                const ONE: u16 = ch(b'1');
-                const EIGHT: u16 = ch(b'8');
-                const NINE: u16 = ch(b'9');
-                const X: u16 = ch(b'x');
-                const U: u16 = ch(b'u');
-                const LF: u16 = ch(b'\n');
-                const CR: u16 = ch(b'\r');
-                const LS: u16 = 0x2028;
-                const PS: u16 = 0x2029;
-                match raw[i] {
-                    N => result.0.push(ch(b'\n')),
-                    R => result.0.push(ch(b'\r')),
-                    T => result.0.push(ch(b'\t')),
-                    B => result.0.push(8),
-                    F => result.0.push(12),
-                    V => result.0.push(11),
-                    ZERO => {
-                        if i + 1 < raw.len() && (is_octal_char(raw[i + 1]) || raw[i + 1] == EIGHT || raw[i + 1] == NINE) {
-                            return None;
-                        }
-                        result.0.push(0);
-                    }
-                    ONE..=NINE => {
-                        return None;
-                    }
-                    X => {
-                        let (advance, ch) = parse_hex_escape(raw, i)?;
-                        result.0.push(ch);
-                        i += advance;
-                    }
-                    U => {
-                        let (advance, code_point) = parse_unicode_escape(raw, i)?;
-                        push_code_point(&mut result.0, code_point);
-                        i += advance;
-                    }
-                    LF => { /* line continuation */ }
-                    CR => {
-                        if i + 1 < raw.len() && raw[i + 1] == LF {
-                            i += 1;
-                        }
-                    }
-                    LS | PS => { /* skip LS/PS */ }
-                    c => result.0.push(c),
-                }
-            } else if raw[i] == ch(b'\r') {
-                result.0.push(ch(b'\n'));
-                if i + 1 < raw.len() && raw[i + 1] == ch(b'\n') {
-                    i += 1;
-                }
-            } else {
-                result.0.push(raw[i]);
-            }
-            i += 1;
-        }
-        Some(result)
+        let result = process_escape_sequences_impl(raw, EscapeMode::TaggedTemplate);
+        if result.failed { None } else { Some(result.value) }
     }
 
     /// Parse a string literal token's value, processing escape sequences.
@@ -1637,100 +1580,145 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn process_escape_sequences(&mut self, inner: &[u16]) -> (Utf16String, bool) {
-        let mut result = Utf16String(Vec::with_capacity(inner.len()));
-        let mut has_legacy_octal = false;
-        let mut i = 0;
-        while i < inner.len() {
-            if inner[i] == b'\\' as u16 && i + 1 < inner.len() {
-                i += 1;
-                const N: u16 = ch(b'n');
-                const R: u16 = ch(b'r');
-                const T: u16 = ch(b't');
-                const B: u16 = ch(b'b');
-                const F: u16 = ch(b'f');
-                const V: u16 = ch(b'v');
-                const ZERO: u16 = ch(b'0');
-                const ONE: u16 = ch(b'1');
-                const SEVEN: u16 = ch(b'7');
-                const EIGHT: u16 = ch(b'8');
-                const NINE: u16 = ch(b'9');
-                const X: u16 = ch(b'x');
-                const U: u16 = ch(b'u');
-                const LF: u16 = ch(b'\n');
-                const CR: u16 = ch(b'\r');
-                const LS: u16 = 0x2028;
-                const PS: u16 = 0x2029;
-                match inner[i] {
-                    N => result.0.push(ch(b'\n')),
-                    R => result.0.push(ch(b'\r')),
-                    T => result.0.push(ch(b'\t')),
-                    B => result.0.push(8),
-                    F => result.0.push(12),
-                    V => result.0.push(11),
-                    ZERO => {
-                        if i + 1 < inner.len() && is_octal_char(inner[i + 1]) {
-                            has_legacy_octal = true;
-                            let (val, consumed) = parse_octal_escape(inner, i);
-                            result.0.push(val);
-                            i += consumed;
-                        } else if i + 1 < inner.len() && (inner[i + 1] == EIGHT || inner[i + 1] == NINE) {
-                            has_legacy_octal = true;
-                            result.0.push(0);
-                        } else {
-                            result.0.push(0);
+        let result = process_escape_sequences_impl(inner, EscapeMode::StringLiteral);
+        if result.malformed_hex {
+            self.syntax_error("Malformed hexadecimal escape sequence");
+        }
+        if result.malformed_unicode {
+            self.syntax_error("Malformed unicode escape sequence");
+        }
+        (result.value, result.has_legacy_octal)
+    }
+}
+
+struct EscapeResult {
+    value: Utf16String,
+    has_legacy_octal: bool,
+    /// Tagged template encountered an invalid escape.
+    failed: bool,
+    malformed_hex: bool,
+    malformed_unicode: bool,
+}
+
+/// Unified escape sequence processor for both string and template literals.
+///
+/// In `TaggedTemplate` mode, `failed` is true when an invalid escape is
+/// encountered (the cooked value becomes `undefined`).
+fn process_escape_sequences_impl(input: &[u16], mode: EscapeMode) -> EscapeResult {
+    let mut result = Utf16String(Vec::with_capacity(input.len()));
+    let mut has_legacy_octal = false;
+    let mut malformed_hex = false;
+    let mut malformed_unicode = false;
+    let mut i = 0;
+
+    const N: u16 = ch(b'n');
+    const R: u16 = ch(b'r');
+    const T: u16 = ch(b't');
+    const B: u16 = ch(b'b');
+    const F: u16 = ch(b'f');
+    const V: u16 = ch(b'v');
+    const ZERO: u16 = ch(b'0');
+    const ONE: u16 = ch(b'1');
+    const SEVEN: u16 = ch(b'7');
+    const EIGHT: u16 = ch(b'8');
+    const NINE: u16 = ch(b'9');
+    const X: u16 = ch(b'x');
+    const U: u16 = ch(b'u');
+    const LF: u16 = ch(b'\n');
+    const CR: u16 = ch(b'\r');
+    const LS: u16 = 0x2028;
+    const PS: u16 = 0x2029;
+
+    while i < input.len() {
+        if input[i] == b'\\' as u16 && i + 1 < input.len() {
+            i += 1;
+            match input[i] {
+                N => result.0.push(ch(b'\n')),
+                R => result.0.push(ch(b'\r')),
+                T => result.0.push(ch(b'\t')),
+                B => result.0.push(8),
+                F => result.0.push(12),
+                V => result.0.push(11),
+                ZERO => {
+                    if mode == EscapeMode::TaggedTemplate {
+                        if i + 1 < input.len() && (is_octal_char(input[i + 1]) || input[i + 1] == EIGHT || input[i + 1] == NINE) {
+                            return EscapeResult { value: result, has_legacy_octal: false, failed: true, malformed_hex: false, malformed_unicode: false };
                         }
-                    }
-                    ONE..=SEVEN => {
+                        result.0.push(0);
+                    } else if i + 1 < input.len() && is_octal_char(input[i + 1]) {
                         has_legacy_octal = true;
-                        let (val, consumed) = parse_octal_escape(inner, i);
+                        let (val, consumed) = parse_octal_escape(input, i);
                         result.0.push(val);
                         i += consumed;
-                    }
-                    EIGHT | NINE => {
+                    } else if i + 1 < input.len() && (input[i + 1] == EIGHT || input[i + 1] == NINE) {
                         has_legacy_octal = true;
-                        result.0.push(inner[i]);
+                        result.0.push(0);
+                    } else {
+                        result.0.push(0);
                     }
-                    X => {
-                        if let Some((advance, ch)) = parse_hex_escape(inner, i) {
-                            result.0.push(ch);
-                            i += advance;
-                        } else {
-                            self.syntax_error("Malformed hexadecimal escape sequence");
-                            result.0.push(inner[i]);
-                        }
-                    }
-                    U => {
-                        if let Some((advance, code_point)) = parse_unicode_escape(inner, i) {
-                            push_code_point(&mut result.0, code_point);
-                            i += advance;
-                        } else {
-                            self.syntax_error("Malformed unicode escape sequence");
-                            result.0.push(inner[i]);
-                        }
-                    }
-                    LF => { /* skip */ }
-                    CR => {
-                        if i + 1 < inner.len() && inner[i + 1] == LF {
-                            i += 1;
-                        }
-                    }
-                    LS | PS => { /* skip LS/PS */ }
-                    c => result.0.push(c),
                 }
-            } else if inner[i] == ch(b'\r') {
-                // Normalize \r\n and bare \r to \n per spec (12.9.6).
-                result.0.push(ch(b'\n'));
-                if i + 1 < inner.len() && inner[i + 1] == ch(b'\n') {
-                    i += 1;
+                ONE..=SEVEN => {
+                    if mode == EscapeMode::TaggedTemplate {
+                        return EscapeResult { value: result, has_legacy_octal: false, failed: true, malformed_hex: false, malformed_unicode: false };
+                    }
+                    has_legacy_octal = true;
+                    let (val, consumed) = parse_octal_escape(input, i);
+                    result.0.push(val);
+                    i += consumed;
                 }
-            } else {
-                result.0.push(inner[i]);
+                EIGHT | NINE => {
+                    if mode == EscapeMode::TaggedTemplate {
+                        return EscapeResult { value: result, has_legacy_octal: false, failed: true, malformed_hex: false, malformed_unicode: false };
+                    }
+                    has_legacy_octal = true;
+                    result.0.push(input[i]);
+                }
+                X => {
+                    if let Some((advance, ch)) = parse_hex_escape(input, i) {
+                        result.0.push(ch);
+                        i += advance;
+                    } else if mode == EscapeMode::TaggedTemplate {
+                        return EscapeResult { value: result, has_legacy_octal: false, failed: true, malformed_hex: false, malformed_unicode: false };
+                    } else {
+                        malformed_hex = true;
+                        result.0.push(input[i]);
+                    }
+                }
+                U => {
+                    if let Some((advance, code_point)) = parse_unicode_escape(input, i) {
+                        push_code_point(&mut result.0, code_point);
+                        i += advance;
+                    } else if mode == EscapeMode::TaggedTemplate {
+                        return EscapeResult { value: result, has_legacy_octal: false, failed: true, malformed_hex: false, malformed_unicode: false };
+                    } else {
+                        malformed_unicode = true;
+                        result.0.push(input[i]);
+                    }
+                }
+                LF => { /* line continuation */ }
+                CR => {
+                    if i + 1 < input.len() && input[i + 1] == LF {
+                        i += 1;
+                    }
+                }
+                LS | PS => { /* skip LS/PS */ }
+                c => result.0.push(c),
             }
-            i += 1;
+        } else if input[i] == ch(b'\r') {
+            // Normalize \r\n and bare \r to \n per spec (12.9.6).
+            result.0.push(ch(b'\n'));
+            if i + 1 < input.len() && input[i + 1] == ch(b'\n') {
+                i += 1;
+            }
+        } else {
+            result.0.push(input[i]);
         }
-        (result, has_legacy_octal)
+        i += 1;
     }
+    EscapeResult { value: result, has_legacy_octal, failed: false, malformed_hex, malformed_unicode }
+}
 
+impl<'a> Parser<'a> {
     /// Try to parse an arrow function expression. Returns `None` on failure.
     // https://tc39.es/ecma262/#sec-arrow-function-definitions
     // ArrowFunction : ArrowParameters [no LineTerminator here] `=>` ConciseBody
