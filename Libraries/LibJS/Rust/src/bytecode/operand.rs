@@ -84,7 +84,7 @@ impl Operand {
             1 => OperandType::Local,
             2 => OperandType::Constant,
             3 => OperandType::Argument,
-            _ => unreachable!(),
+            _ => unreachable!("operand type bits can only be 0-3"),
         }
     }
 

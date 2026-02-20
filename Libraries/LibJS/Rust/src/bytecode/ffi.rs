@@ -292,7 +292,7 @@ pub unsafe fn create_shared_function_data(
                 if let FunctionParameterBinding::Identifier(ref id) = p.binding {
                     FFIUtf16Slice::from(id.name.as_ref())
                 } else {
-                    unreachable!()
+                    unreachable!("has_simple_parameter_list guarantees all bindings are identifiers")
                 }
             })
             .collect()

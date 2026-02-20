@@ -1293,7 +1293,7 @@ fn hex_value(cu: u16) -> u32 {
         0x30..=0x39 => (cu - 0x30) as u32,
         0x41..=0x46 => (cu - 0x41 + 10) as u32,
         0x61..=0x66 => (cu - 0x61 + 10) as u32,
-        _ => unreachable!(),
+        _ => unreachable!("hex_value is only called for validated hex digits"),
     }
 }
 

@@ -196,7 +196,7 @@ fn generate_expression_inner(
                         src: value.operand(),
                     });
                 }
-                UnaryOp::Not => unreachable!(),
+                UnaryOp::Not => unreachable!("Not is handled by early return above"),
                 UnaryOp::Plus => {
                     gen.emit(Instruction::UnaryPlus {
                         dst: dst.operand(),
@@ -209,11 +209,11 @@ fn generate_expression_inner(
                         src: value.operand(),
                     });
                 }
-                UnaryOp::Typeof => unreachable!(),
+                UnaryOp::Typeof => unreachable!("Typeof is handled by early return above"),
                 UnaryOp::Void => {
                     return Some(gen.add_constant_undefined());
                 }
-                UnaryOp::Delete => unreachable!(),
+                UnaryOp::Delete => unreachable!("Delete is handled by early return above"),
             }
             Some(dst)
         }
@@ -374,7 +374,7 @@ fn generate_expression_inner(
                         ExpressionKind::NumericLiteral(n) => nanboxed_number(*n),
                         ExpressionKind::BooleanLiteral(b) => nanboxed_boolean(*b),
                         ExpressionKind::NullLiteral => nanboxed_null(),
-                        _ => unreachable!(),
+                        _ => unreachable!("all elements verified as primitive literals above"),
                     },
                 }).collect();
                 let dst = choose_dst(gen, preferred_dst);
@@ -3246,7 +3246,7 @@ fn generate_assignment_expression(
                                 false_target: lhs_block,
                             });
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("only logical assignment ops reach this branch"),
                     }
                     // RHS block: evaluate RHS, assign, jump to end.
                     gen.switch_to_basic_block(rhs_block);
@@ -4079,7 +4079,7 @@ fn emit_evaluate_member_reference(gen: &mut Generator, target: &Expression) -> E
                 let cache = gen.next_property_lookup_cache();
                 EvaluatedReference::SuperMemberId { base, property: key, cache, this_value }
             } else {
-                unreachable!()
+                unreachable!("non-computed super member property must be an identifier")
             }
         } else {
             if *computed {
@@ -4095,7 +4095,7 @@ fn emit_evaluate_member_reference(gen: &mut Generator, target: &Expression) -> E
                 let id = gen.intern_identifier(&priv_ident.name);
                 EvaluatedReference::PrivateMember { base, property: id }
             } else {
-                unreachable!()
+                unreachable!("non-computed member property must be an identifier or private identifier")
             }
         }
     } else {
@@ -4183,7 +4183,7 @@ fn emit_logical_jump(gen: &mut Generator, op: AssignmentOp, condition: &ScopedOp
                 false_target: lhs_block,
             });
         }
-        _ => unreachable!(),
+        _ => unreachable!("only logical assignment ops are passed to emit_logical_jump"),
     }
 }
 
@@ -4720,7 +4720,7 @@ fn generate_object_expression(
         gen.pending_lhs_name = None;
 
         match property.property_type {
-            ObjectPropertyType::Spread => unreachable!(),
+            ObjectPropertyType::Spread => unreachable!("spread properties are handled before this point"),
             ObjectPropertyType::KeyValue => {
                 if let Some(key_val) = &computed_key {
                     emit_put_by_value(gen, &dst, key_val, &value, PutKind::Own);
@@ -8411,7 +8411,7 @@ fn try_constant_fold_binary(
                     BinaryOp::GreaterThanEquals => a.0 >= b.0,
                     BinaryOp::LessThan => a.0 < b.0,
                     BinaryOp::LessThanEquals => a.0 <= b.0,
-                    _ => unreachable!(),
+                    _ => unreachable!("outer match arm only matches comparison operators"),
                 };
                 return Some(gen.add_constant_boolean(result));
             }
@@ -8463,7 +8463,7 @@ fn try_constant_fold_binary(
                     BinaryOp::GreaterThanEquals => matches!(ord, Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)),
                     BinaryOp::LessThan => matches!(ord, Some(std::cmp::Ordering::Less)),
                     BinaryOp::LessThanEquals => matches!(ord, Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)),
-                    _ => unreachable!(),
+                    _ => unreachable!("outer match arm only matches comparison operators"),
                 };
                 return Some(gen.add_constant_boolean(result));
             }
@@ -8474,7 +8474,7 @@ fn try_constant_fold_binary(
                 BinaryOp::GreaterThanEquals => a >= b,
                 BinaryOp::LessThan => a < b,
                 BinaryOp::LessThanEquals => a <= b,
-                _ => unreachable!(),
+                _ => unreachable!("outer match arm only matches comparison operators"),
             };
             Some(gen.add_constant_boolean(result))
         }
