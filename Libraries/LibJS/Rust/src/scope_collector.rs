@@ -295,7 +295,6 @@ pub struct ScopeError {
     pub column: u32,
 }
 
-/// Saved state for speculative parsing backtracking.
 /// Saved flags for a scope record, used to restore state after
 /// speculative parsing (e.g. failed arrow function attempts).
 struct SavedScopeFlags {

@@ -54,8 +54,7 @@
 
 /// Compile-time conversion of an ASCII string literal to `&'static [u16]`.
 ///
-/// Replaces the old `utf16_lit()` function which allocated a `Vec<u16>` on
-/// every call. This macro produces a static array, so comparisons like
+/// Produces a static `[u16; N]` array, so comparisons like
 /// `value == utf16!("eval")` involve zero heap allocation.
 ///
 /// # Panics (at compile time)

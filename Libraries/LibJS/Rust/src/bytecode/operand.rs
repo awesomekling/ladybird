@@ -96,8 +96,8 @@ impl Operand {
         self.0
     }
 
-    /// Offset the index by the given amount (used during operand rewriting).
-    /// Strips the type tag, leaving a flat index into the combined
+    /// Offset the index by the given amount, stripping the type tag and
+    /// leaving a flat index into the combined
     /// [registers | locals | constants | arguments] array.
     /// Used during operand rewriting in the assembler.
     pub fn offset_index_by(&mut self, offset: u32) {
