@@ -1124,6 +1124,9 @@ unsafe fn extract_module_declarations(
                 let sfd_ptr = bytecode::ffi::create_sfd_for_gdi(
                     function_data, subtable, vm_ptr, source_code_ptr, true,
                 );
+                if sfd_ptr.is_null() {
+                    continue;
+                }
 
                 // Get the binding name from the AST (e.g., "*default*" for anonymous defaults).
                 let binding_name = if let Some(ref name_ident) = name {
