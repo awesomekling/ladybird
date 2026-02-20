@@ -61,6 +61,18 @@ pub fn generate_expression(
     gen.current_source_start = expression.range.start.offset;
     gen.current_source_end = expression.range.end.offset;
 
+    let result = generate_expression_inner(expression, gen, preferred_dst);
+
+    gen.current_source_start = saved_source_start;
+    gen.current_source_end = saved_source_end;
+    result
+}
+
+fn generate_expression_inner(
+    expression: &Expression,
+    gen: &mut Generator,
+    preferred_dst: Option<&ScopedOperand>,
+) -> Option<ScopedOperand> {
     // NamedEvaluation: only function/class expressions consume pending_lhs_name.
     // Clear it for all other expression types so it doesn't leak through to
     // nested function expressions (e.g. IIFEs: `let x = (function() { ... })()`).
@@ -729,8 +741,6 @@ pub fn generate_expression(
         ExpressionKind::Error => None,
     };
 
-    gen.current_source_start = saved_source_start;
-    gen.current_source_end = saved_source_end;
     result
 }
 
