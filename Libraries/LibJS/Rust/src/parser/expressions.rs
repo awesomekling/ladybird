@@ -453,48 +453,14 @@ impl<'a> Parser<'a> {
 
             TokenType::RegexLiteral => {
                 let token = self.consume();
-                let value = self.token_value(&token).to_vec();
-                let pattern = if value.len() >= 2 {
-                    value[1..value.len() - 1].to_vec()
-                } else {
-                    value
-                };
-                let flags = if self.match_token(TokenType::RegexFlags) {
-                    let ftok = self.consume();
-                    self.token_value(&ftok).to_vec()
-                } else {
-                    Vec::new()
-                };
-                self.validate_regex_flags(&flags);
-                let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
-                (self.expression(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
-                    pattern: pattern.into(), flags: flags.into(),
-                    compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
-                })), true)
+                (self.parse_regex_literal(start, &token), true)
             }
 
             TokenType::Slash | TokenType::SlashEquals => {
                 let token = self.lexer.force_slash_as_regex();
                 self.current_token = token;
                 let token = self.consume();
-                let value = self.token_value(&token).to_vec();
-                let pattern = if value.len() >= 2 {
-                    value[1..value.len() - 1].to_vec()
-                } else {
-                    value
-                };
-                let flags = if self.match_token(TokenType::RegexFlags) {
-                    let ftok = self.consume();
-                    self.token_value(&ftok).to_vec()
-                } else {
-                    Vec::new()
-                };
-                self.validate_regex_flags(&flags);
-                let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
-                (self.expression(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
-                    pattern: pattern.into(), flags: flags.into(),
-                    compiled_regex: crate::ast::CompiledRegex::new(compiled_regex),
-                })), true)
+                (self.parse_regex_literal(start, &token), true)
             }
 
             _ => {
@@ -542,6 +508,28 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+
+    fn parse_regex_literal(&mut self, start: Position, token: &Token) -> Expression {
+        let value = self.token_value(token).to_vec();
+        let pattern = if value.len() >= 2 {
+            value[1..value.len() - 1].to_vec()
+        } else {
+            value
+        };
+        let flags = if self.match_token(TokenType::RegexFlags) {
+            let ftok = self.consume();
+            self.token_value(&ftok).to_vec()
+        } else {
+            Vec::new()
+        };
+        self.validate_regex_flags(&flags);
+        let compiled_regex = self.compile_regex_pattern(&pattern, &flags);
+        self.expression(start, ExpressionKind::RegExpLiteral(RegExpLiteralData {
+            pattern: pattern.into(),
+            flags: flags.into(),
+            compiled_regex: CompiledRegex::new(compiled_regex),
+        }))
     }
 
     fn parse_secondary_expression(&mut self, _lhs_start: Position, lhs: Expression, min_precedence: i32, forbidden: ForbiddenTokens) -> (Expression, ForbiddenTokens) {
