@@ -12,7 +12,6 @@
 use crate::ast::*;
 use std::cell::RefCell;
 use std::fmt::Write;
-use std::rc::Rc;
 
 extern "C" {
     // FIXME: This FFI workaround exists only to match C++ float-to-string
@@ -68,7 +67,7 @@ struct DumpState<'a> {
     is_last: bool,
     is_root: bool,
     use_color: bool,
-    output: Option<Rc<RefCell<String>>>,
+    output: Option<&'a RefCell<String>>,
     function_table: &'a FunctionTable,
 }
 
@@ -89,7 +88,7 @@ fn print_node(state: &DumpState, text: &str) {
             format!("{}{}{}", state.prefix, connector, text)
         }
     };
-    if let Some(ref output) = state.output {
+    if let Some(output) = state.output {
         let _ = writeln!(output.borrow_mut(), "{}", line);
     } else {
         println!("{}", line);
@@ -118,7 +117,7 @@ fn child_state<'a>(state: &DumpState<'a>, is_last: bool) -> DumpState<'a> {
         is_last,
         is_root: false,
         use_color: state.use_color,
-        output: state.output.clone(),
+        output: state.output,
         function_table: state.function_table,
     }
 }
@@ -320,19 +319,17 @@ pub fn dump_program(program: &Statement, use_color: bool, function_table: &Funct
 }
 
 pub fn dump_program_to_string(program: &Statement, function_table: &FunctionTable) -> String {
-    let output = Rc::new(RefCell::new(String::new()));
-    {
-        let state = DumpState {
-            prefix: String::new(),
-            is_last: false,
-            is_root: true,
-            use_color: false,
-            output: Some(output.clone()),
-            function_table,
-        };
-        dump_statement(program, &state);
-    }
-    Rc::try_unwrap(output).unwrap().into_inner()
+    let output = RefCell::new(String::new());
+    let state = DumpState {
+        prefix: String::new(),
+        is_last: false,
+        is_root: true,
+        use_color: false,
+        output: Some(&output),
+        function_table,
+    };
+    dump_statement(program, &state);
+    output.into_inner()
 }
 
 // ============================================================================
