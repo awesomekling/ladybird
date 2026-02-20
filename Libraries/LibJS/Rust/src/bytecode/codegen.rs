@@ -8204,6 +8204,20 @@ fn js_exponentiate(base: f64, exponent: f64) -> f64 {
     base.powf(exponent)
 }
 
+/// Parse a non-decimal integer string via BigInt to f64, matching C++
+/// UnsignedBigInteger::from_base() + to_double(). This avoids u64 overflow
+/// for large literals like 0x10000000000000000.
+fn bigint_string_to_f64(s: &str, radix: u32) -> f64 {
+    use num_bigint::BigUint;
+    match BigUint::parse_bytes(s.as_bytes(), radix) {
+        Some(n) => {
+            use num_traits::ToPrimitive;
+            n.to_f64().unwrap_or(f64::INFINITY)
+        }
+        None => f64::NAN,
+    }
+}
+
 // 7.1.4.1.1 StringToNumber ( str ), https://tc39.es/ecma262/#sec-stringtonumber
 fn string_to_number(s: &Utf16String) -> f64 {
     let text: String = char::decode_utf16(s.0.iter().copied())
@@ -8224,21 +8238,21 @@ fn string_to_number(s: &Utf16String) -> f64 {
         match prefix {
             "0b" | "0B" => {
                 return if rest.bytes().all(|b| b == b'0' || b == b'1') {
-                    u64::from_str_radix(rest, 2).map(|n| n as f64).unwrap_or(f64::NAN)
+                    bigint_string_to_f64(rest, 2)
                 } else {
                     f64::NAN
                 };
             }
             "0o" | "0O" => {
                 return if rest.bytes().all(|b| b.is_ascii_digit() && b < b'8') {
-                    u64::from_str_radix(rest, 8).map(|n| n as f64).unwrap_or(f64::NAN)
+                    bigint_string_to_f64(rest, 8)
                 } else {
                     f64::NAN
                 };
             }
             "0x" | "0X" => {
                 return if rest.bytes().all(|b| b.is_ascii_hexdigit()) {
-                    u64::from_str_radix(rest, 16).map(|n| n as f64).unwrap_or(f64::NAN)
+                    bigint_string_to_f64(rest, 16)
                 } else {
                     f64::NAN
                 };
