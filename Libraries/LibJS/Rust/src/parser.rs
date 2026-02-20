@@ -766,21 +766,23 @@ impl<'a> Parser<'a> {
         }
         let start = token.value_start as usize;
         let end = start + token.value_len as usize;
-        if end <= self.source.len() {
-            &self.source[start..end]
-        } else {
-            &[]
-        }
+        assert!(
+            end <= self.source.len(),
+            "token_value: bounds [{start}..{end}) exceed source length {}",
+            self.source.len()
+        );
+        &self.source[start..end]
     }
 
     pub(crate) fn token_original_value(&self, token: &Token) -> &'a [u16] {
         let start = token.value_start as usize;
         let end = (token.value_start + token.value_len) as usize;
-        if end <= self.source.len() {
-            &self.source[start..end]
-        } else {
-            &[]
-        }
+        assert!(
+            end <= self.source.len(),
+            "token_original_value: bounds [{start}..{end}) exceed source length {}",
+            self.source.len()
+        );
+        &self.source[start..end]
     }
 
     /// Re-parse the source range starting at `start` as a binding pattern
