@@ -38,7 +38,7 @@ use std::rc::Rc;
 
 use crate::ast::{
     BindingPattern, Expression, ExpressionKind, FunctionParameter, FunctionTable, Identifier,
-    SourceRange, Statement, StatementKind, ScopeData, ProgramData, Utf16String,
+    PrivateIdentifier, SourceRange, Statement, StatementKind, ScopeData, ProgramData, Utf16String,
 };
 use crate::lexer::{ch, Lexer};
 use crate::scope_collector::{ScopeCollector, ScopeCollectorState};
@@ -576,6 +576,26 @@ impl<'a> Parser<'a> {
             true
         } else {
             false
+        }
+    }
+
+    /// Parse and validate a private identifier token.
+    /// Registers the private name reference and emits an error if outside a class body.
+    /// The current token must be a PrivateIdentifier.
+    pub(crate) fn parse_private_identifier(&mut self, range_start: Position) -> PrivateIdentifier {
+        let value = self.token_value(&self.current_token).to_vec();
+        if !self.register_referenced_private_name(&value) {
+            let name = String::from_utf16_lossy(&value);
+            self.syntax_error(&format!(
+                "Reference to undeclared private field or method '{}'",
+                name
+            ));
+        }
+        let token = self.consume();
+        let value = self.token_value(&token).to_vec();
+        PrivateIdentifier {
+            range: self.range_from(range_start),
+            name: value.into(),
         }
     }
 

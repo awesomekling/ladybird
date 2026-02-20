@@ -438,17 +438,8 @@ impl<'a> Parser<'a> {
             }
 
             TokenType::PrivateIdentifier => {
-                let value = self.token_value(&self.current_token).to_vec();
-                if !self.register_referenced_private_name(&value) {
-                    let name = String::from_utf16_lossy(&value);
-                    self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
-                }
-                let token = self.consume();
-                let value = self.token_value(&token).to_vec();
-                (self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
-                    range: self.range_from(start),
-                    name: value.into(),
-                })), true)
+                let id = self.parse_private_identifier(start);
+                (self.expression(start, ExpressionKind::PrivateIdentifier(id)), true)
             }
 
             TokenType::RegexLiteral => {
@@ -662,18 +653,9 @@ impl<'a> Parser<'a> {
             TokenType::Period => {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
-                    let pvalue = self.token_value(&self.current_token).to_vec();
-                    if !self.register_referenced_private_name(&pvalue) {
-                        let name = String::from_utf16_lossy(&pvalue);
-                        self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
-                    }
-                    let token = self.consume();
-                    let value = self.token_value(&token).to_vec();
                     // C++ uses rule_start (period position) for property identifiers.
-                    let property = self.expression(start, ExpressionKind::PrivateIdentifier(PrivateIdentifier {
-                        range: self.range_from(start),
-                        name: value.into(),
-                    }));
+                    let id = self.parse_private_identifier(start);
+                    let property = self.expression(start, ExpressionKind::PrivateIdentifier(id));
                     (self.expression(start, ExpressionKind::Member {
                         object: Box::new(lhs),
                         property: Box::new(property),
@@ -979,19 +961,10 @@ impl<'a> Parser<'a> {
                         });
                     }
                     TokenType::PrivateIdentifier => {
-                        let pvalue = self.token_value(&self.current_token).to_vec();
-                        if !self.register_referenced_private_name(&pvalue) {
-                            let name = String::from_utf16_lossy(&pvalue);
-                            self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
-                        }
                         let property_start = self.position();
-                        let token = self.consume();
-                        let value = self.token_value(&token).to_vec();
+                        let id = self.parse_private_identifier(property_start);
                         references.push(OptionalChainReference::PrivateMemberReference {
-                            private_identifier: PrivateIdentifier {
-                                range: self.range_from(property_start),
-                                name: value.into(),
-                            },
+                            private_identifier: id,
                             mode: OptionalChainMode::Optional,
                         });
                     }
@@ -1027,19 +1000,10 @@ impl<'a> Parser<'a> {
             } else if self.match_token(TokenType::Period) {
                 self.consume();
                 if self.match_token(TokenType::PrivateIdentifier) {
-                    let pvalue = self.token_value(&self.current_token).to_vec();
-                    if !self.register_referenced_private_name(&pvalue) {
-                        let name = String::from_utf16_lossy(&pvalue);
-                        self.syntax_error(&format!("Reference to undeclared private field or method '{}'", name));
-                    }
                     let property_start = self.position();
-                    let token = self.consume();
-                    let value = self.token_value(&token).to_vec();
+                    let id = self.parse_private_identifier(property_start);
                     references.push(OptionalChainReference::PrivateMemberReference {
-                        private_identifier: PrivateIdentifier {
-                            range: self.range_from(property_start),
-                            name: value.into(),
-                        },
+                        private_identifier: id,
                         mode: OptionalChainMode::NotOptional,
                     });
                 } else if self.match_identifier_name() {
