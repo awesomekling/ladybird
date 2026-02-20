@@ -276,7 +276,7 @@ fn keyword_from_str(s: &[u16]) -> Option<TokenType> {
 }
 
 fn single_char_token(ch: u16) -> TokenType {
-    debug_assert!(ch < 128);
+    assert!(ch < 128);
     match ch as u8 {
         b'&' => TokenType::Ampersand,
         b'*' => TokenType::Asterisk,
@@ -307,7 +307,9 @@ fn single_char_token(ch: u16) -> TokenType {
 }
 
 fn parse_two_char_token(ch0: u16, ch1: u16) -> TokenType {
-    debug_assert!(ch0 < 128 && ch1 < 128);
+    if ch0 >= 128 || ch1 >= 128 {
+        return TokenType::Invalid;
+    }
     match (ch0 as u8, ch1 as u8) {
         (b'=', b'>') => TokenType::Arrow,
         (b'=', b'=') => TokenType::EqualsEquals,
@@ -336,7 +338,9 @@ fn parse_two_char_token(ch0: u16, ch1: u16) -> TokenType {
 }
 
 fn parse_three_char_token(ch0: u16, ch1: u16, ch2: u16) -> TokenType {
-    debug_assert!(ch0 < 128 && ch1 < 128 && ch2 < 128);
+    if ch0 >= 128 || ch1 >= 128 || ch2 >= 128 {
+        return TokenType::Invalid;
+    }
     match (ch0 as u8, ch1 as u8, ch2 as u8) {
         (b'<', b'<', b'=') => TokenType::ShiftLeftEquals,
         (b'>', b'>', b'=') => TokenType::ShiftRightEquals,
@@ -1255,7 +1259,7 @@ impl<'a> Lexer<'a> {
     pub fn force_slash_as_regex(&mut self) -> Token {
         let has_equals = self.current_token_type == TokenType::SlashEquals;
 
-        debug_assert!(self.position > 0);
+        assert!(self.position > 0);
         let mut value_start = self.position - 1;
 
         // Capture line position at the start of the '/' token, before consuming the regex body.
