@@ -397,12 +397,8 @@ impl<'a> Parser<'a> {
                         self.syntax_error("Variable initializer not allowed in for..in/of");
                     }
                 }
-            } else if let LocalForInit::Expression(ref expression) = init {
-                if !Self::is_identifier(expression) && !Self::is_member_expression(expression)
-                    && !Self::is_call_expression(expression)
-                    && !Self::is_object_expression(expression) && !Self::is_array_expression(expression) {
-                    self.syntax_error("Invalid left-hand side in for-loop");
-                }
+            } else {
+                self.validate_for_in_of_lhs(&init);
             }
             self.consume();
             let rhs = self.parse_expression_any();
@@ -410,23 +406,7 @@ impl<'a> Parser<'a> {
 
             let body = self.parse_loop_body();
 
-            let lhs = match init {
-                LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
-                LocalForInit::Expression(expression) => {
-                    if Self::is_array_expression(&expression) || Self::is_object_expression(&expression) {
-                        if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
-                            for (name, id) in self.pattern_bound_names.drain(..) {
-                                self.scope_collector.register_identifier(id, &name, None);
-                            }
-                            ForInOfLhs::Pattern(pattern)
-                        } else {
-                            ForInOfLhs::Expression(Box::new(expression))
-                        }
-                    } else {
-                        ForInOfLhs::Expression(Box::new(expression))
-                    }
-                }
-            };
+            let lhs = self.synthesize_for_in_of_lhs(init, init_start);
             let result = self.statement(forin_start, StatementKind::ForInOf {
                 kind: ForInOfKind::ForIn,
                 lhs,
@@ -449,12 +429,8 @@ impl<'a> Parser<'a> {
                     if self.for_loop_declaration_has_init {
                         self.syntax_error("Variable initializer not allowed in for..of");
                     }
-                } else if let LocalForInit::Expression(ref expression) = init {
-                    if !Self::is_identifier(expression) && !Self::is_member_expression(expression)
-                        && !Self::is_call_expression(expression)
-                        && !Self::is_object_expression(expression) && !Self::is_array_expression(expression) {
-                        self.syntax_error("Invalid left-hand side in for-loop");
-                    }
+                } else {
+                    self.validate_for_in_of_lhs(&init);
                 }
                 self.consume();
                 let rhs = self.parse_expression_any();
@@ -462,23 +438,7 @@ impl<'a> Parser<'a> {
 
                 let body = self.parse_loop_body();
 
-                let lhs = match init {
-                    LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
-                    LocalForInit::Expression(expression) => {
-                        if Self::is_array_expression(&expression) || Self::is_object_expression(&expression) {
-                            if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
-                                for (name, id) in self.pattern_bound_names.drain(..) {
-                                    self.scope_collector.register_identifier(id, &name, None);
-                                }
-                                ForInOfLhs::Pattern(pattern)
-                            } else {
-                                ForInOfLhs::Expression(Box::new(expression))
-                            }
-                        } else {
-                            ForInOfLhs::Expression(Box::new(expression))
-                        }
-                    }
-                };
+                let lhs = self.synthesize_for_in_of_lhs(init, init_start);
                 let for_of_kind = if is_await { ForInOfKind::ForAwaitOf } else { ForInOfKind::ForOf };
                 let result = self.statement(forof_start, StatementKind::ForInOf {
                     kind: for_of_kind,
@@ -842,5 +802,38 @@ impl<'a> Parser<'a> {
         // Must be an actual identifier, not just an identifier-name keyword
         // like `in`. This matches C++ token_is_identifier().
         self.token_is_identifier(&next)
+    }
+
+    /// Validate that an expression-form LHS is valid for for-in/for-of.
+    fn validate_for_in_of_lhs(&mut self, init: &LocalForInit) {
+        if let LocalForInit::Expression(ref expression) = *init {
+            if !Self::is_identifier(expression) && !Self::is_member_expression(expression)
+                && !Self::is_call_expression(expression)
+                && !Self::is_object_expression(expression) && !Self::is_array_expression(expression) {
+                self.syntax_error("Invalid left-hand side in for-loop");
+            }
+        }
+    }
+
+    /// Convert a `LocalForInit` into a `ForInOfLhs`, synthesizing a binding
+    /// pattern when the LHS is an array or object expression.
+    fn synthesize_for_in_of_lhs(&mut self, init: LocalForInit, init_start: Position) -> ForInOfLhs {
+        match init {
+            LocalForInit::Declaration(declaration) => ForInOfLhs::Declaration(Box::new(declaration)),
+            LocalForInit::Expression(expression) => {
+                if Self::is_array_expression(&expression) || Self::is_object_expression(&expression) {
+                    if let Some(pattern) = self.synthesize_binding_pattern(init_start) {
+                        for (name, id) in self.pattern_bound_names.drain(..) {
+                            self.scope_collector.register_identifier(id, &name, None);
+                        }
+                        ForInOfLhs::Pattern(pattern)
+                    } else {
+                        ForInOfLhs::Expression(Box::new(expression))
+                    }
+                } else {
+                    ForInOfLhs::Expression(Box::new(expression))
+                }
+            }
+        }
     }
 }
