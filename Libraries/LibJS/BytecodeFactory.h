@@ -264,7 +264,7 @@ void* rust_create_class_blueprint(
 // Callbacks used by rust_compile_script to populate GDI metadata.
 void script_gdi_push_lexical_name(void* ctx, uint16_t const* name, size_t len);
 void script_gdi_push_var_name(void* ctx, uint16_t const* name, size_t len);
-void script_gdi_push_function(void* ctx, void* sfd, uint16_t const* name, size_t len);
+void script_gdi_push_function(void* ctx, void* sfd_ptr, uint16_t const* name, size_t len);
 void script_gdi_push_var_scoped_name(void* ctx, uint16_t const* name, size_t len);
 void script_gdi_push_annex_b_name(void* ctx, uint16_t const* name, size_t len);
 void script_gdi_push_lexical_binding(void* ctx, uint16_t const* name, size_t len, bool is_constant);

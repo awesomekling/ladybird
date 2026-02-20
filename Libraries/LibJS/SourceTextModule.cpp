@@ -8,17 +8,15 @@
 #include <AK/Debug.h>
 #include <AK/QuickSort.h>
 #include <LibJS/Bytecode/Executable.h>
-#include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
-#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Parser.h>
-#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AsyncFunctionDriverWrapper.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/ModuleEnvironment.h>
 #include <LibJS/Runtime/PromiseCapability.h>
 #include <LibJS/Runtime/SharedFunctionInstanceData.h>
+#include <LibJS/RustIntegration.h>
 #include <LibJS/Script.h>
 #include <LibJS/SourceCode.h>
 #include <LibJS/SourceTextModule.h>
@@ -206,295 +204,23 @@ void SourceTextModule::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_tla_shared_data);
 }
 
-#ifdef ENABLE_RUST_PARSER
-// Builder struct populated by Rust callbacks during module compilation.
-struct ModuleBuilder {
-    bool has_top_level_await { false };
-    Vector<ImportEntry> import_entries;
-    Vector<ExportEntry> local_export_entries;
-    Vector<ExportEntry> indirect_export_entries;
-    Vector<ExportEntry> star_export_entries;
-    Vector<ModuleRequest> requested_modules;
-    Optional<Utf16FlyString> default_export_binding_name;
-    Vector<Utf16FlyString> var_declared_names;
-    Vector<SourceTextModule::LexicalBinding> lexical_bindings;
-    Vector<SourceTextModule::FunctionToInitialize> functions_to_initialize;
-};
-
-static Utf16FlyString utf16_fly_from_raw(uint16_t const* data, size_t len)
-{
-    if (len == 0)
-        return {};
-    return Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(data), len));
-}
-
-static Utf16String utf16_from_raw(uint16_t const* data, size_t len)
-{
-    if (len == 0)
-        return {};
-    return Utf16String::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(data), len));
-}
-
-static Vector<ImportAttribute> attributes_from_ffi(FFIUtf16Slice const* keys, FFIUtf16Slice const* values, size_t count)
-{
-    Vector<ImportAttribute> attributes;
-    for (size_t i = 0; i < count; ++i)
-        attributes.empend(utf16_from_raw(keys[i].data, keys[i].length), utf16_from_raw(values[i].data, values[i].length));
-    return attributes;
-}
-
-static Optional<ModuleRequest> module_request_from_ffi(uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    if (specifier == nullptr || specifier_len == 0)
-        return {};
-    auto attributes = attributes_from_ffi(attribute_keys, attribute_values, attribute_count);
-    if (attributes.is_empty())
-        return ModuleRequest { utf16_fly_from_raw(specifier, specifier_len) };
-    return ModuleRequest { utf16_fly_from_raw(specifier, specifier_len), move(attributes) };
-}
-
-// Module callbacks invoked by Rust.
-extern "C" {
-
-static void module_set_has_top_level_await(void* ctx, bool value)
-{
-    static_cast<ModuleBuilder*>(ctx)->has_top_level_await = value;
-}
-
-static void module_push_import_entry(void* ctx,
-    uint16_t const* import_name, size_t import_name_len, bool is_namespace,
-    uint16_t const* local_name, size_t local_name_len,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    auto* builder = static_cast<ModuleBuilder*>(ctx);
-    Optional<Utf16FlyString> import_name_opt;
-    if (!is_namespace)
-        import_name_opt = utf16_fly_from_raw(import_name, import_name_len);
-    ImportEntry entry { move(import_name_opt), utf16_fly_from_raw(local_name, local_name_len) };
-    entry.m_module_request = module_request_from_ffi(specifier, specifier_len, attribute_keys, attribute_values, attribute_count);
-    builder->import_entries.append(move(entry));
-}
-
-static void module_push_export_entry(Vector<ExportEntry>& list, uint8_t kind,
-    uint16_t const* export_name, size_t export_name_len,
-    uint16_t const* local_or_import_name, size_t local_or_import_name_len,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    Optional<Utf16FlyString> en;
-    if (export_name)
-        en = utf16_fly_from_raw(export_name, export_name_len);
-    Optional<Utf16FlyString> lin;
-    if (local_or_import_name)
-        lin = utf16_fly_from_raw(local_or_import_name, local_or_import_name_len);
-    ExportEntry entry { static_cast<ExportEntry::Kind>(kind), move(en), move(lin) };
-    entry.m_module_request = module_request_from_ffi(specifier, specifier_len, attribute_keys, attribute_values, attribute_count);
-    list.append(move(entry));
-}
-
-static void module_push_local_export(void* ctx, uint8_t kind,
-    uint16_t const* export_name, size_t export_name_len,
-    uint16_t const* local_or_import_name, size_t local_or_import_name_len,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    module_push_export_entry(static_cast<ModuleBuilder*>(ctx)->local_export_entries, kind,
-        export_name, export_name_len, local_or_import_name, local_or_import_name_len,
-        specifier, specifier_len, attribute_keys, attribute_values, attribute_count);
-}
-
-static void module_push_indirect_export(void* ctx, uint8_t kind,
-    uint16_t const* export_name, size_t export_name_len,
-    uint16_t const* local_or_import_name, size_t local_or_import_name_len,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    module_push_export_entry(static_cast<ModuleBuilder*>(ctx)->indirect_export_entries, kind,
-        export_name, export_name_len, local_or_import_name, local_or_import_name_len,
-        specifier, specifier_len, attribute_keys, attribute_values, attribute_count);
-}
-
-static void module_push_star_export(void* ctx, uint8_t kind,
-    uint16_t const* export_name, size_t export_name_len,
-    uint16_t const* local_or_import_name, size_t local_or_import_name_len,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    module_push_export_entry(static_cast<ModuleBuilder*>(ctx)->star_export_entries, kind,
-        export_name, export_name_len, local_or_import_name, local_or_import_name_len,
-        specifier, specifier_len, attribute_keys, attribute_values, attribute_count);
-}
-
-static void module_push_requested_module(void* ctx,
-    uint16_t const* specifier, size_t specifier_len,
-    FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
-{
-    auto* builder = static_cast<ModuleBuilder*>(ctx);
-    auto attributes = attributes_from_ffi(attribute_keys, attribute_values, attribute_count);
-    if (attributes.is_empty())
-        builder->requested_modules.empend(utf16_fly_from_raw(specifier, specifier_len));
-    else
-        builder->requested_modules.empend(utf16_fly_from_raw(specifier, specifier_len), move(attributes));
-}
-
-static void module_set_default_export_binding(void* ctx, uint16_t const* name, size_t name_len)
-{
-    static_cast<ModuleBuilder*>(ctx)->default_export_binding_name = utf16_fly_from_raw(name, name_len);
-}
-
-static void module_push_var_name(void* ctx, uint16_t const* name, size_t name_len)
-{
-    static_cast<ModuleBuilder*>(ctx)->var_declared_names.append(utf16_fly_from_raw(name, name_len));
-}
-
-static void module_push_function(void* ctx, void* sfd_ptr, uint16_t const* name, size_t name_len)
-{
-    auto& shared = *static_cast<SharedFunctionInstanceData*>(sfd_ptr);
-    static_cast<ModuleBuilder*>(ctx)->functions_to_initialize.append({ shared, utf16_fly_from_raw(name, name_len) });
-}
-
-static void module_push_lexical_binding(void* ctx, uint16_t const* name, size_t name_len, bool is_constant, int32_t function_index)
-{
-    static_cast<ModuleBuilder*>(ctx)->lexical_bindings.append({
-        .name = utf16_fly_from_raw(name, name_len),
-        .is_constant = is_constant,
-        .function_index = function_index,
-    });
-}
-
-} // extern "C"
-#endif // ENABLE_RUST_PARSER
-
 // 16.2.1.7.1 ParseModule ( sourceText, realm, hostDefined ), https://tc39.es/ecma262/#sec-parsemodule
 Result<GC::Ref<SourceTextModule>, Vector<ParserError>> SourceTextModule::parse(StringView source_text, Realm& realm, StringView filename, Script::HostDefined* host_defined)
 {
-#ifdef ENABLE_RUST_PARSER
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-    bool const compare_pipelines = compare_pipelines_enabled();
-
-    if (use_rust_codegen || compare_pipelines) {
-        auto source_code = SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text));
-        auto const& code_view = source_code->code_view();
-        auto length = code_view.length_in_code_units();
-
-        ModuleBuilder builder;
-        ModuleCallbacks callbacks {
-            .set_has_top_level_await = module_set_has_top_level_await,
-            .push_import_entry = module_push_import_entry,
-            .push_local_export = module_push_local_export,
-            .push_indirect_export = module_push_indirect_export,
-            .push_star_export = module_push_star_export,
-            .push_requested_module = module_push_requested_module,
-            .set_default_export_binding = module_set_default_export_binding,
-            .push_var_name = module_push_var_name,
-            .push_function = module_push_function,
-            .push_lexical_binding = module_push_lexical_binding,
-        };
-
-        Vector<ParserError> errors;
-        auto error_callback = [](void* ctx, char const* message, size_t message_len, u32 line, u32 column) {
-            auto* error_list = static_cast<Vector<ParserError>*>(ctx);
-            auto msg = String::from_utf8({ message, message_len }).release_value_but_fixme_should_propagate_errors();
-            error_list->empend(move(msg), Position { .line = line, .column = column, .offset = 0 });
-        };
-
-        u8* rust_ast_data = nullptr;
-        size_t rust_ast_len = 0;
-        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
-        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
-
-        void* tla_executable = nullptr;
-        void* exec_ptr;
-
-        if (code_view.has_ascii_storage()) {
-            auto ascii = code_view.ascii_span();
-            Vector<u16> utf16_buf;
-            utf16_buf.ensure_capacity(length);
-            for (size_t i = 0; i < length; ++i)
-                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            exec_ptr = rust_compile_module(utf16_buf.data(), length,
-                &realm.vm(), source_code.ptr(),
-                &builder, &callbacks,
-                g_dump_ast, g_dump_ast_use_color,
-                &errors, error_callback,
-                &tla_executable,
-                rust_ast_data_ptr, rust_ast_len_ptr);
-        } else {
-            auto utf16 = code_view.utf16_span();
-            exec_ptr = rust_compile_module(reinterpret_cast<u16 const*>(utf16.data()), length,
-                &realm.vm(), source_code.ptr(),
-                &builder, &callbacks,
-                g_dump_ast, g_dump_ast_use_color,
-                &errors, error_callback,
-                &tla_executable,
-                rust_ast_data_ptr, rust_ast_len_ptr);
-        }
-
-        if (!exec_ptr && !tla_executable) {
-            if (rust_ast_data)
-                rust_free_string(rust_ast_data, rust_ast_len);
-            return errors;
-        }
-
-        if (compare_pipelines) {
-            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
-
-            // Run C++ pipeline for comparison.
-            auto parser = Parser(Lexer(source_code), Program::Type::Module);
-            auto cpp_program = parser.parse_program();
-
-            if (!parser.has_errors()) {
-                // Compare AST dumps.
-                auto cpp_ast_dump = cpp_program->dump_to_string();
-                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, filename);
-
-                // Compare bytecode dumps (non-TLA modules only, since TLA
-                // wrapping produces a structurally different executable).
-                if (!tla_executable) {
-                    auto& rust_executable = *static_cast<Bytecode::Executable*>(exec_ptr);
-                    auto cpp_executable = Bytecode::Generator::generate_from_ast_node(realm.vm(), *cpp_program, {});
-                    auto rust_bytecode_dump = rust_executable.dump_to_string();
-                    auto cpp_bytecode_dump = cpp_executable->dump_to_string();
-                    compare_pipeline_bytecode(rust_bytecode_dump, cpp_bytecode_dump, filename, cpp_ast_dump);
-                }
-            }
-
-            rust_free_string(rust_ast_data, rust_ast_len);
-        }
-
-        GC::Ptr<Bytecode::Executable> executable;
-        GC::Ptr<SharedFunctionInstanceData> tla_shared_data;
-
-        if (tla_executable) {
-            // TLA module: create the async wrapper SFD on the C++ side.
-            auto& vm = realm.vm();
-            auto* tla_exec = static_cast<Bytecode::Executable*>(tla_executable);
-
-            tla_shared_data = vm.heap().allocate<SharedFunctionInstanceData>(
-                vm, FunctionKind::Async,
-                "module code with top-level await"_utf16_fly_string,
-                0, 0, true, false, true,
-                Vector<Utf16FlyString> {}, nullptr);
-            tla_shared_data->m_is_module_wrapper = true;
-            tla_shared_data->m_uses_this = true;
-            tla_shared_data->m_function_environment_needed = true;
-            tla_shared_data->m_executable = tla_exec;
-        } else {
-            executable = static_cast<Bytecode::Executable*>(exec_ptr);
-        }
-
+    auto rust_result = RustIntegration::compile_module(source_text, realm, filename);
+    if (rust_result.has_value()) {
+        if (rust_result->is_error())
+            return rust_result->release_error();
+        auto& module_result = rust_result->value();
         return realm.heap().allocate<SourceTextModule>(
-            realm, filename, host_defined, builder.has_top_level_await,
-            move(builder.requested_modules), move(builder.import_entries),
-            move(builder.local_export_entries), move(builder.indirect_export_entries),
-            move(builder.star_export_entries), move(builder.default_export_binding_name),
-            move(builder.var_declared_names), move(builder.lexical_bindings),
-            move(builder.functions_to_initialize),
-            executable, tla_shared_data);
+            realm, filename, host_defined, module_result.has_top_level_await,
+            move(module_result.requested_modules), move(module_result.import_entries),
+            move(module_result.local_export_entries), move(module_result.indirect_export_entries),
+            move(module_result.star_export_entries), move(module_result.default_export_binding_name),
+            move(module_result.var_declared_names), move(module_result.lexical_bindings),
+            move(module_result.functions_to_initialize),
+            module_result.executable, module_result.tla_shared_data);
     }
-#endif
 
     // 1. Let body be ParseText(sourceText, Module).
     auto parser = Parser(Lexer(SourceCode::create(String::from_utf8(filename).release_value_but_fixme_should_propagate_errors(), Utf16String::from_utf8(source_text))), Program::Type::Module);

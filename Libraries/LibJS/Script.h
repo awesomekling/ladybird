@@ -22,9 +22,12 @@ JS_API extern bool g_dump_ast;
 JS_API extern bool g_dump_ast_use_color;
 
 class FunctionDeclaration;
-#ifdef ENABLE_RUST_PARSER
-struct ScriptGdiBuilder;
-#endif
+
+namespace RustIntegration {
+
+struct ScriptResult;
+
+}
 
 // 16.1.4 Script Records, https://tc39.es/ecma262/#sec-script-records
 class JS_API Script final : public Cell {
@@ -77,13 +80,8 @@ public:
     };
 
 private:
-#ifdef ENABLE_RUST_PARSER
-    friend struct ScriptGdiBuilder;
-#endif
     Script(Realm&, StringView filename, RefPtr<Program>, HostDefined*);
-#ifdef ENABLE_RUST_PARSER
-    Script(Realm&, StringView filename, ScriptGdiBuilder&&, Bytecode::Executable&, HostDefined*);
-#endif
+    Script(Realm&, StringView filename, RustIntegration::ScriptResult&&, HostDefined*);
 
     virtual void visit_edges(Cell::Visitor&) override;
 

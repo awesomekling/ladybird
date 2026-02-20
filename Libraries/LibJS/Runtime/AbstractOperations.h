@@ -117,20 +117,6 @@ struct EvalDeclarationData {
     static EvalDeclarationData create(VM&, Program const&, bool strict);
 };
 
-#ifdef ENABLE_RUST_PARSER
-// Builder populated by Rust via callbacks during rust_compile_eval.
-struct EvalGdiBuilder {
-    GC::Ptr<Bytecode::Executable> executable;
-    bool is_strict_mode { false };
-    Vector<Utf16FlyString> var_names;
-    Vector<EvalDeclarationData::FunctionToInitialize> functions_to_initialize;
-    HashTable<Utf16FlyString> declared_function_names;
-    Vector<Utf16FlyString> var_scoped_names;
-    Vector<Utf16FlyString> annex_b_candidate_names;
-    Vector<EvalDeclarationData::LexicalBinding> lexical_bindings;
-};
-#endif
-
 ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, EvalDeclarationData&, Environment* variable_environment, Environment* lexical_environment, PrivateEnvironment* private_environment, bool strict);
 
 // 7.3.14 Call ( F, V [ , argumentsList ] ), https://tc39.es/ecma262/#sec-call

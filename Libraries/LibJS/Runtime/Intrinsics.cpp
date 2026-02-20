@@ -6,10 +6,8 @@
  */
 
 #include <LibGC/Root.h>
-#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
-#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/Accessor.h>
 #include <LibJS/Runtime/AggregateErrorConstructor.h>
 #include <LibJS/Runtime/AggregateErrorPrototype.h>
@@ -138,6 +136,7 @@
 #include <LibJS/Runtime/WeakSetConstructor.h>
 #include <LibJS/Runtime/WeakSetPrototype.h>
 #include <LibJS/Runtime/WrapForValidIteratorPrototype.h>
+#include <LibJS/RustIntegration.h>
 
 // FIXME: Remove this asm hack when we upgrade to GCC 15.
 #define INCLUDE_FILE_WITH_ASSEMBLY(name, file_path) \
@@ -208,67 +207,14 @@ GC::Ref<Intrinsics> Intrinsics::create(Realm& realm)
     return *intrinsics;
 }
 
-#ifdef ENABLE_RUST_PARSER
-static void collect_builtin_function(void* ctx, void* sfd_ptr, uint16_t const*, size_t)
-{
-    auto& list = *static_cast<Vector<GC::Root<SharedFunctionInstanceData>>*>(ctx);
-    list.append(*static_cast<SharedFunctionInstanceData*>(sfd_ptr));
-}
-#endif
-
 static Vector<GC::Root<SharedFunctionInstanceData>> parse_builtin_file(unsigned char const* script_text, VM& vm)
 {
+    auto rust_compilation = RustIntegration::compile_builtin_file(script_text, vm);
+    if (rust_compilation.has_value())
+        return move(rust_compilation.value());
+
     auto script_text_as_utf16 = Utf16String::from_utf8_without_validation({ script_text, strlen(reinterpret_cast<char const*>(script_text)) });
     auto code = SourceCode::create("BuiltinFile"_string, move(script_text_as_utf16));
-
-#ifdef ENABLE_RUST_PARSER
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-    bool const compare_pipelines = compare_pipelines_enabled();
-
-    if (use_rust_codegen || compare_pipelines) {
-        auto const& code_view = code->code_view();
-        auto length = code_view.length_in_code_units();
-
-        u8* rust_ast_data = nullptr;
-        size_t rust_ast_len = 0;
-        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
-        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
-
-        Vector<GC::Root<SharedFunctionInstanceData>> shared_data_list;
-        if (code_view.has_ascii_storage()) {
-            auto ascii = code_view.ascii_span();
-            Vector<u16> utf16_buf;
-            utf16_buf.ensure_capacity(length);
-            for (size_t i = 0; i < length; ++i)
-                utf16_buf.unchecked_append(static_cast<u16>(ascii[i]));
-            rust_compile_builtin_file(utf16_buf.data(), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function,
-                rust_ast_data_ptr, rust_ast_len_ptr);
-        } else {
-            auto utf16 = code_view.utf16_span();
-            rust_compile_builtin_file(reinterpret_cast<u16 const*>(utf16.data()), length, &vm, code.ptr(), &shared_data_list, collect_builtin_function,
-                rust_ast_data_ptr, rust_ast_len_ptr);
-        }
-
-        if (compare_pipelines) {
-            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
-
-            // Run C++ pipeline for comparison.
-            auto lexer = Lexer { code };
-            auto parser = Parser { move(lexer) };
-            auto cpp_program = parser.parse_program(true);
-
-            if (!parser.has_errors()) {
-                // Compare AST dumps.
-                auto cpp_ast_dump = cpp_program->dump_to_string();
-                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "BuiltinFile"sv);
-            }
-
-            rust_free_string(rust_ast_data, rust_ast_len);
-        }
-
-        return shared_data_list;
-    }
-#endif
 
     auto lexer = Lexer { move(code) };
     auto parser = Parser { move(lexer) };

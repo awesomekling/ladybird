@@ -29,6 +29,7 @@ set(SOURCES
     ParserError.cpp
     PipelineComparison.cpp
     Print.cpp
+    RustIntegration.cpp
     Runtime/AbstractOperations.cpp
     Runtime/Accessor.cpp
     Runtime/Agent.cpp
@@ -313,7 +314,6 @@ if (ENABLE_RUST_PARSER)
     FetchContent_MakeAvailable(Corrosion)
 
     corrosion_import_crate(MANIFEST_PATH Rust/Cargo.toml)
-    target_sources(LibJS PRIVATE BytecodeFactory.cpp)
     target_link_libraries(LibJS PRIVATE libjs_rust_parser)
     target_compile_definitions(LibJS PRIVATE ENABLE_RUST_PARSER)
     install(TARGETS libjs_rust_parser EXPORT LagomTargets

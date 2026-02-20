@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibGC/DeferGC.h>
-#include <LibJS/Bytecode/Generator.h>
-#include <LibJS/BytecodeFactory.h>
 #include <LibJS/Lexer.h>
 #include <LibJS/Parser.h>
-#include <LibJS/PipelineComparison.h>
 #include <LibJS/Runtime/AbstractOperations.h>
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Error.h>
@@ -19,16 +15,8 @@
 #include <LibJS/Runtime/GlobalEnvironment.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Realm.h>
+#include <LibJS/RustIntegration.h>
 #include <LibJS/SourceCode.h>
-
-#ifdef ENABLE_RUST_PARSER
-static void collect_rust_parse_error(void* ctx, char const* message, size_t message_len, uint32_t line, uint32_t column)
-{
-    auto& error_message = *static_cast<String*>(ctx);
-    if (error_message.is_empty())
-        error_message = MUST(String::formatted("{} (line: {}, column: {})", MUST(String::from_utf8({ message, message_len })), line, column));
-}
-#endif
 
 namespace JS {
 
@@ -164,83 +152,12 @@ ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create
 
     GC::Ptr<SharedFunctionInstanceData> function_data;
 
-#ifdef ENABLE_RUST_PARSER
-    static bool const use_rust_codegen = getenv("USE_RUST_CODEGEN") != nullptr;
-    bool const compare_pipelines = compare_pipelines_enabled();
-
-    if (use_rust_codegen || compare_pipelines) {
-        auto source_code = SourceCode::create({}, Utf16String::from_utf8(source_text));
-        auto const& code_view = source_code->code_view();
-        auto full_length = code_view.length_in_code_units();
-
-        auto params_utf16 = Utf16String::from_utf8(parameters_string);
-        auto body_utf16 = Utf16String::from_utf8(body_parse_string);
-
-        auto get_utf16_data = [](Utf16View const& view, Vector<u16>& buf) -> u16 const* {
-            if (view.has_ascii_storage()) {
-                auto ascii = view.ascii_span();
-                buf.ensure_capacity(view.length_in_code_units());
-                for (size_t i = 0; i < view.length_in_code_units(); ++i)
-                    buf.unchecked_append(static_cast<u16>(ascii[i]));
-                return buf.data();
-            }
-            return reinterpret_cast<u16 const*>(view.utf16_span().data());
-        };
-
-        Vector<u16> full_buf, params_buf, body_buf;
-        auto const* full_data = get_utf16_data(code_view, full_buf);
-        auto const* params_data = get_utf16_data(params_utf16.utf16_view(), params_buf);
-        auto const* body_data = get_utf16_data(body_utf16.utf16_view(), body_buf);
-
-        GC::DeferGC defer_gc(vm.heap());
-        String parse_error;
-
-        u8* rust_ast_data = nullptr;
-        size_t rust_ast_len = 0;
-        u8** rust_ast_data_ptr = compare_pipelines ? &rust_ast_data : nullptr;
-        size_t* rust_ast_len_ptr = compare_pipelines ? &rust_ast_len : nullptr;
-
-        void* sfd_ptr = rust_compile_dynamic_function(
-            full_data, full_length,
-            params_data, params_utf16.utf16_view().length_in_code_units(),
-            body_data, body_utf16.utf16_view().length_in_code_units(),
-            &vm, source_code.ptr(),
-            static_cast<u8>(kind),
-            &parse_error, collect_rust_parse_error,
-            rust_ast_data_ptr, rust_ast_len_ptr);
-
-        if (!sfd_ptr) {
-            if (rust_ast_data)
-                rust_free_string(rust_ast_data, rust_ast_len);
-            return vm.throw_completion<SyntaxError>(parse_error);
-        }
-
-        if (compare_pipelines) {
-            auto rust_ast_dump = StringView { rust_ast_data, rust_ast_len };
-
-            // Run C++ pipeline for comparison.
-            // Parse as a full program to match the Rust side which parses the
-            // complete source text as a Script. Mark as dynamic function so
-            // scope analysis suppresses global identifier marking, matching the
-            // Rust side's analyze_as_dynamic_function() behavior.
-            auto source_parser = Parser(Lexer(source_code));
-            source_parser.set_is_dynamic_function();
-            auto cpp_program = source_parser.parse_program();
-
-            if (!source_parser.has_errors()) {
-                // Compare AST dumps.
-                auto cpp_ast_dump = cpp_program->dump_to_string();
-                compare_pipeline_asts(rust_ast_dump, cpp_ast_dump, "new Function"sv);
-            }
-
-            rust_free_string(rust_ast_data, rust_ast_len);
-        }
-
-        function_data = static_cast<SharedFunctionInstanceData*>(sfd_ptr);
-        function_data->m_source_text_owner = Utf16String::from_utf8(source_text);
-        function_data->m_source_text = function_data->m_source_text_owner.utf16_view();
+    auto rust_compilation = RustIntegration::compile_dynamic_function(vm, source_text, parameters_string, body_parse_string, kind);
+    if (rust_compilation.has_value()) {
+        if (rust_compilation->is_error())
+            return vm.throw_completion<SyntaxError>(rust_compilation->release_error());
+        function_data = rust_compilation->value();
     }
-#endif
 
     if (!function_data) {
         u8 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName;
