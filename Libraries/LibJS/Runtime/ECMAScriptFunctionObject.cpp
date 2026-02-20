@@ -214,7 +214,7 @@ void ECMAScriptFunctionObject::initialize(Realm& realm)
     }
 }
 
-#ifdef ENABLE_RUST_PARSER
+#ifdef ENABLE_RUST
 extern "C" void* rust_compile_function(void* vm_ptr, void const* source_code_ptr, uint16_t const* source, size_t source_len, void* sfd_ptr, void* rust_function_ast, bool builtin_abstract_operations_enabled);
 #endif
 
@@ -222,7 +222,7 @@ void ECMAScriptFunctionObject::get_stack_frame_size(size_t& registers_and_locals
 {
     auto& executable = shared_data().m_executable;
     if (!executable) {
-#ifdef ENABLE_RUST_PARSER
+#ifdef ENABLE_RUST
         if (m_shared_data->m_use_rust_compilation) {
             VERIFY(m_shared_data->m_rust_function_ast);
             GC::DeferGC defer_gc(heap());

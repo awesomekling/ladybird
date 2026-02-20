@@ -6,7 +6,7 @@
 
 #pragma once
 
-#ifdef ENABLE_RUST_PARSER
+#ifdef ENABLE_RUST
 
 #    include <stddef.h>
 #    include <stdint.h>
@@ -461,4 +461,4 @@ void rust_free_string(uint8_t* ptr, size_t len);
 }
 #    endif
 
-#endif // ENABLE_RUST_PARSER
+#endif // ENABLE_RUST

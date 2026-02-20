@@ -304,7 +304,7 @@ endif()
 
 target_link_libraries(LibJS PUBLIC JSClangPlugin)
 
-if (ENABLE_RUST_PARSER)
+if (ENABLE_RUST)
     include(FetchContent)
     FetchContent_Declare(
         Corrosion
@@ -315,7 +315,7 @@ if (ENABLE_RUST_PARSER)
 
     corrosion_import_crate(MANIFEST_PATH Rust/Cargo.toml)
     target_link_libraries(LibJS PRIVATE libjs_rust_parser)
-    target_compile_definitions(LibJS PRIVATE ENABLE_RUST_PARSER)
+    target_compile_definitions(LibJS PRIVATE ENABLE_RUST)
     install(TARGETS libjs_rust_parser EXPORT LagomTargets
         ARCHIVE COMPONENT Lagom_Development
     )

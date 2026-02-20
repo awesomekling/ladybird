@@ -35,7 +35,13 @@ ladybird_option(ENABLE_INSTALL_HEADERS ON CACHE BOOL "Enable installing headers"
 ladybird_option(ENABLE_INSTALL_FREEDESKTOP_FILES ${freedesktop_files_default} CACHE BOOL "Enable installing .desktop and .service files")
 ladybird_option(LADYBIRD_ENABLE_CPPTRACE ON CACHE BOOL "Enable use of cpptrace as the default library for stacktraces. If not available falls back to backtrace.h")
 ladybird_option(ENABLE_CI_BASELINE_CPU OFF CACHE BOOL "Use a baseline CPU target for improved ccache sharing")
-ladybird_option(ENABLE_RUST_PARSER OFF CACHE BOOL "Use the Rust-based JavaScript parser")
+if (WIN32)
+    set(rust_default OFF)
+else()
+    set(rust_default ON)
+endif()
+
+ladybird_option(ENABLE_RUST ${rust_default} CACHE BOOL "Build Rust components")
 
 if (ENABLE_FUZZERS_LIBFUZZER)
     # With libfuzzer, we need to avoid a duplicate main() linker error giving false negatives

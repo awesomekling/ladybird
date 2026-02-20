@@ -6,7 +6,7 @@
 
 #include <LibJS/RustIntegration.h>
 
-#ifdef ENABLE_RUST_PARSER
+#ifdef ENABLE_RUST
 
 #    include <AK/Utf16String.h>
 #    include <AK/Utf16View.h>
@@ -1283,7 +1283,7 @@ extern "C" uint64_t get_abstract_operation_function(void* vm_ptr, uint16_t const
     VERIFY_NOT_REACHED();
 }
 
-#else // !ENABLE_RUST_PARSER
+#else // !ENABLE_RUST
 
 namespace JS::RustIntegration {
 
@@ -1324,4 +1324,4 @@ GC::Ptr<Bytecode::Executable> compile_function(VM&, SharedFunctionInstanceData&)
 
 }
 
-#endif // ENABLE_RUST_PARSER
+#endif // ENABLE_RUST
