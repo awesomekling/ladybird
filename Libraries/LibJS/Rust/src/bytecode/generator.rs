@@ -17,6 +17,7 @@ use super::basic_block::{BasicBlock, SourceMapEntry};
 use super::instruction::Instruction;
 use super::operand::*;
 use crate::ast::{LocalType, Utf16String};
+use crate::u32_from_usize;
 
 /// Identifies an operand that auto-frees its register when the last
 /// clone is dropped.
@@ -261,7 +262,7 @@ macro_rules! define_intern_method {
             if let Some(&index) = self.$cache.get(s) {
                 return index;
             }
-            let index = $index_type(self.$table.len() as u32);
+            let index = $index_type(u32_from_usize(self.$table.len()));
             let key = Utf16String(s.to_vec());
             self.$table.push(key.clone());
             self.$cache.insert(key, index);
@@ -451,7 +452,7 @@ impl Generator {
     // --- Constant pool ---
 
     fn append_constant(&mut self, value: ConstantValue) -> ScopedOperand {
-        let index = self.constants.len() as u32;
+        let index = u32_from_usize(self.constants.len());
         self.constants.push(value);
         self.scoped_operand(Operand::constant(index))
     }
@@ -547,7 +548,7 @@ impl Generator {
         }
         // Cold path: not yet interned, must clone
         let owned = Utf16String(s.to_vec());
-        let key_index = PropertyKeyTableIndex(self.property_key_table.len() as u32);
+        let key_index = PropertyKeyTableIndex(u32_from_usize(self.property_key_table.len()));
         self.property_key_table.push(owned.clone());
         self.property_key_table_index.insert(owned, key_index);
         Some(key_index)
@@ -555,20 +556,20 @@ impl Generator {
 
     /// Register a SharedFunctionInstanceData (opaque pointer) and return its index.
     pub fn register_shared_function_data(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
-        let index = self.shared_function_data.len() as u32;
+        let index = u32_from_usize(self.shared_function_data.len());
         self.shared_function_data.push(ptr);
         index
     }
 
     /// Register a ClassBlueprint (opaque pointer) and return its index.
     pub fn register_class_blueprint(&mut self, ptr: *mut std::ffi::c_void) -> u32 {
-        let index = self.class_blueprints.len() as u32;
+        let index = u32_from_usize(self.class_blueprints.len());
         self.class_blueprints.push(ptr);
         index
     }
 
     pub fn intern_regex(&mut self, compiled: *mut std::ffi::c_void) -> RegexTableIndex {
-        let index = self.compiled_regexes.len() as u32;
+        let index = u32_from_usize(self.compiled_regexes.len());
         self.compiled_regexes.push(compiled);
         RegexTableIndex(index)
     }
@@ -578,7 +579,7 @@ impl Generator {
     /// Create a new basic block and return its label.
     pub fn make_block(&mut self) -> Label {
         let index = self.basic_blocks.len();
-        let mut block = BasicBlock::new(index as u32);
+        let mut block = BasicBlock::new(u32_from_usize(index));
 
         // Propagate exception handler from active unwind context.
         if let Some(handler) = self.current_unwind_handler {
@@ -586,7 +587,7 @@ impl Generator {
         }
 
         self.basic_blocks.push(block);
-        Label(index as u32)
+        Label(u32_from_usize(index))
     }
 
     /// Switch emission to the given basic block.
@@ -614,7 +615,7 @@ impl Generator {
     pub fn terminate_unterminated_blocks_with_yield(&mut self) {
         let block_count = self.basic_block_count();
         for i in 0..block_count {
-            let label = Label(i as u32);
+            let label = Label(u32_from_usize(i));
             if self.is_block_terminated(label) {
                 continue;
             }
@@ -1203,8 +1204,8 @@ impl Generator {
         };
 
         let number_of_registers = self.next_register;
-        let number_of_locals = self.local_variables.len() as u32;
-        let number_of_constants = self.constants.len() as u32;
+        let number_of_locals = u32_from_usize(self.local_variables.len());
+        let number_of_constants = u32_from_usize(self.constants.len());
 
         // Phase 1: Operand rewriting
         for block in &mut self.basic_blocks {
@@ -1341,7 +1342,7 @@ impl Generator {
             for (instruction, _) in &mut block.instructions {
                 instruction.visit_labels(&mut |label: &mut Label| {
                     let block_index = label.0 as usize;
-                    label.0 = block_offsets[block_index] as u32;
+                    label.0 = u32_from_usize(block_offsets[block_index]);
                 });
             }
         }
@@ -1373,7 +1374,7 @@ impl Generator {
                     InstAction::Emit => {
                         let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: instruction_offset as u32,
+                            bytecode_offset: u32_from_usize(instruction_offset),
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1382,7 +1383,7 @@ impl Generator {
                     InstAction::JumpToReturn(value) => {
                         let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: instruction_offset as u32,
+                            bytecode_offset: u32_from_usize(instruction_offset),
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1392,7 +1393,7 @@ impl Generator {
                     InstAction::JumpToEnd(value) => {
                         let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: instruction_offset as u32,
+                            bytecode_offset: u32_from_usize(instruction_offset),
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1402,10 +1403,10 @@ impl Generator {
                     InstAction::EmitJumpFalse { condition, mut target } => {
                         // Patch label for the target
                         let target_block = target.0 as usize;
-                        target.0 = block_offsets[target_block] as u32;
+                        target.0 = u32_from_usize(block_offsets[target_block]);
                         let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: instruction_offset as u32,
+                            bytecode_offset: u32_from_usize(instruction_offset),
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1414,10 +1415,10 @@ impl Generator {
                     }
                     InstAction::EmitJumpTrue { condition, mut target } => {
                         let target_block = target.0 as usize;
-                        target.0 = block_offsets[target_block] as u32;
+                        target.0 = u32_from_usize(block_offsets[target_block]);
                         let instruction_offset = bytecode.len();
                         source_map.push(SourceMapEntry {
-                            bytecode_offset: instruction_offset as u32,
+                            bytecode_offset: u32_from_usize(instruction_offset),
                             source_start: sm.source_start,
                             source_end: sm.source_end,
                         });
@@ -1434,7 +1435,7 @@ impl Generator {
                 let end_instruction = Instruction::End { value: undef_rewritten };
                 let instruction_offset = bytecode.len();
                 source_map.push(SourceMapEntry {
-                    bytecode_offset: instruction_offset as u32,
+                    bytecode_offset: u32_from_usize(instruction_offset),
                     source_start: 0,
                     source_end: 0,
                 });
@@ -1444,9 +1445,9 @@ impl Generator {
             // Close exception handler range
             if let Some(handler_label) = handler {
                 exception_handlers.push(ExceptionHandler {
-                    start_offset: block_start as u32,
-                    end_offset: bytecode.len() as u32,
-                    handler_offset: block_offsets[handler_label.basic_block_index()] as u32,
+                    start_offset: u32_from_usize(block_start),
+                    end_offset: u32_from_usize(bytecode.len()),
+                    handler_offset: u32_from_usize(block_offsets[handler_label.basic_block_index()]),
                 });
             }
         }

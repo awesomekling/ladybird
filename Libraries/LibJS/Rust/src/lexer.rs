@@ -36,6 +36,7 @@
 
 use crate::ast::Utf16String;
 use crate::token::{Token, TokenType};
+use crate::u32_from_usize;
 
 /// State for tracking template literal nesting.
 #[derive(Clone)]
@@ -1183,13 +1184,13 @@ impl<'a> Lexer<'a> {
 
         Token {
             token_type,
-            trivia_start: trivia_start.saturating_sub(1) as u32,
-            trivia_len: (value_start - trivia_start) as u32,
-            value_start: value_start.saturating_sub(1) as u32,
-            value_len: (self.position - value_start) as u32,
+            trivia_start: u32_from_usize(trivia_start.saturating_sub(1)),
+            trivia_len: u32_from_usize(value_start - trivia_start),
+            value_start: u32_from_usize(value_start.saturating_sub(1)),
+            value_len: u32_from_usize(self.position - value_start),
             line_number: value_start_line_number,
             line_column: value_start_column_number,
-            offset: value_start.saturating_sub(1) as u32,
+            offset: u32_from_usize(value_start.saturating_sub(1)),
             trivia_has_line_terminator,
             identifier_value,
             message: token_message,
@@ -1275,11 +1276,11 @@ impl<'a> Lexer<'a> {
             token_type,
             trivia_start: 0,
             trivia_len: 0,
-            value_start: value_start.saturating_sub(1) as u32,
-            value_len: (self.position - value_start) as u32,
+            value_start: u32_from_usize(value_start.saturating_sub(1)),
+            value_len: u32_from_usize(self.position - value_start),
             line_number: token_line_number,
             line_column: token_line_column,
-            offset: value_start.saturating_sub(1) as u32,
+            offset: u32_from_usize(value_start.saturating_sub(1)),
             trivia_has_line_terminator: false,
             identifier_value: None,
             message: None,

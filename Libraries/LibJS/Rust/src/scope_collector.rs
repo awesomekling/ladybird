@@ -58,6 +58,7 @@ use crate::ast::{
     LocalVariable, ScopeData, Utf16String, VarToInit,
 };
 use crate::parser::{DeclarationKind, FunctionKind, ProgramType};
+use crate::u32_from_usize;
 
 // === Enums ===
 
@@ -261,7 +262,7 @@ impl ScopeRecord {
         // matching the semantics of duplicate parameter names in non-strict mode.
         for (i, param) in self.parameter_names.iter().enumerate().rev() {
             if param.name == name {
-                return Some(i as u32);
+                return Some(u32_from_usize(i));
             }
         }
         None
@@ -1093,7 +1094,7 @@ impl ScopeCollector {
                                         id.local_type.set(Some(crate::ast::LocalType::Argument));
                                     }
                                 } else {
-                                    let lvi = sd.local_variables.len() as u32;
+                                    let lvi = u32_from_usize(sd.local_variables.len());
                                     sd.local_variables.push(LocalVariable {
                                         name: name.clone(),
                                         kind: LocalVarKind::Var,
@@ -1105,7 +1106,7 @@ impl ScopeCollector {
                                 }
                             } else {
                                 let kind = local_var_kind.expect("local_var_kind must be set for local variables");
-                                let lvi = sd.local_variables.len() as u32;
+                                let lvi = u32_from_usize(sd.local_variables.len());
                                 sd.local_variables.push(LocalVariable {
                                     name: name.clone().into(),
                                     kind,

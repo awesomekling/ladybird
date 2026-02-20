@@ -27,6 +27,7 @@ use std::ffi::c_void;
 
 use super::generator::{AssembledBytecode, ConstantValue, Generator};
 use crate::ast::Utf16String;
+use crate::u32_from_usize;
 
 /// Opaque pointer returned from rust_create_executable.
 pub type ExecutableHandle = *mut c_void;
@@ -302,7 +303,7 @@ pub unsafe fn create_shared_function_data(
     let function_kind = function_data.kind as u8;
     let strict = function_data.is_strict_mode || is_strict;
     let function_length = function_data.function_length;
-    let formal_parameter_count = function_data.parameters.len() as u32;
+    let formal_parameter_count = u32_from_usize(function_data.parameters.len());
     let is_arrow = function_data.is_arrow_function;
     let uses_this = function_data.parsing_insights.uses_this;
     let uses_this_from_environment = function_data.parsing_insights.uses_this_from_environment;
@@ -383,7 +384,7 @@ fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
             ConstantValue::Empty => buffer.push(ConstantTag::Empty as u8),
             ConstantValue::String(s) => {
                 buffer.push(ConstantTag::String as u8);
-                let len = s.len() as u32;
+                let len = u32_from_usize(s.len());
                 buffer.extend_from_slice(&len.to_le_bytes());
                 for &code_unit in s {
                     buffer.extend_from_slice(&code_unit.to_le_bytes());
@@ -391,7 +392,7 @@ fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
             }
             ConstantValue::BigInt(s) => {
                 buffer.push(ConstantTag::BigInt as u8);
-                let len = s.len() as u32;
+                let len = u32_from_usize(s.len());
                 buffer.extend_from_slice(&len.to_le_bytes());
                 buffer.extend_from_slice(s.as_bytes());
             }

@@ -26,6 +26,8 @@ use std::ffi::c_void;
 use std::fmt;
 use std::rc::Rc;
 
+use crate::u32_from_usize;
+
 // =============================================================================
 // Function table (side table for FunctionData)
 // =============================================================================
@@ -59,7 +61,7 @@ impl FunctionTable {
 
     /// Insert a `FunctionData`, returning a `FunctionId` handle.
     pub fn insert(&mut self, data: FunctionData) -> FunctionId {
-        let id = FunctionId(self.0.len() as u32);
+        let id = FunctionId(u32_from_usize(self.0.len()));
         self.0.push(Some(Box::new(data)));
         id
     }

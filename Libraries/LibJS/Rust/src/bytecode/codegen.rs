@@ -45,6 +45,7 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use crate::ast::*;
 use crate::lexer::ch;
+use crate::u32_from_usize;
 
 use super::generator::{choose_dst, constant_to_boolean, parse_bigint, BlockBoundaryType, ConstantValue, FinallyContext, Generator, ScopedOperand};
 use super::instruction::Instruction;
@@ -379,7 +380,7 @@ fn generate_expression_inner(
                 let dst = choose_dst(gen, preferred_dst);
                 gen.emit(Instruction::NewPrimitiveArray {
                     dst: dst.operand(),
-                    element_count: values.len() as u32,
+                    element_count: u32_from_usize(values.len()),
                     elements: values,
                 });
                 return Some(dst);
@@ -408,7 +409,7 @@ fn generate_expression_inner(
             let arguments: Vec<Operand> = scoped_arguments.iter().map(|s| s.operand()).collect();
             gen.emit(Instruction::NewArray {
                 dst: dst.operand(),
-                element_count: arguments.len() as u32,
+                element_count: u32_from_usize(arguments.len()),
                 elements: arguments,
             });
 
@@ -2718,7 +2719,7 @@ fn try_generate_builtin_abstract_operation(
             dst: dst.operand(),
             callee: callee.operand(),
             this_value: this_value.operand(),
-            argument_count: arguments.len() as u32,
+            argument_count: u32_from_usize(arguments.len()),
             expression_string: callee_name,
             arguments,
         });
@@ -2751,7 +2752,7 @@ fn try_generate_builtin_abstract_operation(
                 dst: dst.operand(),
                 callee: callee.operand(),
                 this_value: undefined.operand(),
-                argument_count: arguments.len() as u32,
+                argument_count: u32_from_usize(arguments.len()),
                 expression_string: Some(expression_string),
                 arguments,
             });
@@ -2955,7 +2956,7 @@ fn generate_call_expression(
         let pre_arguments: Vec<Operand> = pre_holders.iter().map(|a| a.operand()).collect();
         gen.emit(Instruction::NewArray {
             dst: arguments_array.operand(),
-            element_count: pre_arguments.len() as u32,
+            element_count: u32_from_usize(pre_arguments.len()),
             elements: pre_arguments,
         });
 
@@ -3009,7 +3010,7 @@ fn generate_call_expression(
             gen.emit(Instruction::CallConstruct {
                 dst: dst.operand(),
                 callee: callee.operand(),
-                argument_count: arguments.len() as u32,
+                argument_count: u32_from_usize(arguments.len()),
                 expression_string,
                 arguments,
             });
@@ -3018,7 +3019,7 @@ fn generate_call_expression(
                 dst: dst.operand(),
                 callee: callee.operand(),
                 this_value: this_value.operand(),
-                argument_count: arguments.len() as u32,
+                argument_count: u32_from_usize(arguments.len()),
                 expression_string,
                 arguments,
             });
@@ -3028,7 +3029,7 @@ fn generate_call_expression(
                     dst: dst.operand(),
                     callee: callee.operand(),
                     this_value: this_value.operand(),
-                    argument_count: arguments.len() as u32,
+                    argument_count: u32_from_usize(arguments.len()),
                     builtin: b,
                     expression_string,
                     arguments,
@@ -3038,7 +3039,7 @@ fn generate_call_expression(
                     dst: dst.operand(),
                     callee: callee.operand(),
                     this_value: this_value.operand(),
-                    argument_count: arguments.len() as u32,
+                    argument_count: u32_from_usize(arguments.len()),
                     expression_string,
                     arguments,
                 });
@@ -3048,7 +3049,7 @@ fn generate_call_expression(
                 dst: dst.operand(),
                 callee: callee.operand(),
                 this_value: this_value.operand(),
-                argument_count: arguments.len() as u32,
+                argument_count: u32_from_usize(arguments.len()),
                 expression_string,
                 arguments,
             });
@@ -4372,7 +4373,7 @@ fn generate_tagged_template_literal(
     let cache_index = gen.next_template_object_cache();
     gen.emit(Instruction::GetTemplateObject {
         dst: strings_array.operand(),
-        strings_count: string_ops.len() as u32,
+        strings_count: u32_from_usize(string_ops.len()),
         cache_index,
         strings: string_ops,
     });
@@ -4391,7 +4392,7 @@ fn generate_tagged_template_literal(
         dst: dst.operand(),
         callee: tag_reg.operand(),
         this_value: this_op.operand(),
-        argument_count: arguments.len() as u32,
+        argument_count: u32_from_usize(arguments.len()),
         expression_string: None,
         arguments,
     });
@@ -4724,14 +4725,14 @@ fn generate_object_expression(
                 if let Some(key_val) = &computed_key {
                     emit_put_by_value(gen, &dst, key_val, &value, PutKind::Own);
                 } else if is_simple {
-                    emit_object_property_set_by_key(gen, &dst, &property.key, &value, slot as u32, cache_index, false);
+                    emit_object_property_set_by_key(gen, &dst, &property.key, &value, u32_from_usize(slot), cache_index, false);
                 } else {
                     // Non-simple object: use PutOwnById instead of InitObjectLiteralProperty
                     let property_key = match &property.key.inner {
                         ExpressionKind::Identifier(ident) => gen.intern_property_key(&ident.name),
                         ExpressionKind::StringLiteral(s) => gen.intern_property_key(s),
                         _ => {
-                            emit_object_property_set_by_key(gen, &dst, &property.key, &value, slot as u32, cache_index, false);
+                            emit_object_property_set_by_key(gen, &dst, &property.key, &value, u32_from_usize(slot), cache_index, false);
                             continue;
                         }
                     };
@@ -5069,7 +5070,7 @@ fn generate_arguments_array(
     let arg_ops: Vec<Operand> = arg_holders.iter().map(|a| a.operand()).collect();
     gen.emit(Instruction::NewArray {
         dst: dst.operand(),
-        element_count: arg_ops.len() as u32,
+        element_count: u32_from_usize(arg_ops.len()),
         elements: arg_ops,
     });
     drop(arg_holders);
@@ -5497,7 +5498,7 @@ fn generate_class_expression(
         class_environment: class_env.operand(),
         class_blueprint_index: blueprint_index,
         lhs_name,
-        element_keys_count: element_key_ops.len() as u32,
+        element_keys_count: u32_from_usize(element_key_ops.len()),
         element_keys: element_key_ops,
     });
 
@@ -6707,7 +6708,7 @@ fn generate_object_binding_pattern(
             gen.emit(Instruction::CopyObjectExcludingProperties {
                 dst: copy.operand(),
                 from_object: object.operand(),
-                excluded_names_count: excluded_names.len() as u32,
+                excluded_names_count: u32_from_usize(excluded_names.len()),
                 excluded_names: excluded_names.iter().map(|o| o.operand()).collect(),
             });
             assign_binding_entry_alias(gen, entry, &copy, mode);
@@ -7322,7 +7323,7 @@ pub fn emit_function_declaration_instantiation(
             lv.name == utf16!("arguments") && !lv.is_lexically_declared
         });
 
-        let dst = arguments_local_index.map(|index| Operand::local(index as u32));
+        let dst = arguments_local_index.map(|index| Operand::local(u32_from_usize(index)));
 
         let kind = if strict || !function_data.parameters.iter().all(|p| {
             !p.is_rest
@@ -7341,14 +7342,14 @@ pub fn emit_function_declaration_instantiation(
         });
 
         if let Some(index) = arguments_local_index {
-            gen.mark_local_initialized(index as u32);
+            gen.mark_local_initialized(u32_from_usize(index));
         }
     }
 
     // --- Step 4: Bind formal parameters ---
 
     for (parameter_index, parameter) in function_data.parameters.iter().enumerate() {
-        let parameter_index = parameter_index as u32;
+        let parameter_index = u32_from_usize(parameter_index);
 
         if parameter.is_rest {
             let dst = gen.scoped_operand(Operand::argument(parameter_index));
@@ -7455,7 +7456,7 @@ pub fn emit_function_declaration_instantiation(
 
             if has_non_local_vars {
                 gen.emit(Instruction::CreateVariableEnvironment {
-                    capacity: fsd.non_local_var_count_for_parameter_expressions as u32,
+                    capacity: u32_from_usize(fsd.non_local_var_count_for_parameter_expressions),
                 });
                 // After CreateVariableEnvironment, re-read the lexical environment
                 // (which was also updated) and push it onto the register stack.
@@ -7687,7 +7688,7 @@ fn count_non_local_lexical_bindings(scope: &ScopeData) -> u32 {
                     for declaration in declarations {
                         let mut names = Vec::new();
                         collect_target_names(&declaration.target, &mut names);
-                        count += names.len() as u32;
+                        count += u32_from_usize(names.len());
                     }
                 }
             }

@@ -85,6 +85,12 @@ pub mod parser;
 pub mod scope_collector;
 pub mod token;
 
+/// Convert a `usize` to `u32`, panicking if the value exceeds `u32::MAX`.
+/// Prefer this over `as u32` which silently truncates on 64-bit platforms.
+pub(crate) fn u32_from_usize(value: usize) -> u32 {
+    u32::try_from(value).expect("value exceeds u32::MAX")
+}
+
 use ast::StatementKind;
 use parser::{Parser, ProgramType};
 use std::cell::RefCell;
@@ -370,7 +376,7 @@ pub unsafe extern "C" fn rust_compile_script(
         let Some(source_slice) = source_from_raw(source, source_len) else {
             return std::ptr::null_mut();
         };
-        let mut parser = Parser::new_with_line_offset(source_slice, ProgramType::Script, initial_line_number as u32);
+        let mut parser = Parser::new_with_line_offset(source_slice, ProgramType::Script, u32_from_usize(initial_line_number));
 
         let program = parser.parse_program(false);
 
