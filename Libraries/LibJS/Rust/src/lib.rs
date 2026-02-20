@@ -42,7 +42,7 @@
 //! ## Module overview
 //!
 //! - `lib.rs` — Entry point (FFI exports)
-//! - `token.rs` — Token types (must match Token.h order)
+//! - `token.rs` — Token types
 //! - `lexer.rs` — Tokenizer: UTF-16 input → Token stream
 //! - `parser.rs` — Parser state, helpers, token consumption
 //! - `parser/expressions.rs` — Expression parsing (precedence climbing)

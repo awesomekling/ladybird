@@ -5,10 +5,6 @@
  */
 
 //! Token types and Token struct for the lexer.
-//!
-//! The `TokenType` enum must have the same variants in the same order
-//! as `ENUMERATE_JS_TOKENS` in Token.h (alphabetical) because token
-//! type values are passed across the FFI boundary.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenCategory {
@@ -25,12 +21,10 @@ pub enum TokenCategory {
 
 /// Generates the `TokenType` enum with `category()` and `name()` methods.
 /// Each entry maps a variant to its `TokenCategory`. The name is derived
-/// automatically via `stringify!`. Order must match `ENUMERATE_JS_TOKENS`
-/// in Token.h (alphabetical).
+/// automatically via `stringify!`.
 macro_rules! define_tokens {
     ( $( $variant:ident => $category:ident ),* $(,)? ) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        #[repr(u8)]
         pub enum TokenType {
             $( $variant, )*
         }
