@@ -510,11 +510,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_regex_literal(&mut self, start: Position, token: &Token) -> Expression {
-        let value = self.token_value(token).to_vec();
+        let value = self.token_value(token);
         let pattern = if value.len() >= 2 {
             value[1..value.len() - 1].to_vec()
         } else {
-            value
+            value.to_vec()
         };
         let flags = if self.match_token(TokenType::RegexFlags) {
             let ftok = self.consume();
@@ -1575,8 +1575,7 @@ impl<'a> Parser<'a> {
         if raw.len() < 2 {
             return (Utf16String::default(), false);
         }
-        let inner = raw[1..raw.len() - 1].to_vec();
-        self.process_escape_sequences(&inner)
+        self.process_escape_sequences(&raw[1..raw.len() - 1])
     }
 
     pub(crate) fn process_escape_sequences(&mut self, inner: &[u16]) -> (Utf16String, bool) {

@@ -1284,11 +1284,11 @@ impl<'a> Parser<'a> {
                             entry_name = Some(BindingEntryName::Identifier(id));
                         } else if self.match_token(TokenType::BigIntLiteral) {
                             let token = self.consume();
-                            let value = self.token_value(&token).to_vec();
+                            let value = self.token_value(&token);
                             let name_value = if value.last() == Some(&ch(b'n')) {
                                 value[..value.len() - 1].to_vec()
                             } else {
-                                value
+                                value.to_vec()
                             };
                             let id = self.make_identifier(entry_start, name_value);
                             self.scope_collector.register_identifier(id.clone(), &id.name, None);
