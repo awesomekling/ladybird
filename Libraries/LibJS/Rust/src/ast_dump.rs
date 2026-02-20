@@ -63,18 +63,18 @@ const CYAN: &str = "\x1b[36m";
 const MAGENTA: &str = "\x1b[35m";
 const WHITE_BOLD: &str = "\x1b[1;37m";
 
-struct DumpState {
+struct DumpState<'a> {
     prefix: String,
     is_last: bool,
     is_root: bool,
     use_color: bool,
     output: Option<Rc<RefCell<String>>>,
-    function_table: *const FunctionTable,
+    function_table: &'a FunctionTable,
 }
 
-impl DumpState {
+impl DumpState<'_> {
     fn function_table(&self) -> &FunctionTable {
-        unsafe { &*self.function_table }
+        self.function_table
     }
 }
 
@@ -112,7 +112,7 @@ fn child_prefix(state: &DumpState) -> String {
     }
 }
 
-fn child_state(state: &DumpState, is_last: bool) -> DumpState {
+fn child_state<'a>(state: &DumpState<'a>, is_last: bool) -> DumpState<'a> {
     DumpState {
         prefix: child_prefix(state),
         is_last,
