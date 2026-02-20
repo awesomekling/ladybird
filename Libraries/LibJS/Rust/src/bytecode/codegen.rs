@@ -585,7 +585,7 @@ fn generate_array_expression(
 
     // Collect elements before the first spread into a NewArray.
     let pre_spread_count = first_spread.unwrap_or(elements.len());
-    let mut scoped_arguments: Vec<ScopedOperand> = Vec::new();
+    let mut scoped_arguments: Vec<ScopedOperand> = Vec::with_capacity(pre_spread_count);
     for element in &elements[..pre_spread_count] {
         match element {
             Some(e) => {
@@ -2756,7 +2756,7 @@ fn try_generate_builtin_abstract_operation(
         let callee = generate_expression_or_undefined(&data.arguments[0].value, gen, None);
         let this_value = generate_expression_or_undefined(&data.arguments[1].value, gen, None);
         let extra_args = &data.arguments[2..];
-        let mut argument_holders = Vec::new();
+        let mut argument_holders = Vec::with_capacity(extra_args.len());
         for argument in extra_args {
             let val = generate_expression_or_undefined(&argument.value, gen, None);
             argument_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
@@ -2791,7 +2791,7 @@ fn try_generate_builtin_abstract_operation(
             let callee = gen.add_constant_raw_value(intrinsic_value);
             let undefined = gen.add_constant_undefined();
             let expression_string = gen.intern_string(name);
-            let mut argument_holders = Vec::new();
+            let mut argument_holders = Vec::with_capacity(data.arguments.len());
             for argument in &data.arguments {
                 let val = generate_expression_or_undefined(&argument.value, gen, None);
                 argument_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
@@ -2995,7 +2995,7 @@ fn generate_call_expression(
         let arguments_array = gen.allocate_register();
         let first_spread = data.arguments.iter().position(|a| a.is_spread).unwrap_or(0);
 
-        let mut pre_holders = Vec::new();
+        let mut pre_holders = Vec::with_capacity(first_spread);
         for argument in &data.arguments[..first_spread] {
             let reg = gen.allocate_register();
             let val = generate_expression_or_undefined(&argument.value, gen, None);
@@ -3048,7 +3048,7 @@ fn generate_call_expression(
         // Copy local variables into fresh registers so that evaluating
         // later arguments cannot mutate earlier argument values (e.g.
         // `bar(i, i++)` — the first argument must be the pre-increment value).
-        let mut argument_holders = Vec::new();
+        let mut argument_holders = Vec::with_capacity(data.arguments.len());
         for argument in &data.arguments {
             let val = generate_expression_or_undefined(&argument.value, gen, None);
             argument_holders.push(gen.copy_if_needed_to_preserve_evaluation_order(&val));
@@ -4478,7 +4478,7 @@ fn generate_switch_statement(
     });
 
     // Pre-allocate test blocks for each case with a test expression.
-    let mut test_blocks: Vec<Label> = Vec::new();
+    let mut test_blocks: Vec<Label> = Vec::with_capacity(data.cases.len());
     for case in &data.cases {
         if case.test.is_some() {
             test_blocks.push(gen.make_block());
@@ -4490,7 +4490,7 @@ fn generate_switch_statement(
     // This matches C++ block creation order: test blocks interleaved with
     // case body blocks.
     let mut next_test_block = first_test_block;
-    let mut case_blocks: Vec<Label> = Vec::new();
+    let mut case_blocks: Vec<Label> = Vec::with_capacity(data.cases.len());
     let mut default_block = None;
     let mut test_block_index = 0;
 
@@ -5108,7 +5108,7 @@ fn generate_arguments_array(
 
     let first_spread = arguments.iter().position(|a| a.is_spread).unwrap_or(arguments.len());
 
-    let mut arg_holders = Vec::new();
+    let mut arg_holders = Vec::with_capacity(first_spread);
     for argument in &arguments[..first_spread] {
         let reg = gen.allocate_register();
         let val = generate_expression_or_undefined(&argument.value, gen, None);
@@ -5215,7 +5215,7 @@ fn generate_class_expression(
     // First pass: evaluate all computed property keys.
     // This must happen before registering the constructor and method SFDs,
     // matching the C++ pipeline's two-loop structure.
-    let mut element_keys: Vec<Option<ScopedOperand>> = Vec::new();
+    let mut element_keys: Vec<Option<ScopedOperand>> = Vec::with_capacity(data.elements.len());
     for element_node in &data.elements {
         match &element_node.inner {
             ClassElement::Method { key, .. } => {
@@ -5256,7 +5256,7 @@ fn generate_class_expression(
     };
 
     // Second pass: register method/field SFDs and build element descriptors.
-    let mut ffi_elements = Vec::new();
+    let mut ffi_elements = Vec::with_capacity(data.elements.len());
     // Keep literal string data alive until FFI call.
     let mut literal_string_storage: Vec<Utf16String> = Vec::new();
 
