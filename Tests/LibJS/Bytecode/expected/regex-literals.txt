@@ -1,0 +1,10 @@
+JS bytecode executable ""
+[   0]    0: GetLexicalEnvironment dst:reg4
+[   8]       NewRegExp dst:reg5, foo, 
+[  20]       InitializeLexicalBinding identifier:a, src:reg5
+[  38]       NewRegExp dst:reg5, bar, gi
+[  50]       InitializeLexicalBinding identifier:b, src:reg5
+[  68]       NewRegExp dst:reg5, baz, i
+[  80]       Add dst:reg6, lhs:Int32(1), rhs:reg5
+[  90]       InitializeLexicalBinding identifier:c, src:reg6
+[  a8]       End value:Undefined
