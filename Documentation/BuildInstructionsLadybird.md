@@ -4,6 +4,12 @@
 
 Qt6 development packages, nasm, additional build tools, and a C++23 capable compiler are required.
 
+A Rust toolchain is also required for building the JavaScript engine. Install it via [rustup](https://rustup.rs/):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
 We currently use gcc-14 and clang-21 in our CI pipeline. If these versions are not available on your system, see
 [`Meta/find_compiler.py`](../Meta/find_compiler.py) for the minimum compatible version.
 
