@@ -314,9 +314,9 @@ if (ENABLE_RUST)
     FetchContent_MakeAvailable(Corrosion)
 
     corrosion_import_crate(MANIFEST_PATH Rust/Cargo.toml)
-    target_link_libraries(LibJS PRIVATE libjs_rust_parser)
+    target_link_libraries(LibJS PRIVATE libjs_rust)
     target_compile_definitions(LibJS PRIVATE ENABLE_RUST)
-    install(TARGETS libjs_rust_parser EXPORT LagomTargets
+    install(TARGETS libjs_rust EXPORT LagomTargets
         ARCHIVE COMPONENT Lagom_Development
     )
     # The Rust library and LibJS have a circular dependency (C++ calls Rust
@@ -324,12 +324,12 @@ if (ENABLE_RUST)
     # Rust archive into the LibJS archive so all symbols are in one place.
     if(NOT BUILD_SHARED_LIBS)
         add_custom_command(TARGET LibJS POST_BUILD
-            COMMAND ${CMAKE_AR} -x $<TARGET_FILE:libjs_rust_parser-static>
+            COMMAND ${CMAKE_AR} -x $<TARGET_FILE:libjs_rust-static>
             COMMAND ${CMAKE_AR} -qS $<TARGET_FILE:LibJS> *.o
             COMMAND ${CMAKE_RANLIB} $<TARGET_FILE:LibJS>
             COMMAND ${CMAKE_COMMAND} -E remove -f *.o
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/rust_merge_tmp
-            COMMENT "Merging Rust parser archive into LibJS"
+            COMMENT "Merging Rust archive into LibJS"
         )
         file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/rust_merge_tmp)
     endif()

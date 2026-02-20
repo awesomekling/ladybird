@@ -1,5 +1,5 @@
 [package]
-name = "libjs_rust_parser"
+name = "libjs_rust"
 version = "0.1.0"
 edition = "2021"
 
