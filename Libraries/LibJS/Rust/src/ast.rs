@@ -991,15 +991,37 @@ pub struct TemplateLiteralData {
 // RegExp literal
 // =============================================================================
 
-/// RAII wrapper for a compiled regex handle from C++.
-/// Uses Cell for interior mutability so `take()` can transfer ownership.
-struct CompiledRegexInner(Cell<*mut c_void>);
-
 extern "C" {
     fn rust_free_compiled_regex(ptr: *mut c_void);
 }
 
-impl Drop for CompiledRegexInner {
+/// Unique handle to a compiled regex from C++.
+///
+/// The FFI handle has unique ownership semantics: it must be consumed
+/// exactly once via `take()`. `Clone` panics to prevent accidental
+/// sharing (the derive on `ExpressionKind` requires the trait to exist).
+/// `Drop` frees the handle if it was never taken (e.g. on parse error).
+pub struct CompiledRegex(Cell<*mut c_void>);
+
+impl CompiledRegex {
+    pub fn new(ptr: *mut c_void) -> Self {
+        Self(Cell::new(ptr))
+    }
+
+    /// Take ownership of the compiled regex handle, leaving null behind
+    /// so the destructor won't free it.
+    pub fn take(&self) -> *mut c_void {
+        self.0.replace(std::ptr::null_mut())
+    }
+}
+
+impl Clone for CompiledRegex {
+    fn clone(&self) -> Self {
+        panic!("CompiledRegex cannot be cloned: FFI handle has unique ownership");
+    }
+}
+
+impl Drop for CompiledRegex {
     fn drop(&mut self) {
         let ptr = self.0.get();
         if !ptr.is_null() {
@@ -1008,32 +1030,9 @@ impl Drop for CompiledRegexInner {
     }
 }
 
-impl fmt::Debug for CompiledRegexInner {
+impl fmt::Debug for CompiledRegex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CompiledRegex({:p})", self.0.get())
-    }
-}
-
-/// Shared handle to a compiled regex from C++. Cloning shares ownership
-/// via reference counting; the underlying handle is freed when the last
-/// clone is dropped.
-#[derive(Clone, Debug)]
-pub struct CompiledRegex(Rc<CompiledRegexInner>);
-
-impl CompiledRegex {
-    pub fn new(ptr: *mut c_void) -> Self {
-        Self(Rc::new(CompiledRegexInner(Cell::new(ptr))))
-    }
-
-    /// Take ownership of the compiled regex handle, leaving null behind
-    /// so the Rc destructor won't free it.
-    pub fn take(&self) -> *mut c_void {
-        debug_assert!(
-            Rc::strong_count(&self.0) == 1,
-            "CompiledRegex::take() called with {} outstanding references",
-            Rc::strong_count(&self.0)
-        );
-        self.0.0.replace(std::ptr::null_mut())
     }
 }
 
