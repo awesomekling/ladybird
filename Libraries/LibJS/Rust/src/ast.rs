@@ -34,7 +34,7 @@ use crate::u32_from_usize;
 
 /// Opaque handle into the `FunctionTable`. Copy + Clone so AST nodes can
 /// freely duplicate it without cloning the underlying `FunctionData`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct FunctionId(u32);
 
 /// Flat side table that owns all `FunctionData` produced during parsing.
@@ -524,14 +524,14 @@ impl Utf16String {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Position {
     pub line: u32,
     pub column: u32,
     pub offset: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct SourceRange {
     pub start: Position,
     pub end: Position,
@@ -589,7 +589,7 @@ pub enum BinaryOp {
     InstanceOf = 21,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum LogicalOp {
     And = 0,
@@ -609,7 +609,7 @@ pub enum UnaryOp {
     Delete = 6,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum UpdateOp {
     Increment = 0,
@@ -676,7 +676,7 @@ pub enum ProgramType {
     Module = 1,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub enum MetaPropertyType {
     NewTarget,
     ImportMeta,

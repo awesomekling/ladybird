@@ -26,7 +26,7 @@ struct Field {
     is_array: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct OpDef {
     name: String,
     fields: Vec<Field>,

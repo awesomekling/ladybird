@@ -6445,7 +6445,7 @@ fn assign_to_for_in_of_lhs(
 // =============================================================================
 
 /// Whether we are initializing a new binding or setting an existing one.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum BindingMode {
     /// `const` or `let` declarations: emit InitializeLexicalBinding.
     InitializeLexical,

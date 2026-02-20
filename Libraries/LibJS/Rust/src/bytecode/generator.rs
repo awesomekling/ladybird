@@ -103,14 +103,13 @@ impl FinallyContext {
 }
 
 /// A break/continue target registered with a FinallyContext.
-#[derive(Clone)]
 pub struct FinallyJump {
     pub index: i32,
     pub target: Label,
 }
 
 /// A local variable name with metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LocalVariable {
     pub name: Utf16String,
     pub is_lexically_declared: bool,

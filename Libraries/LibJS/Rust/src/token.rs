@@ -24,7 +24,7 @@ pub enum TokenCategory {
 /// automatically via `stringify!`.
 macro_rules! define_tokens {
     ( $( $variant:ident => $category:ident ),* $(,)? ) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum TokenType {
             $( $variant, )*
         }

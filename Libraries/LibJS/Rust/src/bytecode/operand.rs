@@ -13,7 +13,7 @@
 /// - 3: return_value
 /// - 4: saved_lexical_environment
 /// - 5+: user registers
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct Register(pub u32);
 
 impl Register {
@@ -33,7 +33,7 @@ impl Register {
 ///   `raw = (type << 29) | index`
 ///
 /// This encoding is ABI-compatible with the VM's operand format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Operand(u32);
 
 impl Operand {
@@ -119,7 +119,7 @@ pub enum OperandType {
 /// During compilation, holds a basic block index. After linking,
 /// holds the final byte offset in the flat bytecode stream.
 /// Stored as a single `u32`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Label(pub u32);
 
 impl Label {
@@ -129,7 +129,7 @@ impl Label {
 }
 
 /// Index into the string table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct StringTableIndex(pub u32);
 
 impl StringTableIndex {
@@ -137,7 +137,7 @@ impl StringTableIndex {
 }
 
 /// Index into the identifier table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct IdentifierTableIndex(pub u32);
 
 impl IdentifierTableIndex {
@@ -145,11 +145,11 @@ impl IdentifierTableIndex {
 }
 
 /// Index into the property key table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct PropertyKeyTableIndex(pub u32);
 
 /// Index into the regex table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct RegexTableIndex(pub u32);
 
 /// Environment coordinate used as a mutable cache in some instructions.

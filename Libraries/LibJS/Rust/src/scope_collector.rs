@@ -95,7 +95,7 @@ impl ScopeLevel {
 // A single name can accumulate multiple flags (e.g., a `var` that
 // shadows a parameter gets both VAR and FORBIDDEN_LEXICAL).
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default)]
 struct VarFlags(u16);
 
 impl VarFlags {
