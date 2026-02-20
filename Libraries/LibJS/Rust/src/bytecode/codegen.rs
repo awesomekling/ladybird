@@ -343,16 +343,7 @@ pub fn generate_expression(
                     cache: EnvironmentCoordinate::empty(),
                 });
 
-                gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-                gen.lexical_environment_register_stack.pop();
-
-                if !gen.is_current_block_terminated() {
-                    let parent = gen.lexical_environment_register_stack.last().cloned()
-                        .unwrap_or_else(|| gen.add_constant_undefined());
-                    gen.emit(Instruction::SetLexicalEnvironment {
-                        environment: parent.operand(),
-                    });
-                }
+                gen.end_variable_scope();
             }
             Some(dst)
         }
@@ -918,16 +909,7 @@ pub fn generate_statement(
 
             let result = generate_statement(body, gen, preferred_dst);
 
-            gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-            gen.lexical_environment_register_stack.pop();
-
-            if !gen.is_current_block_terminated() {
-                let parent = gen.lexical_environment_register_stack.last().cloned()
-                    .unwrap_or_else(|| gen.add_constant_undefined());
-                gen.emit(Instruction::SetLexicalEnvironment {
-                    environment: parent.operand(),
-                });
-            }
+            gen.end_variable_scope();
             // Per spec 13.11.7 step 10: if body completion value is empty,
             // return NormalCompletion(undefined).
             Some(result.unwrap_or_else(|| gen.add_constant_undefined()))
@@ -2386,12 +2368,7 @@ fn generate_block_statement(
     };
 
     if did_create_env {
-        gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-        gen.lexical_environment_register_stack.pop();
-        if !gen.is_current_block_terminated() {
-            let parent = gen.current_lexical_environment();
-            gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-        }
+        gen.end_variable_scope();
     }
     result
 }
@@ -5855,14 +5832,7 @@ fn generate_for_in_statement(
     generate_with_completion(body, gen, &completion, preferred_dst);
 
     if needs_lexical_env {
-        gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-        gen.lexical_environment_register_stack.pop();
-        if !gen.is_current_block_terminated() {
-            let parent = gen.current_lexical_environment();
-            gen.emit(Instruction::SetLexicalEnvironment {
-                environment: parent.operand(),
-            });
-        }
+        gen.end_variable_scope();
     }
 
     gen.end_breakable_scope();
@@ -6964,12 +6934,7 @@ fn generate_try_statement(
         }
 
         if created_catch_scope {
-            gen.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
-            gen.lexical_environment_register_stack.pop();
-            if !gen.is_current_block_terminated() {
-                let parent = gen.current_lexical_environment();
-                gen.emit(Instruction::SetLexicalEnvironment { environment: parent.operand() });
-            }
+            gen.end_variable_scope();
         }
 
         if !gen.is_current_block_terminated() {

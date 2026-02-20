@@ -770,6 +770,17 @@ impl Generator {
             .unwrap_or_else(|| self.scoped_operand(Operand::register(Register::SAVED_LEXICAL_ENVIRONMENT)))
     }
 
+    pub fn end_variable_scope(&mut self) {
+        self.end_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
+        self.lexical_environment_register_stack.pop();
+        if !self.is_current_block_terminated() {
+            let parent = self.current_lexical_environment();
+            self.emit(Instruction::SetLexicalEnvironment {
+                environment: parent.operand(),
+            });
+        }
+    }
+
     pub fn allocate_completion_register(&mut self) -> Option<ScopedOperand> {
         if self.must_propagate_completion {
             let reg = self.allocate_register();
