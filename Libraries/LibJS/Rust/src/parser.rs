@@ -208,7 +208,7 @@ struct SavedState {
 
 /// The main JavaScript parser.
 ///
-/// Produces a Rust AST. Parsing methods live in the `expressions`,
+/// Produces an AST. Parsing methods live in the `expressions`,
 /// `statements`, and `declarations` submodules (all `impl Parser`).
 pub struct Parser<'a> {
     lexer: Lexer<'a>,

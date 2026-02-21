@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! Rust AST types for JavaScript.
+//! AST types for JavaScript.
 //!
 //! This module defines the Abstract Syntax Tree using idiomatic Rust enums.
 //! Every node carries a `SourceRange` for error messages and source maps.

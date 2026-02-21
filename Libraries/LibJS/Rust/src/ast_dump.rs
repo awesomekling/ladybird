@@ -15,9 +15,8 @@ use std::fmt::Write;
 
 extern "C" {
     // FIXME: This FFI workaround exists only to match C++ float-to-string
-    //        formatting in the Rust AST dump. Once the C++ pipeline is
-    //        removed, this can be deleted and the Rust side can use its own
-    //        formatting without needing to match C++.
+    //        formatting in the AST dump. Once the C++ pipeline is removed,
+    //        this can be deleted and we can use our own formatting.
     fn rust_format_double(value: f64, buffer: *mut u8, buffer_len: usize) -> usize;
 }
 
@@ -224,7 +223,7 @@ fn utf16_to_string(s: &[u16]) -> String {
 ///
 /// FIXME: This calls into C++ via FFI to guarantee identical output.
 ///        Once the C++ pipeline is removed, this can be replaced with
-///        a pure Rust implementation without needing to match C++.
+///        a native implementation.
 fn format_f64(value: f64) -> String {
     // C++ AST dump formats JS::Value which uses to_string_without_side_effects(),
     // producing "Infinity"/"-Infinity"/"NaN". The rust_format_double FFI uses
@@ -353,7 +352,7 @@ fn dump_statement(statement: &Statement, state: &DumpState) {
 
         StatementKind::Block(scope) => {
             let s = scope.borrow();
-            // The Rust parser wraps for-loops in a Block for scope. The C++
+            // The parser wraps for-loops in a Block for scope. The C++
             // parser does not, so skip the wrapper and dump the child directly.
             if s.children.len() == 1
                 && matches!(

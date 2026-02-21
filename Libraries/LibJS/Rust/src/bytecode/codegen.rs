@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! Bytecode generation from Rust AST.
+//! Bytecode generation from AST.
 //!
-//! This is the largest module in the Rust parser -- it walks the AST
+//! This is the largest module in the parser -- it walks the AST
 //! and emits bytecode instructions via the `Generator`.
 //!
 //! ## Conventions
@@ -2416,7 +2416,7 @@ fn generate_block_statement(
         gen.start_boundary(BlockBoundaryType::LeaveLexicalEnvironment);
     }
 
-    // The Rust parser wraps for-loop statements in a Block for scope tracking
+    // The parser wraps for-loop statements in a Block for scope tracking
     // (via close_for_loop_scope). When the block doesn't create a lexical
     // environment and its only child is a for-loop variant, skip
     // generate_scope_children and generate the child directly to avoid
@@ -4666,7 +4666,7 @@ fn generate_object_expression(
     // indexed storage rather than shape-based storage, so they can't use the fast path.
     //
     // NB: The C++ parser treats {["x"]: 1} identically to {"x": 1} at the AST level
-    // (both produce a StringLiteral key with is_computed=false). The Rust parser keeps
+    // (both produce a StringLiteral key with is_computed=false). The parser keeps
     // is_computed=true for bracket-enclosed keys. We normalize here by treating
     // StringLiteral keys as non-computed regardless of is_computed.
     let is_simple = !properties.is_empty() && properties.iter().all(|p| {
@@ -5926,7 +5926,7 @@ fn generate_labelled_statement(
 
     // For iteration/switch statements, set pending_labels so that
     // begin_breakable_scope/begin_continuable_scope pick them up.
-    // NB: The Rust parser wraps for/for-in/for-of loops in a Block for scope
+    // NB: The parser wraps for/for-in/for-of loops in a Block for scope
     // management, so we look through single-child Block wrappers.
     let block_scope_borrow;
     let effective_inner = if let StatementKind::Block(ref scope) = inner.inner {

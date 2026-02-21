@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! Scope analysis for the Rust parser.
+//! Scope analysis for the parser.
 //!
 //! This is a two-phase system:
 //!
@@ -37,7 +37,7 @@
 //!    in the enclosing function scope.
 //!
 //! 4. **Builds local variable lists**: populates `FunctionScopeData`
-//!    on Rust AST ScopeData nodes, enabling the bytecode generator
+//!    on AST ScopeData nodes, enabling the bytecode generator
 //!    to use indexed locals.
 //!
 //! ## Key data structures

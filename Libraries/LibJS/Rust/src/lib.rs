@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! # LibJS Rust Parser
+//! # LibJS Parser
 //!
-//! A JavaScript parser written in Rust that produces a Rust AST.
+//! A JavaScript parser that produces an AST.
 //!
 //! ## Architecture
 //!
@@ -23,9 +23,9 @@
 //! ┌─────────────────────────────────────────────────────┐
 //! │  Parser (parser.rs + parser/*.rs)                   │
 //! │  Recursive descent with precedence climbing         │
-//! │  Builds Rust AST (ast.rs)                           │
+//! │  Builds AST (ast.rs)                                │
 //! └──────────────────────┬──────────────────────────────┘
-//!                        │ Rust AST
+//!                        │ AST
 //!                        ▼
 //! ┌─────────────────────────────────────────────────────┐
 //! │  Codegen (bytecode/codegen.rs)                      │
@@ -48,7 +48,7 @@
 //! - `parser/expressions.rs` — Expression parsing (precedence climbing)
 //! - `parser/statements.rs` — Statement parsing (if, for, while, etc.)
 //! - `parser/declarations.rs` — Functions, classes, variables, modules
-//! - `ast.rs` — Rust AST type definitions
+//! - `ast.rs` — AST type definitions
 //! - `bytecode/` — Bytecode generator, instruction types, and FFI
 //! - `scope_collector.rs` — Scope analysis
 
@@ -276,9 +276,9 @@ unsafe fn compile_program_body(
 // FFI entry points: program compilation
 // =============================================================================
 
-/// Compile a JavaScript program using the Rust parser and bytecode generator.
+/// Compile a JavaScript program using the parser and bytecode generator.
 ///
-/// This is the full Rust pipeline: parse → codegen → assemble → create Executable.
+/// This is the full pipeline: parse → codegen → assemble → create Executable.
 /// Called from C++ when `USE_RUST_CODEGEN=1` is set.
 ///
 /// Returns a `GC::Ptr<Bytecode::Executable>` cast to `void*`, or nullptr on failure.
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn rust_compile_program(
 
 /// Compile a script and extract GDI (GlobalDeclarationInstantiation) metadata.
 ///
-/// This is the Rust-only path for scripts. It:
+/// This is the path for scripts. It:
 /// 1. Parses the program
 /// 2. Runs scope analysis
 /// 3. Generates bytecode → creates Executable
@@ -414,7 +414,7 @@ pub unsafe extern "C" fn rust_compile_script(
 
 /// Compile an eval script and extract EDI (EvalDeclarationInstantiation) metadata.
 ///
-/// This is the Rust-only path for eval(). It:
+/// This is the path for eval(). It:
 /// 1. Parses the program with eval flags
 /// 2. Runs scope analysis with initiated_by_eval=true
 /// 3. Generates bytecode → creates Executable
@@ -681,7 +681,7 @@ type BuiltinFunctionCallback =
 
 /// Parse a builtin JS file in strict mode, extract top-level function
 /// declarations, and create SharedFunctionInstanceData for each via the
-/// Rust pipeline (no C++ parser involved).
+/// the pipeline.
 ///
 /// Calls `push_function` for each top-level FunctionDeclaration found.
 ///
@@ -849,7 +849,7 @@ unsafe fn call_export_callback(
     }
 }
 
-/// Compile an ES module using the Rust parser and bytecode generator.
+/// Compile an ES module using the parser and bytecode generator.
 ///
 /// Parses the source as a module, extracts import/export metadata,
 /// compiles the module body to bytecode, and extracts declaration data
@@ -1629,10 +1629,10 @@ fn for_each_bound_name_in_pattern(pattern: &ast::BindingPattern, f: &mut dyn FnM
 // FFI entry points: memory management and function compilation
 // =============================================================================
 
-/// Free a Rust `Box<FunctionData>` stored in a C++ SharedFunctionInstanceData.
+/// Free a `Box<FunctionData>` stored in a C++ SharedFunctionInstanceData.
 ///
 /// Called from the SFD's `finalize()` or `clear_compile_inputs()` when the
-/// Rust AST is no longer needed.
+/// AST is no longer needed.
 ///
 /// # Safety
 /// `ast` must be a valid pointer returned by `Box::into_raw(Box<FunctionData>)`.
@@ -1658,9 +1658,9 @@ pub unsafe extern "C" fn rust_free_string(ptr: *mut u8, len: usize) {
     });
 }
 
-/// Compile a function body using the Rust pipeline.
+/// Compile a function body.
 ///
-/// Takes ownership of the Rust `Box<FunctionData>` and compiles it into a
+/// Takes ownership of the `Box<FunctionData>` and compiles it into a
 /// C++ `Bytecode::Executable`. Also populates FDI runtime metadata on the
 /// `SharedFunctionInstanceData`.
 ///

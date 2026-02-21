@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! FFI bridge between Rust codegen and C++ runtime.
+//! FFI bridge between the codegen and C++ runtime.
 //!
-//! This module handles the boundary between the Rust bytecode generator
+//! This module handles the boundary between the bytecode generator
 //! and the C++ `Bytecode::Executable` / `SharedFunctionInstanceData` types.
 //!
 //! ## Key operations
@@ -14,7 +14,7 @@
 //! - `create_executable()` -- packages assembled bytecode, tables, and
 //!   metadata into a C++ `Bytecode::Executable` via `rust_create_executable()`
 //! - `create_shared_function_data()` -- creates a C++ `SharedFunctionInstanceData`
-//!   for a parsed function, transferring ownership of the Rust AST
+//!   for a parsed function, transferring ownership of the AST
 //! - `compile_regex()` -- delegates regex compilation to the C++ regex engine
 //!
 //! ## FFI types
@@ -405,7 +405,7 @@ fn encode_constants(constants: &[ConstantValue]) -> Vec<u8> {
     buffer
 }
 
-/// Create a C++ Executable from the Rust generator's assembled output.
+/// Create a C++ Executable from the generator's assembled output.
 ///
 /// # Safety
 /// `vm_ptr` must be a valid `JS::VM*` and `source_code_ptr` a valid
