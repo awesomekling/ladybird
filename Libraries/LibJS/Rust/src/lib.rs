@@ -1425,9 +1425,7 @@ fn extract_gdi_common(
             bytecode::ffi::create_sfd_for_gdi(function_data, subtable, vm_ptr, source_code_ptr, is_strict)
         };
         assert!(!sfd_ptr.is_null(), "create_sfd_for_gdi returned null");
-        if !sfd_ptr.is_null() {
-            push_function(sfd_ptr, name);
-        }
+        push_function(sfd_ptr, name);
     }
 
     // Var-scoped names (var VariableDeclaration names, excluding function declarations)
