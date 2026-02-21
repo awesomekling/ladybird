@@ -809,15 +809,13 @@ pub struct ModuleCallbacks {
 fn build_attribute_slices(
     attributes: &[ast::ImportAttribute],
 ) -> (Vec<bytecode::ffi::FFIUtf16Slice>, Vec<bytecode::ffi::FFIUtf16Slice>) {
-    let keys: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
+    attributes
         .iter()
-        .map(|a| bytecode::ffi::FFIUtf16Slice::from(a.key.as_ref()))
-        .collect();
-    let values: Vec<bytecode::ffi::FFIUtf16Slice> = attributes
-        .iter()
-        .map(|a| bytecode::ffi::FFIUtf16Slice::from(a.value.as_ref()))
-        .collect();
-    (keys, values)
+        .map(|a| (
+            bytecode::ffi::FFIUtf16Slice::from(a.key.as_ref()),
+            bytecode::ffi::FFIUtf16Slice::from(a.value.as_ref()),
+        ))
+        .unzip()
 }
 
 /// Helper to call an export entry callback with optional module request.
