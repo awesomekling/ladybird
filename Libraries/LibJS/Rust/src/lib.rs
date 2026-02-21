@@ -633,23 +633,17 @@ pub unsafe extern "C" fn rust_compile_dynamic_function(
         // The program should contain a single ExpressionStatement wrapping a FunctionExpression.
         let function_id = if let StatementKind::Program(ref data) = program.inner {
             let scope = data.scope.borrow();
-            let mut found: Option<ast::FunctionId> = None;
-            for child in &scope.children {
-                match &child.inner {
-                    StatementKind::FunctionDeclaration { function_id, .. } => {
-                        found = Some(*function_id);
-                        break;
+            scope.children.iter().find_map(|child| match &child.inner {
+                StatementKind::FunctionDeclaration { function_id, .. } => Some(*function_id),
+                StatementKind::Expression(expression) => {
+                    if let ast::ExpressionKind::Function(function_id) = &expression.inner {
+                        Some(*function_id)
+                    } else {
+                        None
                     }
-                    StatementKind::Expression(expression) => {
-                        if let ast::ExpressionKind::Function(function_id) = &expression.inner {
-                            found = Some(*function_id);
-                            break;
-                        }
-                    }
-                    _ => {}
                 }
-            }
-            found
+                _ => None,
+            })
         } else {
             None
         };
