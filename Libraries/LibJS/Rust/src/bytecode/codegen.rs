@@ -4304,10 +4304,9 @@ fn generate_template_literal(
         return Some(dst);
     }
 
-    let mut first = true;
-    for expression in &segments {
+    for (index, expression) in segments.iter().enumerate() {
         let val = generate_expression_or_undefined(expression, gen, None);
-        if first {
+        if index == 0 {
             if matches!(&expression.inner, ExpressionKind::StringLiteral(_)) {
                 gen.emit_mov(&dst, &val);
             } else {
@@ -4316,7 +4315,6 @@ fn generate_template_literal(
                     value: val.operand(),
                 });
             }
-            first = false;
         } else {
             gen.emit(Instruction::ConcatString {
                 dst: dst.operand(),
@@ -6571,8 +6569,7 @@ fn generate_array_binding_pattern(
         hint: IteratorHint::Sync as u32,
     });
 
-    let mut first = true;
-    for entry in &pattern.entries {
+    for (index, entry) in pattern.entries.iter().enumerate() {
         if entry.is_rest {
             // 13.15.5.3 AssignmentRestElement: ... DestructuringAssignmentTarget
             // Step 1: Evaluate the reference BEFORE iterating remaining elements.
@@ -6587,7 +6584,7 @@ fn generate_array_binding_pattern(
             // else branch (matching C++ which allocates before the if/else,
             // then re-allocates after emit_jump_if in the !first path).
             let mut value = gen.allocate_register();
-            if first {
+            if index == 0 {
                 gen.emit(Instruction::IteratorToArray {
                     dst: value.operand(),
                     iterator_object: iterator_object.operand(),
@@ -6649,7 +6646,7 @@ fn generate_array_binding_pattern(
 
         let exhausted_block = gen.make_block();
 
-        if !first {
+        if index != 0 {
             let not_exhausted_block = gen.make_block();
             gen.emit_jump_if(&is_exhausted, exhausted_block, not_exhausted_block);
             gen.switch_to_basic_block(not_exhausted_block);
@@ -6711,8 +6708,6 @@ fn generate_array_binding_pattern(
                 assign_binding_entry_alias(gen, entry, &value, mode);
             }
         }
-
-        first = false;
     }
 
     // Close iterator if not exhausted.
