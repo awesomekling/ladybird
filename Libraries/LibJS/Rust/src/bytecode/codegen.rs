@@ -2042,8 +2042,7 @@ fn generate_if_statement(
             target: end_block,
         });
     }
-    // Drop cons_result before generating alternate to match C++ register
-    // lifetime behavior (C++ build_block lambda drops value on exit).
+    // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
     drop(cons_result);
     gen.current_completion_register = saved_completion.clone();
 
@@ -3017,6 +3016,7 @@ fn generate_call_expression(
                 is_spread: argument.is_spread,
             });
         }
+        // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
         drop(pre_holders);
 
         if is_new {
@@ -3204,13 +3204,11 @@ fn generate_update_expression(
                 // Save property for store-back (matching C++ emit_load_from_reference).
                 let saved_property = gen.allocate_register();
                 gen.emit_mov(&saved_property, &property);
-                // Drop property to free its register, matching C++ where property
-                // is a local in emit_load_from_reference and freed on return.
+                // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
                 drop(property);
                 let result = emit_update_op(gen, op, prefixed, &value, preferred_dst);
                 emit_put_normal_by_value(gen, &base, &saved_property, &value, None);
-                // Match C++ ReferenceOperands destruction order: loaded_value
-                // (value) is freed before referenced_name (saved_property).
+                // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
                 if !prefixed { drop(value); }
                 Some(result)
                 } else if let ExpressionKind::Identifier(property_ident) = &property.inner {
@@ -3436,6 +3434,7 @@ fn generate_assignment_expression(
                     // Save property for store-back (matching C++ emit_load_from_reference).
                     let saved_property = gen.allocate_register();
                     gen.emit_mov(&saved_property, &property);
+                    // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
                     drop(property);
                     if is_logical {
                         let rhs_block = gen.make_block();
@@ -3452,8 +3451,7 @@ fn generate_assignment_expression(
                         gen.emit_mov(&dst, &old_val);
                         gen.emit(Instruction::Jump { target: end_block });
                         gen.switch_to_basic_block(end_block);
-                        // Match C++ destruction order: rhs drops first, then
-                        // reference_operands (loaded_value before referenced_name).
+                        // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
                         drop(rhs_val);
                         drop(old_val);
                         drop(saved_property);
@@ -3463,8 +3461,7 @@ fn generate_assignment_expression(
                     let dst = choose_dst(gen, preferred_dst);
                     emit_compound_assignment(gen, op, &dst, &old_val, &rhs_val);
                     emit_put_normal_by_value(gen, &base, &saved_property, &dst, None);
-                    // Match C++ destruction order: rhs drops first, then
-                    // reference_operands (loaded_value before referenced_name).
+                    // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
                     drop(rhs_val);
                     drop(old_val);
                     drop(saved_property);
@@ -4444,8 +4441,7 @@ fn generate_tagged_template_literal(
         arguments,
     });
 
-    // Match C++ destruction order: argument_regs (containing strings_array)
-    // frees before the tag/this_value struct members.
+    // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
     drop(argument_regs);
     drop(this_op);
 
@@ -5120,6 +5116,7 @@ fn generate_arguments_array(
         element_count: u32_from_usize(arg_ops.len()),
         elements: arg_ops,
     });
+    // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
     drop(arg_holders);
 
     for argument in &arguments[first_spread..] {
@@ -5845,7 +5842,7 @@ fn generate_for_in_statement(
         dst_iterator_done: iterator_done.operand(),
         object: object.operand(),
     });
-    // Drop `object` to match C++ lifetime (freed when for_in_of_head_evaluation returns).
+    // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
     drop(object);
 
     // Body evaluation: completion, then jump to update block.
@@ -6007,8 +6004,7 @@ fn generate_for_of_statement_inner(
         hint: if is_await { IteratorHint::Async } else { IteratorHint::Sync } as u32,
     });
 
-    // Drop `object` to free its register, matching C++ where the rhs ScopedOperand
-    // goes out of scope when for_in_of_head_evaluation returns.
+    // FIXME: Remove this manual drop() when we no longer need to match C++ register allocation.
     drop(object);
 
     let completion = gen.allocate_completion_register();
@@ -6333,9 +6329,7 @@ fn generate_for_of_statement_inner(
         // Even if close succeeded, rethrow original (spec step 5).
         gen.emit(Instruction::Jump { target: rethrow_block });
 
-        // Free registers in C++ destructor order (reverse declaration):
-        // rcv, rct, rc, inner_result, return_method.
-        // This ensures `discarded` below gets the same register as C++.
+        // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
         drop(rcv);
         drop(rct);
         drop(rc);
@@ -7199,17 +7193,8 @@ fn generate_try_statement(
             });
         }
 
-        // Drop try_completion before the FinallyContext registers to match
-        // C++ destructor order: try_completion (declared after FinallyContext)
-        // is destroyed first, then FinallyContext's members in reverse order.
-        // This ensures the register free list ends up with the same ordering.
+        // FIXME: Remove these manual drop() calls when we no longer need to match C++ register allocation.
         drop(try_completion);
-
-        // Release the FinallyContext's ScopedOperands so their registers
-        // can be reused (matching C++ where the FinallyContext goes out
-        // of scope on the stack after try-statement codegen).
-        // NB: Free in reverse declaration order (value before type) to
-        // match C++ destructor ordering and register reuse patterns.
         drop(ctx_ct);
         drop(ctx_cv);
         gen.finally_contexts[ctx_index].lexical_environment_at_entry = None;
