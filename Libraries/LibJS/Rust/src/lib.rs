@@ -1890,22 +1890,12 @@ fn compute_sfd_metadata(function_data: &ast::FunctionData) -> SfdMetadata {
     }
 
     // §10.2.11 steps 15-18: determine if arguments object is needed.
-    let mut arguments_object_needed = bsi.might_need_arguments;
-    if is_arrow || parameter_names.contains(utf16!("arguments")) {
-        arguments_object_needed = false;
-    }
-    if body_scope.is_none() {
-        arguments_object_needed = false;
-    } else {
-        if !has_parameter_expressions && bsi.has_function_named_arguments {
-            arguments_object_needed = false;
-        }
-        if !has_parameter_expressions && arguments_object_needed
-            && bsi.has_lexically_declared_arguments
-        {
-            arguments_object_needed = false;
-        }
-    }
+    let arguments_object_needed = bsi.might_need_arguments
+        && !is_arrow
+        && !parameter_names.contains(utf16!("arguments"))
+        && body_scope.is_some()
+        && (has_parameter_expressions || !bsi.has_function_named_arguments)
+        && (has_parameter_expressions || !bsi.has_lexically_declared_arguments);
 
     // Arguments object needs an environment binding if it's not a local variable.
     let arguments_object_needs_binding =
