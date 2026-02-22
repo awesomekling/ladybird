@@ -1218,9 +1218,9 @@ fn generate_yield_from(
 
     // 6. Let received be NormalCompletion(undefined).
     let normal_const = gen.add_constant_number(CompletionType::Normal.to_f64());
-    gen.emit_mov(&received_completion_type, &normal_const);
+    gen.emit_mov(received_completion_type, &normal_const);
     let undef = gen.add_constant_undefined();
-    gen.emit_mov(&received_completion_value, &undef);
+    gen.emit_mov(received_completion_value, &undef);
 
     // 7. Repeat,
     let loop_block = gen.make_block();
@@ -1263,9 +1263,9 @@ fn generate_yield_from(
         let awaited = generate_await_with_completions(
             gen,
             &inner_result,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
         );
         gen.emit_mov(&inner_result, &awaited);
     }
@@ -1301,9 +1301,9 @@ fn generate_yield_from(
             gen,
             continuation_block,
             &current_value,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
             false,
         );
     }
@@ -1360,9 +1360,9 @@ fn generate_yield_from(
         let awaited = generate_await_with_completions(
             gen,
             &inner_result,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
         );
         gen.emit_mov(&inner_result, &awaited);
     }
@@ -1395,9 +1395,9 @@ fn generate_yield_from(
             gen,
             continuation_block,
             &yield_value,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
             false,
         );
     }
@@ -1437,9 +1437,9 @@ fn generate_yield_from(
         let awaited = generate_await_with_completions(
             gen,
             &close_result,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
         );
         gen.emit(Instruction::ThrowIfNotObject {
             src: awaited.operand(),
@@ -1500,14 +1500,14 @@ fn generate_yield_from(
     if is_async {
         generate_await_with_completions(
             gen,
-            &received_completion_value,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
         );
     }
     // 2. Return received (return completion).
-    gen.generate_return(&received_completion_value);
+    gen.generate_return(received_completion_value);
 
     gen.switch_to_basic_block(return_is_defined_block);
 
@@ -1527,9 +1527,9 @@ fn generate_yield_from(
         let awaited = generate_await_with_completions(
             gen,
             &inner_return_result,
-            &received_completion,
-            &received_completion_type,
-            &received_completion_value,
+            received_completion,
+            received_completion_type,
+            received_completion_value,
         );
         gen.emit_mov(&inner_return_result, &awaited);
     }
@@ -1560,9 +1560,9 @@ fn generate_yield_from(
         gen,
         continuation_block,
         &received,
-        &received_completion,
-        &received_completion_type,
-        &received_completion_value,
+        received_completion,
+        received_completion_type,
+        received_completion_value,
         false,
     );
 
@@ -1571,7 +1571,7 @@ fn generate_yield_from(
     // =========================================================================
     gen.switch_to_basic_block(continuation_block);
     let acc = gen.accumulator();
-    gen.emit_mov(&received_completion, &acc);
+    gen.emit_mov(received_completion, &acc);
     gen.emit(Instruction::GetCompletionFields {
         type_dst: received_completion_type.operand(),
         value_dst: received_completion_value.operand(),
@@ -1652,7 +1652,7 @@ fn generate_yield(
     gen.switch_to_basic_block(return_block);
     generate_await_with_completions(
         gen,
-        &received_completion_value,
+        received_completion_value,
         received_completion,
         received_completion_type,
         received_completion_value,
