@@ -984,10 +984,8 @@ impl<'a> Parser<'a> {
                         collect_binding_names(&decl.target, &mut declared_names);
                     }
                 }
-                StatementKind::FunctionDeclaration { ref name, .. } => {
-                    if let Some(ref name) = name {
-                        declared_names.insert(name.name.clone());
-                    }
+                StatementKind::FunctionDeclaration { name: Some(ref name), .. } => {
+                    declared_names.insert(name.name.clone());
                 }
                 StatementKind::ClassDeclaration(data) => {
                     if let Some(ref name) = data.name {
@@ -1007,10 +1005,8 @@ impl<'a> Parser<'a> {
                                     collect_binding_names(&decl.target, &mut declared_names);
                                 }
                             }
-                            StatementKind::FunctionDeclaration { ref name, .. } => {
-                                if let Some(ref name) = name {
-                                    declared_names.insert(name.name.clone());
-                                }
+                            StatementKind::FunctionDeclaration { name: Some(ref name), .. } => {
+                                declared_names.insert(name.name.clone());
                             }
                             StatementKind::ClassDeclaration(class_data) => {
                                 if let Some(ref name) = class_data.name {

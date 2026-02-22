@@ -1613,10 +1613,8 @@ impl<'a> Parser<'a> {
                 let has_default_name = matches_function == MatchesFunctionDeclaration::WithoutName;
                 let declaration = self.parse_function_declaration_for_export(has_default_name);
                 if !has_default_name {
-                    if let StatementKind::FunctionDeclaration { ref name, .. } = declaration.inner {
-                        if let Some(ref name_id) = name {
-                            local_name = Some(name_id.name.clone());
-                        }
+                    if let StatementKind::FunctionDeclaration { name: Some(ref name_id), .. } = declaration.inner {
+                        local_name = Some(name_id.name.clone());
                     }
                 }
                 statement = Some(Box::new(declaration));

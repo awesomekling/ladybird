@@ -1391,10 +1391,8 @@ fn extract_gdi_common(
     // Var names (var declarations at any nesting level + top-level function declarations)
     for child in &scope.children {
         collect_var_names_recursive(&child.inner, push_var_name);
-        if let StatementKind::FunctionDeclaration { ref name, .. } = child.inner {
-            if let Some(ref name_ident) = name {
-                push_var_name(&name_ident.name);
-            }
+        if let StatementKind::FunctionDeclaration { name: Some(ref name_ident), .. } = child.inner {
+            push_var_name(&name_ident.name);
         }
     }
 
@@ -1402,11 +1400,9 @@ fn extract_gdi_common(
     let mut seen_names: HashSet<ast::Utf16String> = HashSet::new();
     let mut functions_to_init: Vec<(ast::FunctionId, ast::Utf16String)> = Vec::new();
     for child in scope.children.iter().rev() {
-        if let StatementKind::FunctionDeclaration { function_id, ref name, .. } = child.inner {
-            if let Some(ref name_ident) = name {
-                if seen_names.insert(name_ident.name.clone()) {
-                    functions_to_init.push((function_id, name_ident.name.clone()));
-                }
+        if let StatementKind::FunctionDeclaration { function_id, name: Some(ref name_ident), .. } = child.inner {
+            if seen_names.insert(name_ident.name.clone()) {
+                functions_to_init.push((function_id, name_ident.name.clone()));
             }
         }
     }

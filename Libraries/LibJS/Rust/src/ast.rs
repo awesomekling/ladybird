@@ -401,10 +401,8 @@ impl FunctionTable {
 
     fn collect_from_pattern(&mut self, pattern: &BindingPattern, result: &mut FunctionTable) {
         for entry in &pattern.entries {
-            if let Some(ref name) = entry.name {
-                if let BindingEntryName::Expression(expr) = name {
-                    self.collect_from_expression(expr, result);
-                }
+            if let Some(BindingEntryName::Expression(expr)) = entry.name.as_ref() {
+                self.collect_from_expression(expr, result);
             }
             if let Some(ref alias) = entry.alias {
                 match alias {

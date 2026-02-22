@@ -2488,40 +2488,38 @@ fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &Sc
                     }
                 }
             }
-            StatementKind::FunctionDeclaration { function_id, ref name, .. } => {
-                if let Some(ref name_ident) = name {
-                    // a. Create binding.
-                    if !name_ident.is_local() {
-                        let id = gen.intern_identifier(&name_ident.name);
-                        gen.emit(Instruction::CreateMutableBinding {
-                            environment: environment.operand(),
-                            identifier: id,
-                            can_be_deleted: false,
-                        });
-                    }
-                    // b. Instantiate function object.
-                    let function_data = gen.function_table.take(*function_id);
-                    let sfd_index = emit_new_function(gen, function_data, None);
-                    let fo = gen.allocate_register();
-                    gen.emit(Instruction::NewFunction {
-                        dst: fo.operand(),
-                        shared_function_data_index: sfd_index,
-                        home_object: None,
-                        lhs_name: None,
+            StatementKind::FunctionDeclaration { function_id, name: Some(ref name_ident), .. } => {
+                // a. Create binding.
+                if !name_ident.is_local() {
+                    let id = gen.intern_identifier(&name_ident.name);
+                    gen.emit(Instruction::CreateMutableBinding {
+                        environment: environment.operand(),
+                        identifier: id,
+                        can_be_deleted: false,
                     });
-                    if name_ident.is_local() {
-                        let local_index = name_ident.local_index.get();
-                        let local = gen.local(local_index);
-                        gen.emit_mov(&local, &fo);
-                        gen.mark_local_initialized(local_index);
-                    } else {
-                        let id = gen.intern_identifier(&name_ident.name);
-                        gen.emit(Instruction::InitializeLexicalBinding {
-                            identifier: id,
-                            src: fo.operand(),
-                            cache: EnvironmentCoordinate::empty(),
-                        });
-                    }
+                }
+                // b. Instantiate function object.
+                let function_data = gen.function_table.take(*function_id);
+                let sfd_index = emit_new_function(gen, function_data, None);
+                let fo = gen.allocate_register();
+                gen.emit(Instruction::NewFunction {
+                    dst: fo.operand(),
+                    shared_function_data_index: sfd_index,
+                    home_object: None,
+                    lhs_name: None,
+                });
+                if name_ident.is_local() {
+                    let local_index = name_ident.local_index.get();
+                    let local = gen.local(local_index);
+                    gen.emit_mov(&local, &fo);
+                    gen.mark_local_initialized(local_index);
+                } else {
+                    let id = gen.intern_identifier(&name_ident.name);
+                    gen.emit(Instruction::InitializeLexicalBinding {
+                        identifier: id,
+                        src: fo.operand(),
+                        cache: EnvironmentCoordinate::empty(),
+                    });
                 }
             }
             _ => {}
@@ -4534,22 +4532,20 @@ fn generate_switch_statement(
             // For function declarations in switch cases: emit AnnexB hoisting
             // only if the scope collector approved it (name is in annexb_function_names).
             if did_create_env {
-                if let StatementKind::FunctionDeclaration { ref name, .. } = child.inner {
-                    if let Some(ref name_ident) = name {
-                        if gen.annexb_function_names.contains(&name_ident.name) {
-                            let id = gen.intern_identifier(&name_ident.name);
-                            let value = gen.allocate_register();
-                            gen.emit(Instruction::GetBinding {
-                                dst: value.operand(),
-                                identifier: id,
-                                cache: EnvironmentCoordinate::empty(),
-                            });
-                            gen.emit(Instruction::SetVariableBinding {
-                                identifier: id,
-                                src: value.operand(),
-                                cache: EnvironmentCoordinate::empty(),
-                            });
-                        }
+                if let StatementKind::FunctionDeclaration { name: Some(ref name_ident), .. } = child.inner {
+                    if gen.annexb_function_names.contains(&name_ident.name) {
+                        let id = gen.intern_identifier(&name_ident.name);
+                        let value = gen.allocate_register();
+                        gen.emit(Instruction::GetBinding {
+                            dst: value.operand(),
+                            identifier: id,
+                            cache: EnvironmentCoordinate::empty(),
+                        });
+                        gen.emit(Instruction::SetVariableBinding {
+                            identifier: id,
+                            src: value.operand(),
+                            cache: EnvironmentCoordinate::empty(),
+                        });
                     }
                 }
             }

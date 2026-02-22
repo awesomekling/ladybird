@@ -1184,13 +1184,11 @@ impl ScopeCollector {
         {
             let sd = scope_data.borrow();
             for i in (0..sd.children.len()).rev() {
-                if let crate::ast::StatementKind::FunctionDeclaration { ref name, .. } = sd.children[i].inner {
-                    if let Some(ref name_ident) = name {
-                        if seen_function_names.insert(name_ident.name.clone()) {
-                            functions_to_initialize.push(crate::ast::FunctionToInit {
-                                child_index: i,
-                            });
-                        }
+                if let crate::ast::StatementKind::FunctionDeclaration { name: Some(ref name_ident), .. } = sd.children[i].inner {
+                    if seen_function_names.insert(name_ident.name.clone()) {
+                        functions_to_initialize.push(crate::ast::FunctionToInit {
+                            child_index: i,
+                        });
                     }
                 }
             }
