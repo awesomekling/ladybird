@@ -475,18 +475,17 @@ impl<'a> Parser<'a> {
                     if let Some(arrow) = self.try_parse_arrow_function_expression(false, false) {
                         return (arrow, false);
                     }
-                    if self.match_token(TokenType::Await) {
-                        if self.program_type == ProgramType::Module
+                    if self.match_token(TokenType::Await)
+                        && (self.program_type == ProgramType::Module
                             || self.flags.await_expression_is_valid
-                            || self.flags.in_class_static_init_block
-                        {
-                            self.syntax_error("'await' is not allowed as an identifier in this context");
-                        }
+                            || self.flags.in_class_static_init_block)
+                    {
+                        self.syntax_error("'await' is not allowed as an identifier in this context");
                     }
-                    if self.match_token(TokenType::Yield) {
-                        if self.flags.strict_mode || self.flags.in_generator_function_context {
-                            self.syntax_error("'yield' is not allowed as an identifier in this context");
-                        }
+                    if self.match_token(TokenType::Yield)
+                        && (self.flags.strict_mode || self.flags.in_generator_function_context)
+                    {
+                        self.syntax_error("'yield' is not allowed as an identifier in this context");
                     }
                     let token = self.consume_and_check_identifier();
                     let value = self.token_value(&token).to_vec();

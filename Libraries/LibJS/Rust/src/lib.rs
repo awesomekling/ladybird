@@ -1003,8 +1003,9 @@ unsafe fn extract_module_metadata(
         };
 
         // Handle default export binding name.
-        if export_data.is_default_export {
-            if export_data.entries.len() == 1 {
+        if export_data.is_default_export
+            && export_data.entries.len() == 1
+        {
                 let entry = &export_data.entries[0];
                 // If the default export is not a declaration (function/class/etc.),
                 // its binding name is the local_or_import_name.

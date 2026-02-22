@@ -1105,18 +1105,17 @@ impl<'a> Parser<'a> {
             {
                 // Emit errors for await/yield used as parameter names in
                 // contexts where they are reserved.
-                if self.current_token_type() == TokenType::Await {
-                    if self.program_type == ProgramType::Module
+                if self.current_token_type() == TokenType::Await
+                    && (self.program_type == ProgramType::Module
                         || self.flags.await_expression_is_valid
-                        || self.flags.in_class_static_init_block
-                    {
-                        self.syntax_error("'await' is not allowed as an identifier in this context");
-                    }
+                        || self.flags.in_class_static_init_block)
+                {
+                    self.syntax_error("'await' is not allowed as an identifier in this context");
                 }
-                if self.current_token_type() == TokenType::Yield {
-                    if self.flags.strict_mode || self.flags.in_generator_function_context {
-                        self.syntax_error("'yield' is not allowed as an identifier in this context");
-                    }
+                if self.current_token_type() == TokenType::Yield
+                    && (self.flags.strict_mode || self.flags.in_generator_function_context)
+                {
+                    self.syntax_error("'yield' is not allowed as an identifier in this context");
                 }
                 let token = self.consume();
                 let value = Utf16String::from(self.token_value(&token));
