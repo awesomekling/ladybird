@@ -256,6 +256,7 @@ extern "C" {
 ///
 /// # Safety
 /// `vm_ptr` and `source_code_ptr` must be valid pointers.
+#[allow(clippy::boxed_local)] // Callers produce Box<FunctionData>; unboxing would copy a large struct.
 pub unsafe fn create_shared_function_data(
     function_data: Box<crate::ast::FunctionData>,
     subtable: crate::ast::FunctionTable,

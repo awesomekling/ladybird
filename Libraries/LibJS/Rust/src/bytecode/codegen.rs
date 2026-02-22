@@ -7544,7 +7544,7 @@ pub fn emit_function_declaration_instantiation(
         for name in &body_scope.annexb_function_names {
             gen.annexb_function_names.insert(name.clone());
             // Skip creating a var binding if this name is already declared as a var.
-            if var_names.is_some_and(|names| names.iter().any(|n| *n == *name)) {
+            if var_names.is_some_and(|names| names.contains(name)) {
                 continue;
             }
             let id = gen.intern_identifier(name);
@@ -8001,7 +8001,7 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
     match (lhs, rhs) {
         (ConstantValue::Number(n), ConstantValue::String(s))
         | (ConstantValue::String(s), ConstantValue::Number(n)) => {
-            return Some(*n == string_to_number(s));
+            Some(*n == string_to_number(s))
         }
         // BigInt == Number or Number == BigInt: compare mathematical values.
         (ConstantValue::BigInt(b), ConstantValue::Number(n))
@@ -8022,7 +8022,7 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
             if n_i64 as f64 != *n {
                 return None;
             }
-            return Some(BigInt::from(n_i64) == bi);
+            Some(BigInt::from(n_i64) == bi)
         }
         // BigInt == String or String == BigInt: parse string as BigInt per StringToBigInt.
         // If the string cannot be parsed, the result is false (not equal).
@@ -8031,9 +8031,9 @@ fn try_constant_loosely_equals(lhs: &ConstantValue, rhs: &ConstantValue) -> Opti
             match string_to_bigint(s) {
                 Some(s_bi) => {
                     let bi = parse_bigint(b)?;
-                    return Some(bi == s_bi);
+                    Some(bi == s_bi)
                 }
-                None => return Some(false),
+                None => Some(false),
             }
         }
         _ => None,
@@ -8675,7 +8675,7 @@ fn format_double_for_display(n: f64) -> String {
         let displayed_exponent = exp_str.parse::<i32>().unwrap_or(0);
         // AK uses: n < -5 || n > 21 where n = displayed_exponent + 1.
         // Equivalently: displayed_exponent < -6 || displayed_exponent > 20.
-        if displayed_exponent < -6 || displayed_exponent > 20 {
+        if !(-6..=20).contains(&displayed_exponent) {
             let mantissa_part = &e_str[..e_pos];
             if displayed_exponent < 0 {
                 return format!("{}e{}", mantissa_part, displayed_exponent);

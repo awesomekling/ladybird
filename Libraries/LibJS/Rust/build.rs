@@ -577,9 +577,7 @@ fn generate_visit_operands_method(out: &mut String, ops: &[OpDef]) {
             let rname = rust_field_name(&f.name);
             if f.is_array {
                 if f.ty == "Optional<Operand>" {
-                    writeln!(out, "                for item in {}.iter_mut() {{", rname).unwrap();
-                    writeln!(out, "                    if let Some(op) = item {{ visitor(op); }}").unwrap();
-                    writeln!(out, "                }}").unwrap();
+                    writeln!(out, "                for op in {}.iter_mut().flatten() {{ visitor(op); }}", rname).unwrap();
                 } else {
                     writeln!(out, "                for item in {}.iter_mut() {{ visitor(item); }}", rname).unwrap();
                 }

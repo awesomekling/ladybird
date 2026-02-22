@@ -332,8 +332,8 @@ impl FunctionTable {
                 self.collect_from_expression(expr, result);
             }
             ExpressionKind::Array(elements) => {
-                for elem in elements {
-                    if let Some(expr) = elem { self.collect_from_expression(expr, result); }
+                for expr in elements.iter().flatten() {
+                    self.collect_from_expression(expr, result);
                 }
             }
             ExpressionKind::Object(properties) => {

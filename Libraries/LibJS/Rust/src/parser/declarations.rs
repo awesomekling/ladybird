@@ -433,6 +433,7 @@ impl<'a> Parser<'a> {
 
     /// Shared logic for parsing formal parameters, function body, and constructing
     /// FunctionData. Called after the function scope has been opened.
+    #[allow(clippy::too_many_arguments)]
     fn parse_function_common(
         &mut self,
         name: &Option<Rc<Identifier>>,
@@ -1545,7 +1546,7 @@ impl<'a> Parser<'a> {
                         let alias = self.token_value(&alias_token).to_vec();
                         self.check_identifier_name_for_assignment_validity(&alias, false);
                         entries.push(ImportEntry {
-                            import_name: Some(name.into()),
+                            import_name: Some(name),
                             local_name: alias.into(),
                         });
                     } else {

@@ -1105,7 +1105,7 @@ impl ScopeCollector {
                                 let kind = local_var_kind.expect("local_var_kind must be set for local variables");
                                 let lvi = u32_from_usize(sd.local_variables.len());
                                 sd.local_variables.push(LocalVariable {
-                                    name: name.clone().into(),
+                                    name: name.clone(),
                                     kind,
                                 });
                                 for id in &group.identifiers {
@@ -1314,7 +1314,7 @@ impl ScopeCollector {
                 // Reached function/program scope — register the hoisted function name.
                 if let Some(ref scope_data) = records[index].scope_data {
                     let mut sd = scope_data.borrow_mut();
-                    if !sd.annexb_function_names.iter().any(|n| *n == function.name) {
+                    if !sd.annexb_function_names.contains(&function.name) {
                         sd.annexb_function_names.push(function.name.clone());
                     }
                 }

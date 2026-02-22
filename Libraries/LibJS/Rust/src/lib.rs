@@ -1006,19 +1006,18 @@ unsafe fn extract_module_metadata(
         if export_data.is_default_export
             && export_data.entries.len() == 1
         {
-                let entry = &export_data.entries[0];
-                // If the default export is not a declaration (function/class/etc.),
-                // its binding name is the local_or_import_name.
-                let is_declaration = export_data.statement.as_ref().is_some_and(|s| {
-                    matches!(
-                        s.inner,
-                        StatementKind::FunctionDeclaration { .. } | StatementKind::ClassDeclaration(_)
-                    )
-                });
-                if !is_declaration {
-                    if let Some(ref name) = entry.local_or_import_name {
-                        (cb.set_default_export_binding)(ctx, name.as_ptr(), name.len());
-                    }
+            let entry = &export_data.entries[0];
+            // If the default export is not a declaration (function/class/etc.),
+            // its binding name is the local_or_import_name.
+            let is_declaration = export_data.statement.as_ref().is_some_and(|s| {
+                matches!(
+                    s.inner,
+                    StatementKind::FunctionDeclaration { .. } | StatementKind::ClassDeclaration(_)
+                )
+            });
+            if !is_declaration {
+                if let Some(ref name) = entry.local_or_import_name {
+                    (cb.set_default_export_binding)(ctx, name.as_ptr(), name.len());
                 }
             }
         }
@@ -1650,7 +1649,7 @@ pub unsafe extern "C" fn rust_free_function_ast(ast: *mut c_void) {
 pub unsafe extern "C" fn rust_free_string(ptr: *mut u8, len: usize) {
     abort_on_panic(|| {
         if !ptr.is_null() {
-            drop(Box::from_raw(std::slice::from_raw_parts_mut(ptr, len)));
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)));
         }
     });
 }
