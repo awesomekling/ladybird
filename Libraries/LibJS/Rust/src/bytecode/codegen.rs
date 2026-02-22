@@ -8407,27 +8407,18 @@ fn try_constant_fold_binary(
             let b = constant_to_number(rhs_const)?;
             Some(gen.add_constant_number(js_exponentiate(a, b)))
         }
-        BinaryOp::StrictlyEquals => {
-            match (lhs_const, rhs_const) {
-                (ConstantValue::Number(a), ConstantValue::Number(b)) => Some(gen.add_constant_boolean(a == b)),
-                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a == b)),
-                (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a == b)),
-                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(true)),
-                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(true)),
+        BinaryOp::StrictlyEquals | BinaryOp::StrictlyInequals => {
+            let equal = match (lhs_const, rhs_const) {
+                (ConstantValue::Number(a), ConstantValue::Number(b)) => a == b,
+                (ConstantValue::String(a), ConstantValue::String(b)) => a == b,
+                (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => a == b,
+                (ConstantValue::Null, ConstantValue::Null) => true,
+                (ConstantValue::Undefined, ConstantValue::Undefined) => true,
                 // Different types are never strictly equal.
-                _ => Some(gen.add_constant_boolean(false)),
-            }
-        }
-        BinaryOp::StrictlyInequals => {
-            match (lhs_const, rhs_const) {
-                (ConstantValue::Number(a), ConstantValue::Number(b)) => Some(gen.add_constant_boolean(a != b)),
-                (ConstantValue::String(a), ConstantValue::String(b)) => Some(gen.add_constant_boolean(a != b)),
-                (ConstantValue::Boolean(a), ConstantValue::Boolean(b)) => Some(gen.add_constant_boolean(a != b)),
-                (ConstantValue::Null, ConstantValue::Null) => Some(gen.add_constant_boolean(false)),
-                (ConstantValue::Undefined, ConstantValue::Undefined) => Some(gen.add_constant_boolean(false)),
-                // Different types are never strictly equal.
-                _ => Some(gen.add_constant_boolean(true)),
-            }
+                _ => false
+            };
+            let result = if op == BinaryOp::StrictlyInequals { !equal } else { equal };
+            Some(gen.add_constant_boolean(result))
         }
         BinaryOp::GreaterThan
         | BinaryOp::GreaterThanEquals
