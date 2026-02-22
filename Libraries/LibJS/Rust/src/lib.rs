@@ -35,7 +35,7 @@
 //!                        ▼
 //! ┌─────────────────────────────────────────────────────┐
 //! │  FFI (bytecode/ffi.rs → BytecodeFactory.cpp)        │
-//! │  Creates Executable from assembled data              │
+//! │  Creates Executable from assembled data             │
 //! └─────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -1998,8 +1998,7 @@ unsafe fn write_sfd_metadata(sfd_ptr: *mut c_void, metadata: &SfdMetadata) {
 }
 
 /// Count non-local lexically-declared identifiers in a function body scope.
-/// Matches C++ `ScopeNode::has_non_local_lexical_declarations()` but returns
-/// the count (used for environment sizing in the function_environment_needed
+/// Returns the count (used for environment sizing in the function_environment_needed
 /// computation).
 fn count_non_local_lex_declarations(scope: &Rc<RefCell<ast::ScopeData>>) -> usize {
     let sd = scope.borrow();

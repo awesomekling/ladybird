@@ -204,8 +204,7 @@ fn generate_expression_inner(
         ExpressionKind::Await(inner) => {
             let value = generate_expression_or_undefined(inner, gen, None);
             // Match C++ AwaitExpression::generate_bytecode which allocates
-            // received_completion registers and saves the accumulator to
-            // received_completion before the await.
+            // received_completion registers before the await.
             let received_completion = gen.allocate_register();
             let received_completion_type = gen.allocate_register();
             let received_completion_value = gen.allocate_register();
@@ -276,7 +275,7 @@ fn generate_expression_inner(
         // === OptionalChain ===
         ExpressionKind::OptionalChain { base, references } => {
             // Match C++ OptionalChain::generate_bytecode: allocate current_base
-            // first, current_value second, and emit Mov Undefined for current_base.
+            // first, current_value second.
             let current_base = gen.allocate_register();
             let current_value = choose_dst(gen, preferred_dst);
             let undef = gen.add_constant_undefined();
@@ -702,8 +701,8 @@ fn generate_yield_expression(
     argument: Option<&Expression>,
     is_yield_from: bool,
 ) -> Option<ScopedOperand> {
-    // Match C++ YieldExpression::generate_bytecode which allocates
-    // completion registers BEFORE evaluating the argument.
+    // Match C++ YieldExpression::generate_bytecode: allocate
+    // completion registers before evaluating the argument.
     let received_completion = gen.allocate_register();
     let received_completion_type = gen.allocate_register();
     let received_completion_value = gen.allocate_register();
@@ -2433,8 +2432,8 @@ fn generate_block_statement(
 }
 
 /// Create lexical bindings and instantiate function declarations for a block.
-/// Matches C++ behavior: for each declaration, creates bindings and immediately
-/// instantiates functions (single pass, not two separate passes).
+/// For each declaration, creates bindings and immediately instantiates functions
+/// (single pass, not two separate passes).
 fn emit_lexical_declarations_for_block<'a>(gen: &mut Generator, environment: &ScopedOperand, children: impl Iterator<Item = &'a Statement>) {
     for child in children {
         match &child.inner {
@@ -3841,7 +3840,6 @@ enum PutKind {
 }
 
 /// Emit a property write by value, optimizing constant string properties to the ById variant.
-/// Matches C++ Generator::emit_put_by_value which upgrades to emit_put_by_id for constant strings.
 fn emit_put_by_value(
     gen: &mut Generator,
     base: &ScopedOperand,
@@ -3939,7 +3937,7 @@ fn emit_set_variable(gen: &mut Generator, ident: &Identifier, value: &ScopedOper
             });
         }
         // Match C++ emit_set_variable: only skip self-move for variable locals,
-        // not for arguments. C++ checks is_local() && is_variable() && same index.
+        // not for arguments.
         let is_variable_self_move = ident.local_type.get() == Some(LocalType::Variable)
             && value.operand().is_local()
             && value.operand().index() == local_index;
@@ -4956,8 +4954,8 @@ fn emit_object_accessor_by_key(
 // Optional chain
 // =============================================================================
 
-/// Matches C++ generate_optional_chain: takes pre-allocated current_value and
-/// current_base registers, writes results into them directly.
+/// Generate an optional chain, writing results into pre-allocated current_value
+/// and current_base registers.
 fn generate_optional_chain_inner(
     gen: &mut Generator,
     base: &Expression,
@@ -7707,7 +7705,6 @@ fn needs_block_declaration_instantiation(scope: &ScopeData) -> bool {
 }
 
 /// Count non-local lexical bindings in a function body scope.
-/// Matches C++ SharedFunctionInstanceData::m_lex_environment_bindings_count.
 fn count_non_local_lexical_bindings(scope: &ScopeData) -> u32 {
     let mut count = 0u32;
     for child in &scope.children {
@@ -8111,13 +8108,8 @@ fn try_constant_fold_bigint_binary(
             if b.is_zero() {
                 return None; // Division by zero throws at runtime.
             }
-            // BigInt division truncates toward zero.
             use num_integer::Integer;
             let (quotient, _) = a.div_rem(&b);
-            // Rust's div_rem rounds toward zero for BigInt, matching JS spec.
-            // However, for negative dividends with positive divisors (or vice versa),
-            // we need to ensure truncation toward zero. num-bigint's div_rem already
-            // does this (it uses truncated division), so just use the quotient.
             Some(gen.add_constant_bigint(quotient.to_string()))
         }
         BinaryOp::Modulo => {
@@ -8594,7 +8586,6 @@ fn intern_base_identifier(gen: &mut Generator, base: &Expression) -> Option<Iden
 
 /// Try to produce a human-readable name for an expression (for error messages).
 /// Returns None for expressions that have no meaningful name.
-/// Matches C++ `expression_identifier()` in Generator.cpp.
 fn expression_identifier(expression: &Expression) -> Option<Utf16String> {
     match &expression.inner {
         ExpressionKind::Identifier(ident) => Some(ident.name.clone()),
@@ -8630,7 +8621,6 @@ fn expression_identifier(expression: &Expression) -> Option<Utf16String> {
 /// Produce a human-readable string for call expression error messages.
 /// Unlike expression_identifier, this always produces output for known types
 /// (using "<object>" for unrecognized sub-expressions).
-/// Matches C++ `CallExpression::expression_string()` + `expression_to_string_approximation()`.
 fn expression_string_approximation(expression: &Expression) -> Option<Utf16String> {
     match &expression.inner {
         ExpressionKind::Identifier(ident) => Some(ident.name.clone()),

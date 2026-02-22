@@ -665,7 +665,6 @@ impl Generator {
     }
 
     /// Emit a conditional jump, with comparison fusion and constant folding.
-    /// Matches C++ Generator::emit_jump_if().
     pub fn emit_jump_if(
         &mut self,
         condition: &ScopedOperand,
