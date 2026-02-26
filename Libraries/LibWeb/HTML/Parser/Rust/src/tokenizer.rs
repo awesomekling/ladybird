@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use crate::entities::NAMED_CHARACTER_REFERENCES;
+use crate::entities::NamedCharacterReferenceMatcher;
 use crate::token::{Attribute, DoctypeData, Position, Token, TokenType};
 
 /// Tokenizer states per the WHATWG HTML spec section 13.2.5.
@@ -116,6 +116,7 @@ pub struct HtmlTokenizer {
     blocked: bool,
     stop_at_insertion_point: bool,
     cdata_allowed: bool,
+    entity_matcher: NamedCharacterReferenceMatcher,
 }
 
 fn is_ascii_alpha(c: u32) -> bool {
@@ -226,6 +227,7 @@ impl HtmlTokenizer {
             blocked: false,
             stop_at_insertion_point: false,
             cdata_allowed: false,
+            entity_matcher: NamedCharacterReferenceMatcher::new(),
         }
     }
 
@@ -504,58 +506,6 @@ impl HtmlTokenizer {
         }
         self.skip(s.len());
         Some(true)
-    }
-
-    /// Check if any named character reference starts with the given prefix.
-    fn any_entity_starts_with(prefix: &str) -> bool {
-        NAMED_CHARACTER_REFERENCES
-            .iter()
-            .any(|&(name, _, _)| name.starts_with(prefix))
-    }
-
-    /// Named character reference matching.
-    /// Tries to find the longest matching entity name from the current position.
-    /// Returns (first_codepoint, second_codepoint_or_0, chars_consumed, ends_with_semicolon).
-    fn match_named_character_reference(
-        &self,
-        start_offset: usize,
-    ) -> Option<(u32, u32, usize, bool)> {
-        // Collect available characters from current position
-        let limit = if self.stop_at_insertion_point {
-            self.insertion_point.unwrap_or(self.input.len())
-        } else {
-            self.input.len()
-        };
-        let mut available = String::new();
-        let mut i = start_offset;
-        while i < limit {
-            let cp = self.input[i];
-            if cp > 0x7F {
-                // Named character references only use ASCII
-                break;
-            }
-            available.push(cp as u8 as char);
-            i += 1;
-            // Stop at reasonable length (longest entity is ~32 chars)
-            if available.len() > 40 {
-                break;
-            }
-        }
-
-        // Find the longest matching entity name
-        let mut best_match: Option<(u32, u32, usize, bool)> = None;
-        for &(name, first, second) in NAMED_CHARACTER_REFERENCES {
-            if available.starts_with(name) {
-                let ends_with_semi = name.ends_with(';');
-                if best_match
-                    .as_ref()
-                    .map_or(true, |bm| name.len() > bm.2)
-                {
-                    best_match = Some((first, second, name.len(), ends_with_semi));
-                }
-            }
-        }
-        best_match
     }
 
     /// Get the next token from the tokenizer.
@@ -2062,6 +2012,7 @@ impl HtmlTokenizer {
                 State::CharacterReference => {
                     self.temporary_buffer.clear();
                     self.temporary_buffer.push(0x26); // '&'
+                    self.entity_matcher = NamedCharacterReferenceMatcher::new();
 
                     match current_input_character {
                         Some(cp) if is_ascii_alphanumeric(cp) => {
@@ -2086,173 +2037,56 @@ impl HtmlTokenizer {
 
                 // 13.2.5.73 Named character reference state
                 State::NamedCharacterReference => {
-                    // Phase 1: In insertion-point mode, try to accumulate chars
-                    // one at a time (for document.write char-by-char case).
+                    // Insertion-point path: feed one character at a time.
                     if self.stop_at_insertion_point && self.insertion_point.is_some() {
                         if let Some(cp) = current_input_character {
-                            if cp <= 0x7F {
-                                let mut prefix: String = self.temporary_buffer[1..]
-                                    .iter()
-                                    .filter_map(|&c| char::from_u32(c))
-                                    .collect();
-                                prefix.push(cp as u8 as char);
-                                if Self::any_entity_starts_with(&prefix) {
-                                    self.temporary_buffer.push(cp);
-                                    continue;
-                                }
-                            }
-                            // Character doesn't continue any entity match.
-                            self.restore_to(self.prev_offset);
-                        } else if self.is_at_insertion_point_at(self.current_offset) {
-                            // At insertion point with no more chars - pause.
-                            return None;
-                        }
-                        // Fall through to resolve accumulated chars.
-                    }
-
-                    // Phase 2: Resolve entity.
-                    let already_accumulated = self.temporary_buffer.len() - 1;
-                    if already_accumulated > 0 {
-                        // We have accumulated chars (from insertion-point passes
-                        // or cross-boundary). Reconsume current char and do
-                        // combined matching with lookahead.
-                        if current_input_character.is_some() {
-                            // Only restore if we haven't already (the insertion-
-                            // point path already did restore_to above).
-                            if self.current_offset != self.prev_offset {
-                                self.restore_to(self.prev_offset);
-                            }
-                        }
-                        // Build combined string: accumulated + lookahead.
-                        let mut combined = String::new();
-                        for &cp in &self.temporary_buffer[1..] {
-                            if let Some(c) = char::from_u32(cp) {
-                                combined.push(c);
-                            }
-                        }
-                        let mut i = self.current_offset;
-                        while i < self.input.len() && combined.len() <= 40 {
-                            let cp = self.input[i];
-                            if cp > 0x7F {
-                                break;
-                            }
-                            combined.push(cp as u8 as char);
-                            i += 1;
-                        }
-                        // Find longest matching entity.
-                        let mut best: Option<(u32, u32, usize, bool)> = None;
-                        for &(name, first, second) in NAMED_CHARACTER_REFERENCES {
-                            if combined.starts_with(name) {
-                                let ends_with_semi = name.ends_with(';');
-                                if best
-                                    .as_ref()
-                                    .map_or(true, |b| name.len() > b.2)
-                                {
-                                    best = Some((
-                                        first,
-                                        second,
-                                        name.len(),
-                                        ends_with_semi,
-                                    ));
-                                }
-                            }
-                        }
-                        if let Some((
-                            first_cp,
-                            second_cp,
-                            total_chars,
-                            ends_with_semi,
-                        )) = best
-                        {
-                            // Consume additional chars from input beyond
-                            // what was in the temp buffer.
-                            let extra = total_chars.saturating_sub(already_accumulated);
-                            if extra > 0 {
-                                self.skip(extra);
-                            }
-                            // If entity is shorter than what we accumulated,
-                            // put back the overconsumed chars.
-                            if total_chars < already_accumulated {
-                                let overconsumed = already_accumulated - total_chars;
-                                self.temporary_buffer.truncate(
-                                    self.temporary_buffer.len() - overconsumed,
-                                );
-                                self.restore_to(
-                                    self.current_offset - overconsumed,
-                                );
-                            }
-
-                            // Check special attribute handling.
-                            let next_cp = self.peek_code_point(0);
-                            if self.consumed_as_part_of_an_attribute()
-                                && !ends_with_semi
-                                && next_cp.map_or(false, |c| {
-                                    c == 0x3D || is_ascii_alphanumeric(c)
-                                })
-                            {
-                                if extra > 0 {
-                                    for j in 0..extra {
-                                        self.temporary_buffer.push(
-                                            self.input[self.current_offset
-                                                - extra
-                                                + j],
-                                        );
-                                    }
-                                }
-                                self.flush_codepoints_consumed_as_character_reference();
-                                self.state = self.return_state;
-                                if !self.queued_tokens.is_empty() {
-                                    return self.queued_tokens.pop_front();
-                                }
+                            if self.entity_matcher.try_consume_code_point(cp) {
+                                self.temporary_buffer.push(cp);
                                 continue;
                             }
-
-                            if !ends_with_semi {
-                                // parse error
+                            // Character not accepted by matcher. Reconsume it.
+                            self.restore_to(self.prev_offset);
+                        } else if self.is_at_insertion_point_at(self.current_offset) {
+                            // At insertion point with no more chars -- pause.
+                            return None;
+                        }
+                        // Fall through to resolution.
+                    } else {
+                        // Normal path: feed all remaining chars in a tight loop.
+                        if current_input_character.is_some() {
+                            self.restore_to(self.prev_offset);
+                        }
+                        let limit = self.input.len();
+                        while self.current_offset < limit {
+                            let cp = self.input[self.current_offset];
+                            if !self.entity_matcher.try_consume_code_point(cp) {
+                                break;
                             }
-
-                            self.temporary_buffer.clear();
-                            self.temporary_buffer.push(first_cp);
-                            if second_cp != 0 {
-                                self.temporary_buffer.push(second_cp);
-                            }
-                            self.flush_codepoints_consumed_as_character_reference();
-                            self.state = self.return_state;
-                            if !self.queued_tokens.is_empty() {
-                                return self.queued_tokens.pop_front();
-                            }
-                            continue;
-                        } else {
-                            // No match.
-                            self.flush_codepoints_consumed_as_character_reference();
-                            self.state = State::AmbiguousAmpersand;
-                            continue;
+                            self.temporary_buffer.push(cp);
+                            self.skip(1);
                         }
                     }
 
-                    // Fresh entry (no accumulated chars). Reconsume and do
-                    // all-at-once matching from the current position.
-                    if current_input_character.is_some() {
-                        self.restore_to(self.prev_offset);
+                    // Resolution: backtrack overconsumed characters.
+                    let overconsumed = self.entity_matcher.overconsumed_code_points() as usize;
+                    if overconsumed > 0 {
+                        self.restore_to(self.current_offset - overconsumed);
+                        self.temporary_buffer.truncate(
+                            self.temporary_buffer.len() - overconsumed,
+                        );
                     }
-                    let match_result =
-                        self.match_named_character_reference(self.current_offset);
 
-                    if let Some((first_cp, second_cp, chars_consumed, ends_with_semi)) =
-                        match_result
-                    {
-                        self.skip(chars_consumed);
+                    if let Some((first_cp, second_cp)) = self.entity_matcher.code_points() {
+                        let ends_with_semi = self.entity_matcher.last_match_ends_with_semicolon();
 
+                        // Check special attribute handling.
                         let next_cp = self.peek_code_point(0);
                         if self.consumed_as_part_of_an_attribute()
                             && !ends_with_semi
-                            && next_cp.map_or(false, |c| c == 0x3D || is_ascii_alphanumeric(c))
+                            && next_cp.map_or(false, |c| {
+                                c == 0x3D || is_ascii_alphanumeric(c)
+                            })
                         {
-                            for i in 0..chars_consumed {
-                                self.temporary_buffer.push(
-                                    self.input[self.current_offset - chars_consumed + i],
-                                );
-                            }
                             self.flush_codepoints_consumed_as_character_reference();
                             self.state = self.return_state;
                             if !self.queued_tokens.is_empty() {
@@ -2277,6 +2111,7 @@ impl HtmlTokenizer {
                         }
                         continue;
                     } else {
+                        // No match found.
                         self.flush_codepoints_consumed_as_character_reference();
                         self.state = State::AmbiguousAmpersand;
                         continue;
