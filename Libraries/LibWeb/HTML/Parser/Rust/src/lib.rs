@@ -6,7 +6,7 @@ pub mod token;
 pub mod tokenizer;
 
 use std::ptr;
-use token::{Attribute, Position, TokenType};
+use token::{Attribute, Position, TokenPayload, TokenType};
 use tokenizer::{HtmlTokenizer, State};
 
 /// Opaque handle for the Rust tokenizer, passed across the FFI boundary.
@@ -184,10 +184,23 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
         None => return false,
     };
 
+    // Fast path: Character and EOF tokens only need a few fields.
+    // Skip zeroing ~200 bytes of FfiToken for 95%+ of all tokens.
+    match token.token_type {
+        TokenType::Character | TokenType::EndOfFile => {
+            out.token_type = token.token_type as u8;
+            out.code_point = token.code_point;
+            out.start_line = token.start_position.line;
+            out.start_column = token.start_position.column;
+            out.end_line = token.end_position.line;
+            out.end_column = token.end_position.column;
+            return true;
+        }
+        _ => {}
+    }
+
     *out = FfiToken::default();
     out.token_type = token.token_type as u8;
-    out.code_point = token.code_point;
-    out.self_closing = token.self_closing;
 
     let (sl, sc) = position_to_ffi(&token.start_position);
     let (el, ec) = position_to_ffi(&token.end_position);
@@ -197,9 +210,10 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
     out.end_column = ec;
 
     // Store string data in handle so pointers stay valid.
-    match token.token_type {
-        TokenType::StartTag | TokenType::EndTag => {
-            handle.last_tag_name = token.tag_name.into_bytes();
+    match token.payload {
+        TokenPayload::Tag { tag_name, self_closing, attributes } => {
+            out.self_closing = self_closing;
+            handle.last_tag_name = tag_name.into_bytes();
             out.tag_name_ptr = handle.last_tag_name.as_ptr();
             out.tag_name_len = handle.last_tag_name.len();
 
@@ -207,11 +221,11 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
             handle.last_attr_names.clear();
             handle.last_attr_values.clear();
             handle.last_attributes.clear();
-            for attr in &token.attributes {
+            for attr in &attributes {
                 handle.last_attr_names.push(attr.local_name.clone().into_bytes());
                 handle.last_attr_values.push(attr.value.clone().into_bytes());
             }
-            for (i, attr) in token.attributes.iter().enumerate() {
+            for (i, attr) in attributes.iter().enumerate() {
                 let ffi_attr = attribute_to_ffi(
                     attr,
                     &handle.last_attr_names[i],
@@ -222,29 +236,27 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
             out.attributes_ptr = handle.last_attributes.as_ptr();
             out.attributes_len = handle.last_attributes.len();
         }
-        TokenType::Comment => {
-            handle.last_comment = token.comment_data.into_bytes();
+        TokenPayload::Comment(data) => {
+            handle.last_comment = data.into_bytes();
             out.comment_ptr = handle.last_comment.as_ptr();
             out.comment_len = handle.last_comment.len();
         }
-        TokenType::Doctype => {
-            if let Some(ref doctype) = token.doctype_data {
-                handle.last_doctype_name = doctype.name.clone().into_bytes();
-                handle.last_public_id = doctype.public_identifier.clone().into_bytes();
-                handle.last_system_id = doctype.system_identifier.clone().into_bytes();
-                out.doctype_name_ptr = handle.last_doctype_name.as_ptr();
-                out.doctype_name_len = handle.last_doctype_name.len();
-                out.public_id_ptr = handle.last_public_id.as_ptr();
-                out.public_id_len = handle.last_public_id.len();
-                out.system_id_ptr = handle.last_system_id.as_ptr();
-                out.system_id_len = handle.last_system_id.len();
-                out.force_quirks = doctype.force_quirks;
-                out.missing_name = doctype.missing_name;
-                out.missing_public_id = doctype.missing_public_identifier;
-                out.missing_system_id = doctype.missing_system_identifier;
-            }
+        TokenPayload::Doctype(doctype) => {
+            handle.last_doctype_name = doctype.name.into_bytes();
+            handle.last_public_id = doctype.public_identifier.into_bytes();
+            handle.last_system_id = doctype.system_identifier.into_bytes();
+            out.doctype_name_ptr = handle.last_doctype_name.as_ptr();
+            out.doctype_name_len = handle.last_doctype_name.len();
+            out.public_id_ptr = handle.last_public_id.as_ptr();
+            out.public_id_len = handle.last_public_id.len();
+            out.system_id_ptr = handle.last_system_id.as_ptr();
+            out.system_id_len = handle.last_system_id.len();
+            out.force_quirks = doctype.force_quirks;
+            out.missing_name = doctype.missing_name;
+            out.missing_public_id = doctype.missing_public_identifier;
+            out.missing_system_id = doctype.missing_system_identifier;
         }
-        _ => {}
+        TokenPayload::None => {}
     }
 
     true

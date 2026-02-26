@@ -268,7 +268,7 @@ Optional<HTMLToken> HTMLTokenizer::next_token(StopAtInsertionPoint stop_at_inser
 {
 #ifdef ENABLE_RUST
     if (m_rust_tokenizer) {
-        RustFfiToken ffi {};
+        RustFfiToken ffi;
         bool stop = stop_at_insertion_point == StopAtInsertionPoint::Yes;
         bool cdata_allowed = m_parser != nullptr
             && m_parser->adjusted_current_node()
