@@ -1228,4 +1228,10 @@ endif()
 # FIXME: https://github.com/microsoft/vcpkg/issues/42324
 target_include_directories(LibWeb PRIVATE ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include)
 
+if (ENABLE_RUST)
+    import_rust_crate(MANIFEST_PATH HTML/Parser/Rust/Cargo.toml CRATE_NAME libweb_html_tokenizer)
+    target_link_libraries(LibWeb PRIVATE libweb_html_tokenizer)
+    target_compile_definitions(LibWeb PRIVATE ENABLE_RUST)
+endif()
+
 generate_js_bindings(LibWeb)
