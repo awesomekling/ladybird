@@ -20,6 +20,8 @@
 
 namespace Web::HTML {
 
+class RustHTMLTokenizer;
+
 #define ENUMERATE_TOKENIZER_STATES                                        \
     __ENUMERATE_TOKENIZER_STATE(Data)                                     \
     __ENUMERATE_TOKENIZER_STATE(RCDATA)                                   \
@@ -106,6 +108,7 @@ class WEB_API HTMLTokenizer {
 public:
     explicit HTMLTokenizer();
     explicit HTMLTokenizer(StringView input, ByteString const& encoding);
+    ~HTMLTokenizer();
 
     enum class State {
 #define __ENUMERATE_TOKENIZER_STATE(state) state,
@@ -222,6 +225,8 @@ private:
     bool m_aborted { false };
 
     Vector<HTMLToken::Position> m_source_positions;
+
+    RustHTMLTokenizer* m_rust_tokenizer { nullptr };
 };
 
 }

@@ -631,6 +631,7 @@ set(SOURCES
     HTML/Parser/HTMLParser.cpp
     HTML/Parser/HTMLToken.cpp
     HTML/Parser/HTMLTokenizer.cpp
+    HTML/Parser/RustHTMLTokenizer.cpp
     HTML/Parser/ListOfActiveFormattingElements.cpp
     HTML/Parser/StackOfOpenElements.cpp
     HTML/Path2D.cpp
