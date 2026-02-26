@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 
 use crate::entities::NamedCharacterReferenceMatcher;
-use crate::token::{Attribute, DoctypeData, Position, Token, TokenType};
+use crate::token::{Attribute, DoctypeData, Position, Token, TokenPayload, TokenType};
 
 /// Tokenizer states per the WHATWG HTML spec section 13.2.5.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,14 +129,17 @@ fn is_ascii_upper_alpha(c: u32) -> bool {
     matches!(c, 0x41..=0x5A)
 }
 
+#[inline]
 fn is_ascii_digit(c: u32) -> bool {
     matches!(c, 0x30..=0x39)
 }
 
+#[inline]
 fn is_ascii_hex_digit(c: u32) -> bool {
     matches!(c, 0x30..=0x39 | 0x41..=0x46 | 0x61..=0x66)
 }
 
+#[inline]
 fn is_ascii_alphanumeric(c: u32) -> bool {
     is_ascii_alpha(c) || is_ascii_digit(c)
 }
@@ -199,10 +202,12 @@ fn is_noncharacter(c: u32) -> bool {
     (0xFDD0..=0xFDEF).contains(&c) || matches!(c & 0xFFFF, 0xFFFE | 0xFFFF)
 }
 
+#[inline]
 fn is_ascii_lower_alpha(c: u32) -> bool {
     matches!(c, 0x61..=0x7A)
 }
 
+#[inline]
 fn cp_to_char(cp: u32) -> char {
     char::from_u32(cp).unwrap_or('\u{FFFD}')
 }
@@ -313,7 +318,7 @@ impl HtmlTokenizer {
         Some(self.input[idx as usize])
     }
 
-    #[inline]
+    #[inline(always)]
     fn skip(&mut self, count: usize) {
         if !self.source_positions.is_empty() {
             let last = *self.source_positions.last().unwrap();
@@ -334,6 +339,7 @@ impl HtmlTokenizer {
         }
     }
 
+    #[inline(always)]
     fn next_code_point(&mut self) -> Option<u32> {
         if self.current_offset >= self.input.len() {
             self.prev_offset = self.current_offset;
@@ -354,7 +360,7 @@ impl HtmlTokenizer {
         Some(0x0A)
     }
 
-    #[inline]
+    #[inline(always)]
     fn nth_last_position(&self, n: usize) -> Position {
         if n + 1 > self.source_positions.len() {
             return Position { line: 0, column: 0 };
@@ -375,13 +381,27 @@ impl HtmlTokenizer {
     }
 
     fn create_new_token(&mut self, token_type: TokenType) {
-        self.current_token = Token::default();
-        self.current_token.token_type = token_type;
+        let payload = match token_type {
+            TokenType::StartTag | TokenType::EndTag => TokenPayload::Tag {
+                tag_name: String::new(),
+                self_closing: false,
+                attributes: Vec::new(),
+            },
+            TokenType::Comment => TokenPayload::Comment(String::new()),
+            TokenType::Doctype => TokenPayload::Doctype(Box::new(DoctypeData::default())),
+            _ => TokenPayload::None,
+        };
         let pos = match token_type {
             TokenType::StartTag | TokenType::EndTag => self.nth_last_position(1),
             _ => self.nth_last_position(0),
         };
-        self.current_token.start_position = pos;
+        self.current_token = Token {
+            token_type,
+            code_point: 0,
+            payload,
+            start_position: pos,
+            end_position: Position::default(),
+        };
     }
 
     fn current_end_tag_token_is_appropriate(&self) -> bool {
@@ -389,7 +409,7 @@ impl HtmlTokenizer {
             return false;
         }
         match &self.last_emitted_start_tag_name {
-            Some(name) => self.current_token.tag_name == *name,
+            Some(name) => self.current_token.tag_name() == name,
             None => false,
         }
     }
@@ -409,7 +429,7 @@ impl HtmlTokenizer {
         if token_idx == 0 {
             if self.current_token.token_type == TokenType::StartTag {
                 self.last_emitted_start_tag_name =
-                    Some(self.current_token.tag_name.clone());
+                    Some(self.current_token.tag_name().to_string());
             }
             let is_start_or_end_tag = self.current_token.token_type == TokenType::StartTag
                 || self.current_token.token_type == TokenType::EndTag;
@@ -424,7 +444,7 @@ impl HtmlTokenizer {
         self.queued_tokens.push_back(token);
     }
 
-    #[inline]
+    #[inline(always)]
     fn return_character_token(&mut self, code_point: u32) -> Option<Token> {
         let token = self.make_character_token(code_point);
         if self.queued_tokens.is_empty() {
@@ -724,19 +744,19 @@ impl HtmlTokenizer {
                 // 13.2.5.8 Tag name state
                 State::TagName => match current_input_character {
                     Some(cp) if is_whitespace(cp) => {
-                        self.current_token.tag_name = self.consume_current_builder();
+                        { let name = self.consume_current_builder(); *self.current_token.tag_name_mut() = name; }
                         self.current_token.end_position = self.nth_last_position(1);
                         self.state = State::BeforeAttributeName;
                         continue;
                     }
                     Some(0x2F) => {
-                        self.current_token.tag_name = self.consume_current_builder();
+                        { let name = self.consume_current_builder(); *self.current_token.tag_name_mut() = name; }
                         self.current_token.end_position = self.nth_last_position(0);
                         self.state = State::SelfClosingStartTag;
                         continue;
                     }
                     Some(0x3E) => {
-                        self.current_token.tag_name = self.consume_current_builder();
+                        { let name = self.consume_current_builder(); *self.current_token.tag_name_mut() = name; }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
@@ -775,13 +795,13 @@ impl HtmlTokenizer {
                     }
                     Some(0x3D) => {
                         // '=' - parse error
-                        self.current_token.attributes.push(Attribute::default());
+                        self.current_token.attributes_mut().push(Attribute::default());
                         self.current_builder.push('=');
                         self.state = State::AttributeName;
                         continue;
                     }
                     Some(_) => {
-                        self.current_token.attributes.push(Attribute::default());
+                        self.current_token.attributes_mut().push(Attribute::default());
                         self.reconsume(State::AttributeName);
                         continue;
                     }
@@ -849,7 +869,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        self.current_token.attributes.push(Attribute::default());
+                        self.current_token.attributes_mut().push(Attribute::default());
                         self.reconsume(State::AttributeName);
                         continue;
                     }
@@ -858,7 +878,7 @@ impl HtmlTokenizer {
                 // 13.2.5.35 Before attribute value state
                 State::BeforeAttributeValue => {
                     let pos = self.nth_last_position(1);
-                    if let Some(attr) = self.current_token.attributes.last_mut() {
+                    if let Some(attr) = self.current_token.attributes_mut().last_mut() {
                         attr.value_start_position = pos;
                     }
                     match current_input_character {
@@ -982,7 +1002,7 @@ impl HtmlTokenizer {
                 // 13.2.5.39 After attribute value (quoted) state
                 State::AfterAttributeValueQuoted => {
                     let pos = self.nth_last_position(1);
-                    if let Some(attr) = self.current_token.attributes.last_mut() {
+                    if let Some(attr) = self.current_token.attributes_mut().last_mut() {
                         attr.value_end_position = pos;
                     }
                     match current_input_character {
@@ -1014,7 +1034,7 @@ impl HtmlTokenizer {
                 // 13.2.5.40 Self-closing start tag state
                 State::SelfClosingStartTag => match current_input_character {
                     Some(0x3E) => {
-                        self.current_token.self_closing = true;
+                        self.current_token.set_self_closing(true);
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
@@ -1033,13 +1053,13 @@ impl HtmlTokenizer {
                 // 13.2.5.41 Bogus comment state
                 State::BogusComment => match current_input_character {
                     Some(0x3E) => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1107,7 +1127,7 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         // parse error
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
@@ -1126,13 +1146,13 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         // parse error
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1159,7 +1179,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1231,7 +1251,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1245,7 +1265,7 @@ impl HtmlTokenizer {
                 // 13.2.5.51 Comment end state
                 State::CommentEnd => match current_input_character {
                     Some(0x3E) => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
@@ -1259,7 +1279,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1279,13 +1299,13 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         // parse error
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        self.current_token.comment_data = self.consume_current_builder();
+                        { let data = self.consume_current_builder(); self.current_token.set_comment_data(data); }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1308,13 +1328,13 @@ impl HtmlTokenizer {
                     }
                     None => {
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
@@ -1332,12 +1352,12 @@ impl HtmlTokenizer {
                     }
                     Some(cp) if is_ascii_upper_alpha(cp) => {
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.current_builder
                             .push(char::from_u32(to_ascii_lowercase(cp)).unwrap());
                         self.state = State::DOCTYPEName;
@@ -1345,12 +1365,12 @@ impl HtmlTokenizer {
                     }
                     Some(0x00) => {
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.current_builder.push('\u{FFFD}');
                         self.state = State::DOCTYPEName;
                         continue;
@@ -1358,37 +1378,37 @@ impl HtmlTokenizer {
                     Some(0x3E) => {
                         // parse error
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.state = State::Data;
                         self.emit_current_token();
                         return self.queued_tokens.pop_front();
                     }
                     None => {
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(cp) => {
                         self.create_new_token(TokenType::Doctype);
-                        self.current_token.doctype_data = Some(DoctypeData {
+                        *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
                             missing_system_identifier: true,
                             ..Default::default()
-                        });
+                        };
                         self.current_builder
                             .push(cp_to_char(cp));
                         self.state = State::DOCTYPEName;
@@ -1401,7 +1421,7 @@ impl HtmlTokenizer {
                     Some(cp) if is_whitespace(cp) => {
                         {
                             let name = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.name = name;
                             }
                         }
@@ -1411,7 +1431,7 @@ impl HtmlTokenizer {
                     Some(0x3E) => {
                         {
                             let name = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.name = name;
                             }
                         }
@@ -1430,7 +1450,7 @@ impl HtmlTokenizer {
                     }
                     None => {
                         let name = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.name = name;
                             dd.force_quirks = true;
                         }
@@ -1455,7 +1475,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
@@ -1484,7 +1504,7 @@ impl HtmlTokenizer {
                         }
                         // Re-consume the character we put back
                         let _ = self.next_code_point();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1499,21 +1519,21 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x22) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.missing_public_identifier = false;
                         }
                         self.state = State::DOCTYPEPublicIdentifierDoubleQuoted;
                         continue;
                     }
                     Some(0x27) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.missing_public_identifier = false;
                         }
                         self.state = State::DOCTYPEPublicIdentifierSingleQuoted;
                         continue;
                     }
                     Some(0x3E) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.state = State::Data;
@@ -1521,14 +1541,14 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1540,21 +1560,21 @@ impl HtmlTokenizer {
                 State::BeforeDOCTYPEPublicIdentifier => match current_input_character {
                     Some(cp) if is_whitespace(cp) => continue,
                     Some(0x22) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.missing_public_identifier = false;
                         }
                         self.state = State::DOCTYPEPublicIdentifierDoubleQuoted;
                         continue;
                     }
                     Some(0x27) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.missing_public_identifier = false;
                         }
                         self.state = State::DOCTYPEPublicIdentifierSingleQuoted;
                         continue;
                     }
                     Some(0x3E) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.state = State::Data;
@@ -1562,14 +1582,14 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1582,7 +1602,7 @@ impl HtmlTokenizer {
                     Some(0x22) => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                             }
                         }
@@ -1596,7 +1616,7 @@ impl HtmlTokenizer {
                     Some(0x3E) => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                                 dd.force_quirks = true;
                             }
@@ -1608,7 +1628,7 @@ impl HtmlTokenizer {
                     None => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                                 dd.force_quirks = true;
                             }
@@ -1628,7 +1648,7 @@ impl HtmlTokenizer {
                     Some(0x27) => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                             }
                         }
@@ -1642,7 +1662,7 @@ impl HtmlTokenizer {
                     Some(0x3E) => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                                 dd.force_quirks = true;
                             }
@@ -1654,7 +1674,7 @@ impl HtmlTokenizer {
                     None => {
                         {
                             let val = self.consume_current_builder();
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.public_identifier = val;
                                 dd.force_quirks = true;
                             }
@@ -1681,7 +1701,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     Some(0x22) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1689,7 +1709,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x27) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1697,14 +1717,14 @@ impl HtmlTokenizer {
                         continue;
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1722,7 +1742,7 @@ impl HtmlTokenizer {
                             return self.queued_tokens.pop_front();
                         }
                         Some(0x22) => {
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.system_identifier = String::new();
                                 dd.missing_system_identifier = false;
                             }
@@ -1730,7 +1750,7 @@ impl HtmlTokenizer {
                             continue;
                         }
                         Some(0x27) => {
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.system_identifier = String::new();
                                 dd.missing_system_identifier = false;
                             }
@@ -1738,14 +1758,14 @@ impl HtmlTokenizer {
                             continue;
                         }
                         None => {
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.force_quirks = true;
                             }
                             self.emit_current_token_followed_by_eof();
                             return self.queued_tokens.pop_front();
                         }
                         Some(_) => {
-                            if let Some(ref mut dd) = self.current_token.doctype_data {
+                            { let dd = self.current_token.doctype_data_mut();
                                 dd.force_quirks = true;
                             }
                             self.reconsume(State::BogusDOCTYPE);
@@ -1761,7 +1781,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x22) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1769,7 +1789,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x27) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1777,7 +1797,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x3E) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.state = State::Data;
@@ -1785,14 +1805,14 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1804,7 +1824,7 @@ impl HtmlTokenizer {
                 State::BeforeDOCTYPESystemIdentifier => match current_input_character {
                     Some(cp) if is_whitespace(cp) => continue,
                     Some(0x22) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1812,7 +1832,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x27) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = String::new();
                             dd.missing_system_identifier = false;
                         }
@@ -1820,7 +1840,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x3E) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.state = State::Data;
@@ -1828,14 +1848,14 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
                         return self.queued_tokens.pop_front();
                     }
                     Some(_) => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.reconsume(State::BogusDOCTYPE);
@@ -1847,7 +1867,7 @@ impl HtmlTokenizer {
                 State::DOCTYPESystemIdentifierDoubleQuoted => match current_input_character {
                     Some(0x22) => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                         }
                         self.state = State::AfterDOCTYPESystemIdentifier;
@@ -1859,7 +1879,7 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                             dd.force_quirks = true;
                         }
@@ -1869,7 +1889,7 @@ impl HtmlTokenizer {
                     }
                     None => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                             dd.force_quirks = true;
                         }
@@ -1887,7 +1907,7 @@ impl HtmlTokenizer {
                 State::DOCTYPESystemIdentifierSingleQuoted => match current_input_character {
                     Some(0x27) => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                         }
                         self.state = State::AfterDOCTYPESystemIdentifier;
@@ -1899,7 +1919,7 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                             dd.force_quirks = true;
                         }
@@ -1909,7 +1929,7 @@ impl HtmlTokenizer {
                     }
                     None => {
                         let sys_id = self.consume_current_builder();
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.system_identifier = sys_id;
                             dd.force_quirks = true;
                         }
@@ -1932,7 +1952,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        if let Some(ref mut dd) = self.current_token.doctype_data {
+                        { let dd = self.current_token.doctype_data_mut();
                             dd.force_quirks = true;
                         }
                         self.emit_current_token_followed_by_eof();
@@ -2728,7 +2748,7 @@ impl HtmlTokenizer {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn make_character_token(&self, code_point: u32) -> Token {
         let mut token = Token::new_character(code_point);
         token.start_position = self.nth_last_position(0);
@@ -2739,7 +2759,7 @@ impl HtmlTokenizer {
         let name = self.consume_current_builder();
         let name_start = self.nth_last_position(1);
         let name_end = self.nth_last_position(0);
-        if let Some(attr) = self.current_token.attributes.last_mut() {
+        if let Some(attr) = self.current_token.attributes_mut().last_mut() {
             attr.local_name = name;
             attr.name_start_position = name_start;
             attr.name_end_position = name_end;
@@ -2749,7 +2769,7 @@ impl HtmlTokenizer {
     fn set_attribute_value(&mut self) {
         let value = self.consume_current_builder();
         let value_end = self.nth_last_position(0);
-        if let Some(attr) = self.current_token.attributes.last_mut() {
+        if let Some(attr) = self.current_token.attributes_mut().last_mut() {
             attr.value = value;
             attr.value_end_position = value_end;
         }
@@ -2768,7 +2788,7 @@ impl HtmlTokenizer {
     ) {
         match current_input_character {
             Some(cp) if is_whitespace(cp) || cp == 0x2F || cp == 0x3E => {
-                self.current_token.tag_name = self.consume_current_builder();
+                { let name = self.consume_current_builder(); *self.current_token.tag_name_mut() = name; }
                 if self.current_end_tag_token_is_appropriate() {
                     match cp {
                         _ if is_whitespace(cp) => {

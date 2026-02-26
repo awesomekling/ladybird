@@ -50,25 +50,32 @@ impl Default for TokenType {
     }
 }
 
+/// Type-specific data for an HTML token.
+#[derive(Clone, Debug)]
+pub enum TokenPayload {
+    None,
+    Tag {
+        tag_name: String,
+        self_closing: bool,
+        attributes: Vec<Attribute>,
+    },
+    Comment(String),
+    Doctype(Box<DoctypeData>),
+}
+
+impl Default for TokenPayload {
+    fn default() -> Self {
+        TokenPayload::None
+    }
+}
+
 /// An HTML token produced by the tokenizer.
 #[derive(Clone, Debug, Default)]
 pub struct Token {
     pub token_type: TokenType,
-    /// For Character tokens: the code point.
     pub code_point: u32,
-    /// For StartTag/EndTag tokens: the tag name.
-    pub tag_name: String,
-    /// For StartTag/EndTag tokens: whether the tag is self-closing.
-    pub self_closing: bool,
-    /// For StartTag/EndTag tokens: the attributes.
-    pub attributes: Vec<Attribute>,
-    /// For Comment tokens: the comment data.
-    pub comment_data: String,
-    /// For DOCTYPE tokens: the doctype data.
-    pub doctype_data: Option<DoctypeData>,
-    /// Source position where this token starts.
+    pub payload: TokenPayload,
     pub start_position: Position,
-    /// Source position where this token ends.
     pub end_position: Position,
 }
 
@@ -85,6 +92,62 @@ impl Token {
         Token {
             token_type: TokenType::EndOfFile,
             ..Default::default()
+        }
+    }
+
+    #[inline(always)]
+    pub fn tag_name(&self) -> &str {
+        match &self.payload {
+            TokenPayload::Tag { tag_name, .. } => tag_name,
+            _ => "",
+        }
+    }
+
+    #[inline(always)]
+    pub fn tag_name_mut(&mut self) -> &mut String {
+        match &mut self.payload {
+            TokenPayload::Tag { tag_name, .. } => tag_name,
+            _ => panic!("tag_name_mut called on non-tag token"),
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_self_closing(&mut self, value: bool) {
+        match &mut self.payload {
+            TokenPayload::Tag { self_closing, .. } => *self_closing = value,
+            _ => panic!("set_self_closing called on non-tag token"),
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_self_closing(&self) -> bool {
+        match &self.payload {
+            TokenPayload::Tag { self_closing, .. } => *self_closing,
+            _ => false,
+        }
+    }
+
+    #[inline(always)]
+    pub fn attributes_mut(&mut self) -> &mut Vec<Attribute> {
+        match &mut self.payload {
+            TokenPayload::Tag { attributes, .. } => attributes,
+            _ => panic!("attributes_mut called on non-tag token"),
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_comment_data(&mut self, data: String) {
+        match &mut self.payload {
+            TokenPayload::Comment(s) => *s = data,
+            _ => panic!("set_comment_data called on non-comment token"),
+        }
+    }
+
+    #[inline(always)]
+    pub fn doctype_data_mut(&mut self) -> &mut DoctypeData {
+        match &mut self.payload {
+            TokenPayload::Doctype(dd) => dd,
+            _ => panic!("doctype_data_mut called on non-doctype token"),
         }
     }
 }
