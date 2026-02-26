@@ -21,6 +21,7 @@ endif()
 
 
 lagom_utility(test262-runner SOURCES test262-runner.cpp LIBS LibJS LibFileSystem LibGC)
+lagom_utility(dump-html-tokens SOURCES dump-html-tokens.cpp LIBS LibMain LibWeb)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(CheckCSourceCompiles)
