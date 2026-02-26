@@ -17,6 +17,10 @@
 #include <LibWeb/Namespace.h>
 #include <string.h>
 
+#ifdef ENABLE_RUST
+#    include <LibWeb/HTML/Parser/RustHTMLTokenizer.h>
+#endif
+
 namespace Web::HTML {
 
 #pragma GCC diagnostic ignored "-Wunused-label"
@@ -262,6 +266,84 @@ HTMLToken::Position HTMLTokenizer::nth_last_position(size_t n)
 
 Optional<HTMLToken> HTMLTokenizer::next_token(StopAtInsertionPoint stop_at_insertion_point)
 {
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer) {
+        RustFfiToken ffi {};
+        if (!m_rust_tokenizer->next_token(ffi))
+            return {};
+
+        // Map FFI token type (Rust enum) to HTMLToken::Type.
+        HTMLToken::Type type;
+        switch (ffi.token_type) {
+        case 1: type = HTMLToken::Type::DOCTYPE; break;
+        case 2: type = HTMLToken::Type::StartTag; break;
+        case 3: type = HTMLToken::Type::EndTag; break;
+        case 4: type = HTMLToken::Type::Comment; break;
+        case 5: type = HTMLToken::Type::Character; break;
+        case 6: type = HTMLToken::Type::EndOfFile; break;
+        default: VERIFY_NOT_REACHED();
+        }
+
+        HTMLToken token { type };
+        token.set_start_position({}, { ffi.start_line, ffi.start_column });
+        token.set_end_position({}, { ffi.end_line, ffi.end_column });
+
+        switch (type) {
+        case HTMLToken::Type::Character:
+            token.set_code_point(ffi.code_point);
+            break;
+        case HTMLToken::Type::StartTag:
+        case HTMLToken::Type::EndTag: {
+            auto tag_name_view = StringView { ffi.tag_name_ptr, ffi.tag_name_len };
+            token.set_tag_name(MUST(FlyString::from_utf8(tag_name_view)));
+            token.set_self_closing(ffi.self_closing);
+            for (size_t i = 0; i < ffi.attributes_len; ++i) {
+                auto const& fa = ffi.attributes_ptr[i];
+                HTMLToken::Attribute attr;
+                attr.local_name = MUST(FlyString::from_utf8(StringView { fa.name_ptr, fa.name_len }));
+                attr.value = MUST(String::from_utf8(StringView { fa.value_ptr, fa.value_len }));
+                attr.name_start_position = { fa.name_start_line, fa.name_start_column };
+                attr.name_end_position = { fa.name_end_line, fa.name_end_column };
+                attr.value_start_position = { fa.value_start_line, fa.value_start_column };
+                attr.value_end_position = { fa.value_end_line, fa.value_end_column };
+                token.add_attribute(move(attr));
+            }
+            token.normalize_attributes();
+            break;
+        }
+        case HTMLToken::Type::Comment:
+            token.set_comment(MUST(String::from_utf8(StringView { ffi.comment_ptr, ffi.comment_len })));
+            break;
+        case HTMLToken::Type::DOCTYPE: {
+            auto& doctype = token.ensure_doctype_data();
+            if (!ffi.missing_name) {
+                doctype.name = MUST(String::from_utf8(StringView { ffi.doctype_name_ptr, ffi.doctype_name_len }));
+                doctype.missing_name = false;
+            }
+            if (!ffi.missing_public_id) {
+                doctype.public_identifier = MUST(String::from_utf8(StringView { ffi.public_id_ptr, ffi.public_id_len }));
+                doctype.missing_public_identifier = false;
+            }
+            if (!ffi.missing_system_id) {
+                doctype.system_identifier = MUST(String::from_utf8(StringView { ffi.system_id_ptr, ffi.system_id_len }));
+                doctype.missing_system_identifier = false;
+            }
+            doctype.force_quirks = ffi.force_quirks;
+            break;
+        }
+        case HTMLToken::Type::EndOfFile:
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        if (token.is_start_tag())
+            m_last_emitted_start_tag_name = token.tag_name();
+
+        return token;
+    }
+#endif
+
     if (!m_source_positions.is_empty()) {
         auto last_position = m_source_positions.last();
         m_source_positions.clear_with_capacity();
@@ -2883,6 +2965,13 @@ HTMLTokenizer::HTMLTokenizer()
     m_source_positions.empend(0u, 0u);
 }
 
+HTMLTokenizer::~HTMLTokenizer()
+{
+#ifdef ENABLE_RUST
+    delete m_rust_tokenizer;
+#endif
+}
+
 HTMLTokenizer::HTMLTokenizer(StringView input, ByteString const& encoding)
 {
     auto decoder = TextCodec::decoder_for(encoding);
@@ -2894,6 +2983,11 @@ HTMLTokenizer::HTMLTokenizer(StringView input, ByteString const& encoding)
     m_current_offset = 0;
     m_prev_offset = 0;
     m_source_positions.empend(0u, 0u);
+
+#ifdef ENABLE_RUST
+    if (rust_html_tokenizer_enabled())
+        m_rust_tokenizer = new RustHTMLTokenizer(m_decoded_input);
+#endif
 }
 
 void HTMLTokenizer::parser_did_run(Badge<HTMLParser>)
@@ -2956,6 +3050,10 @@ void HTMLTokenizer::switch_to(Badge<HTMLParser>, State new_state)
 {
     dbgln_if(TOKENIZER_TRACE_DEBUG, "[{}] Parser switches tokenizer state to {}", state_name(m_state), state_name(new_state));
     m_state = new_state;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->switch_to(new_state);
+#endif
 }
 
 void HTMLTokenizer::will_emit(HTMLToken& token)
