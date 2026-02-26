@@ -130,8 +130,8 @@ public:
         m_state = new_state;
     }
 
-    void set_blocked(bool b) { m_blocked = b; }
-    bool is_blocked() const { return m_blocked; }
+    void set_blocked(bool b);
+    bool is_blocked() const;
 
     auto const& source() const { return m_source; }
 
@@ -139,15 +139,15 @@ public:
     void insert_eof();
     bool is_eof_inserted();
 
-    bool is_insertion_point_defined() const { return m_insertion_point.has_value(); }
-    bool is_insertion_point_reached() { return m_insertion_point.has_value() && m_current_offset >= *m_insertion_point; }
-    void undefine_insertion_point() { m_insertion_point = {}; }
-    void store_insertion_point() { m_old_insertion_point = m_insertion_point; }
-    void restore_insertion_point() { m_insertion_point = move(m_old_insertion_point); }
-    void update_insertion_point() { m_insertion_point = m_current_offset; }
+    bool is_insertion_point_defined() const;
+    bool is_insertion_point_reached();
+    void undefine_insertion_point();
+    void store_insertion_point();
+    void restore_insertion_point();
+    void update_insertion_point();
 
     // This permanently cuts off the tokenizer input stream.
-    void abort() { m_aborted = true; }
+    void abort();
 
     void parser_did_run(Badge<HTMLParser>);
 

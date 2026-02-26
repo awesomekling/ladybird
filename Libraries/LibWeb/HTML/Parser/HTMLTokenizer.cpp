@@ -269,7 +269,11 @@ Optional<HTMLToken> HTMLTokenizer::next_token(StopAtInsertionPoint stop_at_inser
 #ifdef ENABLE_RUST
     if (m_rust_tokenizer) {
         RustFfiToken ffi {};
-        if (!m_rust_tokenizer->next_token(ffi))
+        bool stop = stop_at_insertion_point == StopAtInsertionPoint::Yes;
+        bool cdata_allowed = m_parser != nullptr
+            && m_parser->adjusted_current_node()
+            && m_parser->adjusted_current_node()->namespace_uri() != Namespace::HTML;
+        if (!m_rust_tokenizer->next_token(ffi, stop, cdata_allowed))
             return {};
 
         // Map FFI token type (Rust enum) to HTMLToken::Type.
@@ -2992,6 +2996,11 @@ HTMLTokenizer::HTMLTokenizer(StringView input, ByteString const& encoding)
 
 void HTMLTokenizer::parser_did_run(Badge<HTMLParser>)
 {
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        return;
+#endif
+
     // OPTIMIZATION: If we've consumed all input and the insertion point is at the start,
     //               we can throw away the decoded input buffer to save memory.
     if (m_current_offset > 0
@@ -3006,13 +3015,24 @@ void HTMLTokenizer::parser_did_run(Badge<HTMLParser>)
 
 void HTMLTokenizer::insert_input_at_insertion_point(StringView input)
 {
+    auto utf8_to_insert = MUST(String::from_utf8(input));
+
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer) {
+        Vector<u32> code_points;
+        for (auto code_point : utf8_to_insert.code_points())
+            code_points.append(code_point);
+        m_rust_tokenizer->insert_input(code_points);
+        return;
+    }
+#endif
+
     Vector<u32> new_decoded_input;
     new_decoded_input.ensure_capacity(m_decoded_input.size() + input.length());
 
     auto before = m_decoded_input.span().slice(0, *m_insertion_point);
     new_decoded_input.append(before.data(), before.size());
 
-    auto utf8_to_insert = MUST(String::from_utf8(input));
     ssize_t code_points_inserted = 0;
     for (auto code_point : utf8_to_insert.code_points()) {
         new_decoded_input.append(code_point);
@@ -3029,11 +3049,97 @@ void HTMLTokenizer::insert_input_at_insertion_point(StringView input)
 void HTMLTokenizer::insert_eof()
 {
     m_explicit_eof_inserted = true;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->insert_eof();
+#endif
 }
 
 bool HTMLTokenizer::is_eof_inserted()
 {
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        return m_rust_tokenizer->is_eof_inserted();
+#endif
     return m_explicit_eof_inserted;
+}
+
+void HTMLTokenizer::set_blocked(bool b)
+{
+    m_blocked = b;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->set_blocked(b);
+#endif
+}
+
+bool HTMLTokenizer::is_blocked() const
+{
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        return m_rust_tokenizer->is_blocked();
+#endif
+    return m_blocked;
+}
+
+bool HTMLTokenizer::is_insertion_point_defined() const
+{
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        return m_rust_tokenizer->is_insertion_point_defined();
+#endif
+    return m_insertion_point.has_value();
+}
+
+bool HTMLTokenizer::is_insertion_point_reached()
+{
+    // NB: This is only used by the C++ tokenizer's state machine.
+    return m_insertion_point.has_value() && m_current_offset >= *m_insertion_point;
+}
+
+void HTMLTokenizer::undefine_insertion_point()
+{
+    m_insertion_point = {};
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->undefine_insertion_point();
+#endif
+}
+
+void HTMLTokenizer::store_insertion_point()
+{
+    m_old_insertion_point = m_insertion_point;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->store_insertion_point();
+#endif
+}
+
+void HTMLTokenizer::restore_insertion_point()
+{
+    m_insertion_point = move(m_old_insertion_point);
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->restore_insertion_point();
+#endif
+}
+
+void HTMLTokenizer::update_insertion_point()
+{
+    m_insertion_point = m_current_offset;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->update_insertion_point();
+#endif
+}
+
+void HTMLTokenizer::abort()
+{
+    m_aborted = true;
+#ifdef ENABLE_RUST
+    if (m_rust_tokenizer)
+        m_rust_tokenizer->abort();
+#endif
 }
 
 void HTMLTokenizer::will_switch_to([[maybe_unused]] State new_state)
