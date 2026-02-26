@@ -194,6 +194,14 @@ fn is_noncharacter(c: u32) -> bool {
     (0xFDD0..=0xFDEF).contains(&c) || matches!(c & 0xFFFF, 0xFFFE | 0xFFFF)
 }
 
+fn is_ascii_lower_alpha(c: u32) -> bool {
+    matches!(c, 0x61..=0x7A)
+}
+
+fn cp_to_char(cp: u32) -> char {
+    char::from_u32(cp).unwrap_or('\u{FFFD}')
+}
+
 impl HtmlTokenizer {
     /// Create a new tokenizer for the given input (as UTF-32 code points).
     pub fn new(input: Vec<u32>) -> Self {
@@ -430,10 +438,10 @@ impl HtmlTokenizer {
     }
 
     fn flush_codepoints_consumed_as_character_reference(&mut self) {
-        for &code_point in &self.temporary_buffer.clone() {
+        for i in 0..self.temporary_buffer.len() {
+            let code_point = self.temporary_buffer[i];
             if self.consumed_as_part_of_an_attribute() {
-                self.current_builder
-                    .push(char::from_u32(code_point).unwrap_or('\u{FFFD}'));
+                self.current_builder.push(cp_to_char(code_point));
             } else {
                 let mut token = Token::new_character(code_point);
                 token.start_position = self.nth_last_position(0);
@@ -457,8 +465,7 @@ impl HtmlTokenizer {
     /// Returns Some(true) if matched and consumed, Some(false) if no match,
     /// None if ran out of characters at the insertion point.
     fn consume_next_if_match(&mut self, s: &str) -> Option<bool> {
-        let bytes: Vec<u8> = s.bytes().collect();
-        for (i, &b) in bytes.iter().enumerate() {
+        for (i, b) in s.bytes().enumerate() {
             match self.peek_code_point(i as isize) {
                 None => {
                     if self.is_at_insertion_point_at(self.current_offset + i) {
@@ -467,24 +474,20 @@ impl HtmlTokenizer {
                     return Some(false);
                 }
                 Some(cp) => {
-                    let expected = b as u32;
-                    let actual = cp;
-                    // Case-insensitive for ASCII
-                    if to_ascii_lowercase(actual) != to_ascii_lowercase(expected) {
+                    if to_ascii_lowercase(cp) != to_ascii_lowercase(b as u32) {
                         return Some(false);
                     }
                 }
             }
         }
         // All matched, consume them
-        self.skip(bytes.len());
+        self.skip(s.len());
         Some(true)
     }
 
     /// Case-sensitive match of upcoming input against a string.
     fn consume_next_if_match_exact(&mut self, s: &str) -> Option<bool> {
-        let bytes: Vec<u8> = s.bytes().collect();
-        for (i, &b) in bytes.iter().enumerate() {
+        for (i, b) in s.bytes().enumerate() {
             match self.peek_code_point(i as isize) {
                 None => {
                     if self.is_at_insertion_point_at(self.current_offset + i) {
@@ -499,7 +502,7 @@ impl HtmlTokenizer {
                 }
             }
         }
-        self.skip(bytes.len());
+        self.skip(s.len());
         Some(true)
     }
 
@@ -803,7 +806,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         self.current_token.end_position = self.nth_last_position(0);
                         continue;
                     }
@@ -861,12 +864,12 @@ impl HtmlTokenizer {
                     Some(cp @ (0x22 | 0x27 | 0x3C)) => {
                         // '"', '\'', '<' - parse error
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -953,7 +956,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -980,7 +983,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1010,7 +1013,7 @@ impl HtmlTokenizer {
                     Some(cp @ (0x22 | 0x27 | 0x3C | 0x3D | 0x60)) => {
                         // parse error, treat as anything else
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                     None => {
@@ -1019,7 +1022,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1094,7 +1097,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1102,9 +1105,8 @@ impl HtmlTokenizer {
                 // 13.2.5.42 Markup declaration open state
                 State::MarkupDeclarationOpen => {
                     // Don't consume next input character (reconsume).
-                    if let Some(c) = current_input_character {
+                    if current_input_character.is_some() {
                         self.restore_to(self.prev_offset);
-                        let _ = c;
                     }
 
                     match self.consume_next_if_match_exact("--") {
@@ -1211,7 +1213,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1436,7 +1438,7 @@ impl HtmlTokenizer {
                             ..Default::default()
                         });
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         self.state = State::DOCTYPEName;
                         continue;
                     }
@@ -1485,7 +1487,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1509,9 +1511,8 @@ impl HtmlTokenizer {
                     }
                     Some(_) => {
                         // Reconsume and try PUBLIC/SYSTEM
-                        if let Some(c) = current_input_character {
+                        if current_input_character.is_some() {
                             self.restore_to(self.prev_offset);
-                            let _ = c;
                         }
                         match self.consume_next_if_match("PUBLIC") {
                             Some(true) => {
@@ -1665,7 +1666,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1711,7 +1712,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1925,7 +1926,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -1965,7 +1966,7 @@ impl HtmlTokenizer {
                     }
                     Some(cp) => {
                         self.current_builder
-                            .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                            .push(cp_to_char(cp));
                         continue;
                     }
                 },
@@ -2115,7 +2116,7 @@ impl HtmlTokenizer {
                         // We have accumulated chars (from insertion-point passes
                         // or cross-boundary). Reconsume current char and do
                         // combined matching with lookahead.
-                        if let Some(_) = current_input_character {
+                        if current_input_character.is_some() {
                             // Only restore if we haven't already (the insertion-
                             // point path already did restore_to above).
                             if self.current_offset != self.prev_offset {
@@ -2231,7 +2232,7 @@ impl HtmlTokenizer {
 
                     // Fresh entry (no accumulated chars). Reconsume and do
                     // all-at-once matching from the current position.
-                    if let Some(_) = current_input_character {
+                    if current_input_character.is_some() {
                         self.restore_to(self.prev_offset);
                     }
                     let match_result =
@@ -2287,7 +2288,7 @@ impl HtmlTokenizer {
                     Some(cp) if is_ascii_alphanumeric(cp) => {
                         if self.consumed_as_part_of_an_attribute() {
                             self.current_builder
-                                .push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                                .push(cp_to_char(cp));
                             continue;
                         } else {
                             self.emit_character(cp);
@@ -2416,7 +2417,7 @@ impl HtmlTokenizer {
                 // 13.2.5.80 Numeric character reference end state
                 State::NumericCharacterReferenceEnd => {
                     // Don't consume
-                    if let Some(_) = current_input_character {
+                    if current_input_character.is_some() {
                         self.restore_to(self.prev_offset);
                     }
 
@@ -2768,7 +2769,7 @@ impl HtmlTokenizer {
                         self.emit_character(cp);
                         return self.queued_tokens.pop_front();
                     }
-                    Some(cp) if cp >= 0x61 && cp <= 0x7A => {
+                    Some(cp) if is_ascii_lower_alpha(cp) => {
                         self.temporary_buffer.push(cp);
                         self.emit_character(cp);
                         return self.queued_tokens.pop_front();
@@ -2895,7 +2896,7 @@ impl HtmlTokenizer {
                         self.emit_character(cp);
                         return self.queued_tokens.pop_front();
                     }
-                    Some(cp) if cp >= 0x61 && cp <= 0x7A => {
+                    Some(cp) if is_ascii_lower_alpha(cp) => {
                         self.temporary_buffer.push(cp);
                         self.emit_character(cp);
                         return self.queued_tokens.pop_front();
@@ -2988,7 +2989,8 @@ impl HtmlTokenizer {
                     .push_back(self.make_character_token(0x3C));
                 self.queued_tokens
                     .push_back(self.make_character_token(0x2F));
-                for &cp in &self.temporary_buffer.clone() {
+                for i in 0..self.temporary_buffer.len() {
+                    let cp = self.temporary_buffer[i];
                     self.queued_tokens
                         .push_back(self.make_character_token(cp));
                 }
@@ -3000,7 +3002,7 @@ impl HtmlTokenizer {
                     .push(char::from_u32(to_ascii_lowercase(cp)).unwrap());
                 self.temporary_buffer.push(cp);
             }
-            Some(cp) if cp >= 0x61 && cp <= 0x7A => {
+            Some(cp) if is_ascii_lower_alpha(cp) => {
                 self.current_builder
                     .push(char::from_u32(cp).unwrap());
                 self.temporary_buffer.push(cp);
@@ -3010,7 +3012,8 @@ impl HtmlTokenizer {
                     .push_back(self.make_character_token(0x3C));
                 self.queued_tokens
                     .push_back(self.make_character_token(0x2F));
-                for &cp in &self.temporary_buffer.clone() {
+                for i in 0..self.temporary_buffer.len() {
+                    let cp = self.temporary_buffer[i];
                     self.queued_tokens
                         .push_back(self.make_character_token(cp));
                 }
