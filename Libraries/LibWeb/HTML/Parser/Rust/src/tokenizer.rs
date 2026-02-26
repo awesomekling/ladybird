@@ -110,6 +110,12 @@ pub struct HtmlTokenizer {
     source_positions: Vec<Position>,
     has_emitted_eof: bool,
     aborted: bool,
+    insertion_point: Option<usize>,
+    old_insertion_point: Option<usize>,
+    explicit_eof_inserted: bool,
+    blocked: bool,
+    stop_at_insertion_point: bool,
+    cdata_allowed: bool,
 }
 
 fn is_ascii_alpha(c: u32) -> bool {
@@ -206,6 +212,12 @@ impl HtmlTokenizer {
             source_positions: vec![Position { line: 0, column: 0 }],
             has_emitted_eof: false,
             aborted: false,
+            insertion_point: None,
+            old_insertion_point: None,
+            explicit_eof_inserted: false,
+            blocked: false,
+            stop_at_insertion_point: false,
+            cdata_allowed: false,
         }
     }
 
@@ -219,12 +231,69 @@ impl HtmlTokenizer {
         self.last_emitted_start_tag_name = Some(name.to_string());
     }
 
+    // -- Insertion point management --
+
+    pub fn store_insertion_point(&mut self) {
+        self.old_insertion_point = self.insertion_point;
+    }
+
+    pub fn restore_insertion_point(&mut self) {
+        self.insertion_point = self.old_insertion_point.take();
+    }
+
+    pub fn update_insertion_point(&mut self) {
+        self.insertion_point = Some(self.current_offset);
+    }
+
+    pub fn undefine_insertion_point(&mut self) {
+        self.insertion_point = None;
+    }
+
+    pub fn is_insertion_point_defined(&self) -> bool {
+        self.insertion_point.is_some()
+    }
+
+    pub fn insert_input_at_insertion_point(&mut self, code_points: &[u32]) {
+        if let Some(ip) = self.insertion_point {
+            let ip = ip.min(self.input.len());
+            self.input.splice(ip..ip, code_points.iter().copied());
+            self.insertion_point = Some(ip + code_points.len());
+        }
+    }
+
+    pub fn set_blocked(&mut self, blocked: bool) {
+        self.blocked = blocked;
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        self.blocked
+    }
+
+    pub fn insert_eof(&mut self) {
+        self.explicit_eof_inserted = true;
+    }
+
+    pub fn is_eof_inserted(&self) -> bool {
+        self.explicit_eof_inserted
+    }
+
+    pub fn abort(&mut self) {
+        self.aborted = true;
+    }
+
     // -- Input helpers --
 
     fn peek_code_point(&self, offset: isize) -> Option<u32> {
         let idx = self.current_offset as isize + offset;
         if idx < 0 || idx as usize >= self.input.len() {
             return None;
+        }
+        if self.stop_at_insertion_point {
+            if let Some(ip) = self.insertion_point {
+                if idx as usize >= ip {
+                    return None;
+                }
+            }
         }
         Some(self.input[idx as usize])
     }
@@ -251,6 +320,7 @@ impl HtmlTokenizer {
 
     fn next_code_point(&mut self) -> Option<u32> {
         if self.current_offset >= self.input.len() {
+            self.prev_offset = self.current_offset;
             return None;
         }
         // CR/LF normalization
@@ -372,13 +442,30 @@ impl HtmlTokenizer {
         }
     }
 
+    /// Check if we ran out of characters due to the insertion point
+    /// (as opposed to plain EOF).
+    fn is_at_insertion_point_at(&self, idx: usize) -> bool {
+        if self.stop_at_insertion_point {
+            if let Some(ip) = self.insertion_point {
+                return idx >= ip;
+            }
+        }
+        false
+    }
+
     /// Case-insensitive match of upcoming input against a string.
-    /// Returns true if matched and consumed.
+    /// Returns Some(true) if matched and consumed, Some(false) if no match,
+    /// None if ran out of characters at the insertion point.
     fn consume_next_if_match(&mut self, s: &str) -> Option<bool> {
         let bytes: Vec<u8> = s.bytes().collect();
         for (i, &b) in bytes.iter().enumerate() {
             match self.peek_code_point(i as isize) {
-                None => return None, // ran out of characters
+                None => {
+                    if self.is_at_insertion_point_at(self.current_offset + i) {
+                        return None;
+                    }
+                    return Some(false);
+                }
                 Some(cp) => {
                     let expected = b as u32;
                     let actual = cp;
@@ -399,7 +486,12 @@ impl HtmlTokenizer {
         let bytes: Vec<u8> = s.bytes().collect();
         for (i, &b) in bytes.iter().enumerate() {
             match self.peek_code_point(i as isize) {
-                None => return None,
+                None => {
+                    if self.is_at_insertion_point_at(self.current_offset + i) {
+                        return None;
+                    }
+                    return Some(false);
+                }
                 Some(cp) => {
                     if cp != b as u32 {
                         return Some(false);
@@ -411,6 +503,13 @@ impl HtmlTokenizer {
         Some(true)
     }
 
+    /// Check if any named character reference starts with the given prefix.
+    fn any_entity_starts_with(prefix: &str) -> bool {
+        NAMED_CHARACTER_REFERENCES
+            .iter()
+            .any(|&(name, _, _)| name.starts_with(prefix))
+    }
+
     /// Named character reference matching.
     /// Tries to find the longest matching entity name from the current position.
     /// Returns (first_codepoint, second_codepoint_or_0, chars_consumed, ends_with_semicolon).
@@ -419,9 +518,14 @@ impl HtmlTokenizer {
         start_offset: usize,
     ) -> Option<(u32, u32, usize, bool)> {
         // Collect available characters from current position
+        let limit = if self.stop_at_insertion_point {
+            self.insertion_point.unwrap_or(self.input.len())
+        } else {
+            self.input.len()
+        };
         let mut available = String::new();
         let mut i = start_offset;
-        while i < self.input.len() {
+        while i < limit {
             let cp = self.input[i];
             if cp > 0x7F {
                 // Named character references only use ASCII
@@ -452,7 +556,10 @@ impl HtmlTokenizer {
     }
 
     /// Get the next token from the tokenizer.
-    pub fn next_token(&mut self) -> Option<Token> {
+    pub fn next_token(&mut self, stop_at_insertion_point: bool, cdata_allowed: bool) -> Option<Token> {
+        self.stop_at_insertion_point = stop_at_insertion_point;
+        self.cdata_allowed = cdata_allowed;
+
         // Return queued tokens first.
         {
             let last = *self.source_positions.last().unwrap_or(&Position::default());
@@ -469,6 +576,15 @@ impl HtmlTokenizer {
         }
 
         loop {
+            // Check insertion point before consuming.
+            if stop_at_insertion_point {
+                if let Some(ip) = self.insertion_point {
+                    if self.current_offset >= ip {
+                        return None;
+                    }
+                }
+            }
+
             let current_input_character = self.next_code_point();
 
             match self.state {
@@ -991,23 +1107,37 @@ impl HtmlTokenizer {
                         let _ = c;
                     }
 
-                    if self.consume_next_if_match_exact("--") == Some(true) {
-                        self.create_new_token(TokenType::Comment);
-                        self.current_token.start_position = self.nth_last_position(3);
-                        self.state = State::CommentStart;
-                        continue;
+                    match self.consume_next_if_match_exact("--") {
+                        Some(true) => {
+                            self.create_new_token(TokenType::Comment);
+                            self.current_token.start_position = self.nth_last_position(3);
+                            self.state = State::CommentStart;
+                            continue;
+                        }
+                        None => return None,
+                        _ => {}
                     }
-                    if self.consume_next_if_match("DOCTYPE") == Some(true) {
-                        self.state = State::DOCTYPE;
-                        continue;
+                    match self.consume_next_if_match("DOCTYPE") {
+                        Some(true) => {
+                            self.state = State::DOCTYPE;
+                            continue;
+                        }
+                        None => return None,
+                        _ => {}
                     }
-                    if self.consume_next_if_match_exact("[CDATA[") == Some(true) {
-                        // NB: Without a parser reference, we can't check the adjusted
-                        // current node's namespace. Treat as bogus comment.
-                        self.create_new_token(TokenType::Comment);
-                        self.current_builder.push_str("[CDATA[");
-                        self.state = State::BogusComment;
-                        continue;
+                    match self.consume_next_if_match_exact("[CDATA[") {
+                        Some(true) => {
+                            if self.cdata_allowed {
+                                self.state = State::CDATASection;
+                            } else {
+                                self.create_new_token(TokenType::Comment);
+                                self.current_builder.push_str("[CDATA[");
+                                self.state = State::BogusComment;
+                            }
+                            continue;
+                        }
+                        None => return None,
+                        _ => {}
                     }
                     // parse error
                     self.create_new_token(TokenType::Comment);
@@ -1383,13 +1513,21 @@ impl HtmlTokenizer {
                             self.restore_to(self.prev_offset);
                             let _ = c;
                         }
-                        if self.consume_next_if_match("PUBLIC") == Some(true) {
-                            self.state = State::AfterDOCTYPEPublicKeyword;
-                            continue;
+                        match self.consume_next_if_match("PUBLIC") {
+                            Some(true) => {
+                                self.state = State::AfterDOCTYPEPublicKeyword;
+                                continue;
+                            }
+                            None => return None,
+                            _ => {}
                         }
-                        if self.consume_next_if_match("SYSTEM") == Some(true) {
-                            self.state = State::AfterDOCTYPESystemKeyword;
-                            continue;
+                        match self.consume_next_if_match("SYSTEM") {
+                            Some(true) => {
+                                self.state = State::AfterDOCTYPESystemKeyword;
+                                continue;
+                            }
+                            None => return None,
+                            _ => {}
                         }
                         // Re-consume the character we put back
                         let _ = self.next_code_point();
@@ -1947,29 +2085,168 @@ impl HtmlTokenizer {
 
                 // 13.2.5.73 Named character reference state
                 State::NamedCharacterReference => {
-                    // Reconsume - put back the character
+                    // Phase 1: In insertion-point mode, try to accumulate chars
+                    // one at a time (for document.write char-by-char case).
+                    if self.stop_at_insertion_point && self.insertion_point.is_some() {
+                        if let Some(cp) = current_input_character {
+                            if cp <= 0x7F {
+                                let mut prefix: String = self.temporary_buffer[1..]
+                                    .iter()
+                                    .filter_map(|&c| char::from_u32(c))
+                                    .collect();
+                                prefix.push(cp as u8 as char);
+                                if Self::any_entity_starts_with(&prefix) {
+                                    self.temporary_buffer.push(cp);
+                                    continue;
+                                }
+                            }
+                            // Character doesn't continue any entity match.
+                            self.restore_to(self.prev_offset);
+                        } else if self.is_at_insertion_point_at(self.current_offset) {
+                            // At insertion point with no more chars - pause.
+                            return None;
+                        }
+                        // Fall through to resolve accumulated chars.
+                    }
+
+                    // Phase 2: Resolve entity.
+                    let already_accumulated = self.temporary_buffer.len() - 1;
+                    if already_accumulated > 0 {
+                        // We have accumulated chars (from insertion-point passes
+                        // or cross-boundary). Reconsume current char and do
+                        // combined matching with lookahead.
+                        if let Some(_) = current_input_character {
+                            // Only restore if we haven't already (the insertion-
+                            // point path already did restore_to above).
+                            if self.current_offset != self.prev_offset {
+                                self.restore_to(self.prev_offset);
+                            }
+                        }
+                        // Build combined string: accumulated + lookahead.
+                        let mut combined = String::new();
+                        for &cp in &self.temporary_buffer[1..] {
+                            if let Some(c) = char::from_u32(cp) {
+                                combined.push(c);
+                            }
+                        }
+                        let mut i = self.current_offset;
+                        while i < self.input.len() && combined.len() <= 40 {
+                            let cp = self.input[i];
+                            if cp > 0x7F {
+                                break;
+                            }
+                            combined.push(cp as u8 as char);
+                            i += 1;
+                        }
+                        // Find longest matching entity.
+                        let mut best: Option<(u32, u32, usize, bool)> = None;
+                        for &(name, first, second) in NAMED_CHARACTER_REFERENCES {
+                            if combined.starts_with(name) {
+                                let ends_with_semi = name.ends_with(';');
+                                if best
+                                    .as_ref()
+                                    .map_or(true, |b| name.len() > b.2)
+                                {
+                                    best = Some((
+                                        first,
+                                        second,
+                                        name.len(),
+                                        ends_with_semi,
+                                    ));
+                                }
+                            }
+                        }
+                        if let Some((
+                            first_cp,
+                            second_cp,
+                            total_chars,
+                            ends_with_semi,
+                        )) = best
+                        {
+                            // Consume additional chars from input beyond
+                            // what was in the temp buffer.
+                            let extra = total_chars.saturating_sub(already_accumulated);
+                            if extra > 0 {
+                                self.skip(extra);
+                            }
+                            // If entity is shorter than what we accumulated,
+                            // put back the overconsumed chars.
+                            if total_chars < already_accumulated {
+                                let overconsumed = already_accumulated - total_chars;
+                                self.temporary_buffer.truncate(
+                                    self.temporary_buffer.len() - overconsumed,
+                                );
+                                self.restore_to(
+                                    self.current_offset - overconsumed,
+                                );
+                            }
+
+                            // Check special attribute handling.
+                            let next_cp = self.peek_code_point(0);
+                            if self.consumed_as_part_of_an_attribute()
+                                && !ends_with_semi
+                                && next_cp.map_or(false, |c| {
+                                    c == 0x3D || is_ascii_alphanumeric(c)
+                                })
+                            {
+                                if extra > 0 {
+                                    for j in 0..extra {
+                                        self.temporary_buffer.push(
+                                            self.input[self.current_offset
+                                                - extra
+                                                + j],
+                                        );
+                                    }
+                                }
+                                self.flush_codepoints_consumed_as_character_reference();
+                                self.state = self.return_state;
+                                if !self.queued_tokens.is_empty() {
+                                    return self.queued_tokens.pop_front();
+                                }
+                                continue;
+                            }
+
+                            if !ends_with_semi {
+                                // parse error
+                            }
+
+                            self.temporary_buffer.clear();
+                            self.temporary_buffer.push(first_cp);
+                            if second_cp != 0 {
+                                self.temporary_buffer.push(second_cp);
+                            }
+                            self.flush_codepoints_consumed_as_character_reference();
+                            self.state = self.return_state;
+                            if !self.queued_tokens.is_empty() {
+                                return self.queued_tokens.pop_front();
+                            }
+                            continue;
+                        } else {
+                            // No match.
+                            self.flush_codepoints_consumed_as_character_reference();
+                            self.state = State::AmbiguousAmpersand;
+                            continue;
+                        }
+                    }
+
+                    // Fresh entry (no accumulated chars). Reconsume and do
+                    // all-at-once matching from the current position.
                     if let Some(_) = current_input_character {
                         self.restore_to(self.prev_offset);
                     }
-
-                    // Try to match named character reference from current position.
                     let match_result =
                         self.match_named_character_reference(self.current_offset);
 
                     if let Some((first_cp, second_cp, chars_consumed, ends_with_semi)) =
                         match_result
                     {
-                        // Consume the matched characters.
                         self.skip(chars_consumed);
 
-                        // Check special attribute handling
                         let next_cp = self.peek_code_point(0);
                         if self.consumed_as_part_of_an_attribute()
                             && !ends_with_semi
                             && next_cp.map_or(false, |c| c == 0x3D || is_ascii_alphanumeric(c))
                         {
-                            // Treat as not a match - flush the ampersand
-                            // and the consumed characters as text
                             for i in 0..chars_consumed {
                                 self.temporary_buffer.push(
                                     self.input[self.current_offset - chars_consumed + i],
@@ -1999,7 +2276,6 @@ impl HtmlTokenizer {
                         }
                         continue;
                     } else {
-                        // No match found
                         self.flush_codepoints_consumed_as_character_reference();
                         self.state = State::AmbiguousAmpersand;
                         continue;
