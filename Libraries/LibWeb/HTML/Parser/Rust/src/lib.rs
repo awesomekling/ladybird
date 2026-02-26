@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Ladybird developers.
 // SPDX-License-Identifier: BSD-2-Clause
 
+pub mod entities;
 pub mod token;
 pub mod tokenizer;
 
