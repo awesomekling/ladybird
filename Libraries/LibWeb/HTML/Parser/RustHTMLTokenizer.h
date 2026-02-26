@@ -63,8 +63,20 @@ struct RustFfiToken {
 
 extern "C" {
 void* rust_html_tokenizer_create(uint32_t const* input, size_t len);
-bool rust_html_tokenizer_next_token(void* handle, RustFfiToken* out);
+bool rust_html_tokenizer_next_token(void* handle, RustFfiToken* out, bool stop_at_insertion_point, bool cdata_allowed);
 void rust_html_tokenizer_switch_state(void* handle, uint8_t state);
+void rust_html_tokenizer_insert_input(void* handle, uint32_t const* input, size_t len);
+void rust_html_tokenizer_store_insertion_point(void* handle);
+void rust_html_tokenizer_restore_insertion_point(void* handle);
+void rust_html_tokenizer_update_insertion_point(void* handle);
+void rust_html_tokenizer_undefine_insertion_point(void* handle);
+bool rust_html_tokenizer_is_insertion_point_defined(void* handle);
+void rust_html_tokenizer_set_blocked(void* handle, bool blocked);
+bool rust_html_tokenizer_is_blocked(void* handle);
+void rust_html_tokenizer_insert_eof(void* handle);
+bool rust_html_tokenizer_is_eof_inserted(void* handle);
+void rust_html_tokenizer_abort(void* handle);
+void rust_html_tokenizer_set_last_start_tag_name(void* handle, uint8_t const* ptr, size_t len);
 void rust_html_tokenizer_destroy(void* handle);
 }
 
@@ -80,8 +92,21 @@ public:
     RustHTMLTokenizer(RustHTMLTokenizer const&) = delete;
     RustHTMLTokenizer& operator=(RustHTMLTokenizer const&) = delete;
 
-    bool next_token(RustFfiToken& out);
+    bool next_token(RustFfiToken& out, bool stop_at_insertion_point, bool cdata_allowed);
     void switch_to(HTMLTokenizer::State state);
+
+    void insert_input(Vector<u32> const& code_points);
+    void store_insertion_point();
+    void restore_insertion_point();
+    void update_insertion_point();
+    void undefine_insertion_point();
+    bool is_insertion_point_defined() const;
+    void set_blocked(bool blocked);
+    bool is_blocked() const;
+    void insert_eof();
+    bool is_eof_inserted() const;
+    void abort();
+    void set_last_start_tag_name(StringView name);
 
 private:
     void* m_handle { nullptr };
