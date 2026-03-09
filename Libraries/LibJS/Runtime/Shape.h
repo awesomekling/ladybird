@@ -23,7 +23,7 @@
 namespace JS {
 
 struct PropertyMetadata {
-    u32 offset { 0 };
+    i32 offset { 0 };
     PropertyAttributes attributes { 0 };
 };
 
@@ -83,7 +83,7 @@ public:
 
     void add_property_without_transition(PropertyKey const&, PropertyAttributes);
 
-    void remove_property_without_transition(PropertyKey const&, u32 offset);
+    void remove_property_without_transition(PropertyKey const&, i32 offset);
     void set_property_attributes_without_transition(PropertyKey const&, PropertyAttributes);
 
     [[nodiscard]] bool is_dictionary() const { return m_dictionary; }

@@ -40,7 +40,7 @@ struct PropertyLookupCache {
             ChangePropertyInPrototypeChain,
             GetPropertyInPrototypeChain,
         };
-        u32 property_offset { 0 };
+        i32 property_offset { 0 };
         u32 shape_dictionary_generation { 0 };
         GC::RawPtr<Shape> from_shape;
         GC::RawPtr<Shape> shape;
@@ -92,7 +92,7 @@ struct TemplateObjectCache {
 // shape lookups and write directly to the correct storage slot.
 struct ObjectShapeCache {
     GC::RawPtr<Shape> shape;
-    Vector<u32> property_offsets;
+    Vector<i32> property_offsets;
 };
 
 struct SourceRecord {

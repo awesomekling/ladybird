@@ -17,7 +17,7 @@ struct ValueAndAttributes {
     Value value;
     PropertyAttributes attributes { default_attributes };
 
-    Optional<u32> property_offset {};
+    Optional<i32> property_offset {};
 
     void visit_edges(Cell::Visitor& visitor)
     {

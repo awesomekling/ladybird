@@ -1426,7 +1426,8 @@ handler GetById
     branch_ne t0, t2, .try_cache
     # IC hit! Load property value via get_direct (own property)
     load32 t0, [t5, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t5, [t3, OBJECT_STORAGE_DATA]
+    movsxd t0, t0
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t0, [t5, t0, 8]
     # Check value is not an accessor
     extract_tag t2, t0
@@ -1446,7 +1447,8 @@ handler GetById
     branch_ne t1, t2, .try_cache
     # IC hit! Load property value via get_direct (from prototype)
     load32 t1, [t5, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t2, [t0, OBJECT_STORAGE_DATA]
+    movsxd t1, t1
+    load64 t2, [t0, OBJECT_BUTTERFLY]
     load64 t0, [t2, t1, 8]
     # Check value is not an accessor
     extract_tag t2, t0
@@ -1487,7 +1489,8 @@ handler PutById
     branch_ne t0, t2, .try_cache
     # Check current value at property_offset is not an accessor
     load32 t0, [t5, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t5, [t3, OBJECT_STORAGE_DATA]
+    movsxd t0, t0
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t2, [t5, t0, 8]
     extract_tag t4, t2
     branch_eq t4, ACCESSOR_TAG, .try_cache
@@ -1681,7 +1684,8 @@ handler GetLength
     branch_ne t0, t2, .slow
     # IC hit
     load32 t0, [t5, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t5, [t3, OBJECT_STORAGE_DATA]
+    movsxd t0, t0
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t0, [t5, t0, 8]
     extract_tag t2, t0
     branch_eq t2, ACCESSOR_TAG, .slow
@@ -1737,7 +1741,8 @@ handler GetGlobal
     branch_ne t0, t5, .try_env_binding
     # IC hit! Load property value via get_direct
     load32 t0, [t3, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t5, [t2, OBJECT_STORAGE_DATA]
+    movsxd t0, t0
+    load64 t5, [t2, OBJECT_BUTTERFLY]
     load64 t0, [t5, t0, 8]
     # Check not accessor
     extract_tag t5, t0
@@ -1794,7 +1799,8 @@ handler SetGlobal
     branch_ne t0, t5, .try_env_binding
     # IC hit! Load current value to check it's not an accessor
     load32 t1, [t3, PROPERTY_LOOKUP_CACHE_ENTRY0_PROPERTY_OFFSET]
-    load64 t5, [t2, OBJECT_STORAGE_DATA]
+    movsxd t1, t1
+    load64 t5, [t2, OBJECT_BUTTERFLY]
     load64 t4, [t5, t1, 8]
     extract_tag t4, t4
     branch_eq t4, ACCESSOR_TAG, .slow

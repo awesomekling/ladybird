@@ -95,13 +95,15 @@ Object::Object(Shape& shape, MayInterfereWithIndexedPropertyAccess may_interfere
 {
     if (may_interfere_with_indexed_property_access == MayInterfereWithIndexedPropertyAccess::Yes)
         set_may_interfere_with_indexed_property_access();
-    m_storage.resize_with_default_value(shape.property_count(), Value());
+    if (shape.property_count() > 0)
+        m_butterfly = Butterfly::create_for_named_properties(shape.property_count());
 }
 
 Object::~Object()
 {
     if (has_intrinsic_accessors())
         s_intrinsics.remove(this);
+    Butterfly::destroy(m_butterfly);
 }
 
 void Object::initialize(Realm& realm)
@@ -112,7 +114,10 @@ void Object::initialize(Realm& realm)
 void Object::unsafe_set_shape(Shape& shape)
 {
     m_shape = shape;
-    m_storage.resize_with_default_value(shape.property_count(), Value());
+    auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->named_property_capacity : 0;
+    auto new_count = shape.property_count();
+    if (new_count > old_capacity)
+        m_butterfly = Butterfly::grow_named_properties(m_butterfly, old_capacity, new_count);
 }
 
 // 7.2 Testing and Comparison Operations, https://tc39.es/ecma262/#sec-testing-and-comparison-operations
@@ -171,7 +176,7 @@ ThrowCompletionOr<void> Object::set(PropertyKey const& property_key, Value value
 }
 
 // 7.3.5 CreateDataProperty ( O, P, V ), https://tc39.es/ecma262/#sec-createdataproperty
-ThrowCompletionOr<bool> Object::create_data_property(PropertyKey const& property_key, Value value, Optional<u32>* new_property_offset)
+ThrowCompletionOr<bool> Object::create_data_property(PropertyKey const& property_key, Value value, Optional<i32>* new_property_offset)
 {
     // 1. Let newDesc be the PropertyDescriptor { [[Value]]: V, [[Writable]]: true, [[Enumerable]]: true, [[Configurable]]: true }.
     auto new_descriptor = PropertyDescriptor {
@@ -1101,7 +1106,7 @@ ThrowCompletionOr<bool> Object::ordinary_set_with_own_descriptor(PropertyKey con
             VERIFY(!receiver_object.storage_has(property_key));
 
             // ii. Return ? CreateDataProperty(Receiver, P, V).
-            Optional<u32> new_property_offset;
+            Optional<i32> new_property_offset;
             auto result = TRY(receiver_object.create_data_property(property_key, value, &new_property_offset));
             auto& receiver_shape = receiver_object.shape();
             if (cacheable_metadata && new_property_offset.has_value() && !receiver_shape.is_dictionary()) {
@@ -1229,7 +1234,7 @@ Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key
 {
     Value value;
     PropertyAttributes attributes;
-    Optional<u32> property_offset;
+    Optional<i32> property_offset;
 
     if (property_key.is_number()) {
         auto value_and_attributes = m_indexed_properties.get(property_key.as_number());
@@ -1244,10 +1249,10 @@ Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key
 
         if (has_intrinsic_accessors()) {
             if (auto accessor = find_intrinsic_accessor(this, property_key); accessor.has_value())
-                const_cast<Object&>(*this).m_storage[metadata->offset] = (*accessor)(shape().realm());
+                const_cast<Object&>(*this).put_direct(metadata->offset, (*accessor)(shape().realm()));
         }
 
-        value = m_storage[metadata->offset];
+        value = get_direct(metadata->offset);
         attributes = metadata->attributes;
         property_offset = metadata->offset;
     }
@@ -1262,7 +1267,7 @@ bool Object::storage_has(PropertyKey const& property_key) const
     return shape().lookup(property_key).has_value();
 }
 
-Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttributes const& value_and_attributes)
+Optional<i32> Object::storage_set(PropertyKey const& property_key, ValueAndAttributes const& value_and_attributes)
 {
     auto [value, attributes, _] = value_and_attributes;
 
@@ -1288,8 +1293,23 @@ Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
             m_shape->add_property_without_transition(property_key, attributes);
         else
             set_shape(*m_shape->create_put_transition(property_key, attributes));
-        m_storage.append(value);
-        return m_storage.size() - 1;
+
+        auto new_offset = shape().lookup(property_key)->offset;
+
+        // Ensure butterfly has capacity for the new property.
+        // Named properties live at negative offsets: -2, -3, -4, ...
+        // We need capacity >= property_count (slots at indices -2 .. -(count+1)).
+        auto property_count = m_shape->property_count();
+        auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->named_property_capacity : 0u;
+        if (property_count > old_capacity) {
+            auto new_capacity = max(4u, old_capacity * 2u);
+            if (new_capacity < property_count)
+                new_capacity = property_count;
+            m_butterfly = Butterfly::grow_named_properties(m_butterfly, old_capacity, new_capacity);
+        }
+
+        put_direct(new_offset, value);
+        return new_offset;
     }
 
     if (attributes != metadata->attributes) {
@@ -1299,7 +1319,7 @@ Optional<u32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
             set_shape(*m_shape->create_configure_transition(property_key, attributes));
     }
 
-    m_storage[metadata->offset] = value;
+    put_direct(metadata->offset, value);
     return metadata->offset;
 }
 
@@ -1318,13 +1338,21 @@ void Object::storage_delete(PropertyKey const& property_key)
     auto metadata = shape().lookup(property_key);
     VERIFY(metadata.has_value());
 
-    if (m_shape->is_dictionary()) {
-        m_shape->remove_property_without_transition(property_key, metadata->offset);
-        m_storage.remove(metadata->offset);
-        return;
-    }
-    m_shape = m_shape->create_delete_transition(property_key);
-    m_storage.remove(metadata->offset);
+    auto deleted_offset = metadata->offset;
+    auto property_count_before = m_shape->property_count();
+
+    if (m_shape->is_dictionary())
+        m_shape->remove_property_without_transition(property_key, deleted_offset);
+    else
+        m_shape = m_shape->create_delete_transition(property_key);
+
+    // Shift named property slots to fill the gap left by the deleted property.
+    // Offsets are negative: -2 is closest to center, -(count+1) is farthest.
+    // Slots more negative than deleted_offset shift toward center (increment).
+    auto most_negative = -static_cast<i32>(property_count_before) - 1;
+    for (i32 i = deleted_offset; i > most_negative; --i)
+        put_direct(i, get_direct(i - 1));
+    put_direct(most_negative, Value());
 }
 
 void Object::set_prototype(Object* new_prototype)
@@ -1533,7 +1561,12 @@ void Object::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_shape);
-    visitor.visit(m_storage);
+
+    if (m_butterfly) {
+        auto named_count = m_shape->property_count();
+        for (u32 i = 0; i < named_count; ++i)
+            visitor.visit(m_butterfly[-2 - static_cast<i64>(i)]);
+    }
 
     m_indexed_properties.visit_edges(visitor);
 

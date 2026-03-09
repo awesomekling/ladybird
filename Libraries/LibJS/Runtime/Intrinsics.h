@@ -36,34 +36,34 @@ public:
     GC::Ref<Shape> new_object_shape() { return *m_new_object_shape; }
 
     [[nodiscard]] GC::Ref<Shape> iterator_result_object_shape() { return *m_iterator_result_object_shape; }
-    [[nodiscard]] u32 iterator_result_object_value_offset() { return m_iterator_result_object_value_offset; }
-    [[nodiscard]] u32 iterator_result_object_done_offset() { return m_iterator_result_object_done_offset; }
+    [[nodiscard]] i32 iterator_result_object_value_offset() { return m_iterator_result_object_value_offset; }
+    [[nodiscard]] i32 iterator_result_object_done_offset() { return m_iterator_result_object_done_offset; }
 
     [[nodiscard]] GC::Ref<Shape> normal_function_prototype_shape() { return *m_normal_function_prototype_shape; }
-    [[nodiscard]] u32 normal_function_prototype_constructor_offset() const { return m_normal_function_prototype_constructor_offset; }
+    [[nodiscard]] i32 normal_function_prototype_constructor_offset() const { return m_normal_function_prototype_constructor_offset; }
 
     [[nodiscard]] GC::Ref<Shape> normal_function_shape() { return *m_normal_function_shape; }
-    [[nodiscard]] u32 normal_function_length_offset() const { return m_normal_function_length_offset; }
-    [[nodiscard]] u32 normal_function_name_offset() const { return m_normal_function_name_offset; }
+    [[nodiscard]] i32 normal_function_length_offset() const { return m_normal_function_length_offset; }
+    [[nodiscard]] i32 normal_function_name_offset() const { return m_normal_function_name_offset; }
 
     [[nodiscard]] GC::Ref<Shape> native_function_shape() { return *m_native_function_shape; }
-    [[nodiscard]] u32 native_function_length_offset() const { return m_native_function_length_offset; }
-    [[nodiscard]] u32 native_function_name_offset() const { return m_native_function_name_offset; }
+    [[nodiscard]] i32 native_function_length_offset() const { return m_native_function_length_offset; }
+    [[nodiscard]] i32 native_function_name_offset() const { return m_native_function_name_offset; }
 
     [[nodiscard]] GC::Ref<Shape> unmapped_arguments_object_shape() { return *m_unmapped_arguments_object_shape; }
-    [[nodiscard]] u32 unmapped_arguments_object_length_offset() const { return m_unmapped_arguments_object_length_offset; }
-    [[nodiscard]] u32 unmapped_arguments_object_well_known_symbol_iterator_offset() const { return m_unmapped_arguments_object_well_known_symbol_iterator_offset; }
-    [[nodiscard]] u32 unmapped_arguments_object_callee_offset() const { return m_unmapped_arguments_object_callee_offset; }
+    [[nodiscard]] i32 unmapped_arguments_object_length_offset() const { return m_unmapped_arguments_object_length_offset; }
+    [[nodiscard]] i32 unmapped_arguments_object_well_known_symbol_iterator_offset() const { return m_unmapped_arguments_object_well_known_symbol_iterator_offset; }
+    [[nodiscard]] i32 unmapped_arguments_object_callee_offset() const { return m_unmapped_arguments_object_callee_offset; }
 
     [[nodiscard]] GC::Ref<Shape> mapped_arguments_object_shape() { return *m_mapped_arguments_object_shape; }
-    [[nodiscard]] u32 mapped_arguments_object_length_offset() const { return m_mapped_arguments_object_length_offset; }
-    [[nodiscard]] u32 mapped_arguments_object_well_known_symbol_iterator_offset() const { return m_mapped_arguments_object_well_known_symbol_iterator_offset; }
-    [[nodiscard]] u32 mapped_arguments_object_callee_offset() const { return m_mapped_arguments_object_callee_offset; }
+    [[nodiscard]] i32 mapped_arguments_object_length_offset() const { return m_mapped_arguments_object_length_offset; }
+    [[nodiscard]] i32 mapped_arguments_object_well_known_symbol_iterator_offset() const { return m_mapped_arguments_object_well_known_symbol_iterator_offset; }
+    [[nodiscard]] i32 mapped_arguments_object_callee_offset() const { return m_mapped_arguments_object_callee_offset; }
 
     [[nodiscard]] GC::Ref<Shape> regexp_builtin_exec_array_shape() { return *m_regexp_builtin_exec_array_shape; }
-    [[nodiscard]] u32 regexp_builtin_exec_array_index_offset() const { return m_regexp_builtin_exec_array_index_offset; }
-    [[nodiscard]] u32 regexp_builtin_exec_array_input_offset() const { return m_regexp_builtin_exec_array_input_offset; }
-    [[nodiscard]] u32 regexp_builtin_exec_array_groups_offset() const { return m_regexp_builtin_exec_array_groups_offset; }
+    [[nodiscard]] i32 regexp_builtin_exec_array_index_offset() const { return m_regexp_builtin_exec_array_index_offset; }
+    [[nodiscard]] i32 regexp_builtin_exec_array_input_offset() const { return m_regexp_builtin_exec_array_input_offset; }
+    [[nodiscard]] i32 regexp_builtin_exec_array_groups_offset() const { return m_regexp_builtin_exec_array_groups_offset; }
 
     [[nodiscard]] GC::Ref<Shape> default_array_prototype_shape() const { return *m_default_array_prototype_shape; }
     [[nodiscard]] GC::Ref<Shape> default_object_prototype_shape() const { return *m_default_object_prototype_shape; }
@@ -184,37 +184,37 @@ private:
     GC::Ptr<Shape> m_new_object_shape;
 
     GC::Ptr<Shape> m_iterator_result_object_shape;
-    u32 m_iterator_result_object_value_offset { 0 };
-    u32 m_iterator_result_object_done_offset { 0 };
+    i32 m_iterator_result_object_value_offset { 0 };
+    i32 m_iterator_result_object_done_offset { 0 };
 
     GC::Ptr<Shape> m_normal_function_prototype_shape;
-    u32 m_normal_function_prototype_constructor_offset { 0 };
+    i32 m_normal_function_prototype_constructor_offset { 0 };
 
     GC::Ptr<Shape> m_normal_function_shape;
-    u32 m_normal_function_length_offset { 0 };
-    u32 m_normal_function_name_offset { 0 };
+    i32 m_normal_function_length_offset { 0 };
+    i32 m_normal_function_name_offset { 0 };
 
     GC::Ptr<Shape> m_native_function_shape;
-    u32 m_native_function_length_offset { 0 };
-    u32 m_native_function_name_offset { 0 };
+    i32 m_native_function_length_offset { 0 };
+    i32 m_native_function_name_offset { 0 };
 
     GC::Ptr<Shape> m_unmapped_arguments_object_shape;
-    u32 m_unmapped_arguments_object_length_offset { 0 };
-    u32 m_unmapped_arguments_object_well_known_symbol_iterator_offset { 0 };
-    u32 m_unmapped_arguments_object_callee_offset { 0 };
+    i32 m_unmapped_arguments_object_length_offset { 0 };
+    i32 m_unmapped_arguments_object_well_known_symbol_iterator_offset { 0 };
+    i32 m_unmapped_arguments_object_callee_offset { 0 };
 
     GC::Ptr<Shape> m_mapped_arguments_object_shape;
-    u32 m_mapped_arguments_object_length_offset { 0 };
-    u32 m_mapped_arguments_object_well_known_symbol_iterator_offset { 0 };
-    u32 m_mapped_arguments_object_callee_offset { 0 };
+    i32 m_mapped_arguments_object_length_offset { 0 };
+    i32 m_mapped_arguments_object_well_known_symbol_iterator_offset { 0 };
+    i32 m_mapped_arguments_object_callee_offset { 0 };
 
     GC::Ptr<Shape> m_default_array_prototype_shape;
     GC::Ptr<Shape> m_default_object_prototype_shape;
 
     GC::Ptr<Shape> m_regexp_builtin_exec_array_shape;
-    u32 m_regexp_builtin_exec_array_index_offset { 0 };
-    u32 m_regexp_builtin_exec_array_input_offset { 0 };
-    u32 m_regexp_builtin_exec_array_groups_offset { 0 };
+    i32 m_regexp_builtin_exec_array_index_offset { 0 };
+    i32 m_regexp_builtin_exec_array_input_offset { 0 };
+    i32 m_regexp_builtin_exec_array_groups_offset { 0 };
 
     GC::Ptr<Accessor> m_throw_type_error_accessor;
 

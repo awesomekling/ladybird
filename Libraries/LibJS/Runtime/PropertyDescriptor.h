@@ -46,7 +46,7 @@ public:
     Optional<bool> configurable {};
     Optional<bool> unimplemented {};
 
-    Optional<u32> property_offset {};
+    Optional<i32> property_offset {};
 };
 
 }

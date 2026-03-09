@@ -227,14 +227,16 @@ void Shape::ensure_property_table() const
         return;
     m_property_table = make<OrderedHashMap<PropertyKey, PropertyMetadata>>();
 
-    u32 next_offset = 0;
+    // Named property offsets are negative butterfly indices: -2, -3, -4, ...
+    // next_offset tracks the next offset to assign (decreasing).
+    i32 next_offset = -2;
 
     Vector<Shape const&, 64> transition_chain;
     transition_chain.append(*this);
     for (auto shape = m_previous; shape; shape = shape->m_previous) {
         if (shape->m_property_table) {
             *m_property_table = *shape->m_property_table;
-            next_offset = shape->m_property_count;
+            next_offset = -static_cast<i32>(shape->m_property_count) - 2;
             break;
         }
         transition_chain.append(*shape);
@@ -246,7 +248,7 @@ void Shape::ensure_property_table() const
             continue;
         }
         if (shape.m_transition_type == TransitionType::Put) {
-            m_property_table->set(*shape.m_property_key, { next_offset++, shape.m_attributes });
+            m_property_table->set(*shape.m_property_key, { next_offset--, shape.m_attributes });
         } else if (shape.m_transition_type == TransitionType::Configure) {
             auto it = m_property_table->find(*shape.m_property_key);
             VERIFY(it != m_property_table->end());
@@ -257,10 +259,11 @@ void Shape::ensure_property_table() const
             auto removed_offset = remove_it->value.offset;
             m_property_table->remove(remove_it);
             for (auto& it : *m_property_table) {
-                if (it.value.offset > removed_offset)
-                    --it.value.offset;
+                // Offsets more negative than removed_offset need to shift toward center.
+                if (it.value.offset < removed_offset)
+                    ++it.value.offset;
             }
-            --next_offset;
+            ++next_offset;
         }
     }
 }
@@ -281,7 +284,8 @@ void Shape::add_property_without_transition(PropertyKey const& property_key, Pro
 {
     invalidate_prototype_if_needed_for_change_without_transition();
     ensure_property_table();
-    if (m_property_table->set(property_key, { m_property_count, attributes }) == AK::HashSetResult::InsertedNewEntry) {
+    auto new_offset = -static_cast<i32>(m_property_count) - 2;
+    if (m_property_table->set(property_key, { new_offset, attributes }) == AK::HashSetResult::InsertedNewEntry) {
         VERIFY(m_property_count < NumericLimits<u32>::max());
         ++m_property_count;
         ++m_dictionary_generation;
@@ -300,7 +304,7 @@ void Shape::set_property_attributes_without_transition(PropertyKey const& proper
     ++m_dictionary_generation;
 }
 
-void Shape::remove_property_without_transition(PropertyKey const& property_key, u32 offset)
+void Shape::remove_property_without_transition(PropertyKey const& property_key, i32 offset)
 {
     invalidate_prototype_if_needed_for_change_without_transition();
     VERIFY(is_dictionary());
@@ -309,8 +313,9 @@ void Shape::remove_property_without_transition(PropertyKey const& property_key, 
         --m_property_count;
     for (auto& it : *m_property_table) {
         VERIFY(it.value.offset != offset);
-        if (it.value.offset > offset)
-            --it.value.offset;
+        // Offsets more negative than the removed one shift toward center.
+        if (it.value.offset < offset)
+            ++it.value.offset;
     }
     ++m_dictionary_generation;
 }

@@ -14,6 +14,7 @@
 #include <LibJS/Export.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibJS/Runtime/Butterfly.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/IndexedProperties.h>
 #include <LibJS/Runtime/PrimitiveString.h>
@@ -53,7 +54,7 @@ struct CacheableGetPropertyMetadata {
         GetPropertyInPrototypeChain,
     };
     Type type { Type::NotCacheable };
-    Optional<u32> property_offset;
+    Optional<i32> property_offset;
     GC::Ptr<Object const> prototype;
 };
 
@@ -65,7 +66,7 @@ struct CacheableSetPropertyMetadata {
         ChangePropertyInPrototypeChain,
     };
     Type type { Type::NotCacheable };
-    Optional<u32> property_offset;
+    Optional<i32> property_offset;
     GC::Ptr<Object const> prototype;
 };
 
@@ -128,7 +129,7 @@ public:
     ThrowCompletionOr<Value> get(PropertyKey const&, Bytecode::PropertyLookupCache&) const;
     ThrowCompletionOr<void> set(PropertyKey const&, Value, ShouldThrowExceptions);
     ThrowCompletionOr<void> set(PropertyKey const&, Value, Bytecode::PropertyLookupCache&);
-    ThrowCompletionOr<bool> create_data_property(PropertyKey const&, Value, Optional<u32>* new_property_offset = nullptr);
+    ThrowCompletionOr<bool> create_data_property(PropertyKey const&, Value, Optional<i32>* new_property_offset = nullptr);
     void create_method_property(PropertyKey const&, Value);
     ThrowCompletionOr<bool> create_data_property_or_throw(PropertyKey const&, Value);
     void create_non_enumerable_data_property_or_throw(PropertyKey const&, Value);
@@ -202,7 +203,7 @@ public:
 
     Optional<ValueAndAttributes> storage_get(PropertyKey const&) const;
     bool storage_has(PropertyKey const&) const;
-    Optional<u32> storage_set(PropertyKey const&, ValueAndAttributes const&);
+    Optional<i32> storage_set(PropertyKey const&, ValueAndAttributes const&);
     void storage_delete(PropertyKey const&);
 
     // Non-standard methods
@@ -280,8 +281,8 @@ public:
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    Value get_direct(size_t index) const { return m_storage[index]; }
-    void put_direct(size_t index, Value value) { m_storage[index] = value; }
+    Value get_direct(i32 index) const { return m_butterfly[index]; }
+    void put_direct(i32 index, Value value) { m_butterfly[index] = value; }
 
     IndexedProperties const& indexed_properties() const { return m_indexed_properties; }
     IndexedProperties& indexed_properties() { return m_indexed_properties; }
@@ -338,7 +339,7 @@ private:
     Object* prototype() { return shape().prototype(); }
 
     GC::Ptr<Shape> m_shape;
-    Vector<Value> m_storage;
+    Value* m_butterfly { nullptr };
     IndexedProperties m_indexed_properties;
     OwnPtr<Vector<PrivateElement>> m_private_elements; // [[PrivateElements]]
 };
