@@ -77,36 +77,25 @@ Value* Butterfly::grow_named_properties(Value* old_butterfly, u32 old_capacity, 
 
 Value* Butterfly::create_for_indexed(u32 vector_length)
 {
-    auto* butterfly = allocate_butterfly(0, vector_length);
-
-    // Initialize indexed element slots to empty.
-    for (u32 i = 0; i < vector_length; ++i)
-        butterfly[i] = Value();
-
-    return butterfly;
+    // Caller is responsible for initializing the indexed slots.
+    return allocate_butterfly(0, vector_length);
 }
 
 Value* Butterfly::grow_indexed(Value* old_butterfly, u32 old_named_capacity, u32 old_vector_length, u32 new_vector_length)
 {
     VERIFY(new_vector_length > old_vector_length);
 
-    auto* new_butterfly = allocate_butterfly(old_named_capacity, new_vector_length);
+    // Indexed elements grow on the right side of the butterfly, so realloc
+    // can often extend the allocation in place without copying.
+    auto* old_base = base(old_butterfly, old_named_capacity);
+    size_t new_total_slots = static_cast<size_t>(old_named_capacity) + 1 + static_cast<size_t>(new_vector_length);
+    auto* new_base = static_cast<Value*>(realloc(old_base, new_total_slots * sizeof(Value)));
+    VERIFY(new_base);
 
-    // Copy existing named properties.
-    for (u32 i = 0; i < old_named_capacity; ++i)
-        new_butterfly[-2 - static_cast<i64>(i)] = old_butterfly[-2 - static_cast<i64>(i)];
+    auto* new_butterfly = new_base + old_named_capacity + 1;
+    header(new_butterfly)->indexed_vector_length = new_vector_length;
 
-    // Copy existing indexed elements.
-    if (old_vector_length > 0)
-        memcpy(new_butterfly, old_butterfly, old_vector_length * sizeof(Value));
-
-    // Initialize new indexed element slots to empty.
-    for (u32 i = old_vector_length; i < new_vector_length; ++i)
-        new_butterfly[i] = Value();
-
-    if (old_butterfly)
-        destroy(old_butterfly);
-
+    // Caller is responsible for initializing new slots.
     return new_butterfly;
 }
 

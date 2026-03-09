@@ -315,6 +315,7 @@ public:
     bool has_no_indexed_storage() const;
     GenericIndexedPropertyStorage const* generic_indexed_storage() const;
     void set_indexed_property_elements(Vector<Value>&& values);
+    void ensure_indexed_capacity(u32 capacity);
 
     Shape& shape() { return *m_shape; }
     Shape const& shape() const { return *m_shape; }

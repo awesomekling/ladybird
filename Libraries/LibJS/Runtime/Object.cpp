@@ -118,10 +118,14 @@ void Object::initialize(Realm& realm)
 void Object::unsafe_set_shape(Shape& shape)
 {
     m_shape = shape;
-    auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->named_property_capacity : 0;
+    auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->named_property_capacity : 0u;
     auto new_count = shape.property_count();
-    if (new_count > old_capacity)
-        m_butterfly = Butterfly::grow_named_properties(m_butterfly, old_capacity, new_count);
+    if (new_count > old_capacity) {
+        auto new_capacity = max(4u, old_capacity * 2u);
+        if (new_capacity < new_count)
+            new_capacity = new_count;
+        m_butterfly = Butterfly::grow_named_properties(m_butterfly, old_capacity, new_capacity);
+    }
 }
 
 // 7.2 Testing and Comparison Operations, https://tc39.es/ecma262/#sec-testing-and-comparison-operations
@@ -1450,8 +1454,15 @@ u32 Object::indexed_array_like_size() const
 
 bool Object::indexed_set_array_like_size(size_t new_size)
 {
-    if (m_indexed_storage_kind == IndexedStorageKind::None)
+    if (m_indexed_storage_kind == IndexedStorageKind::None) {
+        // Don't allocate storage just to set the size. The storage will be
+        // created lazily when elements are first written.
+        if (new_size <= NumericLimits<i32>::max()) {
+            m_indexed_array_like_size = new_size;
+            return true;
+        }
         ensure_indexed_storage();
+    }
 
     if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) {
         if (new_size > NumericLimits<i32>::max()
@@ -1688,7 +1699,16 @@ void Object::switch_to_holey_indexed_storage()
 void Object::ensure_indexed_storage()
 {
     VERIFY(m_indexed_storage_kind == IndexedStorageKind::None);
-    m_indexed_storage_kind = IndexedStorageKind::Packed;
+    if (m_indexed_array_like_size > 0) {
+        // The array has a JS-visible length but no storage yet (e.g. new Array(N)).
+        // Since the existing slots are conceptually empty, start as Holey.
+        m_indexed_storage_kind = IndexedStorageKind::Holey;
+        grow_indexed_storage_if_needed(m_indexed_array_like_size);
+        for (u32 i = 0; i < m_indexed_array_like_size; ++i)
+            m_butterfly[i] = js_special_empty_value();
+    } else {
+        m_indexed_storage_kind = IndexedStorageKind::Packed;
+    }
 }
 
 void Object::grow_indexed_storage_if_needed(u32 needed_capacity)
@@ -1712,6 +1732,14 @@ void Object::grow_indexed_storage_if_needed(u32 needed_capacity)
     // Initialize new slots to empty.
     for (u32 i = old_capacity; i < new_capacity; ++i)
         m_butterfly[i] = js_special_empty_value();
+}
+
+void Object::ensure_indexed_capacity(u32 capacity)
+{
+    if (m_indexed_storage_kind == IndexedStorageKind::None)
+        ensure_indexed_storage();
+    if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey)
+        grow_indexed_storage_if_needed(capacity);
 }
 
 void Object::set_prototype(Object* new_prototype)
