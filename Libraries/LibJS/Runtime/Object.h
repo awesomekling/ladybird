@@ -373,6 +373,11 @@ private:
     void ensure_indexed_storage();
     void grow_indexed_storage_if_needed(u32 needed_capacity);
 
+    // In Dictionary mode, the GenericIndexedPropertyStorage* is stored
+    // at m_butterfly[0] to avoid an extra field on Object.
+    GenericIndexedPropertyStorage* dictionary_storage() const;
+    void set_dictionary_storage(GenericIndexedPropertyStorage*);
+
     u8 m_flags { Flag::IsExtensible };
     IndexedStorageKind m_indexed_storage_kind { IndexedStorageKind::None };
     u32 m_indexed_array_like_size { 0 };
@@ -383,11 +388,10 @@ private:
     GC::Ptr<Shape> m_shape;
     Value* m_butterfly { nullptr };
     OwnPtr<Vector<PrivateElement>> m_private_elements; // [[PrivateElements]]
-    GenericIndexedPropertyStorage* m_generic_storage { nullptr };
 };
 
 #if !defined(AK_OS_WINDOWS)
-static_assert(sizeof(Object) <= 48, "Keep the size of JS::Object down!");
+static_assert(sizeof(Object) <= 40, "Keep the size of JS::Object down!");
 #endif
 
 }

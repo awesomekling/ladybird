@@ -105,7 +105,8 @@ Object::~Object()
 {
     if (has_intrinsic_accessors())
         s_intrinsics.remove(this);
-    delete m_generic_storage;
+    if (m_indexed_storage_kind == IndexedStorageKind::Dictionary)
+        delete dictionary_storage();
     Butterfly::destroy(m_butterfly);
 }
 
@@ -1371,7 +1372,7 @@ bool Object::indexed_has(u32 index) const
     case IndexedStorageKind::Holey:
         return index < m_indexed_array_like_size && !m_butterfly[index].is_special_empty_value();
     case IndexedStorageKind::Dictionary:
-        return m_generic_storage->has_index(index);
+        return dictionary_storage()->has_index(index);
     }
     VERIFY_NOT_REACHED();
 }
@@ -1392,7 +1393,7 @@ Optional<ValueAndAttributes> Object::indexed_get(u32 index) const
             return {};
         return ValueAndAttributes { m_butterfly[index], default_attributes };
     case IndexedStorageKind::Dictionary:
-        return m_generic_storage->get(index);
+        return dictionary_storage()->get(index);
     }
     VERIFY_NOT_REACHED();
 }
@@ -1405,8 +1406,8 @@ void Object::indexed_put(u32 index, Value value, PropertyAttributes attributes)
     if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) {
         if (attributes != default_attributes || index > (m_indexed_array_like_size + SPARSE_ARRAY_HOLE_THRESHOLD)) {
             switch_to_dictionary_indexed_storage();
-            m_generic_storage->put(index, value, attributes);
-            m_indexed_array_like_size = m_generic_storage->array_like_size();
+            dictionary_storage()->put(index, value, attributes);
+            m_indexed_array_like_size = dictionary_storage()->array_like_size();
             return;
         }
         if (index > m_indexed_array_like_size && m_indexed_storage_kind == IndexedStorageKind::Packed)
@@ -1419,8 +1420,8 @@ void Object::indexed_put(u32 index, Value value, PropertyAttributes attributes)
     }
 
     VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
-    m_generic_storage->put(index, value, attributes);
-    m_indexed_array_like_size = m_generic_storage->array_like_size();
+    dictionary_storage()->put(index, value, attributes);
+    m_indexed_array_like_size = dictionary_storage()->array_like_size();
 }
 
 void Object::indexed_remove(u32 index)
@@ -1436,7 +1437,7 @@ void Object::indexed_remove(u32 index)
         m_butterfly[index] = js_special_empty_value();
         return;
     case IndexedStorageKind::Dictionary:
-        m_generic_storage->remove(index);
+        dictionary_storage()->remove(index);
         return;
     }
     VERIFY_NOT_REACHED();
@@ -1456,8 +1457,8 @@ bool Object::indexed_set_array_like_size(size_t new_size)
         if (new_size > NumericLimits<i32>::max()
             || (m_indexed_array_like_size < LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD && new_size > LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD)) {
             switch_to_dictionary_indexed_storage();
-            auto result = m_generic_storage->set_array_like_size(new_size);
-            m_indexed_array_like_size = m_generic_storage->array_like_size();
+            auto result = dictionary_storage()->set_array_like_size(new_size);
+            m_indexed_array_like_size = dictionary_storage()->array_like_size();
             return result;
         }
         auto old_size = m_indexed_array_like_size;
@@ -1480,8 +1481,8 @@ bool Object::indexed_set_array_like_size(size_t new_size)
     }
 
     VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
-    auto result = m_generic_storage->set_array_like_size(new_size);
-    m_indexed_array_like_size = m_generic_storage->array_like_size();
+    auto result = dictionary_storage()->set_array_like_size(new_size);
+    m_indexed_array_like_size = dictionary_storage()->array_like_size();
     return result;
 }
 
@@ -1506,7 +1507,7 @@ u32 Object::indexed_real_size() const
         return count;
     }
     case IndexedStorageKind::Dictionary:
-        return m_generic_storage->size();
+        return dictionary_storage()->size();
     }
     VERIFY_NOT_REACHED();
 }
@@ -1533,7 +1534,7 @@ Vector<u32> Object::indexed_indices() const
         return indices;
     }
     case IndexedStorageKind::Dictionary: {
-        auto indices = m_generic_storage->sparse_elements().keys();
+        auto indices = dictionary_storage()->sparse_elements().keys();
         quick_sort(indices);
         return indices;
     }
@@ -1565,8 +1566,8 @@ ValueAndAttributes Object::indexed_take_first()
         return { first, default_attributes };
     }
     case IndexedStorageKind::Dictionary: {
-        auto result = m_generic_storage->take_first();
-        m_indexed_array_like_size = m_generic_storage->array_like_size();
+        auto result = dictionary_storage()->take_first();
+        m_indexed_array_like_size = dictionary_storage()->array_like_size();
         return result;
     }
     }
@@ -1587,8 +1588,8 @@ ValueAndAttributes Object::indexed_take_last()
         return { last, default_attributes };
     }
     case IndexedStorageKind::Dictionary: {
-        auto result = m_generic_storage->take_last();
-        m_indexed_array_like_size = m_generic_storage->array_like_size();
+        auto result = dictionary_storage()->take_last();
+        m_indexed_array_like_size = dictionary_storage()->array_like_size();
         return result;
     }
     }
@@ -1612,7 +1613,23 @@ bool Object::has_no_indexed_storage() const
 
 GenericIndexedPropertyStorage const* Object::generic_indexed_storage() const
 {
-    return m_generic_storage;
+    if (m_indexed_storage_kind != IndexedStorageKind::Dictionary)
+        return nullptr;
+    return dictionary_storage();
+}
+
+GenericIndexedPropertyStorage* Object::dictionary_storage() const
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
+    VERIFY(m_butterfly);
+    return *reinterpret_cast<GenericIndexedPropertyStorage* const*>(&m_butterfly[0]);
+}
+
+void Object::set_dictionary_storage(GenericIndexedPropertyStorage* storage)
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
+    VERIFY(m_butterfly);
+    *reinterpret_cast<GenericIndexedPropertyStorage**>(&m_butterfly[0]) = storage;
 }
 
 void Object::set_indexed_property_elements(Vector<Value>&& values)
@@ -1642,16 +1659,24 @@ void Object::switch_to_dictionary_indexed_storage()
             if (!value.is_special_empty_value())
                 generic->put(i, value);
         }
-        // Clear butterfly indexed side.
+        // Clear butterfly indexed side (except slot 0 which we'll reuse).
         auto capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
-        for (u32 i = 0; i < capacity; ++i)
+        for (u32 i = 1; i < capacity; ++i)
             m_butterfly[i] = js_special_empty_value();
+    } else if (m_indexed_storage_kind == IndexedStorageKind::Dictionary) {
+        delete dictionary_storage();
     }
     // Preserve the array-like size across the storage transition.
     generic->set_array_like_size(m_indexed_array_like_size);
-    delete m_generic_storage;
-    m_generic_storage = generic;
+    // Ensure butterfly has at least 1 indexed slot to store the dictionary pointer.
+    if (!m_butterfly) {
+        m_butterfly = Butterfly::create_for_indexed(1);
+    } else if (Butterfly::header(m_butterfly)->indexed_vector_length == 0) {
+        auto old_named_capacity = Butterfly::header(m_butterfly)->named_property_capacity;
+        m_butterfly = Butterfly::grow_indexed(m_butterfly, old_named_capacity, 0, 1);
+    }
     m_indexed_storage_kind = IndexedStorageKind::Dictionary;
+    set_dictionary_storage(generic);
 }
 
 void Object::switch_to_holey_indexed_storage()
@@ -1749,7 +1774,7 @@ ThrowCompletionOr<void> Object::for_each_own_property_with_enumerability(Functio
                 keys.unchecked_append({ PropertyKey(index), true });
         } else if (has_generic_indexed_storage()) {
             for (auto index : indexed_indices()) {
-                auto entry = m_generic_storage->get(index);
+                auto entry = dictionary_storage()->get(index);
                 keys.unchecked_append({ PropertyKey(index), entry.has_value() && entry->attributes.is_enumerable() });
             }
         }
@@ -1915,8 +1940,8 @@ void Object::visit_edges(Cell::Visitor& visitor)
         }
     }
 
-    if (m_generic_storage)
-        m_generic_storage->visit_edges(visitor);
+    if (m_indexed_storage_kind == IndexedStorageKind::Dictionary)
+        dictionary_storage()->visit_edges(visitor);
 
     if (m_private_elements) {
         for (auto& private_element : *m_private_elements)
