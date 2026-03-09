@@ -37,7 +37,8 @@ int main()
     outln("# Object layout");
     EMIT_OFFSET(OBJECT_SHAPE, Object, m_shape);
     EMIT_OFFSET(OBJECT_BUTTERFLY, Object, m_butterfly);
-    EMIT_OFFSET(OBJECT_INDEXED_PROPERTIES, Object, m_indexed_properties);
+    EMIT_OFFSET(OBJECT_INDEXED_STORAGE_KIND, Object, m_indexed_storage_kind);
+    EMIT_OFFSET(OBJECT_INDEXED_ARRAY_LIKE_SIZE, Object, m_indexed_array_like_size);
     EMIT_SIZEOF(OBJECT_SIZE, Object);
 
     // Object flags byte
@@ -96,16 +97,13 @@ int main()
     outln("\n# Interpreter layout");
     EMIT_OFFSET(INTERPRETER_RUNNING_EXECUTION_CONTEXT, Interpreter, m_running_execution_context);
 
-    // IndexedPropertyStorage layout
-    outln("\n# IndexedPropertyStorage layout");
-    EMIT_OFFSET(INDEXED_PROPERTY_STORAGE_ARRAY_SIZE, IndexedPropertyStorage, m_array_size);
-    EMIT_OFFSET(INDEXED_PROPERTY_STORAGE_IS_SIMPLE, IndexedPropertyStorage, m_is_simple_storage);
+    // Indexed storage kind values
+    outln("\n# IndexedStorageKind values");
+    outln("const INDEXED_STORAGE_KIND_NONE = 0");
+    outln("const INDEXED_STORAGE_KIND_SIMPLE = 1");
+    outln("const INDEXED_STORAGE_KIND_GENERIC = 2");
 
-    // SimpleIndexedPropertyStorage layout
-    outln("\n# SimpleIndexedPropertyStorage layout");
-    EMIT_OFFSET(SIMPLE_INDEXED_PROPERTY_STORAGE_PACKED_ELEMENTS, SimpleIndexedPropertyStorage, m_packed_elements);
-
-    // Vector<Value> layout (used for m_packed_elements)
+    // Vector<Value> layout (used for Executable.bytecode)
     outln("\n# Vector<Value> layout");
     {
         Vector<Value> v;
@@ -115,8 +113,6 @@ int main()
         outln("const VECTOR_DATA = {}", vec_data);
         outln("const VECTOR_SIZE = {}", vec_size);
 
-        // Composite offsets for SimpleIndexedPropertyStorage.m_packed_elements data pointer
-        outln("const SIMPLE_INDEXED_PROPERTY_STORAGE_PACKED_DATA = {}", offsetof(SimpleIndexedPropertyStorage, m_packed_elements) + vec_data);
         // Composite offset for Executable.bytecode data pointer
         outln("const EXECUTABLE_BYTECODE_DATA = {}", offsetof(Executable, bytecode) + vec_data);
     }

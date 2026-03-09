@@ -6,6 +6,7 @@
  */
 
 #include <AK/ByteString.h>
+#include <AK/QuickSort.h>
 #include <AK/TypeCasts.h>
 #include <LibJS/Bytecode/PropertyAccess.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -16,6 +17,7 @@
 #include <LibJS/Runtime/ECMAScriptFunctionObject.h>
 #include <LibJS/Runtime/Error.h>
 #include <LibJS/Runtime/GlobalObject.h>
+#include <LibJS/Runtime/IndexedProperties.h>
 #include <LibJS/Runtime/MapIteratorPrototype.h>
 #include <LibJS/Runtime/NativeFunction.h>
 #include <LibJS/Runtime/NativeJavaScriptBackedFunction.h>
@@ -103,6 +105,7 @@ Object::~Object()
 {
     if (has_intrinsic_accessors())
         s_intrinsics.remove(this);
+    delete m_generic_storage;
     Butterfly::destroy(m_butterfly);
 }
 
@@ -1173,9 +1176,9 @@ ThrowCompletionOr<GC::RootVector<Value>> Object::internal_own_property_keys() co
     GC::RootVector<Value> keys { heap() };
 
     // 2. For each own property key P of O such that P is an array index, in ascending numeric index order, do
-    for (auto& entry : m_indexed_properties) {
+    for (auto index : indexed_indices()) {
         // a. Add P as the last element of keys.
-        keys.append(PrimitiveString::create_from_unsigned_integer(vm, entry.index()));
+        keys.append(PrimitiveString::create_from_unsigned_integer(vm, index));
     }
 
     // 3. For each own property key P of O such that Type(P) is String and P is not an array index, in ascending chronological order of property creation, do
@@ -1237,7 +1240,7 @@ Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key
     Optional<i32> property_offset;
 
     if (property_key.is_number()) {
-        auto value_and_attributes = m_indexed_properties.get(property_key.as_number());
+        auto value_and_attributes = indexed_get(property_key.as_number());
         if (!value_and_attributes.has_value())
             return {};
         value = value_and_attributes->value;
@@ -1263,7 +1266,7 @@ Optional<ValueAndAttributes> Object::storage_get(PropertyKey const& property_key
 bool Object::storage_has(PropertyKey const& property_key) const
 {
     if (property_key.is_number())
-        return m_indexed_properties.has_index(property_key.as_number());
+        return indexed_has(property_key.as_number());
     return shape().lookup(property_key).has_value();
 }
 
@@ -1273,7 +1276,7 @@ Optional<i32> Object::storage_set(PropertyKey const& property_key, ValueAndAttri
 
     if (property_key.is_number()) {
         auto index = property_key.as_number();
-        m_indexed_properties.put(index, value, attributes);
+        indexed_put(index, value, attributes);
         return {};
     }
 
@@ -1328,7 +1331,7 @@ void Object::storage_delete(PropertyKey const& property_key)
     VERIFY(storage_has(property_key));
 
     if (property_key.is_number())
-        return m_indexed_properties.remove(property_key.as_number());
+        return indexed_remove(property_key.as_number());
 
     if (has_intrinsic_accessors() && property_key.is_string()) {
         if (auto intrinsics = s_intrinsics.find(this); intrinsics != s_intrinsics.end())
@@ -1353,6 +1356,307 @@ void Object::storage_delete(PropertyKey const& property_key)
     for (i32 i = deleted_offset; i > most_negative; --i)
         put_direct(i, get_direct(i - 1));
     put_direct(most_negative, Value());
+}
+
+static constexpr size_t SPARSE_ARRAY_HOLE_THRESHOLD = 200;
+static constexpr size_t LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD = 4 * MiB;
+
+bool Object::indexed_has(u32 index) const
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        return false;
+    case IndexedStorageKind::Simple:
+        return index < m_indexed_array_like_size && !m_butterfly[index].is_special_empty_value();
+    case IndexedStorageKind::Generic:
+        return m_generic_storage->has_index(index);
+    }
+    VERIFY_NOT_REACHED();
+}
+
+Optional<ValueAndAttributes> Object::indexed_get(u32 index) const
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        return {};
+    case IndexedStorageKind::Simple:
+        if (index >= m_indexed_array_like_size)
+            return {};
+        if (m_butterfly[index].is_special_empty_value())
+            return {};
+        return ValueAndAttributes { m_butterfly[index], default_attributes };
+    case IndexedStorageKind::Generic:
+        return m_generic_storage->get(index);
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void Object::indexed_put(u32 index, Value value, PropertyAttributes attributes)
+{
+    if (m_indexed_storage_kind == IndexedStorageKind::None)
+        ensure_indexed_storage();
+
+    if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+        if (attributes != default_attributes || index > (m_indexed_array_like_size + SPARSE_ARRAY_HOLE_THRESHOLD)) {
+            switch_to_generic_indexed_storage();
+            m_generic_storage->put(index, value, attributes);
+            m_indexed_array_like_size = m_generic_storage->array_like_size();
+            return;
+        }
+        if (index >= m_indexed_array_like_size)
+            m_indexed_array_like_size = index + 1;
+        grow_indexed_storage_if_needed(m_indexed_array_like_size);
+        m_butterfly[index] = value;
+        return;
+    }
+
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Generic);
+    m_generic_storage->put(index, value, attributes);
+    m_indexed_array_like_size = m_generic_storage->array_like_size();
+}
+
+void Object::indexed_remove(u32 index)
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        VERIFY_NOT_REACHED();
+    case IndexedStorageKind::Simple:
+        VERIFY(index < m_indexed_array_like_size);
+        m_butterfly[index] = js_special_empty_value();
+        return;
+    case IndexedStorageKind::Generic:
+        m_generic_storage->remove(index);
+        return;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+u32 Object::indexed_array_like_size() const
+{
+    return m_indexed_array_like_size;
+}
+
+bool Object::indexed_set_array_like_size(size_t new_size)
+{
+    if (m_indexed_storage_kind == IndexedStorageKind::None)
+        ensure_indexed_storage();
+
+    if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+        if (new_size > NumericLimits<i32>::max()
+            || (m_indexed_array_like_size < LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD && new_size > LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD)) {
+            switch_to_generic_indexed_storage();
+            auto result = m_generic_storage->set_array_like_size(new_size);
+            m_indexed_array_like_size = m_generic_storage->array_like_size();
+            return result;
+        }
+        auto old_size = m_indexed_array_like_size;
+        if (new_size == old_size)
+            return true;
+        m_indexed_array_like_size = new_size;
+        if (new_size > old_size) {
+            grow_indexed_storage_if_needed(new_size);
+            for (u32 i = old_size; i < new_size; ++i)
+                m_butterfly[i] = js_special_empty_value();
+        } else if (m_butterfly) {
+            // Clear truncated elements so GC doesn't hold stale references.
+            auto capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
+            for (u32 i = new_size; i < min(old_size, capacity); ++i)
+                m_butterfly[i] = js_special_empty_value();
+        }
+        return true;
+    }
+
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Generic);
+    auto result = m_generic_storage->set_array_like_size(new_size);
+    m_indexed_array_like_size = m_generic_storage->array_like_size();
+    return result;
+}
+
+bool Object::indexed_is_empty() const
+{
+    return m_indexed_array_like_size == 0;
+}
+
+u32 Object::indexed_real_size() const
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        return 0;
+    case IndexedStorageKind::Simple: {
+        u32 count = 0;
+        for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
+            if (!m_butterfly[i].is_special_empty_value())
+                ++count;
+        }
+        return count;
+    }
+    case IndexedStorageKind::Generic:
+        return m_generic_storage->size();
+    }
+    VERIFY_NOT_REACHED();
+}
+
+Vector<u32> Object::indexed_indices() const
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        return {};
+    case IndexedStorageKind::Simple: {
+        Vector<u32> indices;
+        indices.ensure_capacity(m_indexed_array_like_size);
+        for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
+            if (!m_butterfly[i].is_special_empty_value())
+                indices.unchecked_append(i);
+        }
+        return indices;
+    }
+    case IndexedStorageKind::Generic: {
+        auto indices = m_generic_storage->sparse_elements().keys();
+        quick_sort(indices);
+        return indices;
+    }
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void Object::indexed_append(Value value, PropertyAttributes attributes)
+{
+    indexed_put(m_indexed_array_like_size, value, attributes);
+}
+
+ValueAndAttributes Object::indexed_take_first()
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        VERIFY_NOT_REACHED();
+    case IndexedStorageKind::Simple: {
+        VERIFY(m_indexed_array_like_size > 0);
+        auto first = m_butterfly[0];
+        // Shift all elements left by 1.
+        auto capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
+        for (u32 i = 0; i + 1 < capacity; ++i)
+            m_butterfly[i] = m_butterfly[i + 1];
+        if (capacity > 0)
+            m_butterfly[capacity - 1] = js_special_empty_value();
+        --m_indexed_array_like_size;
+        return { first, default_attributes };
+    }
+    case IndexedStorageKind::Generic: {
+        auto result = m_generic_storage->take_first();
+        m_indexed_array_like_size = m_generic_storage->array_like_size();
+        return result;
+    }
+    }
+    VERIFY_NOT_REACHED();
+}
+
+ValueAndAttributes Object::indexed_take_last()
+{
+    switch (m_indexed_storage_kind) {
+    case IndexedStorageKind::None:
+        VERIFY_NOT_REACHED();
+    case IndexedStorageKind::Simple: {
+        VERIFY(m_indexed_array_like_size > 0);
+        --m_indexed_array_like_size;
+        auto last = m_butterfly[m_indexed_array_like_size];
+        m_butterfly[m_indexed_array_like_size] = js_special_empty_value();
+        return { last, default_attributes };
+    }
+    case IndexedStorageKind::Generic: {
+        auto result = m_generic_storage->take_last();
+        m_indexed_array_like_size = m_generic_storage->array_like_size();
+        return result;
+    }
+    }
+    VERIFY_NOT_REACHED();
+}
+
+bool Object::has_simple_indexed_storage() const
+{
+    return m_indexed_storage_kind == IndexedStorageKind::Simple;
+}
+
+bool Object::has_generic_indexed_storage() const
+{
+    return m_indexed_storage_kind == IndexedStorageKind::Generic;
+}
+
+bool Object::has_no_indexed_storage() const
+{
+    return m_indexed_storage_kind == IndexedStorageKind::None;
+}
+
+GenericIndexedPropertyStorage const* Object::generic_indexed_storage() const
+{
+    return m_generic_storage;
+}
+
+void Object::set_indexed_property_elements(Vector<Value>&& values)
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::None);
+    if (values.is_empty())
+        return;
+    m_indexed_storage_kind = IndexedStorageKind::Simple;
+    m_indexed_array_like_size = values.size();
+    auto capacity = values.size();
+    if (m_butterfly) {
+        auto old_named_capacity = Butterfly::header(m_butterfly)->named_property_capacity;
+        m_butterfly = Butterfly::grow_indexed(m_butterfly, old_named_capacity, 0, capacity);
+    } else {
+        m_butterfly = Butterfly::create_for_indexed(capacity);
+    }
+    for (size_t i = 0; i < values.size(); ++i)
+        m_butterfly[i] = values[i];
+}
+
+void Object::switch_to_generic_indexed_storage()
+{
+    auto* generic = new GenericIndexedPropertyStorage();
+    if (m_indexed_storage_kind == IndexedStorageKind::Simple && m_butterfly) {
+        for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
+            auto value = m_butterfly[i];
+            if (!value.is_special_empty_value())
+                generic->put(i, value);
+        }
+        // Clear butterfly indexed side.
+        auto capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
+        for (u32 i = 0; i < capacity; ++i)
+            m_butterfly[i] = js_special_empty_value();
+    }
+    // Preserve the array-like size across the storage transition.
+    generic->set_array_like_size(m_indexed_array_like_size);
+    delete m_generic_storage;
+    m_generic_storage = generic;
+    m_indexed_storage_kind = IndexedStorageKind::Generic;
+}
+
+void Object::ensure_indexed_storage()
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::None);
+    m_indexed_storage_kind = IndexedStorageKind::Simple;
+}
+
+void Object::grow_indexed_storage_if_needed(u32 needed_capacity)
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Simple);
+    auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->indexed_vector_length : 0u;
+    if (needed_capacity <= old_capacity)
+        return;
+    auto new_capacity = max(4u, old_capacity * 2u);
+    if (new_capacity < needed_capacity)
+        new_capacity = needed_capacity;
+    auto old_named_capacity = m_butterfly ? Butterfly::header(m_butterfly)->named_property_capacity : 0u;
+    if (m_butterfly && old_capacity > 0) {
+        m_butterfly = Butterfly::grow_indexed(m_butterfly, old_named_capacity, old_capacity, new_capacity);
+    } else if (m_butterfly) {
+        // Butterfly exists (for named props) but has no indexed capacity yet.
+        m_butterfly = Butterfly::grow_indexed(m_butterfly, old_named_capacity, 0, new_capacity);
+    } else {
+        m_butterfly = Butterfly::create_for_indexed(new_capacity);
+    }
+    // Initialize new slots to empty.
+    for (u32 i = old_capacity; i < new_capacity; ++i)
+        m_butterfly[i] = js_special_empty_value();
 }
 
 void Object::set_prototype(Object* new_prototype)
@@ -1408,10 +1712,17 @@ ThrowCompletionOr<void> Object::for_each_own_property_with_enumerability(Functio
             bool enumerable;
         };
         GC::ConservativeVector<OwnKey> keys { heap() };
-        keys.ensure_capacity(m_indexed_properties.real_size() + shape().property_count());
+        keys.ensure_capacity(indexed_real_size() + shape().property_count());
 
-        for (auto& entry : m_indexed_properties)
-            keys.unchecked_append({ PropertyKey(entry.index()), entry.enumerable() });
+        if (has_simple_indexed_storage()) {
+            for (auto index : indexed_indices())
+                keys.unchecked_append({ PropertyKey(index), true });
+        } else if (has_generic_indexed_storage()) {
+            for (auto index : indexed_indices()) {
+                auto entry = m_generic_storage->get(index);
+                keys.unchecked_append({ PropertyKey(index), entry.has_value() && entry->attributes.is_enumerable() });
+            }
+        }
 
         for (auto const& [property_key, metadata] : shape().property_table()) {
             if (!property_key.is_string())
@@ -1439,7 +1750,7 @@ ThrowCompletionOr<void> Object::for_each_own_property_with_enumerability(Functio
 
 size_t Object::own_properties_count() const
 {
-    return m_indexed_properties.real_size() + shape().property_table().size();
+    return indexed_real_size() + shape().property_table().size();
 }
 
 // Simple side-effect free property lookup, following the prototype chain. Non-standard.
@@ -1566,9 +1877,16 @@ void Object::visit_edges(Cell::Visitor& visitor)
         auto named_count = m_shape->property_count();
         for (u32 i = 0; i < named_count; ++i)
             visitor.visit(m_butterfly[-2 - static_cast<i64>(i)]);
+
+        if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+            auto indexed_capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
+            for (u32 i = 0; i < indexed_capacity; ++i)
+                visitor.visit(m_butterfly[i]);
+        }
     }
 
-    m_indexed_properties.visit_edges(visitor);
+    if (m_generic_storage)
+        m_generic_storage->visit_edges(visitor);
 
     if (m_private_elements) {
         for (auto& private_element : *m_private_elements)

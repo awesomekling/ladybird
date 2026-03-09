@@ -87,7 +87,7 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
     // 2. Let newLenDesc be a copy of Desc.
     // NOTE: Handled by step 16
 
-    size_t new_length = indexed_properties().array_like_size();
+    size_t new_length = indexed_array_like_size();
     if (property_descriptor.value.has_value()) {
         // 3. Let newLen be ? ToUint32(Desc.[[Value]]).
         new_length = TRY(property_descriptor.value->to_u32(vm));
@@ -139,7 +139,7 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
         if (property_descriptor.writable.has_value() && *property_descriptor.writable)
             return false;
         // ii. If Desc has a [[Value]] field and SameValue(Desc.[[Value]], current.[[Value]]) is false, return false.
-        if (new_length != indexed_properties().array_like_size())
+        if (new_length != indexed_array_like_size())
             return false;
     }
 
@@ -147,7 +147,7 @@ ThrowCompletionOr<bool> Array::set_length(PropertyDescriptor const& property_des
     // a. Let deleteSucceeded be ! A.[[Delete]](P).
     // b. If deleteSucceeded is false, then
     // i. Set newLenDesc.[[Value]] to ! ToUint32(P) + 1𝔽.
-    bool success = indexed_properties().set_array_like_size(new_length);
+    bool success = indexed_set_array_like_size(new_length);
 
     // ii. If newWritable is false, set newLenDesc.[[Writable]] to false.
     // iii. Perform ! OrdinaryDefineOwnProperty(A, "length", newLenDesc).
@@ -278,10 +278,8 @@ ThrowCompletionOr<double> compare_array_elements(VM& vm, Value x, Value y, Funct
 ThrowCompletionOr<Optional<PropertyDescriptor>> Array::internal_get_own_property(PropertyKey const& property_key) const
 {
     // OPTIMIZATION: Fast path for arrays with simple indexed properties storage.
-    auto const* storage = indexed_properties().storage();
-    if (property_key.is_number() && storage && storage->is_simple_storage()) {
-        auto const& simple_storage = static_cast<SimpleIndexedPropertyStorage const&>(*storage);
-        auto value_and_attributes = simple_storage.get(property_key.as_number());
+    if (property_key.is_number() && has_simple_indexed_storage()) {
+        auto value_and_attributes = indexed_get(property_key.as_number());
         if (value_and_attributes.has_value()) {
             PropertyDescriptor descriptor;
             descriptor.value = value_and_attributes->value;
@@ -295,7 +293,7 @@ ThrowCompletionOr<Optional<PropertyDescriptor>> Array::internal_get_own_property
 
     auto& vm = this->vm();
     if (property_key.is_string() && property_key.as_string() == vm.names.length.as_string())
-        return PropertyDescriptor { .value = Value(indexed_properties().array_like_size()), .writable = m_length_writable, .enumerable = false, .configurable = false };
+        return PropertyDescriptor { .value = Value(indexed_array_like_size()), .writable = m_length_writable, .enumerable = false, .configurable = false };
 
     return Object::internal_get_own_property(property_key);
 }
@@ -306,7 +304,7 @@ bool Array::default_prototype_chain_intact() const
     auto const* array_prototype = shape().prototype();
     if (!array_prototype)
         return false;
-    if (!array_prototype->indexed_properties().is_empty())
+    if (!array_prototype->indexed_is_empty())
         return false;
     auto const& array_prototype_shape = shape().prototype()->shape();
     if (intrinsics.default_array_prototype_shape().ptr() != &array_prototype_shape)
@@ -315,7 +313,7 @@ bool Array::default_prototype_chain_intact() const
     auto const* object_prototype = array_prototype_shape.prototype();
     if (!object_prototype)
         return false;
-    if (!object_prototype->indexed_properties().is_empty())
+    if (!object_prototype->indexed_is_empty())
         return false;
     auto const& object_prototype_shape = array_prototype_shape.prototype()->shape();
     if (intrinsics.default_object_prototype_shape().ptr() != &object_prototype_shape)
@@ -345,14 +343,14 @@ ThrowCompletionOr<bool> Array::internal_set(PropertyKey const& property_key, Val
                 attributes.set_writable(true);
                 attributes.set_enumerable(true);
                 attributes.set_configurable(true);
-                indexed_properties().put(index, value, attributes);
+                indexed_put(index, value, attributes);
                 return true;
             }
             if (property_descriptor->is_data_descriptor()) {
                 if (property_descriptor->writable.has_value() && !*property_descriptor->writable)
                     return false;
                 auto attributes = property_descriptor->attributes();
-                indexed_properties().put(index, value, attributes);
+                indexed_put(index, value, attributes);
                 return true;
             }
         } else if (property_key == vm.names.length) {
@@ -388,15 +386,14 @@ ThrowCompletionOr<bool> Array::internal_define_own_property(PropertyKey const& p
         // f. Let index be ! ToUint32(P).
 
         // g. If index ≥ oldLen and oldLenDesc.[[Writable]] is false, return false.
-        if (property_key.as_number() >= indexed_properties().array_like_size() && !m_length_writable)
+        if (property_key.as_number() >= indexed_array_like_size() && !m_length_writable)
             return false;
 
         // h. Let succeeded be ! OrdinaryDefineOwnProperty(A, P, Desc).
         bool succeeded = true;
-        auto* storage = indexed_properties().storage();
         auto attributes = property_descriptor.attributes();
         // OPTIMIZATION: Fast path for arrays with simple indexed properties storage.
-        if (property_descriptor.is_data_descriptor() && attributes == default_attributes && storage && storage->is_simple_storage()) {
+        if (property_descriptor.is_data_descriptor() && attributes == default_attributes && has_simple_indexed_storage()) {
             if (!extensible()) {
                 auto existing_descriptor = TRY(internal_get_own_property(property_key));
                 if (!existing_descriptor.has_value())
@@ -405,7 +402,7 @@ ThrowCompletionOr<bool> Array::internal_define_own_property(PropertyKey const& p
 
             // NB: We don't call put() directly on the underlying storage here, since we may want to switch
             //     the storage type if the index is too large.
-            indexed_properties().put(property_key.as_number(), property_descriptor.value.value());
+            indexed_put(property_key.as_number(), property_descriptor.value.value());
         } else {
             succeeded = MUST(Object::internal_define_own_property(property_key, property_descriptor, precomputed_get_own_property));
         }
@@ -430,10 +427,8 @@ ThrowCompletionOr<bool> Array::internal_define_own_property(PropertyKey const& p
 // NON-STANDARD: Fast path to quickly check if an indexed property exists in array without holes
 ThrowCompletionOr<bool> Array::internal_has_property(PropertyKey const& property_key) const
 {
-    auto const* storage = indexed_properties().storage();
-    if (property_key.is_number() && !m_is_proxy_target && storage && storage->is_simple_storage()) {
-        auto const& simple_storage = static_cast<SimpleIndexedPropertyStorage const&>(*storage);
-        if (!simple_storage.has_empty_elements() && property_key.as_number() < simple_storage.array_like_size()) {
+    if (property_key.is_number() && !m_is_proxy_target && has_simple_indexed_storage()) {
+        if (indexed_has(property_key.as_number())) {
             return true;
         }
     }
@@ -455,7 +450,7 @@ ThrowCompletionOr<GC::RootVector<Value>> Array::internal_own_property_keys() con
     auto& vm = this->vm();
     auto keys = TRY(Object::internal_own_property_keys());
     // FIXME: This is pretty expensive, find a better way to do this
-    keys.insert(indexed_properties().real_size(), PrimitiveString::create(vm, vm.names.length.as_string()));
+    keys.insert(indexed_real_size(), PrimitiveString::create(vm, vm.names.length.as_string()));
     return { move(keys) };
 }
 

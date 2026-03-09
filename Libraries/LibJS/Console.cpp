@@ -186,11 +186,11 @@ static ThrowCompletionOr<GC::Ref<Object>> create_table_row(Realm& realm, Value r
         auto& array = tabular_data_item.as_array();
 
         // 3.1. Let `indices` be get the indices of `tabularDataItem`
-        auto& indices = array.indexed_properties();
+        auto indices = array.indexed_indices();
 
         // 3.2. For each `index` of `indices`
-        for (auto const& prop : indices) {
-            PropertyKey key(prop.index());
+        for (auto index : indices) {
+            PropertyKey key(index);
 
             // 3.2.1. Let `value` be `tabularDataItem[index]`
             Value value = TRY(array.get(key));
@@ -256,10 +256,9 @@ ThrowCompletionOr<Value> Console::table()
         HashMap<PropertyKey, bool> properties;
 
         if (TRY(properties_arg.is_array(vm))) {
-            auto& properties_array = properties_arg.as_array().indexed_properties();
-            auto* properties_storage = properties_array.storage();
-            for (auto const& col : properties_array) {
-                auto col_name = properties_storage->get(col.index()).value().value;
+            auto& properties_array_obj = properties_arg.as_array();
+            for (auto col_index : properties_array_obj.indexed_indices()) {
+                auto col_name = properties_array_obj.indexed_get(col_index).value().value;
                 properties.set(TRY(PropertyKey::from_value(vm, col_name)), true);
             }
         }
@@ -277,11 +276,11 @@ ThrowCompletionOr<Value> Console::table()
             auto& array = tabular_data.as_array();
 
             // 3.1. Let `indices` be get the indices of `tabularData`
-            auto& indices = array.indexed_properties();
+            auto indices = array.indexed_indices();
 
             // 3.2. For each `index` of `indices`
-            for (auto const& prop : indices) {
-                PropertyKey index(prop.index());
+            for (auto i : indices) {
+                PropertyKey index(i);
 
                 // 3.2.1. Let `value` be `tabularData[index]`
                 Value value = TRY(array.get(index));

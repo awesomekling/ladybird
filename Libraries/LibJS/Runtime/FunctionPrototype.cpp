@@ -77,13 +77,24 @@ JS_DEFINE_NATIVE_FUNCTION(FunctionPrototype::apply)
     // OPTIMIZATION: If argArray has a simple indexed storage without holes and doesn't interfere with indexed property access,
     //               we can skip CreateListFromArrayLike and directly use the storage elements.
     auto& arg_array_object = arg_array.as_object();
-    auto* storage = arg_array_object.indexed_properties().storage();
-    if (!arg_array_object.may_interfere_with_indexed_property_access() && storage && storage->is_simple_storage()) {
+    if (!arg_array_object.may_interfere_with_indexed_property_access() && arg_array_object.has_simple_indexed_storage()) {
         auto length = TRY(length_of_array_like(vm, arg_array_object));
-        auto const* simple_storage = static_cast<SimpleIndexedPropertyStorage*>(storage);
-        auto storage_elements = simple_storage->elements().span();
-        if (!simple_storage->has_empty_elements() && storage_elements.size() >= length)
-            return TRY(JS::call(vm, function, this_arg, storage_elements.slice(0, length)));
+        if (static_cast<size_t>(arg_array_object.indexed_array_like_size()) >= length) {
+            bool all_present = true;
+            for (size_t i = 0; i < length; ++i) {
+                if (!arg_array_object.indexed_has(i)) {
+                    all_present = false;
+                    break;
+                }
+            }
+            if (all_present) {
+                GC::RootVector<Value> args(vm.heap());
+                args.ensure_capacity(length);
+                for (size_t i = 0; i < length; ++i)
+                    args.unchecked_append(arg_array_object.indexed_get(i)->value);
+                return TRY(JS::call(vm, function, this_arg, args.span()));
+            }
+        }
     }
 
     // 4. Let argList be ? CreateListFromArrayLike(argArray).

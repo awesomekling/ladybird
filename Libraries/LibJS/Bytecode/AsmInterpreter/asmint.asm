@@ -1305,21 +1305,18 @@ handler PutByValue
     branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
     # Check !may_interfere_with_indexed_property_access
     branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Load indexed property storage pointer
-    load64 t0, [t3, OBJECT_INDEXED_PROPERTIES]
-    branch_zero t0, .slow
-    # Check is_simple_storage
-    load8 t5, [t0, INDEXED_PROPERTY_STORAGE_IS_SIMPLE]
-    branch_zero t5, .slow
-    # Check index < m_array_size
-    load64 t5, [t0, INDEXED_PROPERTY_STORAGE_ARRAY_SIZE]
+    # Check indexed_storage_kind == Simple (1)
+    load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
+    branch_ne t5, INDEXED_STORAGE_KIND_SIMPLE, .slow
+    # Check index < m_indexed_array_like_size
+    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
     branch_ge_unsigned t4, t5, .slow
-    # Check existing value is not empty (hole) - holes need prototype chain lookup
-    load64 t5, [t0, SIMPLE_INDEXED_PROPERTY_STORAGE_PACKED_DATA]
+    # Load butterfly pointer and check existing value is not empty (hole)
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t1, [t5, t4, 8]
     mov t0, EMPTY_TAG_SHIFTED
     branch_eq t1, t0, .slow
-    # Store value to m_packed_elements.data()[index]
+    # Store value to butterfly[index]
     load_operand t1, m_src
     store64 [t5, t4, 8], t1
     dispatch_next
@@ -1532,22 +1529,19 @@ handler GetByValue
     branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
     # Check !may_interfere_with_indexed_property_access
     branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Load indexed property storage pointer
-    load64 t0, [t3, OBJECT_INDEXED_PROPERTIES]
-    branch_zero t0, .slow
-    # Check is_simple_storage
-    load8 t5, [t0, INDEXED_PROPERTY_STORAGE_IS_SIMPLE]
-    branch_zero t5, .slow
-    # Check index < m_array_size
-    load64 t5, [t0, INDEXED_PROPERTY_STORAGE_ARRAY_SIZE]
+    # Check indexed_storage_kind == Simple (1)
+    load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
+    branch_ne t5, INDEXED_STORAGE_KIND_SIMPLE, .slow
+    # Check index < m_indexed_array_like_size
+    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
     branch_ge_unsigned t4, t5, .slow
-    # Load value from m_packed_elements.data()[index]
-    load64 t5, [t0, SIMPLE_INDEXED_PROPERTY_STORAGE_PACKED_DATA]
+    # Load value from butterfly[index]
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t0, [t5, t4, 8]
     # Check value is not empty (sparse hole)
     mov t5, EMPTY_TAG_SHIFTED
     branch_eq t0, t5, .slow
-    # NB: No accessor check needed -- SimpleIndexedPropertyStorage
+    # NB: No accessor check needed -- simple indexed storage
     #     can only hold default-attributed data properties.
     store_operand m_dst, t0
     dispatch_next
@@ -1692,23 +1686,16 @@ handler GetLength
     store_operand m_dst, t0
     dispatch_next
 .magical_length:
-    # Object.m_indexed_properties
-    load64 t0, [t3, OBJECT_INDEXED_PROPERTIES]
-    # If storage is null, length is 0
-    branch_zero t0, .length_zero
-    # IndexedPropertyStorage.m_array_size
-    load64 t0, [t0, INDEXED_PROPERTY_STORAGE_ARRAY_SIZE]
-    # Box as int32 if fits, otherwise double
+    # Object.m_indexed_array_like_size (u32 field on Object)
+    load32 t0, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
+    # Box as int32 (u32 always fits in int32's positive range... well, not quite,
+    # but array_like_size > INT32_MAX is extremely rare)
     mov t2, t0
     shr t2, 31
     branch_nonzero t2, .length_double
     # Tag as int32
     box_int32 t3, t0
     store_operand m_dst, t3
-    dispatch_next
-.length_zero:
-    mov t0, INT32_TAG_SHIFTED
-    store_operand m_dst, t0
     dispatch_next
 .length_double:
     int_to_double ft0, t0

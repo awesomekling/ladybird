@@ -16,7 +16,6 @@
 #include <LibJS/Heap/Cell.h>
 #include <LibJS/Runtime/Butterfly.h>
 #include <LibJS/Runtime/Completion.h>
-#include <LibJS/Runtime/IndexedProperties.h>
 #include <LibJS/Runtime/PrimitiveString.h>
 #include <LibJS/Runtime/PrivateEnvironment.h>
 #include <LibJS/Runtime/PropertyDescriptor.h>
@@ -25,6 +24,20 @@
 #include <LibJS/Runtime/Value.h>
 
 namespace JS {
+
+class GenericIndexedPropertyStorage;
+
+struct ValueAndAttributes {
+    Value value;
+    PropertyAttributes attributes { default_attributes };
+
+    Optional<i32> property_offset {};
+
+    void visit_edges(Cell::Visitor& visitor)
+    {
+        visitor.visit(value);
+    }
+};
 
 #define JS_OBJECT(class_, base_class) GC_CELL(class_, base_class)
 
@@ -284,9 +297,24 @@ public:
     Value get_direct(i32 index) const { return m_butterfly[index]; }
     void put_direct(i32 index, Value value) { m_butterfly[index] = value; }
 
-    IndexedProperties const& indexed_properties() const { return m_indexed_properties; }
-    IndexedProperties& indexed_properties() { return m_indexed_properties; }
-    void set_indexed_property_elements(Vector<Value>&& values) { m_indexed_properties = IndexedProperties(move(values)); }
+    // Indexed property access
+    bool indexed_has(u32 index) const;
+    Optional<ValueAndAttributes> indexed_get(u32 index) const;
+    void indexed_put(u32 index, Value value, PropertyAttributes attributes = default_attributes);
+    void indexed_remove(u32 index);
+    u32 indexed_array_like_size() const;
+    bool indexed_set_array_like_size(size_t new_size);
+    bool indexed_is_empty() const;
+    u32 indexed_real_size() const;
+    Vector<u32> indexed_indices() const;
+    void indexed_append(Value value, PropertyAttributes attributes = default_attributes);
+    ValueAndAttributes indexed_take_first();
+    ValueAndAttributes indexed_take_last();
+    bool has_simple_indexed_storage() const;
+    bool has_generic_indexed_storage() const;
+    bool has_no_indexed_storage() const;
+    GenericIndexedPropertyStorage const* generic_indexed_storage() const;
+    void set_indexed_property_elements(Vector<Value>&& values);
 
     Shape& shape() { return *m_shape; }
     Shape const& shape() const { return *m_shape; }
@@ -322,6 +350,12 @@ protected:
     explicit Object(Shape&, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
 
 private:
+    enum class IndexedStorageKind : u8 {
+        None = 0,
+        Simple = 1,
+        Generic = 2,
+    };
+
     struct Flag {
         static constexpr u8 IsExtensible = 1 << 0;
         static constexpr u8 HasParameterMap = 1 << 1;
@@ -333,19 +367,25 @@ private:
         static constexpr u8 IsFunction = 1 << 7;
     };
 
+    void switch_to_generic_indexed_storage();
+    void ensure_indexed_storage();
+    void grow_indexed_storage_if_needed(u32 needed_capacity);
+
     u8 m_flags { Flag::IsExtensible };
+    IndexedStorageKind m_indexed_storage_kind { IndexedStorageKind::None };
+    u32 m_indexed_array_like_size { 0 };
     void set_shape(Shape& shape) { m_shape = &shape; }
 
     Object* prototype() { return shape().prototype(); }
 
     GC::Ptr<Shape> m_shape;
     Value* m_butterfly { nullptr };
-    IndexedProperties m_indexed_properties;
     OwnPtr<Vector<PrivateElement>> m_private_elements; // [[PrivateElements]]
+    GenericIndexedPropertyStorage* m_generic_storage { nullptr };
 };
 
 #if !defined(AK_OS_WINDOWS)
-static_assert(sizeof(Object) <= 64, "Keep the size of JS::Object down!");
+static_assert(sizeof(Object) <= 48, "Keep the size of JS::Object down!");
 #endif
 
 }
