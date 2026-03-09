@@ -50,6 +50,7 @@ GC::Ref<Array> Array::create_from(Realm& realm, ReadonlySpan<Value> elements)
 {
     // 1. Let array be ! ArrayCreate(0).
     auto array = MUST(Array::create(realm, 0));
+    array->ensure_indexed_capacity(elements.size());
 
     // 2. Let n be 0.
     // 3. For each element e of elements, do

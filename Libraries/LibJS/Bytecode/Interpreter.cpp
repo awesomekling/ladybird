@@ -1949,18 +1949,38 @@ JS_ENUMERATE_COMMON_UNARY_OPS(JS_DEFINE_COMMON_UNARY_OP)
 
 void NewArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto array = MUST(Array::create(interpreter.realm(), m_element_count));
-    for (size_t i = 0; i < m_element_count; i++) {
-        array->indexed_put(i, interpreter.get(m_elements[i]), default_attributes);
+    auto array = MUST(Array::create(interpreter.realm(), 0));
+    if (m_element_count > 0) {
+        array->ensure_indexed_capacity(m_element_count);
+        bool has_holes = false;
+        for (size_t i = 0; i < m_element_count; i++) {
+            auto value = interpreter.get(m_elements[i]);
+            if (value.is_special_empty_value())
+                has_holes = true;
+            else
+                array->indexed_put(i, value, default_attributes);
+        }
+        if (has_holes)
+            array->indexed_set_array_like_size(m_element_count);
     }
     interpreter.set(dst(), array);
 }
 
 void NewPrimitiveArray::execute_impl(Bytecode::Interpreter& interpreter) const
 {
-    auto array = MUST(Array::create(interpreter.realm(), m_element_count));
-    for (size_t i = 0; i < m_element_count; i++)
-        array->indexed_put(i, m_elements[i], default_attributes);
+    auto array = MUST(Array::create(interpreter.realm(), 0));
+    if (m_element_count > 0) {
+        array->ensure_indexed_capacity(m_element_count);
+        bool has_holes = false;
+        for (size_t i = 0; i < m_element_count; i++) {
+            if (m_elements[i].is_special_empty_value())
+                has_holes = true;
+            else
+                array->indexed_put(i, m_elements[i], default_attributes);
+        }
+        if (has_holes)
+            array->indexed_set_array_like_size(m_element_count);
+    }
     interpreter.set(dst(), array);
 }
 
