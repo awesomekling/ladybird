@@ -60,6 +60,7 @@ set(SOURCES
     Runtime/AsyncGeneratorPrototype.cpp
     Runtime/AsyncIteratorPrototype.cpp
     Runtime/AtomicsObject.cpp
+    Runtime/Butterfly.cpp
     Runtime/BigInt.cpp
     Runtime/BigIntConstructor.cpp
     Runtime/BigIntObject.cpp
