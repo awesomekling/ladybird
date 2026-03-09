@@ -352,8 +352,9 @@ protected:
 private:
     enum class IndexedStorageKind : u8 {
         None = 0,
-        Simple = 1,
-        Generic = 2,
+        Packed = 1,
+        Holey = 2,
+        Dictionary = 3,
     };
 
     struct Flag {
@@ -367,7 +368,8 @@ private:
         static constexpr u8 IsFunction = 1 << 7;
     };
 
-    void switch_to_generic_indexed_storage();
+    void switch_to_dictionary_indexed_storage();
+    void switch_to_holey_indexed_storage();
     void ensure_indexed_storage();
     void grow_indexed_storage_if_needed(u32 needed_capacity);
 

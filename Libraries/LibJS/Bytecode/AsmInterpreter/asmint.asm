@@ -1305,18 +1305,25 @@ handler PutByValue
     branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
     # Check !may_interfere_with_indexed_property_access
     branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Check indexed_storage_kind == Simple (1)
+    # Check indexed_storage_kind is Packed (1) or Holey (2)
     load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
-    branch_ne t5, INDEXED_STORAGE_KIND_SIMPLE, .slow
-    # Check index < m_indexed_array_like_size
+    branch_eq t5, INDEXED_STORAGE_KIND_PACKED, .packed_put
+    branch_ne t5, INDEXED_STORAGE_KIND_HOLEY, .slow
+    # Holey path: index < size, check for hole, then store
     load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
     branch_ge_unsigned t4, t5, .slow
-    # Load butterfly pointer and check existing value is not empty (hole)
     load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t1, [t5, t4, 8]
     mov t0, EMPTY_TAG_SHIFTED
     branch_eq t1, t0, .slow
-    # Store value to butterfly[index]
+    load_operand t1, m_src
+    store64 [t5, t4, 8], t1
+    dispatch_next
+.packed_put:
+    # Packed path: index < size, store directly (no hole check needed)
+    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
+    branch_ge_unsigned t4, t5, .slow
+    load64 t5, [t3, OBJECT_BUTTERFLY]
     load_operand t1, m_src
     store64 [t5, t4, 8], t1
     dispatch_next
@@ -1529,20 +1536,25 @@ handler GetByValue
     branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
     # Check !may_interfere_with_indexed_property_access
     branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Check indexed_storage_kind == Simple (1)
+    # Check indexed_storage_kind is Packed (1) or Holey (2)
     load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
-    branch_ne t5, INDEXED_STORAGE_KIND_SIMPLE, .slow
-    # Check index < m_indexed_array_like_size
+    branch_eq t5, INDEXED_STORAGE_KIND_PACKED, .packed_get
+    branch_ne t5, INDEXED_STORAGE_KIND_HOLEY, .slow
+    # Holey path: index < size, load, check for hole
     load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
     branch_ge_unsigned t4, t5, .slow
-    # Load value from butterfly[index]
     load64 t5, [t3, OBJECT_BUTTERFLY]
     load64 t0, [t5, t4, 8]
-    # Check value is not empty (sparse hole)
     mov t5, EMPTY_TAG_SHIFTED
     branch_eq t0, t5, .slow
-    # NB: No accessor check needed -- simple indexed storage
-    #     can only hold default-attributed data properties.
+    store_operand m_dst, t0
+    dispatch_next
+.packed_get:
+    # Packed path: index < size, load (no hole check needed)
+    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
+    branch_ge_unsigned t4, t5, .slow
+    load64 t5, [t3, OBJECT_BUTTERFLY]
+    load64 t0, [t5, t4, 8]
     store_operand m_dst, t0
     dispatch_next
 .try_typed_array:

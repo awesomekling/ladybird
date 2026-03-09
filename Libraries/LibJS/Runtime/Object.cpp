@@ -1366,9 +1366,11 @@ bool Object::indexed_has(u32 index) const
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         return false;
-    case IndexedStorageKind::Simple:
+    case IndexedStorageKind::Packed:
+        return index < m_indexed_array_like_size;
+    case IndexedStorageKind::Holey:
         return index < m_indexed_array_like_size && !m_butterfly[index].is_special_empty_value();
-    case IndexedStorageKind::Generic:
+    case IndexedStorageKind::Dictionary:
         return m_generic_storage->has_index(index);
     }
     VERIFY_NOT_REACHED();
@@ -1379,13 +1381,17 @@ Optional<ValueAndAttributes> Object::indexed_get(u32 index) const
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         return {};
-    case IndexedStorageKind::Simple:
+    case IndexedStorageKind::Packed:
+        if (index >= m_indexed_array_like_size)
+            return {};
+        return ValueAndAttributes { m_butterfly[index], default_attributes };
+    case IndexedStorageKind::Holey:
         if (index >= m_indexed_array_like_size)
             return {};
         if (m_butterfly[index].is_special_empty_value())
             return {};
         return ValueAndAttributes { m_butterfly[index], default_attributes };
-    case IndexedStorageKind::Generic:
+    case IndexedStorageKind::Dictionary:
         return m_generic_storage->get(index);
     }
     VERIFY_NOT_REACHED();
@@ -1396,13 +1402,15 @@ void Object::indexed_put(u32 index, Value value, PropertyAttributes attributes)
     if (m_indexed_storage_kind == IndexedStorageKind::None)
         ensure_indexed_storage();
 
-    if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+    if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) {
         if (attributes != default_attributes || index > (m_indexed_array_like_size + SPARSE_ARRAY_HOLE_THRESHOLD)) {
-            switch_to_generic_indexed_storage();
+            switch_to_dictionary_indexed_storage();
             m_generic_storage->put(index, value, attributes);
             m_indexed_array_like_size = m_generic_storage->array_like_size();
             return;
         }
+        if (index > m_indexed_array_like_size && m_indexed_storage_kind == IndexedStorageKind::Packed)
+            switch_to_holey_indexed_storage();
         if (index >= m_indexed_array_like_size)
             m_indexed_array_like_size = index + 1;
         grow_indexed_storage_if_needed(m_indexed_array_like_size);
@@ -1410,7 +1418,7 @@ void Object::indexed_put(u32 index, Value value, PropertyAttributes attributes)
         return;
     }
 
-    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Generic);
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
     m_generic_storage->put(index, value, attributes);
     m_indexed_array_like_size = m_generic_storage->array_like_size();
 }
@@ -1420,11 +1428,14 @@ void Object::indexed_remove(u32 index)
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         VERIFY_NOT_REACHED();
-    case IndexedStorageKind::Simple:
+    case IndexedStorageKind::Packed:
+        switch_to_holey_indexed_storage();
+        [[fallthrough]];
+    case IndexedStorageKind::Holey:
         VERIFY(index < m_indexed_array_like_size);
         m_butterfly[index] = js_special_empty_value();
         return;
-    case IndexedStorageKind::Generic:
+    case IndexedStorageKind::Dictionary:
         m_generic_storage->remove(index);
         return;
     }
@@ -1441,10 +1452,10 @@ bool Object::indexed_set_array_like_size(size_t new_size)
     if (m_indexed_storage_kind == IndexedStorageKind::None)
         ensure_indexed_storage();
 
-    if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+    if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) {
         if (new_size > NumericLimits<i32>::max()
             || (m_indexed_array_like_size < LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD && new_size > LENGTH_SETTER_GENERIC_STORAGE_THRESHOLD)) {
-            switch_to_generic_indexed_storage();
+            switch_to_dictionary_indexed_storage();
             auto result = m_generic_storage->set_array_like_size(new_size);
             m_indexed_array_like_size = m_generic_storage->array_like_size();
             return result;
@@ -1454,6 +1465,8 @@ bool Object::indexed_set_array_like_size(size_t new_size)
             return true;
         m_indexed_array_like_size = new_size;
         if (new_size > old_size) {
+            if (m_indexed_storage_kind == IndexedStorageKind::Packed)
+                switch_to_holey_indexed_storage();
             grow_indexed_storage_if_needed(new_size);
             for (u32 i = old_size; i < new_size; ++i)
                 m_butterfly[i] = js_special_empty_value();
@@ -1466,7 +1479,7 @@ bool Object::indexed_set_array_like_size(size_t new_size)
         return true;
     }
 
-    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Generic);
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Dictionary);
     auto result = m_generic_storage->set_array_like_size(new_size);
     m_indexed_array_like_size = m_generic_storage->array_like_size();
     return result;
@@ -1482,7 +1495,9 @@ u32 Object::indexed_real_size() const
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         return 0;
-    case IndexedStorageKind::Simple: {
+    case IndexedStorageKind::Packed:
+        return m_indexed_array_like_size;
+    case IndexedStorageKind::Holey: {
         u32 count = 0;
         for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
             if (!m_butterfly[i].is_special_empty_value())
@@ -1490,7 +1505,7 @@ u32 Object::indexed_real_size() const
         }
         return count;
     }
-    case IndexedStorageKind::Generic:
+    case IndexedStorageKind::Dictionary:
         return m_generic_storage->size();
     }
     VERIFY_NOT_REACHED();
@@ -1501,7 +1516,14 @@ Vector<u32> Object::indexed_indices() const
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         return {};
-    case IndexedStorageKind::Simple: {
+    case IndexedStorageKind::Packed: {
+        Vector<u32> indices;
+        indices.ensure_capacity(m_indexed_array_like_size);
+        for (u32 i = 0; i < m_indexed_array_like_size; ++i)
+            indices.unchecked_append(i);
+        return indices;
+    }
+    case IndexedStorageKind::Holey: {
         Vector<u32> indices;
         indices.ensure_capacity(m_indexed_array_like_size);
         for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
@@ -1510,7 +1532,7 @@ Vector<u32> Object::indexed_indices() const
         }
         return indices;
     }
-    case IndexedStorageKind::Generic: {
+    case IndexedStorageKind::Dictionary: {
         auto indices = m_generic_storage->sparse_elements().keys();
         quick_sort(indices);
         return indices;
@@ -1529,7 +1551,8 @@ ValueAndAttributes Object::indexed_take_first()
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         VERIFY_NOT_REACHED();
-    case IndexedStorageKind::Simple: {
+    case IndexedStorageKind::Packed:
+    case IndexedStorageKind::Holey: {
         VERIFY(m_indexed_array_like_size > 0);
         auto first = m_butterfly[0];
         // Shift all elements left by 1.
@@ -1541,7 +1564,7 @@ ValueAndAttributes Object::indexed_take_first()
         --m_indexed_array_like_size;
         return { first, default_attributes };
     }
-    case IndexedStorageKind::Generic: {
+    case IndexedStorageKind::Dictionary: {
         auto result = m_generic_storage->take_first();
         m_indexed_array_like_size = m_generic_storage->array_like_size();
         return result;
@@ -1555,14 +1578,15 @@ ValueAndAttributes Object::indexed_take_last()
     switch (m_indexed_storage_kind) {
     case IndexedStorageKind::None:
         VERIFY_NOT_REACHED();
-    case IndexedStorageKind::Simple: {
+    case IndexedStorageKind::Packed:
+    case IndexedStorageKind::Holey: {
         VERIFY(m_indexed_array_like_size > 0);
         --m_indexed_array_like_size;
         auto last = m_butterfly[m_indexed_array_like_size];
         m_butterfly[m_indexed_array_like_size] = js_special_empty_value();
         return { last, default_attributes };
     }
-    case IndexedStorageKind::Generic: {
+    case IndexedStorageKind::Dictionary: {
         auto result = m_generic_storage->take_last();
         m_indexed_array_like_size = m_generic_storage->array_like_size();
         return result;
@@ -1573,12 +1597,12 @@ ValueAndAttributes Object::indexed_take_last()
 
 bool Object::has_simple_indexed_storage() const
 {
-    return m_indexed_storage_kind == IndexedStorageKind::Simple;
+    return m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey;
 }
 
 bool Object::has_generic_indexed_storage() const
 {
-    return m_indexed_storage_kind == IndexedStorageKind::Generic;
+    return m_indexed_storage_kind == IndexedStorageKind::Dictionary;
 }
 
 bool Object::has_no_indexed_storage() const
@@ -1596,7 +1620,7 @@ void Object::set_indexed_property_elements(Vector<Value>&& values)
     VERIFY(m_indexed_storage_kind == IndexedStorageKind::None);
     if (values.is_empty())
         return;
-    m_indexed_storage_kind = IndexedStorageKind::Simple;
+    m_indexed_storage_kind = IndexedStorageKind::Packed;
     m_indexed_array_like_size = values.size();
     auto capacity = values.size();
     if (m_butterfly) {
@@ -1609,10 +1633,10 @@ void Object::set_indexed_property_elements(Vector<Value>&& values)
         m_butterfly[i] = values[i];
 }
 
-void Object::switch_to_generic_indexed_storage()
+void Object::switch_to_dictionary_indexed_storage()
 {
     auto* generic = new GenericIndexedPropertyStorage();
-    if (m_indexed_storage_kind == IndexedStorageKind::Simple && m_butterfly) {
+    if ((m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) && m_butterfly) {
         for (u32 i = 0; i < m_indexed_array_like_size; ++i) {
             auto value = m_butterfly[i];
             if (!value.is_special_empty_value())
@@ -1627,18 +1651,24 @@ void Object::switch_to_generic_indexed_storage()
     generic->set_array_like_size(m_indexed_array_like_size);
     delete m_generic_storage;
     m_generic_storage = generic;
-    m_indexed_storage_kind = IndexedStorageKind::Generic;
+    m_indexed_storage_kind = IndexedStorageKind::Dictionary;
+}
+
+void Object::switch_to_holey_indexed_storage()
+{
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Packed);
+    m_indexed_storage_kind = IndexedStorageKind::Holey;
 }
 
 void Object::ensure_indexed_storage()
 {
     VERIFY(m_indexed_storage_kind == IndexedStorageKind::None);
-    m_indexed_storage_kind = IndexedStorageKind::Simple;
+    m_indexed_storage_kind = IndexedStorageKind::Packed;
 }
 
 void Object::grow_indexed_storage_if_needed(u32 needed_capacity)
 {
-    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Simple);
+    VERIFY(m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey);
     auto old_capacity = m_butterfly ? Butterfly::header(m_butterfly)->indexed_vector_length : 0u;
     if (needed_capacity <= old_capacity)
         return;
@@ -1878,7 +1908,7 @@ void Object::visit_edges(Cell::Visitor& visitor)
         for (u32 i = 0; i < named_count; ++i)
             visitor.visit(m_butterfly[-2 - static_cast<i64>(i)]);
 
-        if (m_indexed_storage_kind == IndexedStorageKind::Simple) {
+        if (m_indexed_storage_kind == IndexedStorageKind::Packed || m_indexed_storage_kind == IndexedStorageKind::Holey) {
             auto indexed_capacity = Butterfly::header(m_butterfly)->indexed_vector_length;
             for (u32 i = 0; i < indexed_capacity; ++i)
                 visitor.visit(m_butterfly[i]);

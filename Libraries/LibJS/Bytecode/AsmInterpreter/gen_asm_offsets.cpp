@@ -100,8 +100,9 @@ int main()
     // Indexed storage kind values
     outln("\n# IndexedStorageKind values");
     outln("const INDEXED_STORAGE_KIND_NONE = 0");
-    outln("const INDEXED_STORAGE_KIND_SIMPLE = 1");
-    outln("const INDEXED_STORAGE_KIND_GENERIC = 2");
+    outln("const INDEXED_STORAGE_KIND_PACKED = 1");
+    outln("const INDEXED_STORAGE_KIND_HOLEY = 2");
+    outln("const INDEXED_STORAGE_KIND_DICTIONARY = 3");
 
     // Vector<Value> layout (used for Executable.bytecode)
     outln("\n# Vector<Value> layout");
