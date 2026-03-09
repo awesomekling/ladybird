@@ -86,6 +86,18 @@ macro check_both_double(lhs, rhs, fail)
     branch_eq t4, NAN_BASE_TAG, fail
 end
 
+# Check if a NaN-boxed value is a non-negative int32, and extract the index.
+# For a non-negative int32, the upper 32 bits are always INT32_TAG << 16.
+# On success, dst contains the zero-extended u32 index.
+# Clobbers dst. Jumps to fail if not a non-negative int32.
+macro check_nonneg_int32(dst, src, fail)
+    mov dst, src
+    shr dst, 32
+    branch_ne dst, INT32_NONNEG_UPPER32, fail
+    mov dst, src
+    and dst, 0xFFFFFFFF
+end
+
 # Coerce two operands (already in t1/t2) to numeric types for arithmetic/comparison.
 # If both are int32: jumps to both_int_label with t3=sign-extended lhs, t4=sign-extended rhs.
 # If one or both are double: falls through with ft0=lhs as double, ft1=rhs as double.
@@ -1291,42 +1303,36 @@ handler PutByValue
     # Check base is an object
     extract_tag t3, t1
     branch_ne t3, OBJECT_TAG, .slow
-    # Check property is non-negative int32
-    extract_tag t4, t2
-    branch_ne t4, INT32_TAG, .slow
-    mov t4, t2
-    and t4, 0xFFFFFFFF
-    # Check high bit (negative int32)
-    branch_bit_set t4, 31, .slow
+    # Combined check: property is non-negative int32
+    check_nonneg_int32 t4, t2, .slow
     # Extract Object*
     unbox_object t3, t1
-    # Check IsTypedArray flag -- branch to C++ helper early
+    # Issue all object field loads early (same cache line)
     load8 t0, [t3, OBJECT_FLAGS]
-    branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
-    # Check !may_interfere_with_indexed_property_access
-    branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Check indexed_storage_kind is Packed (1) or Holey (2)
     load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
-    branch_eq t5, INDEXED_STORAGE_KIND_PACKED, .packed_put
+    load32 t7, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
+    load64 t6, [t3, OBJECT_BUTTERFLY]
+    # Check for special flags (typed array or may-interfere)
+    and t0, OBJECT_FLAG_SPECIAL_INDEXED
+    branch_nonzero t0, .check_special_flags
+    # Packed fast path
+    branch_ne t5, INDEXED_STORAGE_KIND_PACKED, .not_packed
+    branch_ge_unsigned t4, t7, .slow
+    load_operand t1, m_src
+    store64 [t6, t4, 8], t1
+    dispatch_next
+.not_packed:
     branch_ne t5, INDEXED_STORAGE_KIND_HOLEY, .slow
-    # Holey path: index < size, check for hole, then store
-    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
-    branch_ge_unsigned t4, t5, .slow
-    load64 t5, [t3, OBJECT_BUTTERFLY]
-    load64 t1, [t5, t4, 8]
+    branch_ge_unsigned t4, t7, .slow
+    load64 t1, [t6, t4, 8]
     mov t0, EMPTY_TAG_SHIFTED
     branch_eq t1, t0, .slow
     load_operand t1, m_src
-    store64 [t5, t4, 8], t1
+    store64 [t6, t4, 8], t1
     dispatch_next
-.packed_put:
-    # Packed path: index < size, store directly (no hole check needed)
-    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
-    branch_ge_unsigned t4, t5, .slow
-    load64 t5, [t3, OBJECT_BUTTERFLY]
-    load_operand t1, m_src
-    store64 [t5, t4, 8], t1
-    dispatch_next
+.check_special_flags:
+    branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
+    jmp .slow
 .try_typed_array:
     # t3 = Object*, t4 = index (u32, non-negative)
     # Check array_length variant holds a u32 (index byte == 2)
@@ -1521,42 +1527,36 @@ handler GetByValue
     # Check base is an object
     extract_tag t3, t1
     branch_ne t3, OBJECT_TAG, .slow
-    # Check property is non-negative int32
-    extract_tag t4, t2
-    branch_ne t4, INT32_TAG, .slow
-    mov t4, t2
-    and t4, 0xFFFFFFFF
-    # t4 = index (zero-extended u32)
-    # Check high bit (negative int32)
-    branch_bit_set t4, 31, .slow
+    # Combined check: property is non-negative int32
+    check_nonneg_int32 t4, t2, .slow
     # Extract Object*
     unbox_object t3, t1
-    # Check IsTypedArray flag -- branch to C++ helper early
+    # Issue all object field loads early (same cache line, CPU can overlap)
     load8 t0, [t3, OBJECT_FLAGS]
-    branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
-    # Check !may_interfere_with_indexed_property_access
-    branch_bits_set t0, OBJECT_FLAG_MAY_INTERFERE, .slow
-    # Check indexed_storage_kind is Packed (1) or Holey (2)
     load8 t5, [t3, OBJECT_INDEXED_STORAGE_KIND]
-    branch_eq t5, INDEXED_STORAGE_KIND_PACKED, .packed_get
+    load32 t7, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
+    load64 t6, [t3, OBJECT_BUTTERFLY]
+    # Check for special flags (typed array or may-interfere)
+    # Single branch on common path (no special flags)
+    and t0, OBJECT_FLAG_SPECIAL_INDEXED
+    branch_nonzero t0, .check_special_flags
+    # Packed fast path (most common)
+    branch_ne t5, INDEXED_STORAGE_KIND_PACKED, .not_packed
+    branch_ge_unsigned t4, t7, .slow
+    load64 t0, [t6, t4, 8]
+    store_operand m_dst, t0
+    dispatch_next
+.not_packed:
     branch_ne t5, INDEXED_STORAGE_KIND_HOLEY, .slow
-    # Holey path: index < size, load, check for hole
-    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
-    branch_ge_unsigned t4, t5, .slow
-    load64 t5, [t3, OBJECT_BUTTERFLY]
-    load64 t0, [t5, t4, 8]
+    branch_ge_unsigned t4, t7, .slow
+    load64 t0, [t6, t4, 8]
     mov t5, EMPTY_TAG_SHIFTED
     branch_eq t0, t5, .slow
     store_operand m_dst, t0
     dispatch_next
-.packed_get:
-    # Packed path: index < size, load (no hole check needed)
-    load32 t5, [t3, OBJECT_INDEXED_ARRAY_LIKE_SIZE]
-    branch_ge_unsigned t4, t5, .slow
-    load64 t5, [t3, OBJECT_BUTTERFLY]
-    load64 t0, [t5, t4, 8]
-    store_operand m_dst, t0
-    dispatch_next
+.check_special_flags:
+    branch_bits_set t0, OBJECT_FLAG_IS_TYPED_ARRAY, .try_typed_array
+    jmp .slow
 .try_typed_array:
     # t3 = Object*, t4 = index (u32, non-negative)
     # Check array_length variant holds a u32 (index byte == 2)

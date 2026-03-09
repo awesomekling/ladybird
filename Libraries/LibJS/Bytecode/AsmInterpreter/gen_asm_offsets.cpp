@@ -47,6 +47,7 @@ int main()
     outln("const OBJECT_FLAG_HAS_MAGICAL_LENGTH = {}", Object::Flag::HasMagicalLengthProperty);
     outln("const OBJECT_FLAG_MAY_INTERFERE = {}", Object::Flag::MayInterfereWithIndexedPropertyAccess);
     outln("const OBJECT_FLAG_IS_TYPED_ARRAY = {}", Object::Flag::IsTypedArray);
+    outln("const OBJECT_FLAG_SPECIAL_INDEXED = {}", Object::Flag::IsTypedArray | Object::Flag::MayInterfereWithIndexedPropertyAccess);
     outln("const OBJECT_FLAG_IS_FUNCTION = {}", Object::Flag::IsFunction);
 
     // Shape layout
@@ -267,6 +268,7 @@ int main()
     outln("\n# Shifted value constants");
     outln("const EMPTY_VALUE = 0x{:X}", static_cast<u64>(EMPTY_TAG << GC::TAG_SHIFT));
     outln("const INT32_TAG_SHIFTED = 0x{:X}", static_cast<u64>(INT32_TAG << GC::TAG_SHIFT));
+    outln("const INT32_NONNEG_UPPER32 = 0x{:X}", static_cast<u64>(INT32_TAG) << 16);
     outln("const BOOLEAN_TRUE = 0x{:X}", static_cast<u64>((BOOLEAN_TAG << GC::TAG_SHIFT) | 1));
     outln("const BOOLEAN_FALSE = 0x{:X}", static_cast<u64>(BOOLEAN_TAG << GC::TAG_SHIFT));
     outln("const UNDEFINED_SHIFTED = 0x{:X}", static_cast<u64>(UNDEFINED_TAG << GC::TAG_SHIFT));
