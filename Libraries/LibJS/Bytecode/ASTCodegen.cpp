@@ -751,7 +751,8 @@ Optional<ScopedOperand> AssignmentExpression::generate_bytecode(Bytecode::Genera
                     if (identifier.is_local()) {
                         if (is<BinaryExpression>(*m_rhs)
                             || is<UnaryExpression>(*m_rhs)
-                            || is<CallExpression>(*m_rhs)) {
+                            || is<CallExpression>(*m_rhs)
+                            || is<MemberExpression>(*m_rhs)) {
                             rhs_preferred_dst = generator.local(identifier.local_index());
                         }
                     }
@@ -1845,14 +1846,24 @@ Optional<ScopedOperand> VariableDeclaration::generate_bytecode(Bytecode::Generat
     Bytecode::Generator::SourceLocationScope scope(generator, *this);
 
     for (auto& declarator : m_declarations) {
-        // NOTE: `var` declarations can have duplicates, but duplicate `let` or `const` bindings are a syntax error.
-        //       Because of this, we can sink `let` and `const` directly into the preferred_dst if available.
-        //       This is not safe for `var` since the preferred_dst may be used in the initializer.
+        // NOTE: `let` and `const` can always sink directly into the local since they create
+        //       new bindings (the initializer can't reference the new variable).
+        //       `var` is hoisted so the variable already exists, but we can still use
+        //       preferred_dst for safe expression types that evaluate all sub-expressions
+        //       before writing to dst.
         Optional<ScopedOperand> init_dst;
-        if (declaration_kind() != DeclarationKind::Var) {
-            if (auto const* identifier = declarator->target().get_pointer<NonnullRefPtr<Identifier const>>()) {
-                if ((*identifier)->is_local()) {
+        if (auto const* identifier = declarator->target().get_pointer<NonnullRefPtr<Identifier const>>()) {
+            if ((*identifier)->is_local()) {
+                if (declaration_kind() != DeclarationKind::Var) {
                     init_dst = generator.local((*identifier)->local_index());
+                } else if (declarator->init()) {
+                    auto const& init = *declarator->init();
+                    if (is<BinaryExpression>(init)
+                        || is<UnaryExpression>(init)
+                        || is<CallExpression>(init)
+                        || is<MemberExpression>(init)) {
+                        init_dst = generator.local((*identifier)->local_index());
+                    }
                 }
             }
         }

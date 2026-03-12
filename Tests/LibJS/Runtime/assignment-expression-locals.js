@@ -133,3 +133,54 @@ describe("named function expression assignment", () => {
         expect(o.b.name).toBe("a");
     });
 });
+
+describe("var declaration preferred_dst optimization", () => {
+    test("var with binary expression initializer", () => {
+        var a = 10;
+        var b = 20;
+        var c = a + b;
+        expect(c).toBe(30);
+    });
+
+    test("var with bitwise expression initializer", () => {
+        var x = 255;
+        var y = (x >> 4) & 0xf;
+        expect(y).toBe(15);
+    });
+
+    test("var with member expression initializer", () => {
+        var arr = [10, 20, 30];
+        var val = arr[1];
+        expect(val).toBe(20);
+    });
+
+    test("var with call expression initializer", () => {
+        function double(x) {
+            return x * 2;
+        }
+        var result = double(21);
+        expect(result).toBe(42);
+    });
+
+    test("var self-reference reads old value", () => {
+        var x = 10;
+        var x = x + 5;
+        expect(x).toBe(15);
+    });
+
+    test("var in loop body with complex expressions", () => {
+        var arr = [1, 2, 3, 4, 5];
+        var sum = 0;
+        for (var i = 0; i < arr.length; i++) {
+            var val = arr[i];
+            sum += val;
+        }
+        expect(sum).toBe(15);
+    });
+
+    test("var object literal should not use preferred_dst", () => {
+        var x = { a: 1 };
+        var x = { old: x };
+        expect(x.old).toEqual({ a: 1 });
+    });
+});

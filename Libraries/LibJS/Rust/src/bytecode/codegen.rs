@@ -2832,12 +2832,23 @@ fn generate_variable_declaration(
         // OPTIMIZATION: For let/const declarations where the target is a local identifier,
         // pass the local as preferred_dst to the initializer. This allows NewArray, NewFunction,
         // Add, etc. to write directly to the local instead of temp+Mov.
-        // NB: Not safe for `var` since var declarations can have duplicates, meaning the
-        // preferred_dst could be used as input in the initializer.
-        let init_dst = if kind != DeclarationKind::Var {
-            if let VariableDeclaratorTarget::Identifier(ident) = &declaration.target {
-                if ident.is_local() && ident.local_type.get() == Some(LocalType::Variable) {
+        // For `var`, we can still use preferred_dst for safe expression types that evaluate
+        // all sub-expressions before writing to dst.
+        let init_dst = if let VariableDeclaratorTarget::Identifier(ident) = &declaration.target {
+            if ident.is_local() && ident.local_type.get() == Some(LocalType::Variable) {
+                if kind != DeclarationKind::Var {
                     Some(generator.local(ident.local_index.get()))
+                } else if let Some(init) = &declaration.init {
+                    match &init.inner {
+                        ExpressionKind::Binary { .. }
+                        | ExpressionKind::Unary { .. }
+                        | ExpressionKind::Call(_)
+                        | ExpressionKind::New(_)
+                        | ExpressionKind::Member { .. } => {
+                            Some(generator.local(ident.local_index.get()))
+                        }
+                        _ => None,
+                    }
                 } else {
                     None
                 }
@@ -3615,7 +3626,8 @@ fn generate_assignment_expression(
                             ExpressionKind::Binary { .. }
                             | ExpressionKind::Unary { .. }
                             | ExpressionKind::Call(_)
-                            | ExpressionKind::New(_) => {
+                            | ExpressionKind::New(_)
+                            | ExpressionKind::Member { .. } => {
                                 let local_type = ident.local_type.get().unwrap();
                                 Some(generator.resolve_local(ident.local_index.get(), local_type))
                             }
