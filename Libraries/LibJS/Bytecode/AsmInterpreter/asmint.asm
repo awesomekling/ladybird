@@ -1436,12 +1436,28 @@ handler PutByValue
     # Dispatch on kind (in t2)
     branch_any_eq t2, TYPED_ARRAY_KIND_INT32, TYPED_ARRAY_KIND_UINT32, .ta_put_int32
     branch_any_eq t2, TYPED_ARRAY_KIND_UINT8, TYPED_ARRAY_KIND_INT8, .ta_put_uint8
+    branch_eq t2, TYPED_ARRAY_KIND_UINT8_CLAMPED, .ta_put_uint8_clamped
     branch_any_eq t2, TYPED_ARRAY_KIND_UINT16, TYPED_ARRAY_KIND_INT16, .ta_put_uint16
     jmp .try_typed_array_slow
 .ta_put_int32:
     store32 [t5, t4, 4], t0
     dispatch_next
 .ta_put_uint8:
+    store8 [t5, t4], t0
+    dispatch_next
+.ta_put_uint8_clamped:
+    # Clamp int32 to [0, 255]. t0 has the zero-extended 32-bit value.
+    # Bit 31 set means the original int32 was negative -> clamp to 0.
+    branch_bit_set t0, 31, .ta_clamp_zero
+    branch_gt_signed t0, 255, .ta_clamp_max
+    store8 [t5, t4], t0
+    dispatch_next
+.ta_clamp_zero:
+    mov t0, 0
+    store8 [t5, t4], t0
+    dispatch_next
+.ta_clamp_max:
+    mov t0, 255
     store8 [t5, t4], t0
     dispatch_next
 .ta_put_uint16:
@@ -1640,7 +1656,7 @@ handler GetByValue
     # Dispatch on kind
     load8 t0, [t3, TYPED_ARRAY_KIND]
     branch_eq t0, TYPED_ARRAY_KIND_INT32, .ta_int32
-    branch_eq t0, TYPED_ARRAY_KIND_UINT8, .ta_uint8
+    branch_any_eq t0, TYPED_ARRAY_KIND_UINT8, TYPED_ARRAY_KIND_UINT8_CLAMPED, .ta_uint8
     branch_eq t0, TYPED_ARRAY_KIND_UINT16, .ta_uint16
     branch_eq t0, TYPED_ARRAY_KIND_INT8, .ta_int8
     branch_eq t0, TYPED_ARRAY_KIND_INT16, .ta_int16
