@@ -802,7 +802,24 @@ Optional<ScopedOperand> AssignmentExpression::generate_bytecode(Bytecode::Genera
         return {};
 
     auto lhs = reference_operands.loaded_value.value();
-    lhs = generator.copy_if_needed_to_preserve_evaluation_order(lhs);
+
+    // OPTIMIZATION: For compound assignments like `x += y` where x is a local,
+    // we can skip the defensive copy if evaluating the RHS cannot modify x.
+    // This allows the arithmetic result to be written directly to the local,
+    // avoiding redundant Mov instructions.
+    bool rhs_can_modify_locals = true;
+    if (lhs.operand().is_local() && is<Identifier>(*lhs_expression)) {
+        if (m_rhs->is_identifier()) {
+            auto& rhs_ident = static_cast<Identifier const&>(*m_rhs);
+            if (rhs_ident.is_local())
+                rhs_can_modify_locals = false;
+        } else if (m_rhs->is_numeric_literal() || m_rhs->is_string_literal()) {
+            rhs_can_modify_locals = false;
+        }
+    }
+
+    if (rhs_can_modify_locals)
+        lhs = generator.copy_if_needed_to_preserve_evaluation_order(lhs);
 
     Bytecode::BasicBlock* rhs_block_ptr { nullptr };
     Bytecode::BasicBlock* lhs_block_ptr { nullptr };

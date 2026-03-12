@@ -3613,7 +3613,28 @@ fn generate_assignment_expression(
 
                 // Load LHS value first (needed for both compound and logical assignments).
                 let lhs_val = generate_identifier(ident, generator, None)?;
-                let lhs_val = generator.copy_if_needed_to_preserve_evaluation_order(&lhs_val);
+
+                // OPTIMIZATION: For compound assignments like `x += y` where x is a local,
+                // skip the defensive copy if evaluating the RHS cannot modify x.
+                // This allows the arithmetic result to be written directly to the local,
+                // avoiding redundant Mov instructions.
+                let need_copy = if ident.is_local() {
+                    match &rhs.inner {
+                        ExpressionKind::Identifier(rhs_ident) if rhs_ident.is_local() => false,
+                        ExpressionKind::NumericLiteral(_) | ExpressionKind::StringLiteral(_) => {
+                            false
+                        }
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                let lhs_val = if need_copy {
+                    generator.copy_if_needed_to_preserve_evaluation_order(&lhs_val)
+                } else {
+                    lhs_val
+                };
 
                 let is_logical = matches!(
                     op,
