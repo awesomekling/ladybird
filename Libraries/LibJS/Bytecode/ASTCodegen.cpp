@@ -737,9 +737,29 @@ Optional<ScopedOperand> AssignmentExpression::generate_bytecode(Bytecode::Genera
                 // d. Else,
                 //    i. Let rref be the result of evaluating AssignmentExpression.
                 //    ii. Let rval be ? GetValue(rref).
+                // OPTIMIZATION: If the LHS is a local identifier, pass it as preferred_dst
+                // so the RHS expression can write its result directly to the local,
+                // avoiding a redundant Mov instruction.
+                // NB: Only safe for expression types that evaluate all sub-expressions
+                // before writing to dst. ObjectExpression/ArrayExpression are NOT safe
+                // because they create the container in dst first, then evaluate
+                // property/element values which might reference the same local
+                // (e.g. obj = { ref: obj }).
+                Optional<ScopedOperand> rhs_preferred_dst;
+                if (is<Identifier>(*lhs)) {
+                    auto& identifier = static_cast<Identifier const&>(*lhs);
+                    if (identifier.is_local()) {
+                        if (is<BinaryExpression>(*m_rhs)
+                            || is<UnaryExpression>(*m_rhs)
+                            || is<CallExpression>(*m_rhs)) {
+                            rhs_preferred_dst = generator.local(identifier.local_index());
+                        }
+                    }
+                }
+
                 auto rval = [&]() -> ScopedOperand {
                     if (lhs->is_identifier()) {
-                        return generator.emit_named_evaluation_if_anonymous_function(*m_rhs, generator.intern_identifier(static_cast<Identifier const&>(*lhs).string()));
+                        return generator.emit_named_evaluation_if_anonymous_function(*m_rhs, generator.intern_identifier(static_cast<Identifier const&>(*lhs).string()), rhs_preferred_dst);
                     } else {
                         return m_rhs->generate_bytecode(generator).value();
                     }

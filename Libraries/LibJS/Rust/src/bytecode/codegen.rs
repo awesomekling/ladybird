@@ -3601,8 +3601,32 @@ fn generate_assignment_expression(
             // Simple assignment to identifier
             if let ExpressionKind::Identifier(ident) = &lhs_expression.inner {
                 if op == AssignmentOp::Assignment {
+                    // OPTIMIZATION: If the LHS is a local identifier, pass it as
+                    // preferred_dst so the RHS expression can write its result
+                    // directly to the local, avoiding a redundant Mov.
+                    // NB: Only safe for expression types that evaluate all
+                    // sub-expressions before writing to dst.
+                    // ObjectExpression/ArrayExpression are NOT safe because they
+                    // create the container in dst first, then evaluate
+                    // property/element values which might reference the same
+                    // local (e.g. obj = { ref: obj }).
+                    let rhs_preferred_dst = if ident.is_local() {
+                        match &rhs.inner {
+                            ExpressionKind::Binary { .. }
+                            | ExpressionKind::Unary { .. }
+                            | ExpressionKind::Call(_)
+                            | ExpressionKind::New(_) => {
+                                let local_type = ident.local_type.get().unwrap();
+                                Some(generator.resolve_local(ident.local_index.get(), local_type))
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+
                     generator.pending_lhs_name = Some(generator.intern_identifier(&ident.name));
-                    let rhs_val = generate_expression(rhs, generator, None)?;
+                    let rhs_val = generate_expression(rhs, generator, rhs_preferred_dst.as_ref())?;
                     generator.pending_lhs_name = None;
                     if ident.is_local() {
                         emit_tdz_check_if_needed(generator, ident);
