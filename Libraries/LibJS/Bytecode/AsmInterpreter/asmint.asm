@@ -1417,26 +1417,48 @@ handler PutByValue
     load_operand t1, m_src
     # Check if source is int32
     extract_tag t0, t1
-    branch_eq t0, INT32_TAG, .ta_store_int32
-    # Non-int32 value: only handle Float64Array with double source
-    branch_ne t2, TYPED_ARRAY_KIND_FLOAT64, .try_typed_array_slow
-    # Compute store address before check_is_double clobbers t4
+    branch_eq t0, INT32_TAG, .ta_source_int32
+    # Non-int32: must be double, otherwise slow path
+    check_tag_is_double t0, .try_typed_array_slow
+    # Source is double. Handle Float64Array specially (store raw bits).
+    branch_eq t2, TYPED_ARRAY_KIND_FLOAT64, .ta_put_f64
+    # Uint8ClampedArray with double needs round-to-nearest + clamp
+    branch_eq t2, TYPED_ARRAY_KIND_UINT8_CLAMPED, .ta_put_double_clamped
+    # All other integer typed arrays: truncate double to int32 (ToInt32)
+    fp_mov ft0, t1
+    js_to_int32 t0, ft0, .try_typed_array_slow
+    jmp .ta_store_int
+.ta_put_f64:
     mov t0, t4
     shl t0, 3
     add t0, t5
-    # Verify value is actually a double
-    check_is_double t1, .try_typed_array_slow
-    # Float64Array: store raw double bits
     store64 [t0, 0], t1
     dispatch_next
-.ta_store_int32:
+.ta_put_double_clamped:
+    # ToUint8Clamp: clamp to [0, 255], round to nearest even.
+    fp_mov ft0, t1
+    # NaN -> 0
+    branch_fp_unordered ft0, ft0, .ta_clamp_zero
+    # If > 255.0, store 255
+    mov t0, 255
+    int_to_double ft1, t0
+    branch_fp_greater ft0, ft1, .ta_clamp_max
+    # Round to nearest even integer
+    fp_round_to_int64 t0, ft0
+    # Negative (including -infinity sentinel) -> 0
+    branch_negative t0, .ta_clamp_zero
+    store8 [t5, t4], t0
+    dispatch_next
+.ta_source_int32:
     # t1 = NaN-boxed int32, extract low 32 bits into t0
     mov t0, t1
     and t0, 0xFFFFFFFF
-    # Dispatch on kind (in t2)
+    # Uint8ClampedArray needs clamping even for int32 source
+    branch_eq t2, TYPED_ARRAY_KIND_UINT8_CLAMPED, .ta_put_uint8_clamped
+.ta_store_int:
+    # Shared store dispatch for integer value in t0
     branch_any_eq t2, TYPED_ARRAY_KIND_INT32, TYPED_ARRAY_KIND_UINT32, .ta_put_int32
     branch_any_eq t2, TYPED_ARRAY_KIND_UINT8, TYPED_ARRAY_KIND_INT8, .ta_put_uint8
-    branch_eq t2, TYPED_ARRAY_KIND_UINT8_CLAMPED, .ta_put_uint8_clamped
     branch_any_eq t2, TYPED_ARRAY_KIND_UINT16, TYPED_ARRAY_KIND_INT16, .ta_put_uint16
     jmp .try_typed_array_slow
 .ta_put_int32:
@@ -1452,6 +1474,13 @@ handler PutByValue
     branch_gt_signed t0, 255, .ta_clamp_max
     store8 [t5, t4], t0
     dispatch_next
+.ta_put_uint16:
+    mov t3, t4
+    add t3, t4
+    add t3, t5
+    store16 [t3, 0], t0
+    dispatch_next
+    # Shared clamp endpoints for both int32 and double Uint8ClampedArray paths
 .ta_clamp_zero:
     mov t0, 0
     store8 [t5, t4], t0
@@ -1459,12 +1488,6 @@ handler PutByValue
 .ta_clamp_max:
     mov t0, 255
     store8 [t5, t4], t0
-    dispatch_next
-.ta_put_uint16:
-    mov t3, t4
-    add t3, t4
-    add t3, t5
-    store16 [t3, 0], t0
     dispatch_next
 .try_typed_array_slow:
     call_interp asm_try_put_by_value_typed_array

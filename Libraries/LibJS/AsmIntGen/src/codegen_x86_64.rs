@@ -550,6 +550,13 @@ fn emit_instruction(out: &mut String, insn: &AsmInstruction, handler: &Handler, 
             w!(out, "    cvtsi2sd {}", ops.join(", "));
         }
 
+        // fp_round_to_int64 gpr, fpr - Round double to i64 (nearest even)
+        "fp_round_to_int64" => {
+            let dst = resolve_op(&insn.operands[0], handler, program);
+            let src = resolve_op(&insn.operands[1], handler, program);
+            w!(out, "    cvtsd2si {dst}, {src}");
+        }
+
         // canonicalize_nan dst_gpr, src_fpr
         // If src is NaN, write CANON_NAN_BITS to dst. Otherwise bitwise-copy src to dst.
         // Uses a cold fixup block to keep the movabs off the hot path, since NaN

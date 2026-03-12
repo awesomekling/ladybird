@@ -1676,6 +1676,15 @@ fn emit_instruction(
             }
         }
 
+        // fp_round_to_int64 gpr, fpr - Round double to i64 (nearest even)
+        "fp_round_to_int64" => {
+            if insn.operands.len() == 2 {
+                let dst = resolve_op(&insn.operands[0], handler, program);
+                let src = resolve_op(&insn.operands[1], handler, program);
+                w!(out, "    fcvtns {dst}, {src}");
+            }
+        }
+
         // fp_mov: move between GP and FP registers, or FP to FP
         "fp_mov" => {
             if insn.operands.len() == 2 {
