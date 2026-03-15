@@ -58,38 +58,23 @@ ThrowCompletionOr<void> AsyncFunctionDriverWrapper::await(JS::Value value)
     //
     // For pending promises, or promises with a non-standard constructor, we fall
     // through to the spec-compliant slow path.
-    {
-        bool fast_path = false;
-        Value resume_value;
-        bool is_fulfilled = true;
+    if (!value.is_object()) {
+        // Primitive values are never thenable -- schedule resume directly.
+        schedule_resume(value, true);
+        return {};
+    }
 
-        if (!value.is_object()) {
-            // Primitive values are never thenable.
-            fast_path = true;
-            resume_value = value;
-        } else if (auto promise = value.as_if<Promise>()) {
-            // Already-settled native Promises whose prototype is the intrinsic %Promise.prototype%.
-            if (promise->state() != Promise::State::Pending
-                && promise->shape().property_count() == 0
-                && promise->shape().prototype() == realm.intrinsics().promise_prototype().ptr()) {
-                fast_path = true;
-                resume_value = promise->result();
-                is_fulfilled = promise->state() == Promise::State::Fulfilled;
+    if (auto promise = value.as_if<Promise>()) {
+        bool is_native_promise = promise->shape().property_count() == 0
+            && promise->shape().prototype() == realm.intrinsics().promise_prototype().ptr();
+
+        if (is_native_promise) {
+            if (promise->state() != Promise::State::Pending) {
+                // Already-settled native Promise -- extract result and schedule resume.
+                schedule_resume(promise->result(), promise->state() == Promise::State::Fulfilled);
                 promise->set_is_handled();
+                return {};
             }
-        }
-
-        if (fast_path) {
-            vm.host_enqueue_promise_job(
-                GC::create_function(vm.heap(), [this, resume_value, is_fulfilled]() -> ThrowCompletionOr<Value> {
-                    auto& vm = this->vm();
-                    TRY(vm.push_execution_context(*m_suspended_execution_context, {}));
-                    continue_async_execution(vm, resume_value, is_fulfilled);
-                    vm.pop_execution_context();
-                    return js_undefined();
-                }),
-                vm.current_realm());
-            return {};
         }
     }
 
@@ -166,6 +151,20 @@ ThrowCompletionOr<void> AsyncFunctionDriverWrapper::await(JS::Value value)
     // 11. Assert: If control reaches here, then asyncContext is the running execution context again.
     // 12. Return completion.
     return {};
+}
+
+void AsyncFunctionDriverWrapper::schedule_resume(Value value, bool is_fulfilled)
+{
+    auto& vm = this->vm();
+    vm.host_enqueue_promise_job(
+        GC::create_function(vm.heap(), [this, value, is_fulfilled]() -> ThrowCompletionOr<Value> {
+            auto& vm = this->vm();
+            TRY(vm.push_execution_context(*m_suspended_execution_context, {}));
+            continue_async_execution(vm, value, is_fulfilled);
+            vm.pop_execution_context();
+            return js_undefined();
+        }),
+        vm.current_realm());
 }
 
 void AsyncFunctionDriverWrapper::continue_async_execution(VM& vm, Value value, bool is_successful)
