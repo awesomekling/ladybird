@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Variant.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/SystemColor.h>
 #include <LibWeb/CSS/VisualViewport.h>
@@ -28,8 +29,10 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/BrowsingContextGroup.h>
 #include <LibWeb/HTML/DocumentState.h>
+#include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLParagraphElement.h>
 #include <LibWeb/HTML/History.h>
 #include <LibWeb/HTML/HistoryHandlingBehavior.h>
 #include <LibWeb/HTML/Navigable.h>
@@ -2729,28 +2732,129 @@ bool Navigable::is_focused() const
     return &m_page->focused_navigable() == this;
 }
 
-static String visible_text_in_range(DOM::Range const& range)
+struct RequiredLineBreakCount {
+    int count { 0 };
+};
+
+// Collect visible text within a range, following the rendered text collection steps
+// from the HTML spec (https://html.spec.whatwg.org/multipage/dom.html#rendered-text-collection-steps)
+// but constrained to the given range.
+static void collect_visible_text_in_range(DOM::Node const& node, DOM::Range const& range, Vector<Variant<String, RequiredLineBreakCount>>& items)
 {
-    // NOTE: This is an adaption of Range stringification, but we skip over DOM nodes that don't have a corresponding layout node.
-    StringBuilder builder;
+    if (!range.intersects_node(const_cast<DOM::Node&>(node)))
+        return;
 
-    if (range.start_container() == range.end_container() && is<DOM::Text>(*range.start_container())) {
-        if (!range.start_container()->layout_node())
-            return String {};
-        return static_cast<DOM::Text const&>(*range.start_container()).data().substring_view(range.start_offset(), range.end_offset() - range.start_offset()).to_utf8_but_should_be_ported_to_utf16();
-    }
-
-    if (is<DOM::Text>(*range.start_container()) && range.start_container()->layout_node())
-        builder.append(static_cast<DOM::Text const&>(*range.start_container()).data().substring_view(range.start_offset()));
-
-    range.for_each_contained([&](GC::Ref<DOM::Node> node) {
-        if (is<DOM::Text>(*node) && node->layout_node())
-            builder.append(static_cast<DOM::Text const&>(*node).data());
+    // 1. Collect from children in tree order.
+    Vector<Variant<String, RequiredLineBreakCount>> child_items;
+    node.for_each_child([&](auto const& child) {
+        collect_visible_text_in_range(child, range, child_items);
         return IterationDecision::Continue;
     });
 
-    if (is<DOM::Text>(*range.end_container()) && range.end_container()->layout_node())
-        builder.append(static_cast<DOM::Text const&>(*range.end_container()).data().substring_view(0, range.end_offset()));
+    // 2. If node is not being rendered, pass through child items.
+    auto* layout_node = node.layout_node();
+    if (!layout_node) {
+        items.extend(move(child_items));
+        return;
+    }
+
+    auto const& computed_values = layout_node->computed_values();
+
+    // 3. If not visible, pass through child items.
+    if (computed_values.visibility() != CSS::Visibility::Visible) {
+        items.extend(move(child_items));
+        return;
+    }
+
+    if (computed_values.content_visibility() == CSS::ContentVisibility::Hidden) {
+        items.extend(move(child_items));
+        return;
+    }
+
+    // 4. Text node: emit the portion within the range.
+    if (is<DOM::Text>(node)) {
+        auto const& text_node = static_cast<DOM::Text const&>(node);
+        auto const& text_data = text_node.data();
+        bool is_start = &node == range.start_container().ptr();
+        bool is_end = &node == range.end_container().ptr();
+
+        u32 start_off = is_start ? range.start_offset() : 0;
+        u32 end_off = is_end ? range.end_offset() : text_node.length_in_utf16_code_units();
+
+        if (start_off < end_off) {
+            auto text = text_data.substring_view(start_off, end_off - start_off)
+                            .to_utf8_but_should_be_ported_to_utf16();
+            if (!text.is_empty())
+                items.append(move(text));
+        }
+        return;
+    }
+
+    // 5. BR element: emit newline.
+    if (is<HTML::HTMLBRElement>(node)) {
+        items.append("\n"_string);
+        return;
+    }
+
+    auto display = computed_values.display();
+
+    // 6. Table cell (not last in row): tab after content.
+    if (display.is_table_cell() && node.next_sibling())
+        child_items.append("\t"_string);
+
+    // 7. Table row (not last in table): newline after content.
+    if (display.is_table_row() && node.next_sibling())
+        child_items.append("\n"_string);
+
+    // 8. Paragraph: 2 required line breaks before and after.
+    if (is<HTML::HTMLParagraphElement>(node)) {
+        child_items.prepend(RequiredLineBreakCount { 2 });
+        child_items.append(RequiredLineBreakCount { 2 });
+    }
+
+    // 9. Block-level or table-caption: 1 required line break before and after.
+    if (display.is_block_outside() || display.is_table_caption()) {
+        child_items.prepend(RequiredLineBreakCount { 1 });
+        child_items.append(RequiredLineBreakCount { 1 });
+    }
+
+    items.extend(move(child_items));
+}
+
+static String visible_text_in_range(DOM::Range const& range)
+{
+    Vector<Variant<String, RequiredLineBreakCount>> items;
+    collect_visible_text_in_range(*range.common_ancestor_container(), range, items);
+
+    // Remove empty strings.
+    items.remove_all_matching([](auto& item) {
+        return item.template has<String>() && item.template get<String>().is_empty();
+    });
+
+    // Remove leading/trailing required line break counts.
+    while (!items.is_empty() && items.first().template has<RequiredLineBreakCount>())
+        items.take_first();
+    while (!items.is_empty() && items.last().template has<RequiredLineBreakCount>())
+        items.take_last();
+
+    // Collapse consecutive required line break counts and build the result.
+    StringBuilder builder;
+    for (size_t i = 0; i < items.size(); ++i) {
+        items[i].visit(
+            [&](String const& string) {
+                builder.append(string);
+            },
+            [&](RequiredLineBreakCount const& line_break_count) {
+                int max_line_breaks = line_break_count.count;
+                size_t j = i + 1;
+                while (j < items.size() && items[j].has<RequiredLineBreakCount>()) {
+                    max_line_breaks = max(max_line_breaks, items[j].get<RequiredLineBreakCount>().count);
+                    ++j;
+                }
+                i = j - 1;
+                builder.append_repeated('\n', max_line_breaks);
+            });
+    }
 
     return MUST(builder.to_string());
 }
