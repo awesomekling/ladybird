@@ -2116,11 +2116,29 @@ fn emit_binary_op(
                 });
             }
         }
-        BinaryOp::UnsignedRightShift => generator.emit(Instruction::UnsignedRightShift {
-            dst: dst_op,
-            lhs: lhs_op,
-            rhs: rhs_op,
-        }),
+        BinaryOp::UnsignedRightShift => {
+            // OPTIMIZATION: x >>> 0 == ToUint32(x) (matches C++)
+            if let Some(ConstantValue::Number(n)) = generator.get_constant(rhs) {
+                if *n == 0.0 && n.is_sign_positive() {
+                    generator.emit(Instruction::ToUint32 {
+                        dst: dst_op,
+                        value: lhs_op,
+                    });
+                } else {
+                    generator.emit(Instruction::UnsignedRightShift {
+                        dst: dst_op,
+                        lhs: lhs_op,
+                        rhs: rhs_op,
+                    });
+                }
+            } else {
+                generator.emit(Instruction::UnsignedRightShift {
+                    dst: dst_op,
+                    lhs: lhs_op,
+                    rhs: rhs_op,
+                });
+            }
+        }
         BinaryOp::In => generator.emit(Instruction::In {
             dst: dst_op,
             lhs: lhs_op,

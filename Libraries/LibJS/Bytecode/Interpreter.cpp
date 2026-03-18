@@ -633,6 +633,7 @@ void Interpreter::run_bytecode(size_t entry_point)
             HANDLE_INSTRUCTION(BitwiseNot);
             HANDLE_INSTRUCTION(BitwiseOr);
             HANDLE_INSTRUCTION(ToInt32);
+            HANDLE_INSTRUCTION(ToUint32);
             HANDLE_INSTRUCTION(ToString);
             HANDLE_INSTRUCTION(ToPrimitiveWithStringHint);
             HANDLE_INSTRUCTION(BitwiseXor);
@@ -1797,6 +1798,23 @@ ThrowCompletionOr<void> ToInt32::execute_impl(Bytecode::Interpreter& interpreter
         return {};
     }
     interpreter.set(m_dst, Value(TRY(value.to_i32(vm))));
+    return {};
+}
+
+ThrowCompletionOr<void> ToUint32::execute_impl(Bytecode::Interpreter& interpreter) const
+{
+    auto& vm = interpreter.vm();
+    auto const value = interpreter.get(m_value);
+    if (value.is_int32()) [[likely]] {
+        auto as_i32 = value.as_i32();
+        if (as_i32 >= 0) {
+            interpreter.set(m_dst, value);
+        } else {
+            interpreter.set(m_dst, Value(static_cast<u32>(as_i32)));
+        }
+        return {};
+    }
+    interpreter.set(m_dst, Value(TRY(value.to_u32(vm))));
     return {};
 }
 

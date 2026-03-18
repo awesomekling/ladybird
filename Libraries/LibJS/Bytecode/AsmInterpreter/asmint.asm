@@ -1314,6 +1314,47 @@ handler ToInt32
     call_slow_path asm_slow_path_to_int32
 end
 
+# ToUint32: like ToInt32 but produces an unsigned result.
+# Values > INT32_MAX must be boxed as double since they don't fit in a
+# signed int32 NaN-box.
+handler ToUint32
+    load_operand t1, m_value
+    extract_tag t2, t1
+    branch_ne t2, INT32_TAG, .try_double
+    # Int32 fast path: extract lower 32 bits as unsigned
+    mov t3, t1
+    and t3, 0xFFFFFFFF
+    branch_bit_set t3, 31, .as_double
+    # Non-negative int32: value is unchanged
+    store_operand m_dst, t1
+    dispatch_next
+.try_double:
+    mov t3, t2
+    check_tag_is_double t3, .try_boolean
+    fp_mov ft0, t1
+    js_to_int32 t3, ft0, .slow
+    and t3, 0xFFFFFFFF
+    branch_bit_set t3, 31, .as_double
+    box_int32_clean t3, t3
+    store_operand m_dst, t3
+    dispatch_next
+.try_boolean:
+    branch_ne t2, BOOLEAN_TAG, .slow
+    # Boolean -> uint32: false -> 0, true -> 1
+    and t1, 1
+    box_int32 t1, t1
+    store_operand m_dst, t1
+    dispatch_next
+.as_double:
+    # t3 has uint32 value (positive in 64-bit register), convert to double
+    int_to_double ft0, t3
+    fp_mov t3, ft0
+    store_operand m_dst, t3
+    dispatch_next
+.slow:
+    call_slow_path asm_slow_path_to_uint32
+end
+
 # ============================================================================
 # Property access (indexed + named + inline caches)
 # ============================================================================

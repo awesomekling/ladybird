@@ -49,6 +49,11 @@ op ToInt32 < Instruction
     m_value: Operand
 endop
 
+op ToUint32 < Instruction
+    m_dst: Operand
+    m_value: Operand
+endop
+
 op ToString < Instruction
     m_dst: Operand
     m_value: Operand

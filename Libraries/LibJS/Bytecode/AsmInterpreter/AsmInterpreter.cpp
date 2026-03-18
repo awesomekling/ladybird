@@ -254,6 +254,7 @@ i64 asm_slow_path_strictly_inequals(Interpreter*, u32 pc);
 i64 asm_slow_path_unary_minus(Interpreter*, u32 pc);
 i64 asm_slow_path_postfix_decrement(Interpreter*, u32 pc);
 i64 asm_slow_path_to_int32(Interpreter*, u32 pc);
+i64 asm_slow_path_to_uint32(Interpreter*, u32 pc);
 i64 asm_slow_path_put_by_value(Interpreter*, u32 pc);
 u64 asm_helper_to_boolean(u64 encoded_value);
 u64 asm_helper_math_exp(u64 encoded_value);
@@ -786,6 +787,11 @@ i64 asm_slow_path_postfix_decrement(Interpreter* interp, u32 pc)
 i64 asm_slow_path_to_int32(Interpreter* interp, u32 pc)
 {
     return slow_path_throwing<Op::ToInt32>(*interp, pc);
+}
+
+i64 asm_slow_path_to_uint32(Interpreter* interp, u32 pc)
+{
+    return slow_path_throwing<Op::ToUint32>(*interp, pc);
 }
 
 i64 asm_slow_path_put_by_value(Interpreter* interp, u32 pc)
