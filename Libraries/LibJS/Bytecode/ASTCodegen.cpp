@@ -344,6 +344,11 @@ Optional<ScopedOperand> BinaryExpression::generate_bytecode(Bytecode::Generator&
         generator.emit<Bytecode::Op::LeftShift>(dst, lhs, rhs);
         break;
     case BinaryOp::RightShift:
+        if (rhs.operand().is_constant() && generator.get_constant(rhs).is_int32() && generator.get_constant(rhs).as_i32() == 0) {
+            // OPTIMIZATION: x >> 0 == ToInt32(x)
+            generator.emit<Bytecode::Op::ToInt32>(dst, lhs);
+            break;
+        }
         generator.emit<Bytecode::Op::RightShift>(dst, lhs, rhs);
         break;
     case BinaryOp::UnsignedRightShift:
