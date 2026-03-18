@@ -73,10 +73,10 @@ block2:
   [  30] End value:reg5
 
 block3:
-  [  38] Mov2 dst1:reg5, src1:String("first"), dst2:reg5, src2:String("second")
+  [  38] Mov dst:reg5, src:String("second")
 
 block4:
-  [  50] End value:reg5
+  [  48] End value:reg5
 
 
 eval$94daef6a line 1, column 1

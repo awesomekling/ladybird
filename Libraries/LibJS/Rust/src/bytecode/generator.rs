@@ -1344,9 +1344,9 @@ impl Generator {
                     && let Instruction::Mov { dst, src } = &block.instructions[i + 1].0
                 {
                     let (dst2, src2) = (*dst, *src);
-                    // Identical Movs: deduplicate to a single Mov.
-                    if dst1 == dst2 && src1 == src2 {
-                        block.instructions.remove(i + 1);
+                    // If both Movs write to the same destination, the first is dead.
+                    if dst1 == dst2 {
+                        block.instructions.remove(i);
                         continue; // Re-check from same position.
                     }
                     // Check for a third consecutive Mov.

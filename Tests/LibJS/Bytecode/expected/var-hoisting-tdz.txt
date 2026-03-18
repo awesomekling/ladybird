@@ -22,24 +22,24 @@ isect$3b32d4d0 var-hoisting-tdz.js:5:5
 
 block0:
   [   0] GetLexicalEnvironment dst:reg4
-  [   8] Mov2 dst1:i~0, src1:Undefined, dst2:i~0, src2:Int32(0)
-  [  20] Jump target:block2
+  [   8] Mov dst:i~0, src:Int32(0)
+  [  18] Jump target:block2
 
 block1:
-  [  28] PostfixIncrement dst:reg5, src:i~0
+  [  20] PostfixIncrement dst:reg5, src:i~0
 
 block2:
-  [  38] JumpLessThan lhs:i~0, rhs:Int32(3), true_target:block1, false_target:block3
+  [  30] JumpLessThan lhs:i~0, rhs:Int32(3), true_target:block1, false_target:block3
 
 block3:
-  [  50] Mov dst:i~0, src:Int32(0)
-  [  60] Jump target:block5
+  [  48] Mov dst:i~0, src:Int32(0)
+  [  58] Jump target:block5
 
 block4:
-  [  68] PostfixIncrement dst:reg5, src:i~0
+  [  60] PostfixIncrement dst:reg5, src:i~0
 
 block5:
-  [  78] JumpLessThan lhs:i~0, rhs:Int32(3), true_target:block4, false_target:block6
+  [  70] JumpLessThan lhs:i~0, rhs:Int32(3), true_target:block4, false_target:block6
 
 block6:
-  [  90] End value:Undefined
+  [  88] End value:Undefined

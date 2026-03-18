@@ -469,10 +469,10 @@ GC::Ref<Executable> Generator::compile(VM& vm, ASTNode const& node, FunctionKind
                 ++it2;
                 if (!it2.at_end() && (*it2).type() == Instruction::Type::Mov) {
                     auto& mov2 = static_cast<Op::Mov const&>(*it2);
-                    // If the two Movs are identical, just emit a single Mov.
-                    if (mov1.dst() == mov2.dst() && mov1.src() == mov2.src()) {
-                        emit_source_map_entry(it.offset());
-                        bytecode.append(reinterpret_cast<u8 const*>(&mov1), mov1.length());
+                    // If the two Movs write to the same destination, the first is dead.
+                    if (mov1.dst() == mov2.dst()) {
+                        emit_source_map_entry(it2.offset());
+                        bytecode.append(reinterpret_cast<u8 const*>(&mov2), mov2.length());
                         ++it;
                         ++it;
                         continue;
