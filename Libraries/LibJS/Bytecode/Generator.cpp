@@ -1748,6 +1748,12 @@ ScopedOperand Generator::add_constant(Value value)
             return append_new_constant();
         });
     }
+    if (value.is_double()) {
+        auto as_bits = bit_cast<u64>(value.as_double());
+        return m_double_constants.ensure(as_bits, [&] {
+            return append_new_constant();
+        });
+    }
     if (value.is_string()) {
         auto as_string = value.as_string().utf16_string();
         return m_string_constants.ensure(as_string, [&] {

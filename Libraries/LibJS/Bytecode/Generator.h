@@ -494,6 +494,7 @@ private:
     mutable Optional<ScopedOperand> m_undefined_constant;
     mutable Optional<ScopedOperand> m_empty_constant;
     mutable HashMap<i32, ScopedOperand> m_int32_constants;
+    mutable HashMap<u64, ScopedOperand> m_double_constants;
     mutable HashMap<Utf16String, ScopedOperand> m_string_constants;
 
     ScopedOperand m_accumulator;
