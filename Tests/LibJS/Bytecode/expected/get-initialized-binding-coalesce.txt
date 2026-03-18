@@ -1,0 +1,41 @@
+$e6445d4a get-initialized-binding-coalesce.js:8:1
+  Registers: 7
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+
+block0:
+  [   0] GetLexicalEnvironment dst:reg4
+  [   8] GetGlobal dst:reg6, `foo`
+  [  20] Call dst:reg5, callee:reg6, this_value:Undefined, foo
+  [  40] End value:reg5
+
+
+foo$e073a7ee get-initialized-binding-coalesce.js:2:5
+  Registers: 8
+  Blocks:    1
+  Locals:    bar~0
+  Constants:
+    [0] = Undefined
+    [1] = Int32(10)
+    [2] = Int32(42)
+    [3] = Int32(4)
+    [4] = Int32(0)
+
+block0:
+  [   0] GetLexicalEnvironment dst:reg4
+  [   8] Mov dst:bar~0, src:Undefined
+  [  18] CreateVariable `c`, is_immutable:false, is_global:false, is_strict:false
+  [  28] InitializeVariableBinding `c`, src:Undefined
+  [  40] NewFunction dst:bar~0, shared_function_data_index:0
+  [  58] GetGlobal dst:reg6, `Uint8Array`
+  [  70] CallConstruct dst:reg5, callee:reg6, Uint8Array, arguments:[Int32(10)]
+  [  90] SetLexicalBinding `c`, src:reg5
+  [  a8] GetInitializedBinding dst:reg5, `c`
+  [  c0] Mov dst:reg6, src:reg5
+  [  d0] GetByValue dst:reg7, base:reg6, property:Int32(42) (c[Int32(42)])
+  [  e8] Add dst:reg6, lhs:reg7, rhs:Int32(4)
+  [  f8] ToInt32 dst:reg7, value:reg6
+  [ 108] PutByValue base:reg5, property:Int32(42), src:reg7, kind:Normal (c[Int32(42)])
+  [ 120] GetInitializedBinding dst:reg5, `c`
+  [ 138] Return value:reg5

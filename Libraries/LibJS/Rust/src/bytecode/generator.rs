@@ -1417,6 +1417,34 @@ impl Generator {
             }
         }
 
+        // Phase 1c: Peephole optimization - coalesce consecutive GetInitializedBinding
+        // with the same identifier. The second lookup is redundant; replace with Mov.
+        for block in &mut self.basic_blocks {
+            let mut i = 0;
+            while i + 1 < block.instructions.len() {
+                if let Instruction::GetInitializedBinding {
+                    dst: dst1,
+                    identifier: id1,
+                    ..
+                } = &block.instructions[i].0
+                    && let Instruction::GetInitializedBinding {
+                        dst: dst2,
+                        identifier: id2,
+                        ..
+                    } = &block.instructions[i + 1].0
+                    && id1.0 == id2.0
+                    && dst1 != dst2
+                {
+                    let (dst2, dst1) = (*dst2, *dst1);
+                    block.instructions[i + 1].0 = Instruction::Mov {
+                        dst: dst2,
+                        src: dst1,
+                    };
+                }
+                i += 1;
+            }
+        }
+
         // Phase 2: Compute block byte offsets, applying assembly-time optimizations.
         // These match the C++ Generator.cpp:compile() optimizations:
         //   - Skip Jump-to-next-block

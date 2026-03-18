@@ -520,6 +520,29 @@ GC::Ref<Executable> Generator::compile(VM& vm, ASTNode const& node, FunctionKind
                 }
             }
 
+            // OPTIMIZATION: Coalesce consecutive GetInitializedBinding with the same identifier.
+            //               The second lookup is redundant; replace it with a Mov from the first's dst.
+            if (instruction.type() == Instruction::Type::GetInitializedBinding) {
+                auto& get1 = static_cast<Op::GetInitializedBinding const&>(instruction);
+                auto it2 = it;
+                ++it2;
+                if (!it2.at_end() && (*it2).type() == Instruction::Type::GetInitializedBinding) {
+                    auto& get2 = static_cast<Op::GetInitializedBinding const&>(*it2);
+                    if (get1.identifier().value == get2.identifier().value && !(get1.dst() == get2.dst())) {
+                        // Emit the first GetInitializedBinding as-is.
+                        emit_source_map_entry(it.offset());
+                        bytecode.append(reinterpret_cast<u8 const*>(&get1), get1.length());
+                        // Replace the second with a Mov.
+                        Op::Mov mov(get2.dst(), get1.dst());
+                        emit_source_map_entry(it2.offset());
+                        bytecode.append(reinterpret_cast<u8 const*>(&mov), mov.length());
+                        ++it;
+                        ++it;
+                        continue;
+                    }
+                }
+            }
+
             instruction.visit_labels([&](Label& label) {
                 size_t label_offset = bytecode.size() + (bit_cast<FlatPtr>(&label) - bit_cast<FlatPtr>(&instruction));
                 label_offsets.append(label_offset);
