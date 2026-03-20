@@ -1,0 +1,580 @@
+// Copyright (c) 2026, Ladybird developers.
+// SPDX-License-Identifier: BSD-2-Clause
+
+//! https://html.spec.whatwg.org/multipage/parsing.html#the-stack-of-open-elements
+//!
+//! The stack of open elements is said to have an element in a specific scope
+//! when it has that element in scope using a list of element types.
+
+use crate::dom_bridge::{DomHandle, DomNamespace};
+
+/// An entry in the stack of open elements.
+/// We cache the tag name and namespace to avoid FFI calls during scope checks.
+#[derive(Clone, Debug)]
+pub struct StackEntry {
+    pub handle: DomHandle,
+    pub tag_name: String,
+    pub namespace: DomNamespace,
+}
+
+impl StackEntry {
+    pub fn new(handle: DomHandle, tag_name: String, namespace: DomNamespace) -> Self {
+        StackEntry {
+            handle,
+            tag_name,
+            namespace,
+        }
+    }
+
+    pub fn is_html_element(&self, tag: &str) -> bool {
+        self.namespace == DomNamespace::HTML && self.tag_name == tag
+    }
+}
+
+pub struct StackOfOpenElements {
+    elements: Vec<StackEntry>,
+}
+
+impl StackOfOpenElements {
+    pub fn new() -> Self {
+        StackOfOpenElements {
+            elements: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, entry: StackEntry) {
+        self.elements.push(entry);
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#stack-of-open-elements
+    /// Pop the current node off the stack.
+    pub fn pop(&mut self) -> Option<StackEntry> {
+        self.elements.pop()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.elements.len()
+    }
+
+    /// The current node is the bottommost node in this stack of open elements.
+    /// https://html.spec.whatwg.org/multipage/parsing.html#current-node
+    pub fn current_node(&self) -> Option<&StackEntry> {
+        self.elements.last()
+    }
+
+    pub fn current_node_mut(&mut self) -> Option<&mut StackEntry> {
+        self.elements.last_mut()
+    }
+
+    /// The first element in the stack (the html element).
+    pub fn first(&self) -> Option<&StackEntry> {
+        self.elements.first()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&StackEntry> {
+        self.elements.get(index)
+    }
+
+    pub fn elements(&self) -> &[StackEntry] {
+        &self.elements
+    }
+
+    pub fn elements_mut(&mut self) -> &mut Vec<StackEntry> {
+        &mut self.elements
+    }
+
+    pub fn contains(&self, handle: DomHandle) -> bool {
+        self.elements.iter().any(|e| e.handle == handle)
+    }
+
+    pub fn contains_tag(&self, tag: &str) -> bool {
+        self.elements
+            .iter()
+            .any(|e| e.namespace == DomNamespace::HTML && e.tag_name == tag)
+    }
+
+    pub fn contains_template_element(&self) -> bool {
+        self.contains_tag("template")
+    }
+
+    /// Pop elements until an element with the given tag name has been popped.
+    /// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
+    pub fn pop_until_tag_name_popped(&mut self, tag: &str) {
+        while let Some(entry) = self.elements.last() {
+            let matches = entry.namespace == DomNamespace::HTML && entry.tag_name == tag;
+            self.elements.pop();
+            if matches {
+                break;
+            }
+        }
+    }
+
+    /// Pop elements until one of the given tag names has been popped.
+    pub fn pop_until_one_of_tag_names_popped(&mut self, tags: &[&str]) {
+        while let Some(entry) = self.elements.last() {
+            let matches =
+                entry.namespace == DomNamespace::HTML && tags.contains(&entry.tag_name.as_str());
+            self.elements.pop();
+            if matches {
+                break;
+            }
+        }
+    }
+
+    /// Remove a specific element from the stack (by handle).
+    pub fn remove(&mut self, handle: DomHandle) {
+        self.elements.retain(|e| e.handle != handle);
+    }
+
+    /// Replace an element in the stack.
+    pub fn replace(&mut self, old_handle: DomHandle, new_entry: StackEntry) {
+        if let Some(pos) = self.elements.iter().position(|e| e.handle == old_handle) {
+            self.elements[pos] = new_entry;
+        }
+    }
+
+    /// Insert an entry immediately below the given target.
+    pub fn insert_immediately_below(&mut self, entry: StackEntry, target: DomHandle) {
+        if let Some(pos) = self.elements.iter().position(|e| e.handle == target) {
+            self.elements.insert(pos + 1, entry);
+        }
+    }
+
+    /// Find the last element with the given tag name, returning its index.
+    pub fn last_element_with_tag_name(&self, tag: &str) -> Option<(usize, &StackEntry)> {
+        self.elements
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, e)| e.namespace == DomNamespace::HTML && e.tag_name == tag)
+    }
+
+    /// Get the element immediately above (closer to top) the target.
+    pub fn element_immediately_above(&self, target: DomHandle) -> Option<&StackEntry> {
+        if let Some(pos) = self.elements.iter().position(|e| e.handle == target) {
+            if pos + 1 < self.elements.len() {
+                return Some(&self.elements[pos + 1]);
+            }
+        }
+        None
+    }
+
+    /// Get the entry at a given index.
+    pub fn entry_at(&self, index: usize) -> &StackEntry {
+        &self.elements[index]
+    }
+
+    /// Find the index of an element by handle.
+    pub fn index_of(&self, handle: DomHandle) -> Option<usize> {
+        self.elements.iter().position(|e| e.handle == handle)
+    }
+
+    // -----------------------------------------------------------------------
+    // Scope checking
+    // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+    // -----------------------------------------------------------------------
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-the-specific-scope
+    fn has_in_specific_scope(&self, target_tag: &str, scope_markers: &ScopeMarkers) -> bool {
+        for entry in self.elements.iter().rev() {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == target_tag {
+                return true;
+            }
+            if is_scope_marker(entry, scope_markers) {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn has_element_in_specific_scope(&self, target: DomHandle, scope_markers: &ScopeMarkers) -> bool {
+        for entry in self.elements.iter().rev() {
+            if entry.handle == target {
+                return true;
+            }
+            if is_scope_marker(entry, scope_markers) {
+                return false;
+            }
+        }
+        false
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+    pub fn has_in_scope(&self, tag: &str) -> bool {
+        self.has_in_specific_scope(tag, &ScopeMarkers::Default)
+    }
+
+    pub fn has_element_in_scope(&self, handle: DomHandle) -> bool {
+        self.has_element_in_specific_scope(handle, &ScopeMarkers::Default)
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-list-item-scope
+    pub fn has_in_list_item_scope(&self, tag: &str) -> bool {
+        self.has_in_specific_scope(tag, &ScopeMarkers::ListItem)
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-button-scope
+    pub fn has_in_button_scope(&self, tag: &str) -> bool {
+        self.has_in_specific_scope(tag, &ScopeMarkers::Button)
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-table-scope
+    pub fn has_in_table_scope(&self, tag: &str) -> bool {
+        self.has_in_specific_scope(tag, &ScopeMarkers::Table)
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-select-scope
+    pub fn has_in_select_scope(&self, tag: &str) -> bool {
+        // The select scope is inverted: everything except <optgroup> and <option> are scope markers.
+        for entry in self.elements.iter().rev() {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == tag {
+                return true;
+            }
+            if entry.namespace == DomNamespace::HTML
+                && (entry.tag_name == "optgroup" || entry.tag_name == "option")
+            {
+                continue;
+            }
+            return false;
+        }
+        false
+    }
+
+    // -----------------------------------------------------------------------
+    // Implied end tags
+    // https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
+    // -----------------------------------------------------------------------
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
+    pub fn generate_implied_end_tags(&mut self, exception: Option<&str>) {
+        loop {
+            let should_pop = if let Some(entry) = self.elements.last() {
+                if entry.namespace != DomNamespace::HTML {
+                    false
+                } else if let Some(exc) = exception {
+                    if entry.tag_name == exc {
+                        false
+                    } else {
+                        is_implied_end_tag(&entry.tag_name)
+                    }
+                } else {
+                    is_implied_end_tag(&entry.tag_name)
+                }
+            } else {
+                false
+            };
+            if should_pop {
+                self.elements.pop();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#generate-all-implied-end-tags-thoroughly
+    pub fn generate_all_implied_end_tags_thoroughly(&mut self) {
+        loop {
+            let should_pop = if let Some(entry) = self.elements.last() {
+                if entry.namespace != DomNamespace::HTML {
+                    false
+                } else {
+                    is_thorough_implied_end_tag(&entry.tag_name)
+                }
+            } else {
+                false
+            };
+            if should_pop {
+                self.elements.pop();
+            } else {
+                break;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Clear stack back to context
+    // https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-context
+    // -----------------------------------------------------------------------
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-context
+    pub fn clear_back_to_table_context(&mut self) {
+        while let Some(entry) = self.elements.last() {
+            if entry.namespace == DomNamespace::HTML
+                && matches!(entry.tag_name.as_str(), "table" | "template" | "html")
+            {
+                break;
+            }
+            self.elements.pop();
+        }
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-body-context
+    pub fn clear_back_to_table_body_context(&mut self) {
+        while let Some(entry) = self.elements.last() {
+            if entry.namespace == DomNamespace::HTML
+                && matches!(
+                    entry.tag_name.as_str(),
+                    "tbody" | "tfoot" | "thead" | "template" | "html"
+                )
+            {
+                break;
+            }
+            self.elements.pop();
+        }
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-row-context
+    pub fn clear_back_to_table_row_context(&mut self) {
+        while let Some(entry) = self.elements.last() {
+            if entry.namespace == DomNamespace::HTML
+                && matches!(entry.tag_name.as_str(), "tr" | "template" | "html")
+            {
+                break;
+            }
+            self.elements.pop();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Special tag classification
+    // https://html.spec.whatwg.org/multipage/parsing.html#special
+    // -----------------------------------------------------------------------
+
+    /// Find the topmost special node below the given element.
+    pub fn topmost_special_node_below(&self, handle: DomHandle) -> Option<&StackEntry> {
+        let pos = self.elements.iter().position(|e| e.handle == handle)?;
+        // Search from pos-1 down to 0, returning the topmost (closest to pos) special node.
+        for i in (0..pos).rev() {
+            if is_special_tag(&self.elements[i].tag_name, self.elements[i].namespace) {
+                return Some(&self.elements[i]);
+            }
+        }
+        None
+    }
+
+    // -----------------------------------------------------------------------
+    // GC integration
+    // -----------------------------------------------------------------------
+
+    /// Call the visitor for each DOM handle in the stack.
+    pub fn visit_dom_handles(&self, visitor: *mut std::ffi::c_void) {
+        for entry in &self.elements {
+            unsafe {
+                crate::dom_bridge::html_parser_bridge_visit_node(visitor, entry.handle.as_ptr());
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// Scope marker definitions
+// -----------------------------------------------------------------------
+
+enum ScopeMarkers {
+    Default,
+    ListItem,
+    Button,
+    Table,
+}
+
+fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
+    match entry.namespace {
+        DomNamespace::HTML => match markers {
+            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+            ScopeMarkers::Default => matches!(
+                entry.tag_name.as_str(),
+                "applet"
+                    | "caption"
+                    | "html"
+                    | "table"
+                    | "td"
+                    | "th"
+                    | "marquee"
+                    | "object"
+                    | "template"
+            ),
+            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-list-item-scope
+            ScopeMarkers::ListItem => matches!(
+                entry.tag_name.as_str(),
+                "applet"
+                    | "caption"
+                    | "html"
+                    | "table"
+                    | "td"
+                    | "th"
+                    | "marquee"
+                    | "object"
+                    | "template"
+                    | "ol"
+                    | "ul"
+            ),
+            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-button-scope
+            ScopeMarkers::Button => matches!(
+                entry.tag_name.as_str(),
+                "applet"
+                    | "caption"
+                    | "html"
+                    | "table"
+                    | "td"
+                    | "th"
+                    | "marquee"
+                    | "object"
+                    | "template"
+                    | "button"
+            ),
+            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-table-scope
+            ScopeMarkers::Table => matches!(
+                entry.tag_name.as_str(),
+                "html" | "table" | "template"
+            ),
+        },
+        // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+        DomNamespace::MathML => matches!(
+            entry.tag_name.as_str(),
+            "mi" | "mo" | "mn" | "ms" | "mtext" | "annotation-xml"
+        ),
+        DomNamespace::SVG => matches!(
+            entry.tag_name.as_str(),
+            "foreignObject" | "desc" | "title"
+        ),
+        _ => false,
+    }
+}
+
+// -----------------------------------------------------------------------
+// Implied end tag sets
+// -----------------------------------------------------------------------
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
+fn is_implied_end_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "dd" | "dt" | "li" | "optgroup" | "option" | "p" | "rb" | "rp" | "rt" | "rtc"
+    )
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#generate-all-implied-end-tags-thoroughly
+fn is_thorough_implied_end_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "caption"
+            | "colgroup"
+            | "dd"
+            | "dt"
+            | "li"
+            | "optgroup"
+            | "option"
+            | "p"
+            | "rb"
+            | "rp"
+            | "rt"
+            | "rtc"
+            | "tbody"
+            | "td"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "tr"
+    )
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#special
+pub fn is_special_tag(tag: &str, namespace: DomNamespace) -> bool {
+    match namespace {
+        DomNamespace::HTML => matches!(
+            tag,
+            "address"
+                | "applet"
+                | "area"
+                | "article"
+                | "aside"
+                | "base"
+                | "basefont"
+                | "bgsound"
+                | "blockquote"
+                | "body"
+                | "br"
+                | "button"
+                | "caption"
+                | "center"
+                | "col"
+                | "colgroup"
+                | "dd"
+                | "details"
+                | "dir"
+                | "div"
+                | "dl"
+                | "dt"
+                | "embed"
+                | "fieldset"
+                | "figcaption"
+                | "figure"
+                | "footer"
+                | "form"
+                | "frame"
+                | "frameset"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "head"
+                | "header"
+                | "hgroup"
+                | "hr"
+                | "html"
+                | "iframe"
+                | "img"
+                | "input"
+                | "keygen"
+                | "li"
+                | "link"
+                | "listing"
+                | "main"
+                | "marquee"
+                | "menu"
+                | "meta"
+                | "nav"
+                | "noembed"
+                | "noframes"
+                | "noscript"
+                | "object"
+                | "ol"
+                | "p"
+                | "param"
+                | "plaintext"
+                | "pre"
+                | "script"
+                | "search"
+                | "section"
+                | "select"
+                | "source"
+                | "style"
+                | "summary"
+                | "table"
+                | "tbody"
+                | "td"
+                | "template"
+                | "textarea"
+                | "tfoot"
+                | "th"
+                | "thead"
+                | "title"
+                | "tr"
+                | "track"
+                | "ul"
+                | "wbr"
+                | "xmp"
+        ),
+        DomNamespace::SVG => matches!(tag, "foreignObject" | "desc" | "title"),
+        DomNamespace::MathML => {
+            matches!(tag, "mi" | "mo" | "mn" | "ms" | "mtext" | "annotation-xml")
+        }
+        _ => false,
+    }
+}

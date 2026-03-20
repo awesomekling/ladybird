@@ -627,6 +627,7 @@ set(SOURCES
     HTML/Parser/HTMLParser.cpp
     HTML/Parser/HTMLToken.cpp
     HTML/Parser/HTMLTokenizer.cpp
+    HTML/Parser/HTMLParserBridge.cpp
     HTML/Parser/RustHTMLTokenizer.cpp
     HTML/Parser/ListOfActiveFormattingElements.cpp
     HTML/Parser/StackOfOpenElements.cpp
@@ -1225,8 +1226,8 @@ endif()
 target_include_directories(LibWeb PRIVATE ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include)
 
 if (ENABLE_RUST)
-    import_rust_crate(MANIFEST_PATH HTML/Parser/Rust/Cargo.toml CRATE_NAME libweb_html_tokenizer)
-    target_link_libraries(LibWeb PRIVATE libweb_html_tokenizer)
+    import_rust_crate(MANIFEST_PATH HTML/Parser/Rust/Cargo.toml CRATE_NAME libweb_html_parser)
+    target_link_libraries(LibWeb PRIVATE libweb_html_parser)
     target_compile_definitions(LibWeb PRIVATE ENABLE_RUST)
 endif()
 

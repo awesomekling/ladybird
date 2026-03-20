@@ -388,8 +388,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "libweb_html_tokenizer"
+name = "libweb_html_parser"
 version = "0.1.0"
+dependencies = [
+ "cbindgen",
+]
 
 [[package]]
 name = "linux-raw-sys"

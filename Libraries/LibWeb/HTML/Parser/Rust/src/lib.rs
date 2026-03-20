@@ -1,19 +1,102 @@
 // Copyright (c) 2026, Ladybird developers.
 // SPDX-License-Identifier: BSD-2-Clause
 
+pub mod active_formatting_elements;
+pub mod dom_bridge;
 pub mod entities;
+pub mod parser;
+pub mod stack_of_open_elements;
 pub mod token;
 pub mod tokenizer;
 
+use std::ffi::c_void;
 use std::ptr;
+
+use parser::HtmlParser;
 use token::{Attribute, Position, TokenPayload, TokenType};
 use tokenizer::{HtmlTokenizer, State};
+
+// =======================================================================
+// Rust HTML Parser FFI
+// =======================================================================
+
+/// Opaque handle for the Rust HTML parser, passed across the FFI boundary.
+pub struct HtmlParserHandle {
+    parser: HtmlParser,
+}
+
+/// Create a new Rust HTML parser.
+///
+/// # Safety
+/// `document` must be a valid pointer to a C++ DOM::Document.
+/// `input` must point to `input_len` valid u32 code points.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_create(
+    document: *mut c_void,
+    input: *const u32,
+    input_len: usize,
+    scripting_enabled: bool,
+) -> *mut HtmlParserHandle {
+    let code_points = if input.is_null() || input_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(input, input_len) }.to_vec()
+    };
+
+    let handle = Box::new(HtmlParserHandle {
+        parser: HtmlParser::new(
+            dom_bridge::DomHandle(document),
+            code_points,
+            scripting_enabled,
+        ),
+    });
+
+    Box::into_raw(handle)
+}
+
+/// Run the Rust HTML parser.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `rust_html_parser_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_run(handle: *mut HtmlParserHandle) {
+    let handle = unsafe { &mut *handle };
+    handle.parser.run();
+}
+
+/// Visit all DOM handles held by the parser for garbage collection.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `rust_html_parser_create`.
+/// `visitor` must be a valid pointer to a C++ GC::Cell::Visitor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_visit_dom_handles(
+    handle: *mut HtmlParserHandle,
+    visitor: *mut c_void,
+) {
+    let handle = unsafe { &*handle };
+    handle.parser.visit_dom_handles(visitor);
+}
+
+/// Destroy a Rust HTML parser.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `rust_html_parser_create`,
+/// and must not be used after this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_destroy(handle: *mut HtmlParserHandle) {
+    if !handle.is_null() {
+        drop(unsafe { Box::from_raw(handle) });
+    }
+}
+
+// =======================================================================
+// Rust HTML Tokenizer FFI (kept for backward compatibility with C++ HTMLParser)
+// =======================================================================
 
 /// Opaque handle for the Rust tokenizer, passed across the FFI boundary.
 pub struct FfiTokenizerHandle {
     tokenizer: HtmlTokenizer,
-    /// Temporary storage for the last token's string data, kept alive
-    /// so that pointers in FfiToken remain valid until the next call.
     last_tag_name: Vec<u8>,
     last_comment: Vec<u8>,
     last_doctype_name: Vec<u8>,
@@ -24,19 +107,15 @@ pub struct FfiTokenizerHandle {
     last_attr_values: Vec<Vec<u8>>,
 }
 
-/// C-compatible token representation.
 #[repr(C)]
 pub struct FfiToken {
     pub token_type: u8,
     pub code_point: u32,
     pub self_closing: bool,
-
     pub tag_name_ptr: *const u8,
     pub tag_name_len: usize,
-
     pub comment_ptr: *const u8,
     pub comment_len: usize,
-
     pub doctype_name_ptr: *const u8,
     pub doctype_name_len: usize,
     pub public_id_ptr: *const u8,
@@ -47,17 +126,14 @@ pub struct FfiToken {
     pub missing_name: bool,
     pub missing_public_id: bool,
     pub missing_system_id: bool,
-
     pub attributes_ptr: *const FfiAttribute,
     pub attributes_len: usize,
-
     pub start_line: u64,
     pub start_column: u64,
     pub end_line: u64,
     pub end_column: u64,
 }
 
-/// C-compatible attribute representation.
 #[repr(C)]
 pub struct FfiAttribute {
     pub name_ptr: *const u8,
@@ -108,11 +184,7 @@ fn position_to_ffi(pos: &Position) -> (u64, u64) {
     (pos.line, pos.column)
 }
 
-fn attribute_to_ffi(
-    attr: &Attribute,
-    name_buf: &[u8],
-    value_buf: &[u8],
-) -> FfiAttribute {
+fn attribute_to_ffi(attr: &Attribute, name_buf: &[u8], value_buf: &[u8]) -> FfiAttribute {
     let (nsl, nsc) = position_to_ffi(&attr.name_start_position);
     let (nel, nec) = position_to_ffi(&attr.name_end_position);
     let (vsl, vsc) = position_to_ffi(&attr.value_start_position);
@@ -133,10 +205,6 @@ fn attribute_to_ffi(
     }
 }
 
-/// Create a new Rust HTML tokenizer from UTF-32 code points.
-///
-/// # Safety
-/// `input` must point to `len` valid u32 values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_create(
     input: *const u32,
@@ -147,7 +215,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_create(
     } else {
         unsafe { std::slice::from_raw_parts(input, len) }.to_vec()
     };
-
     let handle = Box::new(FfiTokenizerHandle {
         tokenizer: HtmlTokenizer::new(code_points),
         last_tag_name: Vec::new(),
@@ -159,16 +226,9 @@ pub unsafe extern "C" fn rust_html_tokenizer_create(
         last_attr_names: Vec::new(),
         last_attr_values: Vec::new(),
     });
-
     Box::into_raw(handle)
 }
 
-/// Get the next token from the tokenizer.
-/// Returns true if a token was produced, false if no more tokens.
-///
-/// # Safety
-/// `handle` must be a valid pointer from `rust_html_tokenizer_create`.
-/// `out` must be a valid pointer to an FfiToken.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_next_token(
     handle: *mut FfiTokenizerHandle,
@@ -178,14 +238,13 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
 ) -> bool {
     let handle = unsafe { &mut *handle };
     let out = unsafe { &mut *out };
-
-    let token = match handle.tokenizer.next_token(stop_at_insertion_point, cdata_allowed) {
+    let token = match handle
+        .tokenizer
+        .next_token(stop_at_insertion_point, cdata_allowed)
+    {
         Some(t) => t,
         None => return false,
     };
-
-    // Fast path: Character and EOF tokens only need a few fields.
-    // Skip zeroing ~200 bytes of FfiToken for 95%+ of all tokens.
     match token.token_type {
         TokenType::Character | TokenType::EndOfFile => {
             out.token_type = token.token_type as u8;
@@ -198,32 +257,34 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
         }
         _ => {}
     }
-
     *out = FfiToken::default();
     out.token_type = token.token_type as u8;
-
     let (sl, sc) = position_to_ffi(&token.start_position);
     let (el, ec) = position_to_ffi(&token.end_position);
     out.start_line = sl;
     out.start_column = sc;
     out.end_line = el;
     out.end_column = ec;
-
-    // Store string data in handle so pointers stay valid.
     match token.payload {
-        TokenPayload::Tag { tag_name, self_closing, attributes } => {
+        TokenPayload::Tag {
+            tag_name,
+            self_closing,
+            attributes,
+        } => {
             out.self_closing = self_closing;
             handle.last_tag_name = tag_name.into_bytes();
             out.tag_name_ptr = handle.last_tag_name.as_ptr();
             out.tag_name_len = handle.last_tag_name.len();
-
-            // Convert attributes.
             handle.last_attr_names.clear();
             handle.last_attr_values.clear();
             handle.last_attributes.clear();
             for attr in &attributes {
-                handle.last_attr_names.push(attr.local_name.clone().into_bytes());
-                handle.last_attr_values.push(attr.value.clone().into_bytes());
+                handle
+                    .last_attr_names
+                    .push(attr.local_name.clone().into_bytes());
+                handle
+                    .last_attr_values
+                    .push(attr.value.clone().into_bytes());
             }
             for (i, attr) in attributes.iter().enumerate() {
                 let ffi_attr = attribute_to_ffi(
@@ -258,29 +319,19 @@ pub unsafe extern "C" fn rust_html_tokenizer_next_token(
         }
         TokenPayload::None => {}
     }
-
     true
 }
 
-/// Switch the tokenizer to a new state.
-///
-/// # Safety
-/// `handle` must be a valid pointer from `rust_html_tokenizer_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_switch_state(
     handle: *mut FfiTokenizerHandle,
     state: u8,
 ) {
     let handle = unsafe { &mut *handle };
-    // The state values must match the State enum order.
     let state: State = unsafe { std::mem::transmute(state) };
     handle.tokenizer.switch_to(state);
 }
 
-/// Insert input (as UTF-32 code points) at the current insertion point.
-///
-/// # Safety
-/// `handle` must be a valid pointer. `input` must point to `len` valid u32 values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_insert_input(
     handle: *mut FfiTokenizerHandle,
@@ -293,11 +344,11 @@ pub unsafe extern "C" fn rust_html_tokenizer_insert_input(
     } else {
         unsafe { std::slice::from_raw_parts(input, len) }
     };
-    handle.tokenizer.insert_input_at_insertion_point(code_points);
+    handle
+        .tokenizer
+        .insert_input_at_insertion_point(code_points);
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_store_insertion_point(
     handle: *mut FfiTokenizerHandle,
@@ -306,8 +357,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_store_insertion_point(
     handle.tokenizer.store_insertion_point();
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_restore_insertion_point(
     handle: *mut FfiTokenizerHandle,
@@ -316,8 +365,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_restore_insertion_point(
     handle.tokenizer.restore_insertion_point();
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_update_insertion_point(
     handle: *mut FfiTokenizerHandle,
@@ -326,8 +373,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_update_insertion_point(
     handle.tokenizer.update_insertion_point();
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_undefine_insertion_point(
     handle: *mut FfiTokenizerHandle,
@@ -336,8 +381,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_undefine_insertion_point(
     handle.tokenizer.undefine_insertion_point();
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_is_insertion_point_defined(
     handle: *mut FfiTokenizerHandle,
@@ -346,8 +389,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_is_insertion_point_defined(
     handle.tokenizer.is_insertion_point_defined()
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_set_blocked(
     handle: *mut FfiTokenizerHandle,
@@ -357,8 +398,6 @@ pub unsafe extern "C" fn rust_html_tokenizer_set_blocked(
     handle.tokenizer.set_blocked(blocked);
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_is_blocked(
     handle: *mut FfiTokenizerHandle,
@@ -367,18 +406,12 @@ pub unsafe extern "C" fn rust_html_tokenizer_is_blocked(
     handle.tokenizer.is_blocked()
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_html_tokenizer_insert_eof(
-    handle: *mut FfiTokenizerHandle,
-) {
+pub unsafe extern "C" fn rust_html_tokenizer_insert_eof(handle: *mut FfiTokenizerHandle) {
     let handle = unsafe { &mut *handle };
     handle.tokenizer.insert_eof();
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_is_eof_inserted(
     handle: *mut FfiTokenizerHandle,
@@ -387,20 +420,12 @@ pub unsafe extern "C" fn rust_html_tokenizer_is_eof_inserted(
     handle.tokenizer.is_eof_inserted()
 }
 
-/// # Safety
-/// `handle` must be a valid pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_html_tokenizer_abort(
-    handle: *mut FfiTokenizerHandle,
-) {
+pub unsafe extern "C" fn rust_html_tokenizer_abort(handle: *mut FfiTokenizerHandle) {
     let handle = unsafe { &mut *handle };
     handle.tokenizer.abort();
 }
 
-/// Set the last emitted start tag name (for end tag matching in RCDATA/ScriptData).
-///
-/// # Safety
-/// `handle` must be a valid pointer. `ptr` must point to `len` valid UTF-8 bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_html_tokenizer_set_last_start_tag_name(
     handle: *mut FfiTokenizerHandle,
@@ -416,15 +441,8 @@ pub unsafe extern "C" fn rust_html_tokenizer_set_last_start_tag_name(
     handle.tokenizer.set_last_start_tag(name);
 }
 
-/// Destroy a Rust HTML tokenizer.
-///
-/// # Safety
-/// `handle` must be a valid pointer from `rust_html_tokenizer_create`,
-/// and must not be used after this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_html_tokenizer_destroy(
-    handle: *mut FfiTokenizerHandle,
-) {
+pub unsafe extern "C" fn rust_html_tokenizer_destroy(handle: *mut FfiTokenizerHandle) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle) });
     }
