@@ -445,7 +445,13 @@ impl HtmlParser {
         // 11. Append each attribute in the given token to element.
         // NOTE: Using append_attribute ensures first attribute wins (per spec).
         for attr in token.attributes() {
-            element.append_attribute(&attr.local_name, &attr.value);
+            // Adjust SVG attribute names if we're in the SVG namespace.
+            if namespace == DomNamespace::SVG {
+                let adjusted_name = adjust_svg_attribute_name(&attr.local_name);
+                element.append_attribute(adjusted_name, &attr.value);
+            } else {
+                element.append_attribute(&attr.local_name, &attr.value);
+            }
         }
 
         // 3. If onlyAddToElementStack is false, then run insert an element at the adjusted
@@ -3689,6 +3695,71 @@ fn adjust_svg_tag_name(tag_name: &str) -> &str {
         "radialgradient" => "radialGradient",
         "textpath" => "textPath",
         _ => tag_name,
+    }
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#adjust-svg-attributes
+fn adjust_svg_attribute_name(name: &str) -> &str {
+    match name {
+        "attributename" => "attributeName",
+        "attributetype" => "attributeType",
+        "basefrequency" => "baseFrequency",
+        "baseprofile" => "baseProfile",
+        "calcmode" => "calcMode",
+        "clippathunits" => "clipPathUnits",
+        "diffuseconstant" => "diffuseConstant",
+        "edgemode" => "edgeMode",
+        "filterunits" => "filterUnits",
+        "glyphref" => "glyphRef",
+        "gradienttransform" => "gradientTransform",
+        "gradientunits" => "gradientUnits",
+        "kernelmatrix" => "kernelMatrix",
+        "kernelunitlength" => "kernelUnitLength",
+        "keypoints" => "keyPoints",
+        "keysplines" => "keySplines",
+        "keytimes" => "keyTimes",
+        "lengthadjust" => "lengthAdjust",
+        "limitingconeangle" => "limitingConeAngle",
+        "markerheight" => "markerHeight",
+        "markerunits" => "markerUnits",
+        "markerwidth" => "markerWidth",
+        "maskcontentunits" => "maskContentUnits",
+        "maskunits" => "maskUnits",
+        "numoctaves" => "numOctaves",
+        "pathlength" => "pathLength",
+        "patterncontentunits" => "patternContentUnits",
+        "patterntransform" => "patternTransform",
+        "patternunits" => "patternUnits",
+        "pointsatx" => "pointsAtX",
+        "pointsaty" => "pointsAtY",
+        "pointsatz" => "pointsAtZ",
+        "preservealpha" => "preserveAlpha",
+        "preserveaspectratio" => "preserveAspectRatio",
+        "primitiveunits" => "primitiveUnits",
+        "refx" => "refX",
+        "refy" => "refY",
+        "repeatcount" => "repeatCount",
+        "repeatdur" => "repeatDur",
+        "requiredextensions" => "requiredExtensions",
+        "requiredfeatures" => "requiredFeatures",
+        "specularconstant" => "specularConstant",
+        "specularexponent" => "specularExponent",
+        "spreadmethod" => "spreadMethod",
+        "startoffset" => "startOffset",
+        "stddeviation" => "stdDeviation",
+        "stitchtiles" => "stitchTiles",
+        "surfacescale" => "surfaceScale",
+        "systemlanguage" => "systemLanguage",
+        "tablevalues" => "tableValues",
+        "targetx" => "targetX",
+        "targety" => "targetY",
+        "textlength" => "textLength",
+        "viewbox" => "viewBox",
+        "viewtarget" => "viewTarget",
+        "xchannelselector" => "xChannelSelector",
+        "ychannelselector" => "yChannelSelector",
+        "zoomandpan" => "zoomAndPan",
+        _ => name,
     }
 }
 
