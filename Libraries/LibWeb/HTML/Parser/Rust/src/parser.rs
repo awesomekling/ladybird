@@ -718,10 +718,10 @@ impl HtmlParser {
             }
 
             if ns == DomNamespace::HTML {
-                // 4. If node is a select element, ...
+                // 4. If node is a select element, set the insertion mode to InBody.
+                // NOTE: The current HTML spec no longer has InSelect mode.
                 if tag == "select" {
-                    // TODO: Handle select scope
-                    self.insertion_mode = InsertionMode::InSelect;
+                    self.insertion_mode = InsertionMode::InBody;
                     return;
                 }
 
@@ -2267,18 +2267,8 @@ impl HtmlParser {
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
             self.frameset_ok = false;
-            match self.insertion_mode {
-                InsertionMode::InTable
-                | InsertionMode::InCaption
-                | InsertionMode::InTableBody
-                | InsertionMode::InRow
-                | InsertionMode::InCell => {
-                    self.insertion_mode = InsertionMode::InSelectInTable;
-                }
-                _ => {
-                    self.insertion_mode = InsertionMode::InSelect;
-                }
-            }
+            // NOTE: The current HTML spec does not have InSelect/InSelectInTable insertion modes.
+            // Select elements and their children (option, optgroup) are handled in InBody.
             return;
         }
 
@@ -3302,26 +3292,14 @@ impl HtmlParser {
     }
 
     fn handle_in_select(&mut self, token: &Token) {
-        // TODO: Full implementation
-        if token.is_eof() {
-            self.stop_parsing();
-            return;
-        }
-        if token.is_character() {
-            if token.code_point != 0 {
-                self.insert_character(token.code_point);
-            }
-            return;
-        }
-        if token.is_comment() {
-            self.insert_comment(token);
-            return;
-        }
+        // NOTE: The current HTML spec no longer has InSelect mode.
+        // This is kept as a fallback that processes tokens using InBody rules.
+        self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
     fn handle_in_select_in_table(&mut self, token: &Token) {
-        // TODO: Full implementation
-        self.handle_in_select(token);
+        // NOTE: The current HTML spec no longer has InSelectInTable mode.
+        self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intemplate

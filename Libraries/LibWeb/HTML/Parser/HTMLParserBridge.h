@@ -52,6 +52,9 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr);
 /// Set parser document and force_async=false on a script element.
 void html_parser_bridge_setup_script_element(void* element_ptr, void* document_ptr);
 
+/// Notify that an element was popped from the stack of open elements.
+void html_parser_bridge_element_popped(void* element_ptr);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

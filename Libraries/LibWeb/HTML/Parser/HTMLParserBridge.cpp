@@ -17,6 +17,7 @@
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -279,6 +280,18 @@ void html_parser_bridge_setup_script_element(void* element_ptr, void* document_p
     auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
         Web::HTML::HTMLParser::setup_script_element(*script, document);
+    }
+}
+
+void html_parser_bridge_element_popped(void* element_ptr)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#the-option-element
+    // When an option element is popped off the stack of open elements,
+    // the user agent must run maybe clone an option into selectedcontent.
+    if (auto* option = as_if<Web::HTML::HTMLOptionElement>(&element)) {
+        MUST(option->maybe_clone_into_selectedcontent());
     }
 }
 
