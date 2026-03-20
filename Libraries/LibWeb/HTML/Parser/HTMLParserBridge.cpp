@@ -91,7 +91,9 @@ void* html_parser_bridge_create_element(void* document_ptr, uint8_t const* local
         is_value = MUST(String::from_utf8(is_sv));
     }
 
-    auto element = Web::DOM::create_element(document, local_name, ns, {}, is_value).release_value_but_fixme_should_propagate_errors();
+    // Pass will_execute_script=true so custom element constructors run during creation.
+    bool will_execute_script = is_value.has_value() || document.lookup_custom_element_definition(ns, local_name, is_value);
+    auto element = Web::DOM::create_element(document, local_name, ns, {}, is_value, will_execute_script).release_value_but_fixme_should_propagate_errors();
     return element.ptr();
 }
 
