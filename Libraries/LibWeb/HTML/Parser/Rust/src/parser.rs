@@ -149,7 +149,9 @@ impl HtmlParser {
         self.stop_parsing = false;
 
         loop {
-            let token = match self.tokenizer.next_token(true, false) {
+            let cdata_allowed = self.adjusted_current_node_namespace()
+                .is_some_and(|ns| ns != DomNamespace::HTML);
+            let token = match self.tokenizer.next_token(true, cdata_allowed) {
                 Some(t) => t,
                 None => break,
             };
@@ -181,7 +183,9 @@ impl HtmlParser {
         self.stop_parsing = false;
 
         loop {
-            let token = match self.tokenizer.next_token(false, false) {
+            let cdata_allowed = self.adjusted_current_node_namespace()
+                .is_some_and(|ns| ns != DomNamespace::HTML);
+            let token = match self.tokenizer.next_token(false, cdata_allowed) {
                 Some(t) => t,
                 None => break,
             };
