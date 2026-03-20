@@ -5027,21 +5027,6 @@ void HTMLParser::mark_svg_script_as_parser_inserted(SVG::SVGScriptElement& scrip
     script.set_parser_inserted(Badge<HTMLParser> {});
 }
 
-void HTMLParser::process_pending_scripts(DOM::Document& document)
-{
-    while (document.pending_parsing_blocking_script()) {
-        auto the_script = document.take_pending_parsing_blocking_script(Badge<HTMLParser> {});
-
-        if (document.has_a_style_sheet_that_is_blocking_scripts() || !the_script->is_ready_to_be_parser_executed()) {
-            main_thread_event_loop().spin_until(GC::create_function(document.heap(), [&] {
-                return !document.has_a_style_sheet_that_is_blocking_scripts() && the_script->is_ready_to_be_parser_executed();
-            }));
-        }
-
-        the_script->execute_script();
-    }
-}
-
 GC::Ref<DOM::Element> HTMLParser::create_element_for_rust_parser(DOM::Document& document, FlyString const& local_name, Optional<FlyString> const& namespace_, Optional<String> const& is_value, GC::Ptr<CustomElementDefinition> definition)
 {
     bool will_execute_script = definition != nullptr;
@@ -5065,18 +5050,16 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for_rust_parser(DOM::Document& 
     return element;
 }
 
-void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document, size_t script_nesting_level)
+void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document&, size_t)
 {
     // Prepare the script element.
+    // NOTE: This only prepares/fetches. Pending scripts are processed separately
+    // by process_pending_scripts after nesting level reaches 0.
     prepare_script_element(script);
+}
 
-    // If the script nesting level is not zero, set the parser pause flag and return.
-    // The pending script will be executed when nesting level reaches zero.
-    if (script_nesting_level != 0 && document.pending_parsing_blocking_script()) {
-        return;
-    }
-
-    // Handle pending parsing-blocking script (external scripts that need to be fetched).
+void HTMLParser::process_pending_scripts(DOM::Document& document)
+{
     while (document.pending_parsing_blocking_script()) {
         auto the_script = document.take_pending_parsing_blocking_script(Badge<HTMLParser> {});
 
