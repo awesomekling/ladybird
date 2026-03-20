@@ -226,6 +226,12 @@ unsafe extern "C" {
     // GC integration
     // -----------------------------------------------------------------------
 
+    /// Set parser_document and force_async=false on a script element.
+    pub fn html_parser_bridge_setup_script_element(
+        element: *mut c_void,
+        document: *mut c_void,
+    );
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(
@@ -393,5 +399,11 @@ impl DomHandle {
 
     pub fn execute_script(self) -> bool {
         unsafe { html_parser_bridge_execute_script(self.as_ptr()) }
+    }
+
+    pub fn setup_script_element(self, document: DomHandle) {
+        unsafe {
+            html_parser_bridge_setup_script_element(self.as_ptr(), document.as_ptr());
+        }
     }
 }

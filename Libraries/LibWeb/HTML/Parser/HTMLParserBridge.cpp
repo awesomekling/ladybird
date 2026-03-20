@@ -248,11 +248,19 @@ void html_parser_bridge_associate_with_form(void* element_ptr, void* form_ptr)
 bool html_parser_bridge_execute_script(void* element_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
-    // TODO: Implement proper script preparation and execution.
-    // The C++ HTMLParser uses Badge<HTMLParser> to call prepare_script().
-    // For now, we skip script execution in the Rust parser.
-    (void)element;
+    if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
+        Web::HTML::HTMLParser::prepare_script_element(*script);
+    }
     return false;
+}
+
+void html_parser_bridge_setup_script_element(void* element_ptr, void* document_ptr)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
+        Web::HTML::HTMLParser::setup_script_element(*script, document);
+    }
 }
 
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr)

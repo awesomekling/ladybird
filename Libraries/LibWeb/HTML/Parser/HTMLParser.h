@@ -81,6 +81,10 @@ public:
 
     static bool is_special_tag(FlyString const& tag_name, Optional<FlyString> const& namespace_);
 
+    // Called by the Rust HTML parser bridge to prepare/setup a script element.
+    static void prepare_script_element(HTMLScriptElement&);
+    static void setup_script_element(HTMLScriptElement&, DOM::Document&);
+
     HTMLTokenizer& tokenizer() { return m_tokenizer; }
 
     // https://html.spec.whatwg.org/multipage/parsing.html#abort-a-parser

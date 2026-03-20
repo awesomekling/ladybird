@@ -45,6 +45,9 @@ void* html_parser_bridge_document_node(void* document_ptr);
 void html_parser_bridge_associate_with_form(void* element_ptr, void* form_ptr);
 bool html_parser_bridge_execute_script(void* element_ptr);
 
+/// Set parser document and force_async=false on a script element.
+void html_parser_bridge_setup_script_element(void* element_ptr, void* document_ptr);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

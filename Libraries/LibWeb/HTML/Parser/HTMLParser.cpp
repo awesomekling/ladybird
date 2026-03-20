@@ -4991,6 +4991,18 @@ GC::Ref<HTMLParser> HTMLParser::create(DOM::Document& document, StringView input
     return document.realm().create<HTMLParser>(document, input, encoding);
 }
 
+void HTMLParser::prepare_script_element(HTMLScriptElement& script)
+{
+    script.set_string_text(script.child_text_content());
+    script.prepare_script(Badge<HTMLParser> {});
+}
+
+void HTMLParser::setup_script_element(HTMLScriptElement& script, DOM::Document& document)
+{
+    script.set_parser_document(Badge<HTMLParser> {}, document);
+    script.set_force_async(Badge<HTMLParser> {}, false);
+}
+
 enum class AttributeMode {
     No,
     Yes,

@@ -1196,8 +1196,9 @@ impl HtmlParser {
                 element.set_attribute(&attr.local_name, &attr.value);
             }
 
-            // 3-5. Set parser document, force async, etc.
-            // (Handled by the bridge when the script element is created.)
+            // 3. Set the element's parser document to the Document, and set the element's
+            //    force async to false.
+            element.setup_script_element(self.document);
 
             // 6. Insert the newly created element at the adjusted insertion location.
             self.insert_at_adjusted_location(element, &adjusted);
