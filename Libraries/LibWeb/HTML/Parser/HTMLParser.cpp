@@ -51,6 +51,23 @@
 #include <LibWeb/SVG/SVGScriptElement.h>
 #include <LibWeb/SVG/TagNames.h>
 
+#ifdef ENABLE_RUST
+#    include <LibWeb/HTML/Parser/HTMLParserBridge.h>
+
+extern "C" {
+void* rust_html_parser_create(void* document, uint32_t const* input, size_t input_len, bool scripting_enabled);
+void rust_html_parser_run(void* handle);
+void rust_html_parser_visit_dom_handles(void* handle, void* visitor);
+void rust_html_parser_destroy(void* handle);
+}
+
+static bool rust_html_parser_enabled()
+{
+    static bool const enabled = getenv("LIBWEB_USE_RUST_PARSER") != nullptr;
+    return enabled;
+}
+#endif
+
 namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(HTMLParser);
@@ -267,6 +284,18 @@ void HTMLParser::run(URL::URL const& url, HTMLTokenizer::StopAtInsertionPoint st
 {
     m_document->set_url(url);
     m_document->set_source(m_tokenizer.source());
+
+#ifdef ENABLE_RUST
+    if (rust_html_parser_enabled()) {
+        auto const& code_points = m_tokenizer.decoded_input();
+        auto* handle = rust_html_parser_create(m_document.ptr(), code_points.data(), code_points.size(), m_scripting_enabled);
+        rust_html_parser_run(handle);
+        rust_html_parser_destroy(handle);
+        the_end(*m_document, this);
+        return;
+    }
+#endif
+
     run(stop_at_insertion_point);
     the_end(*m_document, this);
 }

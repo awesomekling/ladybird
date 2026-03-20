@@ -134,6 +134,7 @@ public:
     bool is_blocked() const;
 
     auto const& source() const { return m_source; }
+    auto const& decoded_input() const { return m_decoded_input; }
 
     void insert_input_at_insertion_point(StringView input);
     void insert_eof();
