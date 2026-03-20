@@ -95,6 +95,21 @@ void html_parser_bridge_set_attribute(void* element_ptr, uint8_t const* name_ptr
     element.set_attribute_value(name, value);
 }
 
+void html_parser_bridge_append_attribute(void* element_ptr, uint8_t const* name_ptr, size_t name_len, uint8_t const* value_ptr, size_t value_len)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+    auto name_sv = string_view_from_rust(name_ptr, name_len);
+    auto value_sv = string_view_from_rust(value_ptr, value_len);
+
+    auto name = MUST(FlyString::from_utf8(name_sv));
+
+    // Only add the attribute if it doesn't already exist (first one wins per spec).
+    if (!element.has_attribute(name)) {
+        auto value = MUST(String::from_utf8(value_sv));
+        element.append_attribute(name, value);
+    }
+}
+
 void html_parser_bridge_set_attribute_ns(void* element_ptr, uint8_t namespace_id, uint8_t const* prefix_ptr, size_t prefix_len, uint8_t const* local_name_ptr, size_t local_name_len, uint8_t const* value_ptr, size_t value_len)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);

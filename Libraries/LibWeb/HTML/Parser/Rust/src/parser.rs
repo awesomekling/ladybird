@@ -441,9 +441,11 @@ impl HtmlParser {
         // 2. Let element be the result of creating an element for the token in the given namespace.
         let element = self.create_element_for(token, namespace);
 
-        // Set attributes on the element.
+        // https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
+        // 11. Append each attribute in the given token to element.
+        // NOTE: Using append_attribute ensures first attribute wins (per spec).
         for attr in token.attributes() {
-            element.set_attribute(&attr.local_name, &attr.value);
+            element.append_attribute(&attr.local_name, &attr.value);
         }
 
         // 3. If onlyAddToElementStack is false, then run insert an element at the adjusted
@@ -992,7 +994,7 @@ impl HtmlParser {
             // of open elements.
             let element = self.create_element_for(token, DomNamespace::HTML);
             for attr in token.attributes() {
-                element.set_attribute(&attr.local_name, &attr.value);
+                element.append_attribute(&attr.local_name, &attr.value);
             }
             let doc_node = DomHandle::document_node(self.document);
             DomHandle::insert_before(doc_node, element, None);
@@ -1193,7 +1195,7 @@ impl HtmlParser {
             // 2. Create an element for the token in the HTML namespace.
             let element = self.create_element_for(token, DomNamespace::HTML);
             for attr in token.attributes() {
-                element.set_attribute(&attr.local_name, &attr.value);
+                element.append_attribute(&attr.local_name, &attr.value);
             }
 
             // 3. Set the element's parser document to the Document, and set the element's
@@ -1548,7 +1550,7 @@ impl HtmlParser {
                 let handle = first.handle;
                 for attr in token.attributes() {
                     // TODO: Check if attribute already exists before setting
-                    handle.set_attribute(&attr.local_name, &attr.value);
+                    handle.append_attribute(&attr.local_name, &attr.value);
                 }
             }
             return;
@@ -1602,7 +1604,7 @@ impl HtmlParser {
             if let Some(body) = self.stack_of_open_elements.get(1) {
                 let handle = body.handle;
                 for attr in token.attributes() {
-                    handle.set_attribute(&attr.local_name, &attr.value);
+                    handle.append_attribute(&attr.local_name, &attr.value);
                 }
             }
             return;

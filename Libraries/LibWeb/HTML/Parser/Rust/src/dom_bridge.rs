@@ -77,7 +77,16 @@ unsafe extern "C" {
         namespace: u8,
     ) -> *mut c_void;
 
-    /// Set an attribute on an element.
+    /// Append an attribute to an element (only if not already present — first one wins).
+    pub fn html_parser_bridge_append_attribute(
+        element: *mut c_void,
+        name: *const u8,
+        name_len: usize,
+        value: *const u8,
+        value_len: usize,
+    );
+
+    /// Set an attribute on an element (overwrites existing).
     pub fn html_parser_bridge_set_attribute(
         element: *mut c_void,
         name: *const u8,
@@ -254,6 +263,19 @@ impl DomHandle {
                 namespace as u8,
             )
         })
+    }
+
+    /// Append an attribute (first one wins — skips if already present).
+    pub fn append_attribute(self, name: &str, value: &str) {
+        unsafe {
+            html_parser_bridge_append_attribute(
+                self.as_ptr(),
+                name.as_ptr(),
+                name.len(),
+                value.as_ptr(),
+                value.len(),
+            );
+        }
     }
 
     pub fn set_attribute(self, name: &str, value: &str) {

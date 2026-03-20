@@ -18,6 +18,7 @@ extern "C" {
 
 void* html_parser_bridge_create_element(void* document_ptr, uint8_t const* local_name_ptr, size_t local_name_len, uint8_t namespace_id);
 void html_parser_bridge_set_attribute(void* element_ptr, uint8_t const* name_ptr, size_t name_len, uint8_t const* value_ptr, size_t value_len);
+void html_parser_bridge_append_attribute(void* element_ptr, uint8_t const* name_ptr, size_t name_len, uint8_t const* value_ptr, size_t value_len);
 void html_parser_bridge_set_attribute_ns(void* element_ptr, uint8_t namespace_id, uint8_t const* prefix_ptr, size_t prefix_len, uint8_t const* local_name_ptr, size_t local_name_len, uint8_t const* value_ptr, size_t value_len);
 
 void* html_parser_bridge_create_text_node(void* document_ptr, uint8_t const* data_ptr, size_t data_len);
