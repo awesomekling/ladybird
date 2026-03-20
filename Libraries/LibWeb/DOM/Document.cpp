@@ -216,6 +216,7 @@
 #ifdef ENABLE_RUST
 extern "C" {
 void rust_html_parser_insert_input(void* handle, uint32_t const* input, size_t input_len);
+void rust_html_parser_run(void* handle);
 void rust_html_parser_run_stop_at_insertion_point(void* handle);
 bool rust_html_parser_is_insertion_point_defined(void* handle);
 void rust_html_parser_insert_eof(void* handle);
@@ -940,7 +941,9 @@ WebIDL::ExceptionOr<void> Document::close()
         if (pending_parsing_blocking_script())
             return {};
 
-        rust_html_parser_run_stop_at_insertion_point(m_parser->rust_parser_handle());
+        // Use full run (not stop_at_insertion_point) since document.close()
+        // should process all remaining input including EOF.
+        rust_html_parser_run(m_parser->rust_parser_handle());
 
         completely_finish_loading();
         return {};
