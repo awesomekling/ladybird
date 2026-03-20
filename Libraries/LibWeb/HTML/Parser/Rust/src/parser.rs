@@ -523,9 +523,11 @@ impl HtmlParser {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
+    /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
     fn create_element_for(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
-        // Simplified version — create element via the bridge.
-        DomHandle::create_element(self.document, token.tag_name(), namespace)
+        // 5. Let is be the value of the "is" attribute in token, if such an attribute exists.
+        let is_value = token.get_attribute("is");
+        DomHandle::create_element(self.document, token.tag_name(), namespace, is_value)
     }
 
     /// Insert a node at an adjusted insertion location.
@@ -1077,7 +1079,7 @@ impl HtmlParser {
         // -> Anything else
         // Create an html element whose node document is the Document object.
         // Append it to the Document object. Put this element in the stack of open elements.
-        let element = DomHandle::create_element(self.document, "html", DomNamespace::HTML);
+        let element = DomHandle::create_element(self.document, "html", DomNamespace::HTML, None);
         let doc_node = DomHandle::document_node(self.document);
         DomHandle::insert_before(doc_node, element, None);
         self.stack_of_open_elements.push(StackEntry::new(

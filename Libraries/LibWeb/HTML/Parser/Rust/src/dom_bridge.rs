@@ -68,13 +68,15 @@ unsafe extern "C" {
     // Element creation
     // -----------------------------------------------------------------------
 
-    /// Create a DOM element with the given local name and namespace.
+    /// Create a DOM element with the given local name, namespace, and optional `is` value.
     /// Returns an opaque handle to the created element.
     pub fn html_parser_bridge_create_element(
         document: *mut c_void,
         local_name: *const u8,
         local_name_len: usize,
         namespace: u8,
+        is_value: *const u8,
+        is_value_len: usize,
     ) -> *mut c_void;
 
     /// Append an attribute to an element (only if not already present — first one wins).
@@ -276,13 +278,24 @@ unsafe extern "C" {
 // -----------------------------------------------------------------------
 
 impl DomHandle {
-    pub fn create_element(document: DomHandle, local_name: &str, namespace: DomNamespace) -> DomHandle {
+    pub fn create_element(
+        document: DomHandle,
+        local_name: &str,
+        namespace: DomNamespace,
+        is_value: Option<&str>,
+    ) -> DomHandle {
+        let (is_ptr, is_len) = match is_value {
+            Some(v) => (v.as_ptr(), v.len()),
+            None => (std::ptr::null(), 0),
+        };
         DomHandle(unsafe {
             html_parser_bridge_create_element(
                 document.as_ptr(),
                 local_name.as_ptr(),
                 local_name.len(),
                 namespace as u8,
+                is_ptr,
+                is_len,
             )
         })
     }

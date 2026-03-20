@@ -76,14 +76,20 @@ static StringView string_view_from_rust(uint8_t const* ptr, size_t len)
 
 extern "C" {
 
-void* html_parser_bridge_create_element(void* document_ptr, uint8_t const* local_name_ptr, size_t local_name_len, uint8_t namespace_id)
+void* html_parser_bridge_create_element(void* document_ptr, uint8_t const* local_name_ptr, size_t local_name_len, uint8_t namespace_id, uint8_t const* is_value_ptr, size_t is_value_len)
 {
     auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
     auto local_name_sv = string_view_from_rust(local_name_ptr, local_name_len);
     auto local_name = MUST(FlyString::from_utf8(local_name_sv));
     auto const& ns = namespace_from_u8(namespace_id);
 
-    auto element = Web::DOM::create_element(document, local_name, ns).release_value_but_fixme_should_propagate_errors();
+    Optional<String> is_value;
+    if (is_value_ptr && is_value_len > 0) {
+        auto is_sv = string_view_from_rust(is_value_ptr, is_value_len);
+        is_value = MUST(String::from_utf8(is_sv));
+    }
+
+    auto element = Web::DOM::create_element(document, local_name, ns, {}, is_value).release_value_but_fixme_should_propagate_errors();
     return element.ptr();
 }
 
