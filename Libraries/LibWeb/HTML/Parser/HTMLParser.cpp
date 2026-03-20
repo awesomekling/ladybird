@@ -5003,6 +5003,27 @@ void HTMLParser::setup_script_element(HTMLScriptElement& script, DOM::Document& 
     script.set_force_async(Badge<HTMLParser> {}, false);
 }
 
+void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document)
+{
+    // Prepare the script element.
+    prepare_script_element(script);
+
+    // Handle pending parsing-blocking script (external scripts that need to be fetched).
+    while (document.pending_parsing_blocking_script()) {
+        auto the_script = document.take_pending_parsing_blocking_script(Badge<HTMLParser> {});
+
+        // Spin the event loop until the script is ready.
+        if (document.has_a_style_sheet_that_is_blocking_scripts() || !the_script->is_ready_to_be_parser_executed()) {
+            main_thread_event_loop().spin_until(GC::create_function(document.heap(), [&] {
+                return !document.has_a_style_sheet_that_is_blocking_scripts() && the_script->is_ready_to_be_parser_executed();
+            }));
+        }
+
+        // Execute the script.
+        the_script->execute_script();
+    }
+}
+
 enum class AttributeMode {
     No,
     Yes,

@@ -16,6 +16,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
@@ -260,12 +261,15 @@ void html_parser_bridge_associate_with_form(void* element_ptr, void* form_ptr)
     // TODO: Implement form association
 }
 
-bool html_parser_bridge_execute_script(void* element_ptr)
+bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
-        Web::HTML::HTMLParser::prepare_script_element(*script);
+        Web::HTML::HTMLParser::handle_script_end_tag(*script, document);
     }
+
     return false;
 }
 

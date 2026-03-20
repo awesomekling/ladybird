@@ -84,6 +84,7 @@ public:
     // Called by the Rust HTML parser bridge to prepare/setup a script element.
     static void prepare_script_element(HTMLScriptElement&);
     static void setup_script_element(HTMLScriptElement&, DOM::Document&);
+    static void handle_script_end_tag(HTMLScriptElement&, DOM::Document&);
 
     HTMLTokenizer& tokenizer() { return m_tokenizer; }
 

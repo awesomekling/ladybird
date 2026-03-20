@@ -2491,7 +2491,7 @@ impl HtmlParser {
             // (The C++ bridge handles script preparation and execution.)
             if let Some(entry) = script_entry {
                 self.flush_character_insertions();
-                entry.handle.execute_script();
+                entry.handle.execute_script(self.document);
             }
             return;
         }

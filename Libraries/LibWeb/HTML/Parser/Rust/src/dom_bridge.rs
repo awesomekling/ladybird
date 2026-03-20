@@ -228,8 +228,9 @@ unsafe extern "C" {
     // -----------------------------------------------------------------------
 
     /// Prepare and potentially execute a script element.
-    /// Returns true if the parser should be paused.
-    pub fn html_parser_bridge_execute_script(element: *mut c_void) -> bool;
+    /// For external scripts, blocks until loaded and executed.
+    /// Returns true if the parser should stop.
+    pub fn html_parser_bridge_execute_script(element: *mut c_void, document: *mut c_void) -> bool;
 
     // -----------------------------------------------------------------------
     // GC integration
@@ -419,8 +420,8 @@ impl DomHandle {
         }
     }
 
-    pub fn execute_script(self) -> bool {
-        unsafe { html_parser_bridge_execute_script(self.as_ptr()) }
+    pub fn execute_script(self, document: DomHandle) -> bool {
+        unsafe { html_parser_bridge_execute_script(self.as_ptr(), document.as_ptr()) }
     }
 
     pub fn setup_script_element(self, document: DomHandle) {
