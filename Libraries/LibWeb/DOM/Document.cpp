@@ -218,6 +218,7 @@ extern "C" {
 void rust_html_parser_insert_input(void* handle, uint32_t const* input, size_t input_len);
 void rust_html_parser_run_stop_at_insertion_point(void* handle);
 bool rust_html_parser_is_insertion_point_defined(void* handle);
+void rust_html_parser_insert_eof(void* handle);
 }
 #endif
 
@@ -932,6 +933,19 @@ WebIDL::ExceptionOr<void> Document::close()
         return {};
 
     // 4. Insert an explicit "EOF" character at the end of the parser's input stream.
+#ifdef ENABLE_RUST
+    if (m_parser->rust_parser_handle()) {
+        rust_html_parser_insert_eof(m_parser->rust_parser_handle());
+
+        if (pending_parsing_blocking_script())
+            return {};
+
+        rust_html_parser_run_stop_at_insertion_point(m_parser->rust_parser_handle());
+
+        completely_finish_loading();
+        return {};
+    }
+#endif
     m_parser->tokenizer().insert_eof();
 
     // 5. If there is a pending parsing-blocking script, then return.

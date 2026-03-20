@@ -109,6 +109,16 @@ pub unsafe extern "C" fn rust_html_parser_is_insertion_point_defined(
     handle.parser.tokenizer.is_insertion_point_defined()
 }
 
+/// Insert an EOF marker into the tokenizer's input stream.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_insert_eof(handle: *mut HtmlParserHandle) {
+    let handle = unsafe { &mut *handle };
+    handle.parser.tokenizer.insert_eof();
+}
+
 /// Run the Rust parser, stopping at the insertion point.
 ///
 /// # Safety
