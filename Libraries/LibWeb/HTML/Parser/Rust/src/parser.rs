@@ -2313,6 +2313,12 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "input"
         if token.is_start_tag() && token.tag_name() == "input" {
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope("select") {
+                // Pop elements until a select element has been popped.
+                self.stack_of_open_elements
+                    .pop_until_tag_name_popped("select");
+            }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2341,6 +2347,11 @@ impl HtmlParser {
         if token.is_start_tag() && token.tag_name() == "hr" {
             if self.stack_of_open_elements.has_in_button_scope("p") {
                 self.close_a_p_element();
+            }
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope("select") {
+                self.stack_of_open_elements
+                    .generate_implied_end_tags(None);
             }
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2399,16 +2410,33 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "select"
         if token.is_start_tag() && token.tag_name() == "select" {
-            self.reconstruct_the_active_formatting_elements();
-            self.insert_html_element(token);
-            self.frameset_ok = false;
-            // NOTE: The current HTML spec does not have InSelect/InSelectInTable insertion modes.
-            // Select elements and their children (option, optgroup) are handled in InBody.
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope("select") {
+                // Parse error. Pop elements until a select element has been popped.
+                // (This handles nested <select> by closing the existing one.)
+                self.stack_of_open_elements
+                    .pop_until_tag_name_popped("select");
+            } else {
+                // No select in scope: create select normally.
+                self.reconstruct_the_active_formatting_elements();
+                self.insert_html_element(token);
+                self.frameset_ok = false;
+            }
             return;
         }
 
         // -> A start tag whose tag name is one of: "optgroup", "option"
         if token.is_start_tag() && matches!(token.tag_name(), "optgroup" | "option") {
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope("select") {
+                if token.tag_name() == "option" {
+                    self.stack_of_open_elements
+                        .generate_implied_end_tags(Some("optgroup"));
+                } else {
+                    self.stack_of_open_elements
+                        .generate_implied_end_tags(None);
+                }
+            }
             if let Some(current) = self.stack_of_open_elements.current_node() {
                 if current.is_html_element("option") {
                     self.stack_of_open_elements.pop();
