@@ -285,6 +285,12 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr)
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
     auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
 
+    // Perform a microtask checkpoint before script preparation.
+    // This processes queued custom element reactions (e.g., connectedCallback).
+    auto& vm = Web::HTML::main_thread_event_loop().vm();
+    if (vm.execution_context_stack().is_empty())
+        Web::HTML::perform_a_microtask_checkpoint();
+
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
         Web::HTML::HTMLParser::handle_script_end_tag(*script, document);
     } else if (auto* svg_script = as_if<Web::SVG::SVGScriptElement>(&element)) {
