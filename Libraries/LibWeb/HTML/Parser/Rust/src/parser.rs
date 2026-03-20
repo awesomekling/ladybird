@@ -2600,50 +2600,648 @@ impl HtmlParser {
     // Stub handlers for modes not yet fully implemented
     // =======================================================================
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intable
     fn handle_in_table(&mut self, token: &Token) {
-        // TODO: Full implementation
-        // For now, process as "in body" (this is wrong but allows basic parsing to continue)
+        // -> A character token, if the current node is table, tbody, template, tfoot, thead, or tr element
+        if token.is_character() {
+            if let Some(current) = self.stack_of_open_elements.current_node() {
+                if current.namespace == DomNamespace::HTML
+                    && matches!(
+                        current.tag_name.as_str(),
+                        "table" | "tbody" | "template" | "tfoot" | "thead" | "tr"
+                    )
+                {
+                    // Let the pending table character tokens be an empty list of tokens.
+                    self.pending_table_character_tokens.clear();
+                    // Set the original insertion mode to the current insertion mode.
+                    self.original_insertion_mode = self.insertion_mode;
+                    // Switch the insertion mode to "in table text" and reprocess the token.
+                    self.insertion_mode = InsertionMode::InTableText;
+                    self.reprocess_token();
+                    return;
+                }
+            }
+        }
+
+        // -> A comment token
+        if token.is_comment() {
+            self.insert_comment(token);
+            return;
+        }
+
+        // -> A DOCTYPE token
+        if token.is_doctype() {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> A start tag whose tag name is "caption"
+        if token.is_start_tag() && token.tag_name() == "caption" {
+            // Clear the stack back to a table context.
+            self.stack_of_open_elements.clear_back_to_table_context();
+            // Insert a marker at the end of the list of active formatting elements.
+            self.list_of_active_formatting_elements.add_marker();
+            // Insert an HTML element for the token, then switch the insertion mode to "in caption".
+            self.insert_html_element(token);
+            self.insertion_mode = InsertionMode::InCaption;
+            return;
+        }
+
+        // -> A start tag whose tag name is "colgroup"
+        if token.is_start_tag() && token.tag_name() == "colgroup" {
+            self.stack_of_open_elements.clear_back_to_table_context();
+            self.insert_html_element(token);
+            self.insertion_mode = InsertionMode::InColumnGroup;
+            return;
+        }
+
+        // -> A start tag whose tag name is "col"
+        if token.is_start_tag() && token.tag_name() == "col" {
+            self.stack_of_open_elements.clear_back_to_table_context();
+            let colgroup_token = Self::make_start_tag_token("colgroup");
+            self.insert_html_element(&colgroup_token);
+            self.insertion_mode = InsertionMode::InColumnGroup;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "tbody", "tfoot", "thead"
+        if token.is_start_tag()
+            && matches!(token.tag_name(), "tbody" | "tfoot" | "thead")
+        {
+            self.stack_of_open_elements.clear_back_to_table_context();
+            self.insert_html_element(token);
+            self.insertion_mode = InsertionMode::InTableBody;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "td", "th", "tr"
+        if token.is_start_tag()
+            && matches!(token.tag_name(), "td" | "th" | "tr")
+        {
+            self.stack_of_open_elements.clear_back_to_table_context();
+            let tbody_token = Self::make_start_tag_token("tbody");
+            self.insert_html_element(&tbody_token);
+            self.insertion_mode = InsertionMode::InTableBody;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is "table"
+        if token.is_start_tag() && token.tag_name() == "table" {
+            // Parse error.
+            if !self.stack_of_open_elements.has_in_table_scope("table") {
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("table");
+            self.reset_the_insertion_mode_appropriately();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is "table"
+        if token.is_end_tag() && token.tag_name() == "table" {
+            if !self.stack_of_open_elements.has_in_table_scope("table") {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("table");
+            self.reset_the_insertion_mode_appropriately();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "body", "caption", "col", "colgroup", "html",
+        //    "tbody", "td", "tfoot", "th", "thead", "tr"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "body"
+                    | "caption"
+                    | "col"
+                    | "colgroup"
+                    | "html"
+                    | "tbody"
+                    | "td"
+                    | "tfoot"
+                    | "th"
+                    | "thead"
+                    | "tr"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "style", "script", "template"
+        // -> An end tag whose tag name is "template"
+        if (token.is_start_tag()
+            && matches!(token.tag_name(), "style" | "script" | "template"))
+            || (token.is_end_tag() && token.tag_name() == "template")
+        {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "input"
+        if token.is_start_tag() && token.tag_name() == "input" {
+            let is_hidden = token
+                .get_attribute("type")
+                .is_some_and(|v| v.eq_ignore_ascii_case("hidden"));
+            if !is_hidden {
+                // Act as described in the "anything else" entry below.
+                self.foster_parenting = true;
+                self.process_using_the_rules_for(InsertionMode::InBody, token);
+                self.foster_parenting = false;
+                return;
+            }
+            // Parse error. Insert an HTML element for the token. Pop it off.
+            self.insert_html_element(token);
+            self.stack_of_open_elements.pop();
+            return;
+        }
+
+        // -> A start tag whose tag name is "form"
+        if token.is_start_tag() && token.tag_name() == "form" {
+            // Parse error.
+            if self.form_element.is_some()
+                || self.stack_of_open_elements.contains_template_element()
+            {
+                return;
+            }
+            let element = self.insert_html_element(token);
+            self.form_element = Some(element);
+            self.stack_of_open_elements.pop();
+            return;
+        }
+
+        // -> An end-of-file token
+        if token.is_eof() {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> Anything else
+        // Parse error. Enable foster parenting, process using InBody, disable foster parenting.
+        self.foster_parenting = true;
         self.process_using_the_rules_for(InsertionMode::InBody, token);
+        self.foster_parenting = false;
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intabletext
     fn handle_in_table_text(&mut self, token: &Token) {
-        // TODO: Full implementation
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
+        if token.is_character() {
+            // -> A character token that is U+0000 NULL
+            if token.code_point == 0 {
+                // Parse error. Ignore the token.
+                return;
+            }
+            // -> Any other character token
+            // Append the character token to the pending table character tokens list.
+            self.pending_table_character_tokens.push(token.clone());
+            return;
+        }
+
+        // -> Anything else
+        // If any of the tokens in the pending table character tokens list are character tokens
+        // that are not ASCII whitespace, then this is a parse error: reprocess them using InBody
+        // with foster parenting enabled.
+        let has_non_whitespace = self
+            .pending_table_character_tokens
+            .iter()
+            .any(|t| !t.is_parser_whitespace());
+
+        let pending = std::mem::take(&mut self.pending_table_character_tokens);
+        if has_non_whitespace {
+            for pending_token in &pending {
+                self.foster_parenting = true;
+                self.process_using_the_rules_for(InsertionMode::InBody, pending_token);
+                self.foster_parenting = false;
+            }
+        } else {
+            // Otherwise, insert the characters.
+            for pending_token in &pending {
+                self.insert_character(pending_token.code_point);
+            }
+        }
+
+        // Switch the insertion mode to the original insertion mode and reprocess the token.
+        self.insertion_mode = self.original_insertion_mode;
+        self.reprocess_token();
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-incaption
     fn handle_in_caption(&mut self, token: &Token) {
-        // TODO: Full implementation
+        // -> An end tag whose tag name is "caption"
+        if token.is_end_tag() && token.tag_name() == "caption" {
+            if !self.stack_of_open_elements.has_in_table_scope("caption") {
+                // Parse error. Ignore the token. (fragment case)
+                return;
+            }
+            self.stack_of_open_elements
+                .generate_implied_end_tags(None);
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("caption");
+            self.list_of_active_formatting_elements
+                .clear_up_to_last_marker();
+            self.insertion_mode = InsertionMode::InTable;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "col", "colgroup", "tbody", "td",
+        //    "tfoot", "th", "thead", "tr"
+        // -> An end tag whose tag name is "table"
+        if (token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption"
+                    | "col"
+                    | "colgroup"
+                    | "tbody"
+                    | "td"
+                    | "tfoot"
+                    | "th"
+                    | "thead"
+                    | "tr"
+            ))
+            || (token.is_end_tag() && token.tag_name() == "table")
+        {
+            if !self.stack_of_open_elements.has_in_table_scope("caption") {
+                // Parse error. Ignore the token. (fragment case)
+                return;
+            }
+            self.stack_of_open_elements
+                .generate_implied_end_tags(None);
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("caption");
+            self.list_of_active_formatting_elements
+                .clear_up_to_last_marker();
+            self.insertion_mode = InsertionMode::InTable;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "body", "col", "colgroup", "html", "tbody",
+        //    "td", "tfoot", "th", "thead", "tr"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "body"
+                    | "col"
+                    | "colgroup"
+                    | "html"
+                    | "tbody"
+                    | "td"
+                    | "tfoot"
+                    | "th"
+                    | "thead"
+                    | "tr"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> Anything else
         self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-incolgroup
     fn handle_in_column_group(&mut self, token: &Token) {
-        // TODO: Full implementation
+        // -> A character token that is one of U+0009, U+000A, U+000C, U+000D, or U+0020
         if token.is_parser_whitespace() {
             self.insert_character(token.code_point);
             return;
         }
-        if token.is_eof() {
-            self.stop_parsing();
+
+        // -> A comment token
+        if token.is_comment() {
+            self.insert_comment(token);
             return;
         }
-        // Fall through to "anything else": pop and reprocess
+
+        // -> A DOCTYPE token
+        if token.is_doctype() {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> A start tag whose tag name is "html"
+        if token.is_start_tag() && token.tag_name() == "html" {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "col"
+        if token.is_start_tag() && token.tag_name() == "col" {
+            self.insert_html_element(token);
+            self.stack_of_open_elements.pop();
+            return;
+        }
+
+        // -> An end tag whose tag name is "colgroup"
+        if token.is_end_tag() && token.tag_name() == "colgroup" {
+            if let Some(current) = self.stack_of_open_elements.current_node() {
+                if !(current.namespace == DomNamespace::HTML && current.tag_name == "colgroup") {
+                    // Parse error. Ignore the token.
+                    return;
+                }
+            }
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTable;
+            return;
+        }
+
+        // -> An end tag whose tag name is "col"
+        if token.is_end_tag() && token.tag_name() == "col" {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> A start tag whose tag name is "template"
+        // -> An end tag whose tag name is "template"
+        if (token.is_start_tag() || token.is_end_tag()) && token.tag_name() == "template" {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+
+        // -> An end-of-file token
+        if token.is_eof() {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> Anything else
+        if let Some(current) = self.stack_of_open_elements.current_node() {
+            if !(current.namespace == DomNamespace::HTML && current.tag_name == "colgroup") {
+                // Parse error. Ignore the token.
+                return;
+            }
+        }
         self.stack_of_open_elements.pop();
         self.insertion_mode = InsertionMode::InTable;
         self.reprocess_token();
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intbody
     fn handle_in_table_body(&mut self, token: &Token) {
-        // TODO: Full implementation
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
+        // -> A start tag whose tag name is "tr"
+        if token.is_start_tag() && token.tag_name() == "tr" {
+            self.stack_of_open_elements
+                .clear_back_to_table_body_context();
+            self.insert_html_element(token);
+            self.insertion_mode = InsertionMode::InRow;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "th", "td"
+        if token.is_start_tag() && matches!(token.tag_name(), "th" | "td") {
+            // Parse error.
+            self.stack_of_open_elements
+                .clear_back_to_table_body_context();
+            let tr_token = Self::make_start_tag_token("tr");
+            self.insert_html_element(&tr_token);
+            self.insertion_mode = InsertionMode::InRow;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "tbody", "tfoot", "thead"
+        if token.is_end_tag()
+            && matches!(token.tag_name(), "tbody" | "tfoot" | "thead")
+        {
+            if !self
+                .stack_of_open_elements
+                .has_in_table_scope(token.tag_name())
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .clear_back_to_table_body_context();
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTable;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "col", "colgroup", "tbody",
+        //    "tfoot", "thead"
+        // -> An end tag whose tag name is "table"
+        if (token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption" | "col" | "colgroup" | "tbody" | "tfoot" | "thead"
+            ))
+            || (token.is_end_tag() && token.tag_name() == "table")
+        {
+            if !self.stack_of_open_elements.has_in_table_scope("tbody")
+                && !self.stack_of_open_elements.has_in_table_scope("thead")
+                && !self.stack_of_open_elements.has_in_table_scope("tfoot")
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .clear_back_to_table_body_context();
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTable;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "body", "caption", "col", "colgroup", "html",
+        //    "td", "th", "tr"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "body" | "caption" | "col" | "colgroup" | "html" | "td" | "th" | "tr"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> Anything else
+        self.process_using_the_rules_for(InsertionMode::InTable, token);
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intr
     fn handle_in_row(&mut self, token: &Token) {
-        // TODO: Full implementation
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
+        // -> A start tag whose tag name is one of: "th", "td"
+        if token.is_start_tag() && matches!(token.tag_name(), "th" | "td") {
+            self.stack_of_open_elements
+                .clear_back_to_table_row_context();
+            self.insert_html_element(token);
+            self.insertion_mode = InsertionMode::InCell;
+            self.list_of_active_formatting_elements.add_marker();
+            return;
+        }
+
+        // -> An end tag whose tag name is "tr"
+        if token.is_end_tag() && token.tag_name() == "tr" {
+            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .clear_back_to_table_row_context();
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTableBody;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "col", "colgroup", "tbody",
+        //    "tfoot", "thead", "tr"
+        // -> An end tag whose tag name is "table"
+        if (token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption" | "col" | "colgroup" | "tbody" | "tfoot" | "thead" | "tr"
+            ))
+            || (token.is_end_tag() && token.tag_name() == "table")
+        {
+            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .clear_back_to_table_row_context();
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTableBody;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "tbody", "tfoot", "thead"
+        if token.is_end_tag()
+            && matches!(token.tag_name(), "tbody" | "tfoot" | "thead")
+        {
+            if !self
+                .stack_of_open_elements
+                .has_in_table_scope(token.tag_name())
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+                return;
+            }
+            self.stack_of_open_elements
+                .clear_back_to_table_row_context();
+            self.stack_of_open_elements.pop();
+            self.insertion_mode = InsertionMode::InTableBody;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "body", "caption", "col", "colgroup",
+        //    "html", "td", "th"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "body" | "caption" | "col" | "colgroup" | "html" | "td" | "th"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> Anything else
+        self.process_using_the_rules_for(InsertionMode::InTable, token);
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#close-the-cell
+    fn close_the_cell(&mut self) {
+        self.stack_of_open_elements
+            .generate_implied_end_tags(None);
+        // Pop elements until a td or th element has been popped.
+        self.stack_of_open_elements
+            .pop_until_one_of_tag_names_popped(&["td", "th"]);
+        self.list_of_active_formatting_elements
+            .clear_up_to_last_marker();
+        self.insertion_mode = InsertionMode::InRow;
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intd
     fn handle_in_cell(&mut self, token: &Token) {
-        // TODO: Full implementation
+        // -> An end tag whose tag name is one of: "td", "th"
+        if token.is_end_tag() && matches!(token.tag_name(), "td" | "th") {
+            if !self
+                .stack_of_open_elements
+                .has_in_table_scope(token.tag_name())
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .generate_implied_end_tags(None);
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped(token.tag_name());
+            self.list_of_active_formatting_elements
+                .clear_up_to_last_marker();
+            self.insertion_mode = InsertionMode::InRow;
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "col", "colgroup", "tbody", "td",
+        //    "tfoot", "th", "thead", "tr"
+        if token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption"
+                    | "col"
+                    | "colgroup"
+                    | "tbody"
+                    | "td"
+                    | "tfoot"
+                    | "th"
+                    | "thead"
+                    | "tr"
+            )
+        {
+            if !self.stack_of_open_elements.has_in_table_scope("td")
+                && !self.stack_of_open_elements.has_in_table_scope("th")
+            {
+                // Parse error. Ignore the token. (fragment case)
+                return;
+            }
+            self.close_the_cell();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "body", "caption", "col", "colgroup", "html"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "body" | "caption" | "col" | "colgroup" | "html"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "table", "tbody", "tfoot", "thead", "tr"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "table" | "tbody" | "tfoot" | "thead" | "tr"
+            )
+        {
+            if !self
+                .stack_of_open_elements
+                .has_in_table_scope(token.tag_name())
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.close_the_cell();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> Anything else
         self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
@@ -2670,15 +3268,105 @@ impl HtmlParser {
         self.handle_in_select(token);
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intemplate
     fn handle_in_template(&mut self, token: &Token) {
-        // TODO: Full implementation
+        // -> A character token, A comment token, A DOCTYPE token
+        if token.is_character() || token.is_comment() || token.is_doctype() {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "base", "basefont", "bgsound", "link", "meta",
+        //    "noframes", "script", "style", "template", "title"
+        // -> An end tag whose tag name is "template"
+        if (token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "base"
+                    | "basefont"
+                    | "bgsound"
+                    | "link"
+                    | "meta"
+                    | "noframes"
+                    | "script"
+                    | "style"
+                    | "template"
+                    | "title"
+            ))
+            || (token.is_end_tag() && token.tag_name() == "template")
+        {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "colgroup", "tbody", "tfoot", "thead"
+        if token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption" | "colgroup" | "tbody" | "tfoot" | "thead"
+            )
+        {
+            self.stack_of_template_insertion_modes.pop();
+            self.stack_of_template_insertion_modes
+                .push(InsertionMode::InTable);
+            self.insertion_mode = InsertionMode::InTable;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is "col"
+        if token.is_start_tag() && token.tag_name() == "col" {
+            self.stack_of_template_insertion_modes.pop();
+            self.stack_of_template_insertion_modes
+                .push(InsertionMode::InColumnGroup);
+            self.insertion_mode = InsertionMode::InColumnGroup;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is "tr"
+        if token.is_start_tag() && token.tag_name() == "tr" {
+            self.stack_of_template_insertion_modes.pop();
+            self.stack_of_template_insertion_modes
+                .push(InsertionMode::InTableBody);
+            self.insertion_mode = InsertionMode::InTableBody;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "td", "th"
+        if token.is_start_tag() && matches!(token.tag_name(), "td" | "th") {
+            self.stack_of_template_insertion_modes.pop();
+            self.stack_of_template_insertion_modes
+                .push(InsertionMode::InRow);
+            self.insertion_mode = InsertionMode::InRow;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> Any other start tag
+        if token.is_start_tag() {
+            self.stack_of_template_insertion_modes.pop();
+            self.stack_of_template_insertion_modes
+                .push(InsertionMode::InBody);
+            self.insertion_mode = InsertionMode::InBody;
+            self.reprocess_token();
+            return;
+        }
+
+        // -> Any other end tag
+        if token.is_end_tag() {
+            // Parse error. Ignore the token.
+            return;
+        }
+
+        // -> An end-of-file token
         if token.is_eof() {
             if !self.stack_of_open_elements.contains_template_element() {
                 self.stop_parsing();
                 return;
             }
-            self.stack_of_open_elements
-                .generate_all_implied_end_tags_thoroughly();
+            // Parse error.
             self.stack_of_open_elements
                 .pop_until_tag_name_popped("template");
             self.list_of_active_formatting_elements
@@ -2686,10 +3374,7 @@ impl HtmlParser {
             self.stack_of_template_insertion_modes.pop();
             self.reset_the_insertion_mode_appropriately();
             self.reprocess_token();
-            return;
         }
-        // For other tokens, process using current template insertion mode logic.
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
     }
 
     fn handle_in_frameset(&mut self, token: &Token) {
