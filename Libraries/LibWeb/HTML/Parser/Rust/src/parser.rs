@@ -2825,14 +2825,35 @@ impl HtmlParser {
             // Let the insertion point be just before the next input character.
             self.tokenizer.update_insertion_point();
 
+            // Increment the parser's script nesting level by one.
+            self.script_nesting_level += 1;
+
             // Prepare and execute the script element.
             if let Some(entry) = script_entry {
                 self.flush_character_insertions();
-                entry.handle.execute_script(self.document);
+                entry.handle.execute_script(self.document, self.script_nesting_level);
+            }
+
+            // Decrement the parser's script nesting level by one.
+            self.script_nesting_level -= 1;
+
+            // If the parser's script nesting level is zero, set the parser pause flag to false.
+            if self.script_nesting_level == 0 {
+                self.parser_pause_flag = false;
             }
 
             // Let the insertion point have the value of the old insertion point.
             self.tokenizer.restore_insertion_point();
+
+            // At this stage, if the pending parsing-blocking script is not null
+            // and script nesting level is zero, process pending scripts.
+            if self.script_nesting_level == 0 {
+                unsafe {
+                    crate::dom_bridge::html_parser_bridge_process_pending_scripts(
+                        self.document.as_ptr(),
+                    );
+                }
+            }
             return;
         }
 
@@ -3956,7 +3977,7 @@ impl HtmlParser {
                     self.flush_character_insertions();
                     let script = self.stack_of_open_elements.pop();
                     if let Some(entry) = script {
-                        entry.handle.execute_script(self.document);
+                        entry.handle.execute_script(self.document, self.script_nesting_level);
                     }
                 } else {
                     self.stack_of_open_elements.pop();
@@ -3977,7 +3998,7 @@ impl HtmlParser {
                         let script_entry = self.stack_of_open_elements.pop();
                         // Execute the SVG script via the bridge.
                         if let Some(entry) = script_entry {
-                            entry.handle.execute_script(self.document);
+                            entry.handle.execute_script(self.document, self.script_nesting_level);
                         }
                         return;
                     }

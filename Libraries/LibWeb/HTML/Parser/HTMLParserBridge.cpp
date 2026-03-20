@@ -280,7 +280,7 @@ void html_parser_bridge_associate_with_form(void* element_ptr, void* form_ptr)
     Web::HTML::HTMLParser::associate_with_form(element, *form);
 }
 
-bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr)
+bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr, size_t script_nesting_level)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
     auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
@@ -292,7 +292,7 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr)
         Web::HTML::perform_a_microtask_checkpoint();
 
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
-        Web::HTML::HTMLParser::handle_script_end_tag(*script, document);
+        Web::HTML::HTMLParser::handle_script_end_tag(*script, document, script_nesting_level);
     } else if (auto* svg_script = as_if<Web::SVG::SVGScriptElement>(&element)) {
         svg_script->process_the_script_element();
     }
@@ -383,6 +383,12 @@ bool html_parser_bridge_handle_declarative_shadow_template(
     tmpl->set_template_contents(shadow);
     shadow.set_available_to_element_internals(true);
     return true;
+}
+
+void html_parser_bridge_process_pending_scripts(void* document_ptr)
+{
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    Web::HTML::HTMLParser::process_pending_scripts(document);
 }
 
 void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr)

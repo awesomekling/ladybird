@@ -84,10 +84,11 @@ public:
     // Called by the Rust HTML parser bridge to prepare/setup a script element.
     static void prepare_script_element(HTMLScriptElement&);
     static void setup_script_element(HTMLScriptElement&, DOM::Document&);
-    static void handle_script_end_tag(HTMLScriptElement&, DOM::Document&);
+    static void handle_script_end_tag(HTMLScriptElement&, DOM::Document&, size_t script_nesting_level = 0);
     static void setup_link_element(HTMLLinkElement&);
     static void associate_with_form(DOM::Element&, HTMLFormElement&);
     static void mark_svg_script_as_parser_inserted(SVG::SVGScriptElement&);
+    static void process_pending_scripts(DOM::Document&);
     static GC::Ref<DOM::Element> create_element_for_rust_parser(DOM::Document&, FlyString const& local_name, Optional<FlyString> const& namespace_, Optional<String> const& is_value, GC::Ptr<HTML::CustomElementDefinition>);
 
     HTMLTokenizer& tokenizer() { return m_tokenizer; }

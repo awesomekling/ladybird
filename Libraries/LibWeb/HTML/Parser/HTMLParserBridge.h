@@ -47,7 +47,7 @@ void html_parser_bridge_associate_with_form(void* element_ptr, void* form_ptr);
 /// Prepare and execute a script element. Handles both inline and external scripts.
 /// For external scripts, blocks until the script is loaded and executed.
 /// Returns true if the parser should stop (abort).
-bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr);
+bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr, size_t script_nesting_level);
 
 /// Set parser document and force_async=false on a script element.
 void html_parser_bridge_setup_script_element(void* element_ptr, void* document_ptr);
@@ -70,6 +70,8 @@ bool html_parser_bridge_handle_declarative_shadow_template(
     bool shadowrootclonable,
     bool shadowrootserializable,
     bool shadowrootdelegatesfocus);
+
+void html_parser_bridge_process_pending_scripts(void* document_ptr);
 
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 

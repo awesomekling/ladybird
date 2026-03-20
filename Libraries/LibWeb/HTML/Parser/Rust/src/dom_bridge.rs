@@ -232,7 +232,7 @@ unsafe extern "C" {
     /// Prepare and potentially execute a script element.
     /// For external scripts, blocks until loaded and executed.
     /// Returns true if the parser should stop.
-    pub fn html_parser_bridge_execute_script(element: *mut c_void, document: *mut c_void) -> bool;
+    pub fn html_parser_bridge_execute_script(element: *mut c_void, document: *mut c_void, script_nesting_level: usize) -> bool;
 
     // -----------------------------------------------------------------------
     // GC integration
@@ -264,6 +264,9 @@ unsafe extern "C" {
         shadowrootserializable: bool,
         shadowrootdelegatesfocus: bool,
     ) -> bool;
+
+    /// Process pending parsing-blocking scripts after script nesting level reaches 0.
+    pub fn html_parser_bridge_process_pending_scripts(document: *mut c_void);
 
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
@@ -454,8 +457,8 @@ impl DomHandle {
         }
     }
 
-    pub fn execute_script(self, document: DomHandle) -> bool {
-        unsafe { html_parser_bridge_execute_script(self.as_ptr(), document.as_ptr()) }
+    pub fn execute_script(self, document: DomHandle, script_nesting_level: usize) -> bool {
+        unsafe { html_parser_bridge_execute_script(self.as_ptr(), document.as_ptr(), script_nesting_level) }
     }
 
     pub fn setup_script_element(self, document: DomHandle) {
