@@ -1356,6 +1356,10 @@ impl HtmlParser {
                 // 10. Otherwise: declarative shadow DOM.
                 let host_handle = self.adjusted_current_node().unwrap().handle;
 
+                // Compute adjusted insertion location BEFORE creating the template
+                // (since the template will be pushed to the stack).
+                let adjusted_before = self.find_appropriate_place_for_inserting_node(None);
+
                 // Insert a foreign element with only_add_to_element_stack=true.
                 let template_element =
                     self.insert_foreign_element(token, DomNamespace::HTML, true);
@@ -1379,9 +1383,10 @@ impl HtmlParser {
                 };
 
                 if !success {
-                    // Shadow root attachment failed: insert the template at the adjusted location.
-                    let adjusted = self.find_appropriate_place_for_inserting_node(None);
-                    self.insert_at_adjusted_location(template_element, &adjusted);
+                    // Shadow root attachment failed: insert the template at the
+                    // adjusted insertion location computed before the template was
+                    // pushed to the stack.
+                    self.insert_at_adjusted_location(template_element, &adjusted_before);
                 }
             }
             return;
