@@ -218,6 +218,13 @@ impl HtmlParser {
     /// As each token is emitted from the tokenizer, the user agent must follow the appropriate
     /// steps from the following list, known as the tree construction dispatcher:
     fn process_token(&mut self, token: &Token) {
+        // Flush character insertions before processing non-character tokens.
+        // This ensures text nodes are created before the stack changes due to
+        // start/end tags, comments, etc.
+        if !token.is_character() {
+            self.flush_character_insertions();
+        }
+
         self.reprocess = true;
         while self.reprocess {
             self.reprocess = false;
