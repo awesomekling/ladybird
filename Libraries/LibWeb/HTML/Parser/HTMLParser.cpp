@@ -5050,12 +5050,17 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for_rust_parser(DOM::Document& 
     return element;
 }
 
-void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document&, size_t)
+void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document, size_t script_nesting_level)
 {
-    // Prepare the script element.
-    // NOTE: This only prepares/fetches. Pending scripts are processed separately
-    // by process_pending_scripts after nesting level reaches 0.
+    // Prepare the script element (initiates fetch for external scripts).
     prepare_script_element(script);
+
+    // If the script nesting level is 1 (outermost script), process pending scripts now.
+    // For nested scripts (nesting > 1), pending scripts are deferred to process_pending_scripts
+    // which runs after nesting returns to 0.
+    if (script_nesting_level <= 1) {
+        process_pending_scripts(document);
+    }
 }
 
 void HTMLParser::process_pending_scripts(DOM::Document& document)
