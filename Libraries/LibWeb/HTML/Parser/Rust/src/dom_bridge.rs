@@ -268,6 +268,9 @@ unsafe extern "C" {
     /// Process pending parsing-blocking scripts after script nesting level reaches 0.
     pub fn html_parser_bridge_process_pending_scripts(document: *mut c_void);
 
+    /// Check if the document is in quirks mode.
+    pub fn html_parser_bridge_document_in_quirks_mode(document: *mut c_void) -> bool;
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(

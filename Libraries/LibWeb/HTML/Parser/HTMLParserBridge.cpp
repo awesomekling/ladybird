@@ -391,6 +391,12 @@ void html_parser_bridge_process_pending_scripts(void* document_ptr)
     Web::HTML::HTMLParser::process_pending_scripts(document);
 }
 
+bool html_parser_bridge_document_in_quirks_mode(void* document_ptr)
+{
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    return document.in_quirks_mode();
+}
+
 void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr)
 {
     auto& from = *static_cast<Web::DOM::Node*>(from_ptr);

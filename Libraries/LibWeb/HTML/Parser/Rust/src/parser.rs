@@ -2276,8 +2276,10 @@ impl HtmlParser {
         if token.is_start_tag() && token.tag_name() == "table" {
             // If the Document is not set to quirks mode, and the stack of open elements
             // has a p element in button scope, then close a p element.
-            // FIXME: Check quirks mode — in quirks mode this step is skipped.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            let in_quirks = unsafe {
+                crate::dom_bridge::html_parser_bridge_document_in_quirks_mode(self.document.as_ptr())
+            };
+            if !in_quirks && self.stack_of_open_elements.has_in_button_scope("p") {
                 self.close_a_p_element();
             }
             self.insert_html_element(token);
