@@ -15,6 +15,8 @@ pub struct StackEntry {
     pub handle: DomHandle,
     pub tag_name: String,
     pub namespace: DomNamespace,
+    /// Cached "encoding" attribute for MathML annotation-xml (HTML integration point check).
+    pub encoding_attr: Option<String>,
 }
 
 impl StackEntry {
@@ -23,6 +25,21 @@ impl StackEntry {
             handle,
             tag_name,
             namespace,
+            encoding_attr: None,
+        }
+    }
+
+    pub fn new_with_encoding(
+        handle: DomHandle,
+        tag_name: String,
+        namespace: DomNamespace,
+        encoding_attr: Option<String>,
+    ) -> Self {
+        StackEntry {
+            handle,
+            tag_name,
+            namespace,
+            encoding_attr,
         }
     }
 

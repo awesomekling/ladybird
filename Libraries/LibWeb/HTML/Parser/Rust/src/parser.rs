@@ -326,7 +326,14 @@ impl HtmlParser {
             // "application/xhtml+xml".
             // NOTE: We check the element's actual encoding attribute here.
             if node.namespace == DomNamespace::MathML && node.tag_name == "annotation-xml" {
-                // TODO: Check encoding attribute on the actual DOM element
+                // Check the cached encoding attribute from the start tag token.
+                if let Some(ref encoding) = node.encoding_attr {
+                    if encoding.eq_ignore_ascii_case("text/html")
+                        || encoding.eq_ignore_ascii_case("application/xhtml+xml")
+                    {
+                        return true;
+                    }
+                }
                 return false;
             }
             // An SVG foreignObject, desc, or title element.
@@ -483,6 +490,11 @@ impl HtmlParser {
                 element.set_attribute_ns(ns, prefix, local_name, &attr.value);
                 continue;
             }
+            // Adjust MathML attribute names.
+            if namespace == DomNamespace::MathML && attr.local_name == "definitionurl" {
+                element.append_attribute("definitionURL", &attr.value);
+                continue;
+            }
             // Adjust SVG attribute names if we're in the SVG namespace.
             if namespace == DomNamespace::SVG {
                 let adjusted_name = adjust_svg_attribute_name(&attr.local_name);
@@ -512,10 +524,19 @@ impl HtmlParser {
 
         // 4. Push element onto the stack of open elements so that it is the new current node.
         let tag_name = token.tag_name().to_string();
-        self.stack_of_open_elements.push(StackEntry::new(
+
+        // Cache encoding attribute for MathML annotation-xml (needed for HTML integration point check).
+        let encoding_attr = if namespace == DomNamespace::MathML && tag_name == "annotation-xml" {
+            token.get_attribute("encoding").map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        self.stack_of_open_elements.push(StackEntry::new_with_encoding(
             element,
             tag_name,
             namespace,
+            encoding_attr,
         ));
 
         // 5. Return element.
