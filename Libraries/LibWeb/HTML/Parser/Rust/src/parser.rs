@@ -2304,8 +2304,50 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "math"
+        if token.is_start_tag() && token.tag_name() == "math" {
+            self.reconstruct_the_active_formatting_elements();
+            // TODO: Adjust MathML attributes for the token.
+            // TODO: Adjust foreign attributes for the token.
+            self.insert_foreign_element(token, DomNamespace::MathML, false);
+            if token.is_self_closing() {
+                self.stack_of_open_elements.pop();
+            }
+            return;
+        }
+
         // -> A start tag whose tag name is "svg"
-        // (TODO: Implement foreign content)
+        if token.is_start_tag() && token.tag_name() == "svg" {
+            self.reconstruct_the_active_formatting_elements();
+            // TODO: Adjust SVG attributes for the token.
+            // TODO: Adjust foreign attributes for the token.
+            self.insert_foreign_element(token, DomNamespace::SVG, false);
+            if token.is_self_closing() {
+                self.stack_of_open_elements.pop();
+            }
+            return;
+        }
+
+        // -> A start tag whose tag name is one of: "caption", "col", "colgroup", "frame", "head",
+        //    "tbody", "td", "tfoot", "th", "thead", "tr"
+        if token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption"
+                    | "col"
+                    | "colgroup"
+                    | "frame"
+                    | "head"
+                    | "tbody"
+                    | "td"
+                    | "tfoot"
+                    | "th"
+                    | "thead"
+                    | "tr"
+            )
+        {
+            // Parse error. Ignore the token.
+            return;
+        }
 
         // -> Any other start tag
         if token.is_start_tag() {
