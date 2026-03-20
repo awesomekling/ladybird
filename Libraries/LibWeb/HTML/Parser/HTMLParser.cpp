@@ -5011,6 +5011,17 @@ void HTMLParser::setup_link_element(HTMLLinkElement& link)
     link.set_was_enabled_when_created_by_parser(Badge<HTMLParser> {}, !link.has_attribute(HTML::AttributeNames::disabled));
 }
 
+void HTMLParser::associate_with_form(DOM::Element& element, HTMLFormElement& form)
+{
+    if (auto* form_associated = as_if<FormAssociatedElement>(element)) {
+        auto& html_element = form_associated->form_associated_element_to_html_element();
+        if (!form_associated->is_listed() || !html_element.has_attribute(HTML::AttributeNames::form)) {
+            form_associated->set_form(&form);
+            form_associated->set_parser_inserted(Badge<HTMLParser> {});
+        }
+    }
+}
+
 void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document)
 {
     // Prepare the script element.
