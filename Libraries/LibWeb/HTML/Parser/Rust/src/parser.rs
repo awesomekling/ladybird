@@ -2062,6 +2062,7 @@ impl HtmlParser {
                     | "pre"
                     | "search"
                     | "section"
+                    | "select"
                     | "summary"
                     | "ul"
             )
