@@ -217,6 +217,7 @@
 extern "C" {
 void rust_html_parser_insert_input(void* handle, uint32_t const* input, size_t input_len);
 void rust_html_parser_run_stop_at_insertion_point(void* handle);
+bool rust_html_parser_is_insertion_point_defined(void* handle);
 }
 #endif
 
@@ -767,7 +768,18 @@ WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(Vector<TrustedT
         return {};
 
     // 9. If the insertion point is undefined, then:
-    if (!(m_parser && m_parser->tokenizer().is_insertion_point_defined())) {
+    bool insertion_point_defined = false;
+    if (m_parser) {
+#ifdef ENABLE_RUST
+        if (m_parser->rust_parser_handle()) {
+            insertion_point_defined = rust_html_parser_is_insertion_point_defined(m_parser->rust_parser_handle());
+        } else
+#endif
+        {
+            insertion_point_defined = m_parser->tokenizer().is_insertion_point_defined();
+        }
+    }
+    if (!insertion_point_defined) {
         // 1. If document's unload counter is greater than 0 or document's ignore-destructive-writes counter is greater than 0, then return.
         if (m_unload_counter > 0 || m_ignore_destructive_writes_counter > 0)
             return {};

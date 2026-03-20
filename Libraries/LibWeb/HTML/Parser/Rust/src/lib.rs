@@ -97,6 +97,18 @@ pub unsafe extern "C" fn rust_html_parser_insert_input(
     handle.parser.tokenizer.insert_input_at_insertion_point(code_points);
 }
 
+/// Check if the tokenizer's insertion point is defined.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_is_insertion_point_defined(
+    handle: *mut HtmlParserHandle,
+) -> bool {
+    let handle = unsafe { &*handle };
+    handle.parser.tokenizer.is_insertion_point_defined()
+}
+
 /// Run the Rust parser, stopping at the insertion point.
 ///
 /// # Safety
