@@ -1728,8 +1728,20 @@ impl HtmlParser {
             if !self.frameset_ok {
                 return;
             }
-            // TODO: Remove the second element from the stack and its parent,
-            // then insert frameset element.
+            // Remove the second element on the stack from its parent node, if it has one.
+            if let Some(second) = self.stack_of_open_elements.get(1) {
+                let body_handle = second.handle;
+                body_handle.remove();
+            }
+            // Pop all the nodes from the bottom of the stack of open elements, from the
+            // current node up to, but not including, the root html element.
+            while self.stack_of_open_elements.len() > 1 {
+                self.stack_of_open_elements.pop();
+            }
+            // Insert an HTML element for the token.
+            self.insert_html_element(token);
+            // Switch the insertion mode to "in frameset".
+            self.insertion_mode = InsertionMode::InFrameset;
             return;
         }
 
