@@ -17,6 +17,7 @@
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
@@ -280,6 +281,19 @@ void html_parser_bridge_setup_script_element(void* element_ptr, void* document_p
     auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
         Web::HTML::HTMLParser::setup_script_element(*script, document);
+    }
+}
+
+void html_parser_bridge_post_create_element(void* element_ptr)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+
+    // https://html.spec.whatwg.org/multipage/media.html#user-interface:attr-media-muted
+    // When a media element is created, if the element has a muted content attribute specified,
+    // then the muted IDL attribute should be set to true.
+    if (element.is_html_media_element() && element.has_attribute("muted"_fly_string)) {
+        auto& media_element = static_cast<Web::HTML::HTMLMediaElement&>(element);
+        media_element.set_muted(true);
     }
 }
 

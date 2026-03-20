@@ -236,6 +236,9 @@ unsafe extern "C" {
     // GC integration
     // -----------------------------------------------------------------------
 
+    /// Post-creation setup for elements (media muted attribute, etc).
+    pub fn html_parser_bridge_post_create_element(element: *mut c_void);
+
     /// Notify that an element was popped from the stack of open elements.
     pub fn html_parser_bridge_element_popped(element: *mut c_void);
 

@@ -55,6 +55,9 @@ void html_parser_bridge_setup_script_element(void* element_ptr, void* document_p
 /// Notify that an element was popped from the stack of open elements.
 void html_parser_bridge_element_popped(void* element_ptr);
 
+/// Post-creation setup for elements (media muted attribute, etc).
+void html_parser_bridge_post_create_element(void* element_ptr);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

@@ -459,6 +459,11 @@ impl HtmlParser {
             }
         }
 
+        // Post-creation setup (e.g., media element muted attribute).
+        unsafe {
+            crate::dom_bridge::html_parser_bridge_post_create_element(element.as_ptr());
+        }
+
         // 3. If onlyAddToElementStack is false, then run insert an element at the adjusted
         //    insertion location with element.
         if !only_add_to_element_stack {
