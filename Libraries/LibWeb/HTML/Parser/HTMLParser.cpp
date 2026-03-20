@@ -5003,6 +5003,12 @@ void HTMLParser::setup_script_element(HTMLScriptElement& script, DOM::Document& 
     script.set_force_async(Badge<HTMLParser> {}, false);
 }
 
+void HTMLParser::setup_link_element(HTMLLinkElement& link)
+{
+    link.set_parser_document(Badge<HTMLParser> {}, link.document());
+    link.set_was_enabled_when_created_by_parser(Badge<HTMLParser> {}, !link.has_attribute(HTML::AttributeNames::disabled));
+}
+
 void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document)
 {
     // Prepare the script element.

@@ -18,6 +18,7 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
+#include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
@@ -287,6 +288,11 @@ void html_parser_bridge_setup_script_element(void* element_ptr, void* document_p
 void html_parser_bridge_post_create_element(void* element_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+
+    // AD-HOC: Let <link> elements know which document they were originally parsed for.
+    if (auto* link = as_if<Web::HTML::HTMLLinkElement>(&element)) {
+        Web::HTML::HTMLParser::setup_link_element(*link);
+    }
 
     // https://html.spec.whatwg.org/multipage/media.html#user-interface:attr-media-muted
     // When a media element is created, if the element has a muted content attribute specified,

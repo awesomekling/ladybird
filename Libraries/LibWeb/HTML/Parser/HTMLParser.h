@@ -85,6 +85,7 @@ public:
     static void prepare_script_element(HTMLScriptElement&);
     static void setup_script_element(HTMLScriptElement&, DOM::Document&);
     static void handle_script_end_tag(HTMLScriptElement&, DOM::Document&);
+    static void setup_link_element(HTMLLinkElement&);
 
     HTMLTokenizer& tokenizer() { return m_tokenizer; }
 
