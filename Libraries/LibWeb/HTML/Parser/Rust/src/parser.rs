@@ -1269,8 +1269,50 @@ impl HtmlParser {
             self.stack_of_template_insertion_modes
                 .push(InsertionMode::InTemplate);
 
-            // Insert an HTML element for the token.
-            self.insert_html_element(token);
+            // Check for declarative shadow root (shadowrootmode attribute).
+            let shadowrootmode = token.get_attribute("shadowrootmode");
+            let has_valid_shadowrootmode = shadowrootmode
+                .is_some_and(|m| m == "open" || m == "closed");
+
+            // 9. If shadowrootmode is not valid, or document doesn't allow declarative shadow
+            //    roots, or the adjusted current node IS the topmost element: insert normally.
+            if !has_valid_shadowrootmode
+                || self.stack_of_open_elements.len() <= 1
+            {
+                // Normal template: insert an HTML element for the token.
+                self.insert_html_element(token);
+            } else {
+                // 10. Otherwise: declarative shadow DOM.
+                let host_handle = self.adjusted_current_node().unwrap().handle;
+
+                // Insert a foreign element with only_add_to_element_stack=true.
+                let template_element =
+                    self.insert_foreign_element(token, DomNamespace::HTML, true);
+
+                let mode = shadowrootmode.unwrap();
+                let clonable = token.has_attribute("shadowrootclonable");
+                let serializable = token.has_attribute("shadowrootserializable");
+                let delegates_focus = token.has_attribute("shadowrootdelegatesfocus");
+
+                let success = unsafe {
+                    crate::dom_bridge::html_parser_bridge_handle_declarative_shadow_template(
+                        template_element.as_ptr(),
+                        host_handle.as_ptr(),
+                        self.document.as_ptr(),
+                        mode.as_ptr(),
+                        mode.len(),
+                        clonable,
+                        serializable,
+                        delegates_focus,
+                    )
+                };
+
+                if !success {
+                    // Shadow root attachment failed: insert the template at the adjusted location.
+                    let adjusted = self.find_appropriate_place_for_inserting_node(None);
+                    self.insert_at_adjusted_location(template_element, &adjusted);
+                }
+            }
             return;
         }
         // -> An end tag whose tag name is "template"

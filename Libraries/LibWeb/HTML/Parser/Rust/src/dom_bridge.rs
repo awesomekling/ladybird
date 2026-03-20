@@ -251,6 +251,18 @@ unsafe extern "C" {
     /// Move all children of `from` node to `to` node.
     pub fn html_parser_bridge_reparent_children(from: *mut c_void, to: *mut c_void);
 
+    /// Handle declarative shadow DOM template.
+    pub fn html_parser_bridge_handle_declarative_shadow_template(
+        template_element: *mut c_void,
+        host_element: *mut c_void,
+        document: *mut c_void,
+        shadowrootmode: *const u8,
+        shadowrootmode_len: usize,
+        shadowrootclonable: bool,
+        shadowrootserializable: bool,
+        shadowrootdelegatesfocus: bool,
+    ) -> bool;
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(
