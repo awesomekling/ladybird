@@ -3565,6 +3565,22 @@ impl HtmlParser {
                 .adjusted_current_node()
                 .map(|n| n.namespace)
                 .unwrap_or(DomNamespace::HTML);
+
+            // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+            // If the current node is an element in the SVG namespace, adjust SVG tag names.
+            if namespace == DomNamespace::SVG {
+                let adjusted_name = adjust_svg_tag_name(token.tag_name());
+                if adjusted_name != token.tag_name() {
+                    let mut adjusted_token = token.clone();
+                    *adjusted_token.tag_name_mut() = adjusted_name.to_string();
+                    self.insert_foreign_element(&adjusted_token, namespace, false);
+                    if token.is_self_closing() {
+                        self.stack_of_open_elements.pop();
+                    }
+                    return;
+                }
+            }
+
             self.insert_foreign_element(token, namespace, false);
             if token.is_self_closing() {
                 self.stack_of_open_elements.pop();
@@ -3631,6 +3647,50 @@ impl HtmlParser {
 // Quirks mode public ID prefixes
 // https://html.spec.whatwg.org/multipage/parsing.html#the-initial-insertion-mode
 // =======================================================================
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#adjust-svg-attributes
+fn adjust_svg_tag_name(tag_name: &str) -> &str {
+    match tag_name {
+        "altglyph" => "altGlyph",
+        "altglyphdef" => "altGlyphDef",
+        "altglyphitem" => "altGlyphItem",
+        "animatecolor" => "animateColor",
+        "animatemotion" => "animateMotion",
+        "animatetransform" => "animateTransform",
+        "clippath" => "clipPath",
+        "feblend" => "feBlend",
+        "fecolormatrix" => "feColorMatrix",
+        "fecomponenttransfer" => "feComponentTransfer",
+        "fecomposite" => "feComposite",
+        "feconvolvematrix" => "feConvolveMatrix",
+        "fediffuselighting" => "feDiffuseLighting",
+        "fedisplacementmap" => "feDisplacementMap",
+        "fedistantlight" => "feDistantLight",
+        "fedropshadow" => "feDropShadow",
+        "feflood" => "feFlood",
+        "fefunca" => "feFuncA",
+        "fefuncb" => "feFuncB",
+        "fefuncg" => "feFuncG",
+        "fefuncr" => "feFuncR",
+        "fegaussianblur" => "feGaussianBlur",
+        "feimage" => "feImage",
+        "femerge" => "feMerge",
+        "femergenode" => "feMergeNode",
+        "femorphology" => "feMorphology",
+        "feoffset" => "feOffset",
+        "fepointlight" => "fePointLight",
+        "fespecularlighting" => "feSpecularLighting",
+        "fespotlight" => "feSpotLight",
+        "fetile" => "feTile",
+        "feturbulence" => "feTurbulence",
+        "foreignobject" => "foreignObject",
+        "glyphref" => "glyphRef",
+        "lineargradient" => "linearGradient",
+        "radialgradient" => "radialGradient",
+        "textpath" => "textPath",
+        _ => tag_name,
+    }
+}
 
 static QUIRKS_PUBLIC_ID_PREFIXES: &[&str] = &[
     "+//Silmaril//dtd html Pro v0r11 19970101//",
