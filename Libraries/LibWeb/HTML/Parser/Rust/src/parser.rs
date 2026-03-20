@@ -3844,7 +3844,8 @@ impl HtmlParser {
                 // 4. If node's tag name matches the token's tag name, pop elements until
                 //    node has been popped, then return.
                 if entry.tag_name.eq_ignore_ascii_case(tag) {
-                    while self.stack_of_open_elements.len() > i {
+                    // Pop elements from the current node up to and including node.
+                    while self.stack_of_open_elements.len() > i + 1 {
                         self.stack_of_open_elements.pop();
                     }
                     self.stack_of_open_elements.pop(); // pop node itself
