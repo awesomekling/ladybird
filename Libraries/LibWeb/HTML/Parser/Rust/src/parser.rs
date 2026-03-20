@@ -3821,21 +3821,48 @@ impl HtmlParser {
         }
 
         if token.is_end_tag() {
-            // Pop until we find an element with the matching tag name.
+            // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+            // 1. Initialize node to be the current node.
             let tag = token.tag_name();
-            for i in (0..self.stack_of_open_elements.len()).rev() {
+            let stack_len = self.stack_of_open_elements.len();
+            if stack_len == 0 {
+                return;
+            }
+
+            // Start from the current node (top of stack).
+            let mut i = stack_len - 1;
+
+            // 3. Loop:
+            loop {
                 let entry = self.stack_of_open_elements.entry_at(i);
+
+                // If node is the topmost element in the stack, return. (fragment case)
+                if i == 0 {
+                    return;
+                }
+
+                // 4. If node's tag name matches the token's tag name, pop elements until
+                //    node has been popped, then return.
                 if entry.tag_name.eq_ignore_ascii_case(tag) {
                     while self.stack_of_open_elements.len() > i {
                         self.stack_of_open_elements.pop();
                     }
+                    self.stack_of_open_elements.pop(); // pop node itself
                     return;
                 }
-                if entry.namespace == DomNamespace::HTML {
-                    // Process using current insertion mode rules.
-                    self.process_using_the_rules_for(self.insertion_mode, token);
-                    return;
+
+                // 5. Set node to the previous entry in the stack.
+                i -= 1;
+                let next_entry = self.stack_of_open_elements.entry_at(i);
+
+                // 6. If node is not in the HTML namespace, return to loop.
+                if next_entry.namespace != DomNamespace::HTML {
+                    continue;
                 }
+
+                // 7. Otherwise, process the token using the current insertion mode rules.
+                self.process_using_the_rules_for(self.insertion_mode, token);
+                return;
             }
         }
     }
