@@ -435,6 +435,7 @@ impl HtmlParser {
         namespace: DomNamespace,
         only_add_to_element_stack: bool,
     ) -> DomHandle {
+        self.flush_character_insertions();
         // 1. Let the adjusted insertion location be the appropriate place for inserting a node.
         let adjusted = self.find_appropriate_place_for_inserting_node(None);
 
@@ -505,7 +506,8 @@ impl HtmlParser {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#insert-a-comment
-    fn insert_comment(&self, token: &Token) {
+    fn insert_comment(&mut self, token: &Token) {
+        self.flush_character_insertions();
         let adjusted = self.find_appropriate_place_for_inserting_node(None);
         let comment = DomHandle::create_comment(self.document, token.comment_data());
         self.insert_at_adjusted_location(comment, &adjusted);
@@ -513,46 +515,49 @@ impl HtmlParser {
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#insert-a-character
     fn insert_character(&mut self, code_point: u32) {
-        self.flush_character_insertions();
         let adjusted = self.find_appropriate_place_for_inserting_node(None);
 
         // If the adjusted insertion location is in a Document node, return.
-        // (We detect this by checking if parent is the document node.)
         if adjusted.parent == DomHandle::document_node(self.document) {
             return;
         }
 
-        // Check if we can append to an existing text node.
-        let existing_text = if adjusted.insert_before_sibling.is_some() {
-            // Look for a text node immediately before the insertion point.
-            // TODO: Check previous sibling of insert_before_sibling
+        // Find or create the text node we'll insert into.
+        let text_node = if adjusted.insert_before_sibling.is_some() {
+            // TODO: Check previous sibling of insert_before_sibling for an existing text node
             None::<DomHandle>
         } else {
-            // Look for a text node as the last child of the parent.
-            let last_child = adjusted.parent.last_child();
-            last_child.filter(|c| c.is_text_node())
+            // Check if the last child of the parent is a text node.
+            adjusted.parent.last_child().filter(|c| c.is_text_node())
         };
 
-        if let Some(text_node) = existing_text {
-            // Append to existing text node.
-            let mut buf = [0u8; 4];
-            if let Some(ch) = char::from_u32(code_point) {
-                let s = ch.encode_utf8(&mut buf);
-                text_node.append_text(s);
-            }
+        let target_node = if let Some(node) = text_node {
+            node
         } else {
-            // Create a new text node.
-            let mut buf = [0u8; 4];
-            if let Some(ch) = char::from_u32(code_point) {
-                let s = ch.encode_utf8(&mut buf);
-                let text_node = DomHandle::create_text_node(self.document, s);
-                self.insert_at_adjusted_location(text_node, &adjusted);
+            // We need to create a new text node. First flush any pending buffer.
+            self.flush_character_insertions();
+            let new_node = DomHandle::create_text_node(self.document, "");
+            self.insert_at_adjusted_location(new_node, &adjusted);
+            new_node
+        };
+
+        // If we're accumulating into a different node, flush the old buffer first.
+        if let Some(existing) = self.character_insertion_node {
+            if existing != target_node {
+                self.flush_character_insertions();
             }
+        }
+
+        // Buffer the character.
+        self.character_insertion_node = Some(target_node);
+        if let Some(ch) = char::from_u32(code_point) {
+            self.character_insertion_builder.push(ch);
         }
     }
 
     fn flush_character_insertions(&mut self) {
         if self.character_insertion_builder.is_empty() {
+            self.character_insertion_node = None;
             return;
         }
         if let Some(node) = self.character_insertion_node {
