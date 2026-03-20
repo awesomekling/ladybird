@@ -1583,9 +1583,9 @@ impl HtmlParser {
                     | "template"
                     | "title"
             )
+            || (token.is_end_tag() && token.tag_name() == "template")
         {
             // Parse error.
-
             // Push the node pointed to by the head element pointer onto the stack.
             if let Some(head) = self.head_element {
                 self.stack_of_open_elements.push(StackEntry::new(
@@ -1594,21 +1594,12 @@ impl HtmlParser {
                     DomNamespace::HTML,
                 ));
             }
-
             // Process the token using the rules for the "in head" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InHead, token);
-
             // Remove the node pointed to by the head element pointer from the stack.
             if let Some(head) = self.head_element {
                 self.stack_of_open_elements.remove(head);
             }
-            return;
-        }
-
-        // -> An end tag whose tag name is "template"
-        if token.is_end_tag() && token.tag_name() == "template" {
-            // Process the token using the rules for the "in head" insertion mode.
-            self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
 
@@ -1716,21 +1707,8 @@ impl HtmlParser {
             ))
             || (token.is_end_tag() && token.tag_name() == "template")
         {
-            // Parse error.
-            // Push the node pointed to by the head element pointer onto the stack.
-            if let Some(head) = self.head_element {
-                self.stack_of_open_elements.push(StackEntry::new(
-                    head,
-                    "head".to_string(),
-                    DomNamespace::HTML,
-                ));
-            }
             // Process the token using the rules for the "in head" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InHead, token);
-            // Remove the node pointed to by the head element pointer from the stack.
-            if let Some(head) = self.head_element {
-                self.stack_of_open_elements.remove(head);
-            }
             return;
         }
 
