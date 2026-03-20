@@ -309,6 +309,49 @@ void html_parser_bridge_element_popped(void* element_ptr)
     }
 }
 
+bool html_parser_bridge_handle_declarative_shadow_template(
+    void* template_element_ptr,
+    void* host_element_ptr,
+    void* document_ptr,
+    uint8_t const* shadowrootmode_ptr, size_t shadowrootmode_len,
+    bool shadowrootclonable,
+    bool shadowrootserializable,
+    bool shadowrootdelegatesfocus)
+{
+    auto& template_element = *static_cast<Web::DOM::Element*>(template_element_ptr);
+    auto& host_element = *static_cast<Web::DOM::Element*>(host_element_ptr);
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    auto mode_sv = string_view_from_rust(shadowrootmode_ptr, shadowrootmode_len);
+
+    auto* tmpl = as_if<Web::HTML::HTMLTemplateElement>(&template_element);
+    if (!tmpl)
+        return false;
+
+    Optional<Web::Bindings::ShadowRootMode> shadowrootmode;
+    if (mode_sv == "open"sv)
+        shadowrootmode = Web::Bindings::ShadowRootMode::Open;
+    else if (mode_sv == "closed"sv)
+        shadowrootmode = Web::Bindings::ShadowRootMode::Closed;
+
+    if (!shadowrootmode.has_value() || !document.allow_declarative_shadow_roots())
+        return false;
+
+    // If host is already a shadow host, insert template at adjusted insertion location.
+    if (host_element.is_shadow_host())
+        return false;
+
+    // Attach shadow root.
+    auto result = host_element.attach_a_shadow_root(*shadowrootmode, shadowrootclonable, shadowrootserializable, shadowrootdelegatesfocus, Web::Bindings::SlotAssignmentMode::Named);
+    if (result.is_error())
+        return false;
+
+    auto& shadow = *host_element.shadow_root();
+    shadow.set_declarative(true);
+    tmpl->set_template_contents(shadow);
+    shadow.set_available_to_element_internals(true);
+    return true;
+}
+
 void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr)
 {
     auto& from = *static_cast<Web::DOM::Node*>(from_ptr);

@@ -61,6 +61,18 @@ void html_parser_bridge_post_create_element(void* element_ptr);
 /// Move all children of `from` to `to` (reparent).
 void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr);
 
+/// Handle declarative shadow DOM template.
+/// Returns true if a shadow root was attached and template contents should use the shadow root.
+/// Sets *out_template_contents to the shadow root's content document fragment if successful.
+bool html_parser_bridge_handle_declarative_shadow_template(
+    void* template_element_ptr,
+    void* host_element_ptr,
+    void* document_ptr,
+    uint8_t const* shadowrootmode_ptr, size_t shadowrootmode_len,
+    bool shadowrootclonable,
+    bool shadowrootserializable,
+    bool shadowrootdelegatesfocus);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

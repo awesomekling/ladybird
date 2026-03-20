@@ -1256,21 +1256,61 @@ impl HtmlParser {
         }
         // -> A start tag whose tag name is "template"
         else if token.is_start_tag() && token.tag_name() == "template" {
-            // Insert a marker at the end of the list of active formatting elements.
+            // 2. Insert a marker at the end of the list of active formatting elements.
             self.list_of_active_formatting_elements.add_marker();
 
-            // Set the frameset-ok flag to "not ok".
+            // 3. Set the frameset-ok flag to "not ok".
             self.frameset_ok = false;
 
-            // Switch the insertion mode to "in template".
+            // 4. Switch the insertion mode to "in template".
             self.insertion_mode = InsertionMode::InTemplate;
 
-            // Push "in template" onto the stack of template insertion modes.
+            // 5. Push "in template" onto the stack of template insertion modes.
             self.stack_of_template_insertion_modes
                 .push(InsertionMode::InTemplate);
 
-            // Insert an HTML element for the token.
-            self.insert_html_element(token);
+            // 9. Check for declarative shadow root (shadowrootmode attribute).
+            let shadowrootmode = token.get_attribute("shadowrootmode");
+            let has_valid_shadowrootmode = shadowrootmode
+                .is_some_and(|m| m == "open" || m == "closed");
+
+            // If shadowrootmode is valid AND the adjusted current node is not the topmost element:
+            if has_valid_shadowrootmode
+                && self.stack_of_open_elements.len() > 1
+                && self.adjusted_current_node().is_some()
+            {
+                let host_handle = self.adjusted_current_node().unwrap().handle;
+
+                // Insert a foreign element for the token, with HTML namespace and true (only add to stack).
+                let template_element = self.insert_foreign_element(token, DomNamespace::HTML, true);
+
+                let mode = shadowrootmode.unwrap();
+                let clonable = token.has_attribute("shadowrootclonable");
+                let serializable = token.has_attribute("shadowrootserializable");
+                let delegates_focus = token.has_attribute("shadowrootdelegatesfocus");
+
+                let success = unsafe {
+                    crate::dom_bridge::html_parser_bridge_handle_declarative_shadow_template(
+                        template_element.as_ptr(),
+                        host_handle.as_ptr(),
+                        self.document.as_ptr(),
+                        mode.as_ptr(),
+                        mode.len(),
+                        clonable,
+                        serializable,
+                        delegates_focus,
+                    )
+                };
+
+                if !success {
+                    // If shadow root attachment failed, insert at adjusted insertion location.
+                    let adjusted = self.find_appropriate_place_for_inserting_node(None);
+                    self.insert_at_adjusted_location(template_element, &adjusted);
+                }
+            } else {
+                // Normal template insertion (no declarative shadow root).
+                self.insert_html_element(token);
+            }
             return;
         }
         // -> An end tag whose tag name is "template"
