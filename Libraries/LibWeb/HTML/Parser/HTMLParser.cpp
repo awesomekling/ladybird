@@ -5027,6 +5027,29 @@ void HTMLParser::mark_svg_script_as_parser_inserted(SVG::SVGScriptElement& scrip
     script.set_parser_inserted(Badge<HTMLParser> {});
 }
 
+GC::Ref<DOM::Element> HTMLParser::create_element_for_rust_parser(DOM::Document& document, FlyString const& local_name, Optional<FlyString> const& namespace_, Optional<String> const& is_value, GC::Ptr<CustomElementDefinition> definition)
+{
+    bool will_execute_script = definition != nullptr;
+
+    if (will_execute_script) {
+        document.increment_throw_on_dynamic_markup_insertion_counter(Badge<HTMLParser> {});
+        auto& vm = main_thread_event_loop().vm();
+        if (vm.execution_context_stack().is_empty())
+            perform_a_microtask_checkpoint();
+        relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.append({});
+    }
+
+    auto element = create_element(document, local_name, namespace_, {}, is_value, will_execute_script).release_value_but_fixme_should_propagate_errors();
+
+    if (will_execute_script) {
+        auto queue = relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.take_last();
+        Bindings::invoke_custom_element_reactions(queue);
+        document.decrement_throw_on_dynamic_markup_insertion_counter(Badge<HTMLParser> {});
+    }
+
+    return element;
+}
+
 void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document)
 {
     // Prepare the script element.

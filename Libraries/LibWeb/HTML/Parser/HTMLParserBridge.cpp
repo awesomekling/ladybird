@@ -16,7 +16,11 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Text.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/HTML/CustomElements/CustomElementDefinition.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
@@ -92,9 +96,9 @@ void* html_parser_bridge_create_element(void* document_ptr, uint8_t const* local
         is_value = MUST(String::from_utf8(is_sv));
     }
 
-    // Pass will_execute_script=true so custom element constructors run during creation.
-    bool will_execute_script = is_value.has_value() || document.lookup_custom_element_definition(ns, local_name, is_value);
-    auto element = Web::DOM::create_element(document, local_name, ns, {}, is_value, will_execute_script).release_value_but_fixme_should_propagate_errors();
+    auto definition = document.lookup_custom_element_definition(ns, local_name, is_value);
+    auto element = Web::HTML::HTMLParser::create_element_for_rust_parser(document, local_name, ns, is_value, definition);
+
     return element.ptr();
 }
 

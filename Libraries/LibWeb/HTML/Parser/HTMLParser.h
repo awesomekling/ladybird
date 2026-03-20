@@ -88,6 +88,7 @@ public:
     static void setup_link_element(HTMLLinkElement&);
     static void associate_with_form(DOM::Element&, HTMLFormElement&);
     static void mark_svg_script_as_parser_inserted(SVG::SVGScriptElement&);
+    static GC::Ref<DOM::Element> create_element_for_rust_parser(DOM::Document&, FlyString const& local_name, Optional<FlyString> const& namespace_, Optional<String> const& is_value, GC::Ptr<HTML::CustomElementDefinition>);
 
     HTMLTokenizer& tokenizer() { return m_tokenizer; }
 
