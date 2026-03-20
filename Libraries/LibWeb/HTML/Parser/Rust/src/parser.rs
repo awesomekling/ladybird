@@ -3416,53 +3416,135 @@ impl HtmlParser {
         }
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inframeset
     fn handle_in_frameset(&mut self, token: &Token) {
-        // TODO: Full implementation
+        // -> A character token that is one of U+0009, U+000A, U+000C, U+000D, or U+0020
         if token.is_parser_whitespace() {
             self.insert_character(token.code_point);
             return;
         }
-        if token.is_comment() {
-            self.insert_comment(token);
-            return;
-        }
-        if token.is_eof() {
-            self.stop_parsing();
-            return;
-        }
-    }
 
-    fn handle_after_frameset(&mut self, token: &Token) {
-        // TODO: Full implementation
-        if token.is_parser_whitespace() {
-            self.insert_character(token.code_point);
-            return;
-        }
+        // -> A comment token
         if token.is_comment() {
             self.insert_comment(token);
             return;
         }
-        if token.is_eof() {
-            self.stop_parsing();
+
+        // -> A DOCTYPE token
+        if token.is_doctype() {
             return;
         }
+
+        // -> A start tag whose tag name is "html"
+        if token.is_start_tag() && token.tag_name() == "html" {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "frameset"
+        if token.is_start_tag() && token.tag_name() == "frameset" {
+            self.insert_html_element(token);
+            return;
+        }
+
+        // -> An end tag whose tag name is "frameset"
         if token.is_end_tag() && token.tag_name() == "frameset" {
-            self.insertion_mode = InsertionMode::AfterAfterFrameset;
+            // If the current node is the root html element, parse error; ignore the token.
+            if self.stack_of_open_elements.len() == 1 {
+                return;
+            }
+            self.stack_of_open_elements.pop();
+            // If not fragment case and current node is no longer a frameset, switch mode.
+            if !self.parsing_fragment {
+                if let Some(current) = self.stack_of_open_elements.current_node() {
+                    if !(current.namespace == DomNamespace::HTML
+                        && current.tag_name == "frameset")
+                    {
+                        self.insertion_mode = InsertionMode::AfterFrameset;
+                    }
+                }
+            }
+            return;
         }
+
+        // -> A start tag whose tag name is "frame"
+        if token.is_start_tag() && token.tag_name() == "frame" {
+            self.insert_html_element(token);
+            self.stack_of_open_elements.pop();
+            return;
+        }
+
+        // -> A start tag whose tag name is "noframes"
+        if token.is_start_tag() && token.tag_name() == "noframes" {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+
+        // -> An end-of-file token
+        if token.is_eof() {
+            self.stop_parsing();
+            return;
+        }
+
+        // -> Anything else: parse error, ignore the token.
     }
 
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-afterframeset
+    fn handle_after_frameset(&mut self, token: &Token) {
+        if token.is_parser_whitespace() {
+            self.insert_character(token.code_point);
+            return;
+        }
+        if token.is_comment() {
+            self.insert_comment(token);
+            return;
+        }
+        if token.is_doctype() {
+            return;
+        }
+        if token.is_start_tag() && token.tag_name() == "html" {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
+        if token.is_end_tag() && token.tag_name() == "html" {
+            self.insertion_mode = InsertionMode::AfterAfterFrameset;
+            return;
+        }
+        if token.is_start_tag() && token.tag_name() == "noframes" {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+        if token.is_eof() {
+            self.stop_parsing();
+            return;
+        }
+        // Anything else: parse error, ignore.
+    }
+
+    /// https://html.spec.whatwg.org/multipage/parsing.html#the-after-after-frameset-insertion-mode
     fn handle_after_after_frameset(&mut self, token: &Token) {
-        // TODO: Full implementation
         if token.is_comment() {
             let comment = DomHandle::create_comment(self.document, token.comment_data());
             let doc_node = DomHandle::document_node(self.document);
             DomHandle::insert_before(doc_node, comment, None);
             return;
         }
+        if token.is_doctype()
+            || token.is_parser_whitespace()
+            || (token.is_start_tag() && token.tag_name() == "html")
+        {
+            self.process_using_the_rules_for(InsertionMode::InBody, token);
+            return;
+        }
         if token.is_eof() {
             self.stop_parsing();
             return;
         }
+        if token.is_start_tag() && token.tag_name() == "noframes" {
+            self.process_using_the_rules_for(InsertionMode::InHead, token);
+            return;
+        }
+        // Anything else: parse error, ignore.
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
