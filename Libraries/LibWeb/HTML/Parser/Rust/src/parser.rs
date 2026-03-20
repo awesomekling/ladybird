@@ -445,6 +445,11 @@ impl HtmlParser {
         // 11. Append each attribute in the given token to element.
         // NOTE: Using append_attribute ensures first attribute wins (per spec).
         for attr in token.attributes() {
+            // Adjust foreign attributes (xlink:*, xml:*, xmlns:*).
+            if let Some((ns, prefix, local_name)) = adjust_foreign_attribute(&attr.local_name) {
+                element.set_attribute_ns(ns, prefix, local_name, &attr.value);
+                continue;
+            }
             // Adjust SVG attribute names if we're in the SVG namespace.
             if namespace == DomNamespace::SVG {
                 let adjusted_name = adjust_svg_attribute_name(&attr.local_name);
@@ -3695,6 +3700,25 @@ fn adjust_svg_tag_name(tag_name: &str) -> &str {
         "radialgradient" => "radialGradient",
         "textpath" => "textPath",
         _ => tag_name,
+    }
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes
+/// Returns (namespace, prefix, local_name) if the attribute needs namespace adjustment.
+fn adjust_foreign_attribute(name: &str) -> Option<(DomNamespace, &str, &str)> {
+    match name {
+        "xlink:actuate" => Some((DomNamespace::XLink, "xlink", "actuate")),
+        "xlink:arcrole" => Some((DomNamespace::XLink, "xlink", "arcrole")),
+        "xlink:href" => Some((DomNamespace::XLink, "xlink", "href")),
+        "xlink:role" => Some((DomNamespace::XLink, "xlink", "role")),
+        "xlink:show" => Some((DomNamespace::XLink, "xlink", "show")),
+        "xlink:title" => Some((DomNamespace::XLink, "xlink", "title")),
+        "xlink:type" => Some((DomNamespace::XLink, "xlink", "type")),
+        "xml:lang" => Some((DomNamespace::XML, "xml", "lang")),
+        "xml:space" => Some((DomNamespace::XML, "xml", "space")),
+        "xmlns" => Some((DomNamespace::XMLNS, "", "xmlns")),
+        "xmlns:xlink" => Some((DomNamespace::XMLNS, "xmlns", "xlink")),
+        _ => None,
     }
 }
 
