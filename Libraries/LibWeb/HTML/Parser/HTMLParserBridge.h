@@ -58,6 +58,9 @@ void html_parser_bridge_element_popped(void* element_ptr);
 /// Post-creation setup for elements (media muted attribute, etc).
 void html_parser_bridge_post_create_element(void* element_ptr);
 
+/// Move all children of `from` to `to` (reparent).
+void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

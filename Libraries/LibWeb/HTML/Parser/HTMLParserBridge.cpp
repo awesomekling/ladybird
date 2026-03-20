@@ -309,6 +309,15 @@ void html_parser_bridge_element_popped(void* element_ptr)
     }
 }
 
+void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr)
+{
+    auto& from = *static_cast<Web::DOM::Node*>(from_ptr);
+    auto& to = *static_cast<Web::DOM::Node*>(to_ptr);
+    while (auto* child = from.first_child()) {
+        MUST(to.append_child(MUST(from.remove_child(*child))));
+    }
+}
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr)
 {
     if (!visitor_ptr || !node_ptr)

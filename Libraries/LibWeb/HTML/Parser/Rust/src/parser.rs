@@ -1565,7 +1565,7 @@ impl HtmlParser {
             if let Some(first) = self.stack_of_open_elements.first() {
                 let handle = first.handle;
                 for attr in token.attributes() {
-                    // TODO: Check if attribute already exists before setting
+                    // append_attribute only adds if not already present (first one wins).
                     handle.append_attribute(&attr.local_name, &attr.value);
                 }
             }
@@ -2145,8 +2145,9 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "table"
         if token.is_start_tag() && token.tag_name() == "table" {
-            // TODO: If the Document is not set to quirks mode, and the stack of open elements
+            // If the Document is not set to quirks mode, and the stack of open elements
             // has a p element in button scope, then close a p element.
+            // FIXME: Check quirks mode — in quirks mode this step is skipped.
             if self.stack_of_open_elements.has_in_button_scope("p") {
                 self.close_a_p_element();
             }
@@ -2312,8 +2313,7 @@ impl HtmlParser {
         // -> A start tag whose tag name is "math"
         if token.is_start_tag() && token.tag_name() == "math" {
             self.reconstruct_the_active_formatting_elements();
-            // TODO: Adjust MathML attributes for the token.
-            // TODO: Adjust foreign attributes for the token.
+            // NOTE: MathML and foreign attribute adjustment is done in insert_foreign_element.
             self.insert_foreign_element(token, DomNamespace::MathML, false);
             if token.is_self_closing() {
                 self.stack_of_open_elements.pop();
@@ -2324,8 +2324,7 @@ impl HtmlParser {
         // -> A start tag whose tag name is "svg"
         if token.is_start_tag() && token.tag_name() == "svg" {
             self.reconstruct_the_active_formatting_elements();
-            // TODO: Adjust SVG attributes for the token.
-            // TODO: Adjust foreign attributes for the token.
+            // NOTE: SVG tag/attribute and foreign attribute adjustment is done in insert_foreign_element.
             self.insert_foreign_element(token, DomNamespace::SVG, false);
             if token.is_self_closing() {
                 self.stack_of_open_elements.pop();
@@ -2492,17 +2491,174 @@ impl HtmlParser {
                 return;
             }
 
-            // The full adoption agency algorithm is complex. For now, we implement a simplified
-            // version that handles the common cases. A complete implementation will follow.
-            // TODO: Implement steps 12-22 of the adoption agency algorithm.
+            let furthest_block_index = furthest_block_index.unwrap();
 
-            // Simplified: just pop up to and including the formatting element.
-            while self.stack_of_open_elements.len() > formatting_stack_index {
-                self.stack_of_open_elements.pop();
+            // 12. Let commonAncestor be the element immediately above formattingElement in the stack.
+            let common_ancestor = self
+                .stack_of_open_elements
+                .element_immediately_above(formatting_element_handle)
+                .map(|e| e.handle);
+
+            // 13. Let a bookmark note the position of formattingElement in the list.
+            let mut bookmark = self
+                .list_of_active_formatting_elements
+                .index_of(formatting_element_handle)
+                .unwrap();
+
+            // 14. Let node and lastNode be furthestBlock.
+            let furthest_block_handle = self
+                .stack_of_open_elements
+                .entry_at(furthest_block_index)
+                .handle;
+            let mut node_handle = furthest_block_handle;
+            let mut last_node_handle = furthest_block_handle;
+
+            let mut node_above_node = self
+                .stack_of_open_elements
+                .element_immediately_above(node_handle)
+                .map(|e| e.handle);
+
+            // 15. Let innerLoopCounter be 0.
+            // 16. While true:
+            for _inner_loop_counter in 1..=usize::MAX {
+                // 1. Let node be the element immediately above node in the stack.
+                node_handle = match node_above_node {
+                    Some(h) => h,
+                    None => break,
+                };
+
+                node_above_node = self
+                    .stack_of_open_elements
+                    .element_immediately_above(node_handle)
+                    .map(|e| e.handle);
+
+                // 2. If node is formattingElement, then break.
+                if node_handle == formatting_element_handle {
+                    break;
+                }
+
+                // 3. If innerLoopCounter > 3 and node is in the formatting list, remove it.
+                let node_formatting_index = self
+                    .list_of_active_formatting_elements
+                    .index_of(node_handle);
+                if _inner_loop_counter > 3 && node_formatting_index.is_some() {
+                    let idx = node_formatting_index.unwrap();
+                    if idx < bookmark {
+                        bookmark -= 1;
+                    }
+                    self.list_of_active_formatting_elements.remove(node_handle);
+                }
+
+                // 4. If node is not in the formatting list, remove from stack and continue.
+                let node_formatting_index = self
+                    .list_of_active_formatting_elements
+                    .index_of(node_handle);
+                if node_formatting_index.is_none() {
+                    self.stack_of_open_elements.remove(node_handle);
+                    continue;
+                }
+
+                // 5. Create an element for the token, replace in both lists.
+                let formatting_idx = node_formatting_index.unwrap();
+                let token_clone = {
+                    let entry = &self.list_of_active_formatting_elements.entries()[formatting_idx];
+                    entry.token().unwrap().clone()
+                };
+                let tag_name = token_clone.tag_name().to_string();
+                let new_element = self.create_element_for(&token_clone, DomNamespace::HTML);
+                for attr in token_clone.attributes() {
+                    new_element.append_attribute(&attr.local_name, &attr.value);
+                }
+
+                self.list_of_active_formatting_elements.replace(
+                    node_handle,
+                    new_element,
+                    tag_name.clone(),
+                    token_clone.clone(),
+                );
+                self.stack_of_open_elements.replace(
+                    node_handle,
+                    StackEntry::new(new_element, tag_name, DomNamespace::HTML),
+                );
+                node_handle = new_element;
+
+                // 6. If lastNode is furthestBlock, move bookmark.
+                if last_node_handle == furthest_block_handle {
+                    bookmark = self
+                        .list_of_active_formatting_elements
+                        .index_of(node_handle)
+                        .unwrap()
+                        + 1;
+                }
+
+                // 7. Append lastNode to node.
+                DomHandle::insert_before(node_handle, last_node_handle, None);
+
+                // 8. Set lastNode to node.
+                last_node_handle = node_handle;
+            }
+
+            // 17. Insert lastNode at the appropriate place, using commonAncestor as override target.
+            if let Some(ancestor) = common_ancestor {
+                let adjusted = self.find_appropriate_place_for_inserting_node(Some(ancestor));
+                self.insert_at_adjusted_location(last_node_handle, &adjusted);
+            }
+
+            // 18. Create an element for the token for which formattingElement was created.
+            let formatting_idx = self
+                .list_of_active_formatting_elements
+                .index_of(formatting_element_handle);
+            let (token_clone, tag_name) = if let Some(idx) = formatting_idx {
+                let entry = &self.list_of_active_formatting_elements.entries()[idx];
+                (
+                    entry.token().unwrap().clone(),
+                    entry.tag_name().unwrap().to_string(),
+                )
+            } else {
+                return;
+            };
+
+            let new_element = self.create_element_for(&token_clone, DomNamespace::HTML);
+            for attr in token_clone.attributes() {
+                new_element.append_attribute(&attr.local_name, &attr.value);
+            }
+
+            // 19. Take all child nodes of furthestBlock and append them to the new element.
+            unsafe {
+                crate::dom_bridge::html_parser_bridge_reparent_children(
+                    furthest_block_handle.as_ptr(),
+                    new_element.as_ptr(),
+                );
+            }
+
+            // 20. Append the new element to furthestBlock.
+            DomHandle::insert_before(furthest_block_handle, new_element, None);
+
+            // 21. Remove formattingElement from the list, insert new element at bookmark.
+            let formatting_idx = self
+                .list_of_active_formatting_elements
+                .index_of(formatting_element_handle);
+            if let Some(idx) = formatting_idx {
+                if idx < bookmark {
+                    bookmark -= 1;
+                }
             }
             self.list_of_active_formatting_elements
                 .remove(formatting_element_handle);
-            return;
+            self.list_of_active_formatting_elements.insert_at(
+                bookmark,
+                new_element,
+                tag_name.clone(),
+                token_clone,
+            );
+
+            // 22. Remove formattingElement from the stack, insert new element below furthestBlock.
+            self.stack_of_open_elements
+                .remove(formatting_element_handle);
+            self.stack_of_open_elements.insert_immediately_below(
+                StackEntry::new(new_element, tag_name, DomNamespace::HTML),
+                furthest_block_handle,
+            );
         }
     }
 

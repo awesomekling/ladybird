@@ -248,6 +248,9 @@ unsafe extern "C" {
         document: *mut c_void,
     );
 
+    /// Move all children of `from` node to `to` node.
+    pub fn html_parser_bridge_reparent_children(from: *mut c_void, to: *mut c_void);
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(
