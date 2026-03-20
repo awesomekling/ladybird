@@ -3951,13 +3951,39 @@ impl HtmlParser {
 
             self.insert_foreign_element(token, namespace, false);
             if token.is_self_closing() {
-                self.stack_of_open_elements.pop();
+                // If self-closing SVG script, execute it before popping.
+                if namespace == DomNamespace::SVG && token.tag_name() == "script" {
+                    self.flush_character_insertions();
+                    let script = self.stack_of_open_elements.pop();
+                    if let Some(entry) = script {
+                        entry.handle.execute_script(self.document);
+                    }
+                } else {
+                    self.stack_of_open_elements.pop();
+                }
             }
             return;
         }
 
         if token.is_end_tag() {
             // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+            // Special case: </script> when current node is an SVG script element.
+            if token.tag_name() == "script" {
+                if let Some(current) = self.stack_of_open_elements.current_node() {
+                    if current.namespace == DomNamespace::SVG && current.tag_name == "script" {
+                        // Flush character insertions so the script text is complete.
+                        self.flush_character_insertions();
+                        // Pop the script element.
+                        let script_entry = self.stack_of_open_elements.pop();
+                        // Execute the SVG script via the bridge.
+                        if let Some(entry) = script_entry {
+                            entry.handle.execute_script(self.document);
+                        }
+                        return;
+                    }
+                }
+            }
+
             // 1. Initialize node to be the current node.
             let tag = token.tag_name();
             let stack_len = self.stack_of_open_elements.len();

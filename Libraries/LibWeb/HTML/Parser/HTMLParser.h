@@ -87,6 +87,7 @@ public:
     static void handle_script_end_tag(HTMLScriptElement&, DOM::Document&);
     static void setup_link_element(HTMLLinkElement&);
     static void associate_with_form(DOM::Element&, HTMLFormElement&);
+    static void mark_svg_script_as_parser_inserted(SVG::SVGScriptElement&);
 
     HTMLTokenizer& tokenizer() { return m_tokenizer; }
 

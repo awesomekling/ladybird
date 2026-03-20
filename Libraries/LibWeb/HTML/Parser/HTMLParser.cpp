@@ -5022,6 +5022,11 @@ void HTMLParser::associate_with_form(DOM::Element& element, HTMLFormElement& for
     }
 }
 
+void HTMLParser::mark_svg_script_as_parser_inserted(SVG::SVGScriptElement& script)
+{
+    script.set_parser_inserted(Badge<HTMLParser> {});
+}
+
 void HTMLParser::handle_script_end_tag(HTMLScriptElement& script, DOM::Document& document)
 {
     // Prepare the script element.

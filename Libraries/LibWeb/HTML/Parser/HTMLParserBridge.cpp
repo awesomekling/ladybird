@@ -23,6 +23,7 @@
 #include <LibWeb/HTML/HTMLLinkElement.h>
 #include <LibWeb/HTML/HTMLOptionElement.h>
 #include <LibWeb/HTML/HTMLScriptElement.h>
+#include <LibWeb/SVG/SVGScriptElement.h>
 #include <LibWeb/HTML/HTMLTemplateElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/Namespace.h>
@@ -282,6 +283,8 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr)
 
     if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
         Web::HTML::HTMLParser::handle_script_end_tag(*script, document);
+    } else if (auto* svg_script = as_if<Web::SVG::SVGScriptElement>(&element)) {
+        svg_script->process_the_script_element();
     }
 
     return false;
@@ -303,6 +306,11 @@ void html_parser_bridge_post_create_element(void* element_ptr)
     // AD-HOC: Let <link> elements know which document they were originally parsed for.
     if (auto* link = as_if<Web::HTML::HTMLLinkElement>(&element)) {
         Web::HTML::HTMLParser::setup_link_element(*link);
+    }
+
+    // Mark SVG script elements as parser-inserted so they don't execute on insertion.
+    if (as_if<Web::SVG::SVGScriptElement>(&element)) {
+        Web::HTML::HTMLParser::mark_svg_script_as_parser_inserted(static_cast<Web::SVG::SVGScriptElement&>(element));
     }
 
     // https://html.spec.whatwg.org/multipage/media.html#user-interface:attr-media-muted
