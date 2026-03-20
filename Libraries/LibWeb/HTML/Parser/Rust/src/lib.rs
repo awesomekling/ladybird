@@ -78,6 +78,37 @@ pub unsafe extern "C" fn rust_html_parser_visit_dom_handles(
     handle.parser.visit_dom_handles(visitor);
 }
 
+/// Insert input at the tokenizer's insertion point (for document.write).
+///
+/// # Safety
+/// `handle` must be a valid pointer. `input` must point to `input_len` valid u32 values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_insert_input(
+    handle: *mut HtmlParserHandle,
+    input: *const u32,
+    input_len: usize,
+) {
+    let handle = unsafe { &mut *handle };
+    let code_points = if input.is_null() || input_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(input, input_len) }
+    };
+    handle.parser.tokenizer.insert_input_at_insertion_point(code_points);
+}
+
+/// Run the Rust parser, stopping at the insertion point.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_run_stop_at_insertion_point(
+    handle: *mut HtmlParserHandle,
+) {
+    let handle = unsafe { &mut *handle };
+    handle.parser.run_stop_at_insertion_point();
+}
+
 /// Destroy a Rust HTML parser.
 ///
 /// # Safety

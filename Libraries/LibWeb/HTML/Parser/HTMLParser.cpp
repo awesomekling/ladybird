@@ -289,7 +289,9 @@ void HTMLParser::run(URL::URL const& url, HTMLTokenizer::StopAtInsertionPoint st
     if (rust_html_parser_enabled() && !m_parsing_fragment) {
         auto const& code_points = m_tokenizer.decoded_input();
         auto* handle = rust_html_parser_create(m_document.ptr(), code_points.data(), code_points.size(), m_scripting_enabled);
+        m_rust_parser_handle = handle;
         rust_html_parser_run(handle);
+        m_rust_parser_handle = nullptr;
         rust_html_parser_destroy(handle);
         the_end(*m_document, this);
         return;

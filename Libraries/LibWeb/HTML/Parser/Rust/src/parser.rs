@@ -53,7 +53,7 @@ struct AdjustedInsertionLocation {
 #[allow(dead_code)]
 pub struct HtmlParser {
     // The tokenizer.
-    tokenizer: HtmlTokenizer,
+    pub tokenizer: HtmlTokenizer,
 
     // https://html.spec.whatwg.org/multipage/parsing.html#insertion-mode
     insertion_mode: InsertionMode,
@@ -142,6 +142,38 @@ impl HtmlParser {
     // Main parsing loop
     // https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
     // =======================================================================
+
+    /// Run the parser, stopping at the tokenizer's insertion point.
+    /// Used for document.write() re-entrant parsing.
+    pub fn run_stop_at_insertion_point(&mut self) {
+        self.stop_parsing = false;
+
+        loop {
+            let token = match self.tokenizer.next_token(true, false) {
+                Some(t) => t,
+                None => break,
+            };
+
+            if self.next_line_feed_can_be_ignored {
+                self.next_line_feed_can_be_ignored = false;
+                if token.is_character() && token.code_point == '\n' as u32 {
+                    continue;
+                }
+            }
+
+            self.process_token(&token);
+
+            if token.is_eof() && self.tokenizer.is_eof_inserted() {
+                break;
+            }
+
+            if self.stop_parsing {
+                break;
+            }
+        }
+
+        self.flush_character_insertions();
+    }
 
     /// Run the parser.
     /// https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
@@ -2738,12 +2770,19 @@ impl HtmlParser {
             // Switch the insertion mode to the original insertion mode.
             self.insertion_mode = self.original_insertion_mode;
 
-            // Prepare the script element to be executed.
-            // (The C++ bridge handles script preparation and execution.)
+            // Let the old insertion point have the same value as the current insertion point.
+            self.tokenizer.store_insertion_point();
+            // Let the insertion point be just before the next input character.
+            self.tokenizer.update_insertion_point();
+
+            // Prepare and execute the script element.
             if let Some(entry) = script_entry {
                 self.flush_character_insertions();
                 entry.handle.execute_script(self.document);
             }
+
+            // Let the insertion point have the value of the old insertion point.
+            self.tokenizer.restore_insertion_point();
             return;
         }
 

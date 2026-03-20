@@ -213,6 +213,13 @@
 #include <LibWeb/WebIDL/ObservableArray.h>
 #include <LibWeb/XPath/XPath.h>
 
+#ifdef ENABLE_RUST
+extern "C" {
+void rust_html_parser_insert_input(void* handle, uint32_t const* input, size_t input_len);
+void rust_html_parser_run_stop_at_insertion_point(void* handle);
+}
+#endif
+
 namespace Web::DOM {
 
 GC_DEFINE_ALLOCATOR(Document);
@@ -770,6 +777,21 @@ WebIDL::ExceptionOr<void> Document::run_the_document_write_steps(Vector<TrustedT
     }
 
     // 10. Insert string into the input stream just before the insertion point.
+#ifdef ENABLE_RUST
+    if (m_parser->rust_parser_handle()) {
+        // Convert UTF-8 string to UTF-32 code points for the Rust tokenizer.
+        Vector<u32> code_points;
+        for (auto code_point : Utf8View(string.string_view()))
+            code_points.append(code_point);
+
+        rust_html_parser_insert_input(m_parser->rust_parser_handle(), code_points.data(), code_points.size());
+
+        if (!pending_parsing_blocking_script())
+            rust_html_parser_run_stop_at_insertion_point(m_parser->rust_parser_handle());
+
+        return {};
+    }
+#endif
     m_parser->tokenizer().insert_input_at_insertion_point(string.string_view());
 
     // 11. If document's pending parsing-blocking script is null, then have the HTML parser process string, one code

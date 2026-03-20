@@ -221,6 +221,15 @@ private:
 
     GC::Ptr<DOM::Text> m_character_insertion_node;
     StringBuilder m_character_insertion_builder { StringBuilder::Mode::UTF16 };
+
+#ifdef ENABLE_RUST
+public:
+    void set_rust_parser_handle(void* handle) { m_rust_parser_handle = handle; }
+    void* rust_parser_handle() const { return m_rust_parser_handle; }
+
+private:
+    void* m_rust_parser_handle { nullptr };
+#endif
 };
 
 RefPtr<CSS::StyleValue const> parse_dimension_value(StringView);
