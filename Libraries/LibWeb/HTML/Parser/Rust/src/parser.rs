@@ -4033,6 +4033,23 @@ impl HtmlParser {
             return;
         }
 
+        // -> An end tag whose tag name is "br", "p"
+        // Parse error. Pop elements until an HTML integration point, MathML text integration
+        // point, or HTML namespace element. Then reprocess in InBody.
+        if token.is_end_tag() && matches!(token.tag_name(), "br" | "p") {
+            while let Some(current) = self.stack_of_open_elements.current_node() {
+                if current.namespace == DomNamespace::HTML
+                    || is_mathml_text_integration_point(current)
+                    || is_html_integration_point(current)
+                {
+                    break;
+                }
+                self.stack_of_open_elements.pop();
+            }
+            self.reprocess_token();
+            return;
+        }
+
         if token.is_end_tag() {
             // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
             // Special case: </script> when current node is an SVG script element.
