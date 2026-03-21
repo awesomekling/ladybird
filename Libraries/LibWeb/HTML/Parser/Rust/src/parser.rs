@@ -812,10 +812,29 @@ impl HtmlParser {
             }
 
             if ns == DomNamespace::HTML {
-                // 4. If node is a select element, set the insertion mode to InBody.
-                // NOTE: The current HTML spec no longer has InSelect mode.
+                // 4. If node is a select element, run these substeps:
                 if tag == "select" {
-                    self.insertion_mode = InsertionMode::InBody;
+                    if !last {
+                        // Walk ancestors to check for table/template.
+                        let mut ancestor_idx = node_index;
+                        loop {
+                            if ancestor_idx == 0 {
+                                break;
+                            }
+                            ancestor_idx -= 1;
+                            let ancestor = self.stack_of_open_elements.entry_at(ancestor_idx);
+                            if ancestor.namespace == DomNamespace::HTML {
+                                if ancestor.tag_name == "template" {
+                                    break;
+                                }
+                                if ancestor.tag_name == "table" {
+                                    self.insertion_mode = InsertionMode::InSelectInTable;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    self.insertion_mode = InsertionMode::InSelect;
                     return;
                 }
 
@@ -3657,8 +3676,46 @@ impl HtmlParser {
     }
 
     fn handle_in_select_in_table(&mut self, token: &Token) {
-        // NOTE: The current HTML spec no longer has InSelectInTable mode.
-        self.process_using_the_rules_for(InsertionMode::InBody, token);
+        // -> A start tag whose tag name is one of: "caption", "table", "tbody", "tfoot",
+        //    "thead", "tr", "td", "th"
+        if token.is_start_tag()
+            && matches!(
+                token.tag_name(),
+                "caption" | "table" | "tbody" | "tfoot" | "thead" | "tr" | "td" | "th"
+            )
+        {
+            // Parse error. Pop elements until a select element has been popped.
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("select");
+            self.reset_the_insertion_mode_appropriately();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> An end tag whose tag name is one of: "caption", "table", "tbody", "tfoot",
+        //    "thead", "tr", "td", "th"
+        if token.is_end_tag()
+            && matches!(
+                token.tag_name(),
+                "caption" | "table" | "tbody" | "tfoot" | "thead" | "tr" | "td" | "th"
+            )
+        {
+            if !self
+                .stack_of_open_elements
+                .has_in_table_scope(token.tag_name())
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            self.stack_of_open_elements
+                .pop_until_tag_name_popped("select");
+            self.reset_the_insertion_mode_appropriately();
+            self.reprocess_token();
+            return;
+        }
+
+        // -> Anything else: process using the rules for InSelect.
+        self.process_using_the_rules_for(InsertionMode::InSelect, token);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intemplate

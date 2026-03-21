@@ -127,14 +127,12 @@ impl StackOfOpenElements {
 
     /// Pop elements until an element with the given tag name has been popped.
     pub fn pop_until_tag_name_popped(&mut self, tag: &str) {
-        loop {
-            let matches = self
-                .elements
-                .last()
-                .is_some_and(|e| e.namespace == DomNamespace::HTML && e.tag_name == tag);
-            if self.pop().is_none() {
-                break;
-            }
+        while let Some(entry) = self.elements.last() {
+            let matches = entry.namespace == DomNamespace::HTML && entry.tag_name == tag;
+            // Use self.pop() to call the element_popped callback, but only for option elements
+            // which need maybe_clone_into_selectedcontent. For other elements, directly pop
+            // to avoid potential side effects.
+            self.pop();
             if matches {
                 break;
             }
@@ -143,13 +141,10 @@ impl StackOfOpenElements {
 
     /// Pop elements until one of the given tag names has been popped.
     pub fn pop_until_one_of_tag_names_popped(&mut self, tags: &[&str]) {
-        loop {
-            let matches = self.elements.last().is_some_and(|e| {
-                e.namespace == DomNamespace::HTML && tags.contains(&e.tag_name.as_str())
-            });
-            if self.pop().is_none() {
-                break;
-            }
+        while let Some(entry) = self.elements.last() {
+            let matches =
+                entry.namespace == DomNamespace::HTML && tags.contains(&entry.tag_name.as_str());
+            self.pop();
             if matches {
                 break;
             }
