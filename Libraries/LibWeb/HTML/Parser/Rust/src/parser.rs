@@ -2198,8 +2198,13 @@ impl HtmlParser {
                 .last_element_with_tag_name_before_marker("a")
             {
                 // Run the adoption agency algorithm for the token.
-                self.run_the_adoption_agency_algorithm(token);
-                // Remove the element from the list and the stack.
+                if self.run_the_adoption_agency_algorithm(token) {
+                    // The algorithm fell through to "any other end tag" steps
+                    // (which were already executed internally).
+                    return;
+                }
+                // Remove the element from the list and the stack if the adoption agency
+                // algorithm didn't already remove it.
                 self.list_of_active_formatting_elements.remove(handle);
                 self.stack_of_open_elements.remove(handle);
             }
@@ -2600,7 +2605,8 @@ impl HtmlParser {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#adoption-agency-algorithm
-    fn run_the_adoption_agency_algorithm(&mut self, token: &Token) {
+    /// Returns true if the "any other end tag" steps were run instead of the normal algorithm.
+    fn run_the_adoption_agency_algorithm(&mut self, token: &Token) -> bool {
         let subject = token.tag_name();
 
         // 1. If the current node is an HTML element whose tag name is subject, and the current
@@ -2614,7 +2620,7 @@ impl HtmlParser {
                     .contains(current.handle)
             {
                 self.stack_of_open_elements.pop();
-                return;
+                return false;
             }
         }
 
@@ -2635,7 +2641,7 @@ impl HtmlParser {
                 Some(info) => info,
                 None => {
                     self.handle_any_other_end_tag_in_body(token);
-                    return;
+                    return true;
                 }
             };
 
@@ -2647,7 +2653,7 @@ impl HtmlParser {
                     None => {
                         self.list_of_active_formatting_elements
                             .remove(formatting_element_handle);
-                        return;
+                        return false;
                     }
                 };
 
@@ -2657,7 +2663,7 @@ impl HtmlParser {
                 .stack_of_open_elements
                 .has_element_in_scope(formatting_element_handle)
             {
-                return;
+                return false;
             }
 
             // 9. If formatting element is not the current node, this is a parse error.
@@ -2684,7 +2690,7 @@ impl HtmlParser {
                 }
                 self.list_of_active_formatting_elements
                     .remove(formatting_element_handle);
-                return;
+                return false;
             }
 
             let furthest_block_index = furthest_block_index.unwrap();
@@ -2811,7 +2817,7 @@ impl HtmlParser {
                     entry.tag_name().unwrap().to_string(),
                 )
             } else {
-                return;
+                return false;
             };
 
             let new_element = self.create_element_for(&token_clone, DomNamespace::HTML);
@@ -2856,6 +2862,8 @@ impl HtmlParser {
                 furthest_block_handle,
             );
         }
+
+        false
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-incdata
