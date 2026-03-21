@@ -429,6 +429,7 @@ fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
                     | "th"
                     | "marquee"
                     | "object"
+                    | "select"
                     | "template"
             ),
             // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-list-item-scope
@@ -442,6 +443,7 @@ fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
                     | "th"
                     | "marquee"
                     | "object"
+                    | "select"
                     | "template"
                     | "ol"
                     | "ul"
@@ -457,6 +459,7 @@ fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
                     | "th"
                     | "marquee"
                     | "object"
+                    | "select"
                     | "template"
                     | "button"
             ),
