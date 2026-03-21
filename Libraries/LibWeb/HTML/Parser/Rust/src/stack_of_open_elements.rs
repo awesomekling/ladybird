@@ -460,17 +460,19 @@ fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
                     | "button"
             ),
             // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-table-scope
+            // NOTE: Table scope only has HTML element markers, no MathML/SVG markers.
             ScopeMarkers::Table => matches!(
                 entry.tag_name.as_str(),
                 "html" | "table" | "template"
             ),
         },
+        // MathML and SVG scope markers only apply to non-table scope types.
         // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
-        DomNamespace::MathML => matches!(
+        DomNamespace::MathML if !matches!(markers, ScopeMarkers::Table) => matches!(
             entry.tag_name.as_str(),
             "mi" | "mo" | "mn" | "ms" | "mtext" | "annotation-xml"
         ),
-        DomNamespace::SVG => matches!(
+        DomNamespace::SVG if !matches!(markers, ScopeMarkers::Table) => matches!(
             entry.tag_name.as_str(),
             "foreignObject" | "desc" | "title"
         ),
