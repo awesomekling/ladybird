@@ -412,6 +412,12 @@ void html_parser_bridge_reparent_children(void* from_ptr, void* to_ptr)
     }
 }
 
+bool html_parser_bridge_parser_cannot_change_the_mode(void* document_ptr)
+{
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    return document.parser_cannot_change_the_mode();
+}
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr)
 {
     if (!visitor_ptr || !node_ptr)

@@ -77,6 +77,9 @@ void html_parser_bridge_process_pending_scripts(void* document_ptr);
 /// Check if the document is in quirks mode.
 bool html_parser_bridge_document_in_quirks_mode(void* document_ptr);
 
+/// Check if the parser cannot change the document mode (e.g., iframe srcdoc).
+bool html_parser_bridge_parser_cannot_change_the_mode(void* document_ptr);
+
 void html_parser_bridge_visit_node(void* visitor_ptr, void* node_ptr);
 
 } // extern "C"

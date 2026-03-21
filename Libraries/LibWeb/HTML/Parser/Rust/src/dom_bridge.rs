@@ -274,6 +274,9 @@ unsafe extern "C" {
     /// Check if the document is in quirks mode.
     pub fn html_parser_bridge_document_in_quirks_mode(document: *mut c_void) -> bool;
 
+    /// Check if the parser cannot change the document mode (e.g., iframe srcdoc).
+    pub fn html_parser_bridge_parser_cannot_change_the_mode(document: *mut c_void) -> bool;
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(
@@ -408,6 +411,10 @@ impl DomHandle {
         unsafe {
             html_parser_bridge_set_quirks_mode(document.as_ptr(), mode as u8);
         }
+    }
+
+    pub fn parser_cannot_change_the_mode(document: DomHandle) -> bool {
+        unsafe { html_parser_bridge_parser_cannot_change_the_mode(document.as_ptr()) }
     }
 
     pub fn insert_before(parent: DomHandle, node: DomHandle, before_sibling: Option<DomHandle>) {

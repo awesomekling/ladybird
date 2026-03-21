@@ -1077,8 +1077,10 @@ impl HtmlParser {
             DomHandle::insert_doctype(self.document, name, public_id, system_id);
 
             // Set the Document to quirks mode if appropriate.
-            let quirks = self.which_quirks_mode(token);
-            DomHandle::set_quirks_mode(self.document, quirks);
+            if !DomHandle::parser_cannot_change_the_mode(self.document) {
+                let quirks = self.which_quirks_mode(token);
+                DomHandle::set_quirks_mode(self.document, quirks);
+            }
 
             // Then, switch the insertion mode to "before html".
             self.insertion_mode = InsertionMode::BeforeHTML;
@@ -1086,8 +1088,11 @@ impl HtmlParser {
         }
 
         // -> Anything else
-        // Parse error. Set the Document to quirks mode.
-        DomHandle::set_quirks_mode(self.document, QuirksMode::Yes);
+        // Parse error. If the parser cannot change the mode flag is false,
+        // set the Document to quirks mode.
+        if !DomHandle::parser_cannot_change_the_mode(self.document) {
+            DomHandle::set_quirks_mode(self.document, QuirksMode::Yes);
+        }
 
         // Switch the insertion mode to "before html" and reprocess the token.
         self.insertion_mode = InsertionMode::BeforeHTML;
