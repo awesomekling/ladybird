@@ -213,6 +213,12 @@ void HTMLParser::visit_edges(Cell::Visitor& visitor)
     m_stack_of_open_elements.visit_edges(visitor);
     m_list_of_active_formatting_elements.visit_edges(visitor);
     m_tokenizer.visit_edges(visitor);
+
+#if ENABLE_RUST
+    // Visit DOM handles held by the Rust parser (stack of open elements, etc.)
+    if (m_rust_parser_handle)
+        rust_html_parser_visit_dom_handles(m_rust_parser_handle, &visitor);
+#endif
 }
 
 void HTMLParser::initialize(JS::Realm& realm)
