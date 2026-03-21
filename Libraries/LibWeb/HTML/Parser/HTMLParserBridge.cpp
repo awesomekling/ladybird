@@ -306,6 +306,12 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr, si
     return false;
 }
 
+bool html_parser_bridge_allow_declarative_shadow_roots(void* document_ptr)
+{
+    auto& document = *static_cast<Web::DOM::Document*>(document_ptr);
+    return document.allow_declarative_shadow_roots();
+}
+
 void html_parser_bridge_set_svg_script_parser_inserted(void* element_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);

@@ -1397,6 +1397,7 @@ impl HtmlParser {
             // 9. If shadowrootmode is not valid, or document doesn't allow declarative shadow
             //    roots, or the adjusted current node IS the topmost element: insert normally.
             if !has_valid_shadowrootmode
+                || !DomHandle::allow_declarative_shadow_roots(self.document)
                 || self.stack_of_open_elements.len() <= 1
             {
                 // Normal template: insert an HTML element for the token.

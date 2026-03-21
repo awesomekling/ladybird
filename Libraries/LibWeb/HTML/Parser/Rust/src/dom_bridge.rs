@@ -280,6 +280,9 @@ unsafe extern "C" {
     /// Check if the parser cannot change the document mode (e.g., iframe srcdoc).
     pub fn html_parser_bridge_parser_cannot_change_the_mode(document: *mut c_void) -> bool;
 
+    /// Check if the document allows declarative shadow roots.
+    pub fn html_parser_bridge_allow_declarative_shadow_roots(document: *mut c_void) -> bool;
+
     /// Visit a DOM handle for garbage collection.
     /// The visitor_ctx is an opaque pointer to a C++ GC::Cell::Visitor.
     pub fn html_parser_bridge_visit_node(
@@ -418,6 +421,10 @@ impl DomHandle {
 
     pub fn parser_cannot_change_the_mode(document: DomHandle) -> bool {
         unsafe { html_parser_bridge_parser_cannot_change_the_mode(document.as_ptr()) }
+    }
+
+    pub fn allow_declarative_shadow_roots(document: DomHandle) -> bool {
+        unsafe { html_parser_bridge_allow_declarative_shadow_roots(document.as_ptr()) }
     }
 
     pub fn insert_before(parent: DomHandle, node: DomHandle, before_sibling: Option<DomHandle>) {

@@ -77,6 +77,9 @@ void html_parser_bridge_process_pending_scripts(void* document_ptr);
 /// Check if the document is in quirks mode.
 bool html_parser_bridge_document_in_quirks_mode(void* document_ptr);
 
+/// Check if the document allows declarative shadow roots.
+bool html_parser_bridge_allow_declarative_shadow_roots(void* document_ptr);
+
 /// Mark an SVG script element as parser-inserted.
 void html_parser_bridge_set_svg_script_parser_inserted(void* element_ptr);
 
