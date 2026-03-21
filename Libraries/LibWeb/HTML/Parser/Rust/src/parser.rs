@@ -212,6 +212,12 @@ impl HtmlParser {
         }
 
         self.flush_character_insertions();
+
+        // https://html.spec.whatwg.org/multipage/parsing.html#the-end
+        // 4. Pop all the nodes off the stack of open elements.
+        while !self.stack_of_open_elements.is_empty() {
+            self.stack_of_open_elements.pop();
+        }
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#tree-construction-dispatcher

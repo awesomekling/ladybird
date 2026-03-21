@@ -126,11 +126,15 @@ impl StackOfOpenElements {
     }
 
     /// Pop elements until an element with the given tag name has been popped.
-    /// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
     pub fn pop_until_tag_name_popped(&mut self, tag: &str) {
-        while let Some(entry) = self.elements.last() {
-            let matches = entry.namespace == DomNamespace::HTML && entry.tag_name == tag;
-            self.elements.pop();
+        loop {
+            let matches = self
+                .elements
+                .last()
+                .is_some_and(|e| e.namespace == DomNamespace::HTML && e.tag_name == tag);
+            if self.pop().is_none() {
+                break;
+            }
             if matches {
                 break;
             }
@@ -139,10 +143,13 @@ impl StackOfOpenElements {
 
     /// Pop elements until one of the given tag names has been popped.
     pub fn pop_until_one_of_tag_names_popped(&mut self, tags: &[&str]) {
-        while let Some(entry) = self.elements.last() {
-            let matches =
-                entry.namespace == DomNamespace::HTML && tags.contains(&entry.tag_name.as_str());
-            self.elements.pop();
+        loop {
+            let matches = self.elements.last().is_some_and(|e| {
+                e.namespace == DomNamespace::HTML && tags.contains(&e.tag_name.as_str())
+            });
+            if self.pop().is_none() {
+                break;
+            }
             if matches {
                 break;
             }
@@ -294,7 +301,7 @@ impl StackOfOpenElements {
                 false
             };
             if should_pop {
-                self.elements.pop();
+                self.pop();
             } else {
                 break;
             }
@@ -314,7 +321,7 @@ impl StackOfOpenElements {
                 false
             };
             if should_pop {
-                self.elements.pop();
+                self.pop();
             } else {
                 break;
             }
