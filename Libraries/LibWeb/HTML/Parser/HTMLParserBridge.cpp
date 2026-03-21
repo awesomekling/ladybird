@@ -306,6 +306,13 @@ bool html_parser_bridge_execute_script(void* element_ptr, void* document_ptr, si
     return false;
 }
 
+void html_parser_bridge_set_svg_script_parser_inserted(void* element_ptr)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+    if (auto* script = as_if<Web::SVG::SVGScriptElement>(&element))
+        Web::HTML::HTMLParser::mark_svg_script_as_parser_inserted(*script);
+}
+
 void html_parser_bridge_setup_script_element(void* element_ptr, void* document_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);

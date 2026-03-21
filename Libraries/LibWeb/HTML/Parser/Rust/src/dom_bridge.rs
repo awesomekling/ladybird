@@ -247,6 +247,9 @@ unsafe extern "C" {
     /// Notify that an element was popped from the stack of open elements.
     pub fn html_parser_bridge_element_popped(element: *mut c_void);
 
+    /// Mark an SVG script element as parser-inserted.
+    pub fn html_parser_bridge_set_svg_script_parser_inserted(element: *mut c_void);
+
     /// Set parser_document and force_async=false on a script element.
     pub fn html_parser_bridge_setup_script_element(
         element: *mut c_void,
@@ -482,6 +485,12 @@ impl DomHandle {
     pub fn setup_script_element(self, document: DomHandle) {
         unsafe {
             html_parser_bridge_setup_script_element(self.as_ptr(), document.as_ptr());
+        }
+    }
+
+    pub fn set_svg_script_parser_inserted(self) {
+        unsafe {
+            html_parser_bridge_set_svg_script_parser_inserted(self.as_ptr());
         }
     }
 }

@@ -3984,6 +3984,40 @@ impl HtmlParser {
         // Anything else: parse error, ignore.
     }
 
+    /// Steps for an SVG script end tag (or self-closing SVG script start tag).
+    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+    fn run_svg_script_end_tag_steps(&mut self) {
+        // Pop the current node off the stack of open elements.
+        let script_entry = self.stack_of_open_elements.pop();
+
+        // Let the old insertion point have the same value as the current insertion point.
+        self.tokenizer.store_insertion_point();
+        // Let the insertion point be just before the next input character.
+        self.tokenizer.update_insertion_point();
+        // Increment the parser's script nesting level by one.
+        self.script_nesting_level += 1;
+        // Set the parser pause flag to true.
+        self.parser_pause_flag = true;
+
+        // Non-standard: flush character insertions so the script text is complete.
+        self.flush_character_insertions();
+
+        // Process the SVG script element.
+        if let Some(entry) = script_entry {
+            entry.handle.execute_script(self.document, self.script_nesting_level);
+        }
+
+        // Decrement the parser's script nesting level by one.
+        self.script_nesting_level -= 1;
+        // If the parser's script nesting level is zero, then set the parser pause flag to false.
+        if self.script_nesting_level == 0 {
+            self.parser_pause_flag = false;
+        }
+
+        // Let the insertion point have the value of the old insertion point.
+        self.tokenizer.restore_insertion_point();
+    }
+
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
     fn process_using_the_rules_for_foreign_content(&mut self, token: &Token) {
         // TODO: Full foreign content implementation
@@ -4102,14 +4136,19 @@ impl HtmlParser {
             }
 
             self.insert_foreign_element(token, namespace, false);
+
+            // AD-HOC: Mark SVG script elements as parser-inserted so they don't
+            // execute prematurely when text content is added.
+            if namespace == DomNamespace::SVG && token.tag_name() == "script" {
+                if let Some(current) = self.stack_of_open_elements.current_node() {
+                    current.handle.set_svg_script_parser_inserted();
+                }
+            }
+
             if token.is_self_closing() {
-                // If self-closing SVG script, execute it before popping.
+                // If self-closing SVG script, handle as if </script> end tag.
                 if namespace == DomNamespace::SVG && token.tag_name() == "script" {
-                    self.flush_character_insertions();
-                    let script = self.stack_of_open_elements.pop();
-                    if let Some(entry) = script {
-                        entry.handle.execute_script(self.document, self.script_nesting_level);
-                    }
+                    self.run_svg_script_end_tag_steps();
                 } else {
                     self.stack_of_open_elements.pop();
                 }
@@ -4136,18 +4175,11 @@ impl HtmlParser {
 
         if token.is_end_tag() {
             // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
-            // Special case: </script> when current node is an SVG script element.
+            // -> An end tag whose tag name is "script", if the current node is an SVG script element
             if token.tag_name() == "script" {
                 if let Some(current) = self.stack_of_open_elements.current_node() {
                     if current.namespace == DomNamespace::SVG && current.tag_name == "script" {
-                        // Flush character insertions so the script text is complete.
-                        self.flush_character_insertions();
-                        // Pop the script element.
-                        let script_entry = self.stack_of_open_elements.pop();
-                        // Execute the SVG script via the bridge.
-                        if let Some(entry) = script_entry {
-                            entry.handle.execute_script(self.document, self.script_nesting_level);
-                        }
+                        self.run_svg_script_end_tag_steps();
                         return;
                     }
                 }
