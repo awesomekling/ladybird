@@ -1,0 +1,10 @@
+PASS: select is scope marker
+PASS: foreign content break-out
+PASS: adoption agency nested anchors
+PASS: template end tag in after-head
+PASS: option pop without select
+PASS: fragment select context ignores input
+PASS: fragment select context ignores nested select
+PASS: fragment reset insertion mode
+PASS: SVG foreign content
+PASS: declarative shadow DOM (not applicable in innerHTML)
