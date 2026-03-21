@@ -806,17 +806,28 @@ impl HtmlParser {
         let mut node_index = self.stack_of_open_elements.len() - 1;
 
         loop {
-            let node = self.stack_of_open_elements.entry_at(node_index);
-            let tag = node.tag_name.as_str();
-            let ns = node.namespace;
-
             // 3. Loop: If node is the first node in the stack of open elements, then set last to
             //    true, and, if the parser was created as part of the HTML fragment parsing algorithm
             //    (fragment case), set node to the context element passed to that algorithm.
-            if node_index == 0 {
+            let (tag, ns) = if node_index == 0 {
                 last = true;
-                // TODO: fragment case - set node to context element
-            }
+                if self.parsing_fragment {
+                    if let Some(ctx) = self.context_element {
+                        // Use the context element's tag name and namespace.
+                        (ctx.local_name(), ctx.namespace())
+                    } else {
+                        let node = self.stack_of_open_elements.entry_at(node_index);
+                        (node.tag_name.clone(), node.namespace)
+                    }
+                } else {
+                    let node = self.stack_of_open_elements.entry_at(node_index);
+                    (node.tag_name.clone(), node.namespace)
+                }
+            } else {
+                let node = self.stack_of_open_elements.entry_at(node_index);
+                (node.tag_name.clone(), node.namespace)
+            };
+            let tag = tag.as_str();
 
             if ns == DomNamespace::HTML {
                 // 4. If node is a select element, run these substeps:

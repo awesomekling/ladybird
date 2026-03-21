@@ -42,6 +42,20 @@ pub enum DomNamespace {
     XMLNS = 5,
 }
 
+impl DomNamespace {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            0 => DomNamespace::HTML,
+            1 => DomNamespace::SVG,
+            2 => DomNamespace::MathML,
+            3 => DomNamespace::XLink,
+            4 => DomNamespace::XML,
+            5 => DomNamespace::XMLNS,
+            _ => DomNamespace::HTML,
+        }
+    }
+}
+
 /// Quirks mode values matching C++ DOM::Document::QuirksMode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -465,6 +479,20 @@ impl DomHandle {
 
     pub fn is_text_node(self) -> bool {
         unsafe { html_parser_bridge_is_text_node(self.as_ptr()) }
+    }
+
+    pub fn local_name(self) -> String {
+        unsafe {
+            let mut ptr: *const u8 = std::ptr::null();
+            let mut len: usize = 0;
+            html_parser_bridge_element_local_name(self.as_ptr(), &mut ptr, &mut len);
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)).to_string()
+        }
+    }
+
+    pub fn namespace(self) -> DomNamespace {
+        let ns = unsafe { html_parser_bridge_element_namespace(self.as_ptr()) };
+        DomNamespace::from_u8(ns)
     }
 
     pub fn is_element(self) -> bool {
