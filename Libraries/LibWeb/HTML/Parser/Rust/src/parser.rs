@@ -496,10 +496,15 @@ impl HtmlParser {
         // 11. Append each attribute in the given token to element.
         // NOTE: Using append_attribute ensures first attribute wins (per spec).
         for attr in token.attributes() {
-            // Adjust foreign attributes (xlink:*, xml:*, xmlns:*).
-            if let Some((ns, prefix, local_name)) = adjust_foreign_attribute(&attr.local_name) {
-                element.set_attribute_ns(ns, prefix, local_name, &attr.value);
-                continue;
+            // https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes
+            // Adjust foreign attributes only for elements in foreign (non-HTML) namespaces.
+            if namespace != DomNamespace::HTML {
+                if let Some((ns, prefix, local_name)) =
+                    adjust_foreign_attribute(&attr.local_name)
+                {
+                    element.set_attribute_ns(ns, prefix, local_name, &attr.value);
+                    continue;
+                }
             }
             // Adjust MathML attribute names.
             if namespace == DomNamespace::MathML && attr.local_name == "definitionurl" {
