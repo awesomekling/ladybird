@@ -178,10 +178,12 @@ impl StackOfOpenElements {
     }
 
     /// Get the element immediately above (closer to top) the target.
+    /// Return the element immediately above (closer to the root) the target in the stack.
+    /// In the spec, "above" means toward the root of the tree (lower index in our array).
     pub fn element_immediately_above(&self, target: DomHandle) -> Option<&StackEntry> {
         if let Some(pos) = self.elements.iter().position(|e| e.handle == target) {
-            if pos + 1 < self.elements.len() {
-                return Some(&self.elements[pos + 1]);
+            if pos > 0 {
+                return Some(&self.elements[pos - 1]);
             }
         }
         None
