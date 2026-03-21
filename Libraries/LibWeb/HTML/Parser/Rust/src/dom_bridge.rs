@@ -180,6 +180,9 @@ unsafe extern "C" {
     /// Get the next sibling. Returns null if none.
     pub fn html_parser_bridge_next_sibling(node: *mut c_void) -> *mut c_void;
 
+    /// Get the previous sibling. Returns null if none.
+    pub fn html_parser_bridge_previous_sibling(node: *mut c_void) -> *mut c_void;
+
     /// Check if a node is a Text node.
     pub fn html_parser_bridge_is_text_node(node: *mut c_void) -> bool;
 
@@ -435,6 +438,11 @@ impl DomHandle {
 
     pub fn next_sibling(self) -> Option<DomHandle> {
         let s = DomHandle(unsafe { html_parser_bridge_next_sibling(self.as_ptr()) });
+        if s.is_null() { None } else { Some(s) }
+    }
+
+    pub fn previous_sibling(self) -> Option<DomHandle> {
+        let s = DomHandle(unsafe { html_parser_bridge_previous_sibling(self.as_ptr()) });
         if s.is_null() { None } else { Some(s) }
     }
 

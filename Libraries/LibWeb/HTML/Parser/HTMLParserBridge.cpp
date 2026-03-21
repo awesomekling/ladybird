@@ -231,6 +231,12 @@ void* html_parser_bridge_next_sibling(void* node_ptr)
     return node.next_sibling();
 }
 
+void* html_parser_bridge_previous_sibling(void* node_ptr)
+{
+    auto& node = *static_cast<Web::DOM::Node*>(node_ptr);
+    return node.previous_sibling();
+}
+
 bool html_parser_bridge_is_text_node(void* node_ptr)
 {
     auto& node = *static_cast<Web::DOM::Node*>(node_ptr);

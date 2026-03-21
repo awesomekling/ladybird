@@ -215,8 +215,15 @@ impl HtmlParser {
 
         // https://html.spec.whatwg.org/multipage/parsing.html#the-end
         // 4. Pop all the nodes off the stack of open elements.
-        while !self.stack_of_open_elements.is_empty() {
-            self.stack_of_open_elements.pop();
+        // Call element_popped only for option elements (needed for selectedcontent cloning).
+        // We must flush character insertions first so option content is up-to-date.
+        self.flush_character_insertions();
+        while let Some(entry) = self.stack_of_open_elements.current_node() {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == "option" {
+                self.stack_of_open_elements.pop();
+            } else {
+                self.stack_of_open_elements.elements_mut().pop();
+            }
         }
     }
 
@@ -607,9 +614,9 @@ impl HtmlParser {
         }
 
         // Find or create the text node we'll insert into.
-        let text_node = if adjusted.insert_before_sibling.is_some() {
-            // TODO: Check previous sibling of insert_before_sibling for an existing text node
-            None::<DomHandle>
+        let text_node = if let Some(before) = adjusted.insert_before_sibling {
+            // Check if the previous sibling of insert_before_sibling is a text node.
+            before.previous_sibling().filter(|s| s.is_text_node())
         } else {
             // Check if the last child of the parent is a text node.
             adjusted.parent.last_child().filter(|c| c.is_text_node())

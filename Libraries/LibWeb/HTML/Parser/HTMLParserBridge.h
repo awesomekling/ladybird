@@ -34,6 +34,7 @@ void html_parser_bridge_remove_node(void* node_ptr);
 void* html_parser_bridge_parent(void* node_ptr);
 void* html_parser_bridge_last_child(void* node_ptr);
 void* html_parser_bridge_next_sibling(void* node_ptr);
+void* html_parser_bridge_previous_sibling(void* node_ptr);
 bool html_parser_bridge_is_text_node(void* node_ptr);
 bool html_parser_bridge_is_element(void* node_ptr);
 

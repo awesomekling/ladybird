@@ -64,16 +64,22 @@ impl StackOfOpenElements {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#stack-of-open-elements
-    /// Pop the current node off the stack.
+    /// Pop the current node off the stack, notifying the C++ side.
     pub fn pop(&mut self) -> Option<StackEntry> {
         let entry = self.elements.pop();
         if let Some(ref e) = entry {
             // Notify the C++ side that an element was popped.
+            // This is needed for option elements (maybe_clone_into_selectedcontent).
             unsafe {
                 crate::dom_bridge::html_parser_bridge_element_popped(e.handle.as_ptr());
             }
         }
         entry
+    }
+
+    /// Clear the stack without callbacks. Used at end of parsing.
+    pub fn clear(&mut self) {
+        self.elements.clear();
     }
 
     pub fn is_empty(&self) -> bool {
