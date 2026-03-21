@@ -4035,8 +4035,9 @@ impl HtmlParser {
                     }
                     self.stack_of_open_elements.pop();
                 }
-                // Reprocess the token.
-                self.reprocess_token();
+                // Reprocess the token according to the rules given in the section
+                // corresponding to the current insertion mode in HTML content.
+                self.process_using_the_rules_for(self.insertion_mode, token);
                 return;
             }
         }
@@ -4099,7 +4100,7 @@ impl HtmlParser {
 
         // -> An end tag whose tag name is "br", "p"
         // Parse error. Pop elements until an HTML integration point, MathML text integration
-        // point, or HTML namespace element. Then reprocess in InBody.
+        // point, or HTML namespace element. Then reprocess using the current insertion mode.
         if token.is_end_tag() && matches!(token.tag_name(), "br" | "p") {
             while let Some(current) = self.stack_of_open_elements.current_node() {
                 if current.namespace == DomNamespace::HTML
@@ -4110,7 +4111,7 @@ impl HtmlParser {
                 }
                 self.stack_of_open_elements.pop();
             }
-            self.reprocess_token();
+            self.process_using_the_rules_for(self.insertion_mode, token);
             return;
         }
 
