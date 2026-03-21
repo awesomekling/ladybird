@@ -2481,22 +2481,35 @@ impl HtmlParser {
             return;
         }
 
-        // -> A start tag whose tag name is one of: "optgroup", "option"
-        if token.is_start_tag() && matches!(token.tag_name(), "optgroup" | "option") {
-            // If the stack of open elements has a select element in scope:
+        // -> A start tag whose tag name is "option"
+        if token.is_start_tag() && token.tag_name() == "option" {
             if self.stack_of_open_elements.has_in_scope("select") {
-                if token.tag_name() == "option" {
-                    self.stack_of_open_elements
-                        .generate_implied_end_tags(Some("optgroup"));
-                } else {
-                    self.stack_of_open_elements
-                        .generate_implied_end_tags(None);
-                }
+                // Generate implied end tags except for optgroup elements.
+                self.stack_of_open_elements
+                    .generate_implied_end_tags(Some("optgroup"));
+            } else if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element("option"))
+            {
+                self.stack_of_open_elements.pop();
             }
-            if let Some(current) = self.stack_of_open_elements.current_node() {
-                if current.is_html_element("option") {
-                    self.stack_of_open_elements.pop();
-                }
+            self.reconstruct_the_active_formatting_elements();
+            self.insert_html_element(token);
+            return;
+        }
+
+        // -> A start tag whose tag name is "optgroup"
+        if token.is_start_tag() && token.tag_name() == "optgroup" {
+            if self.stack_of_open_elements.has_in_scope("select") {
+                // Generate implied end tags.
+                self.stack_of_open_elements.generate_implied_end_tags(None);
+            } else if self
+                .stack_of_open_elements
+                .current_node()
+                .is_some_and(|n| n.is_html_element("option"))
+            {
+                self.stack_of_open_elements.pop();
             }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
