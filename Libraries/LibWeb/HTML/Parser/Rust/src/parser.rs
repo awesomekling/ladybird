@@ -2380,6 +2380,15 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "input"
         if token.is_start_tag() && token.tag_name() == "input" {
+            // If the parser was created as part of the HTML fragment parsing algorithm and
+            // the context element is a select element, ignore the token.
+            if self.parsing_fragment
+                && self
+                    .context_element
+                    .is_some_and(|ctx| ctx.local_name() == "select")
+            {
+                return;
+            }
             // If the stack of open elements has a select element in scope:
             if self.stack_of_open_elements.has_in_scope("select") {
                 // Pop elements until a select element has been popped.
@@ -2477,10 +2486,18 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "select"
         if token.is_start_tag() && token.tag_name() == "select" {
+            // If the parser was created as part of the HTML fragment parsing algorithm and
+            // the context element is a select element, ignore the token.
+            if self.parsing_fragment
+                && self
+                    .context_element
+                    .is_some_and(|ctx| ctx.local_name() == "select")
+            {
+                // Parse error. Ignore the token.
+            }
             // If the stack of open elements has a select element in scope:
-            if self.stack_of_open_elements.has_in_scope("select") {
+            else if self.stack_of_open_elements.has_in_scope("select") {
                 // Parse error. Pop elements until a select element has been popped.
-                // (This handles nested <select> by closing the existing one.)
                 self.stack_of_open_elements
                     .pop_until_tag_name_popped("select");
             } else {
