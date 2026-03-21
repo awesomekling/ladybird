@@ -3952,9 +3952,15 @@ impl HtmlParser {
                     || token.has_attribute("face")
                     || token.has_attribute("size")))
             {
-                // Parse error. Pop elements until current node is in HTML namespace.
+                // Parse error. Pop an element from the stack of open elements, and then keep
+                // popping more elements from the stack of open elements until the current node
+                // is a MathML text integration point, an HTML integration point, or an element
+                // in the HTML namespace.
                 while let Some(current) = self.stack_of_open_elements.current_node() {
-                    if current.namespace == DomNamespace::HTML {
+                    if current.namespace == DomNamespace::HTML
+                        || is_mathml_text_integration_point(current)
+                        || is_html_integration_point(current)
+                    {
                         break;
                     }
                     self.stack_of_open_elements.pop();
@@ -4187,6 +4193,41 @@ fn adjust_foreign_attribute(name: &str) -> Option<(DomNamespace, &str, &str)> {
         "xmlns:xlink" => Some((DomNamespace::XMLNS, "xmlns", "xlink")),
         _ => None,
     }
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#mathml-text-integration-point
+fn is_mathml_text_integration_point(entry: &StackEntry) -> bool {
+    entry.namespace == DomNamespace::MathML
+        && matches!(
+            entry.tag_name.as_str(),
+            "mi" | "mo" | "mn" | "ms" | "mtext"
+        )
+}
+
+/// https://html.spec.whatwg.org/multipage/parsing.html#html-integration-point
+fn is_html_integration_point(entry: &StackEntry) -> bool {
+    // An SVG foreignObject, desc, or title element.
+    if entry.namespace == DomNamespace::SVG
+        && matches!(
+            entry.tag_name.as_str(),
+            "foreignObject" | "desc" | "title"
+        )
+    {
+        return true;
+    }
+    // A MathML annotation-xml element whose start tag token had an attribute with the name
+    // "encoding" whose value was an ASCII case-insensitive match for "text/html" or
+    // "application/xhtml+xml".
+    if entry.namespace == DomNamespace::MathML && entry.tag_name == "annotation-xml" {
+        if let Some(ref encoding) = entry.encoding_attr {
+            if encoding.eq_ignore_ascii_case("text/html")
+                || encoding.eq_ignore_ascii_case("application/xhtml+xml")
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#adjust-svg-attributes
