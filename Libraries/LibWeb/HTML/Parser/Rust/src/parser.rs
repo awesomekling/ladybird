@@ -158,6 +158,25 @@ impl HtmlParser {
         self.form_element = Some(form_element);
     }
 
+    /// Push an element onto the stack of open elements (used in fragment parsing setup).
+    pub fn push_onto_open_elements(&mut self, element: DomHandle, tag_name: &str, namespace: DomNamespace) {
+        self.stack_of_open_elements.push(StackEntry::new(
+            element,
+            tag_name.to_string(),
+            namespace,
+        ));
+    }
+
+    /// Push a template insertion mode (used in fragment parsing setup).
+    pub fn push_template_insertion_mode(&mut self, mode: InsertionMode) {
+        self.stack_of_template_insertion_modes.push(mode);
+    }
+
+    /// Reset the parser's insertion mode appropriately (public for FFI).
+    pub fn reset_insertion_mode(&mut self) {
+        self.reset_the_insertion_mode_appropriately();
+    }
+
     // =======================================================================
     // Main parsing loop
     // https://html.spec.whatwg.org/multipage/parsing.html#tree-construction

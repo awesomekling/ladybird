@@ -58,6 +58,16 @@ extern "C" {
 void* rust_html_parser_create(void* document, uint32_t const* input, size_t input_len, bool scripting_enabled);
 void rust_html_parser_run(void* handle);
 void rust_html_parser_visit_dom_handles(void* handle, void* visitor);
+void rust_html_parser_insert_input(void* handle, uint32_t const* input, size_t input_len);
+void rust_html_parser_insert_eof(void* handle);
+void rust_html_parser_run_stop_at_insertion_point(void* handle);
+bool rust_html_parser_is_insertion_point_defined(void* handle);
+void rust_html_parser_set_context_element(void* handle, void* context_element);
+void rust_html_parser_set_tokenizer_state(void* handle, uint8_t state);
+void rust_html_parser_set_form_element(void* handle, void* form_element);
+void rust_html_parser_push_element(void* handle, void* element, uint8_t const* tag_name, size_t tag_name_len, uint8_t namespace_);
+void rust_html_parser_push_template_insertion_mode(void* handle);
+void rust_html_parser_reset_insertion_mode(void* handle);
 void rust_html_parser_destroy(void* handle);
 }
 
@@ -4899,53 +4909,81 @@ WebIDL::ExceptionOr<Vector<GC::Root<DOM::Node>>> HTMLParser::parse_html_fragment
     if (allow_declarative_shadow_roots == AllowDeclarativeShadowRoots::Yes)
         temp_document->set_allow_declarative_shadow_roots(true);
 
-    // 5. Create a new HTML parser, and associate it with document.
-    auto parser = HTMLParser::create(*temp_document, markup, "utf-8"sv);
-    parser->m_context_element = context_element;
-    parser->m_parsing_fragment = true;
-
-    // 6. Set the state of the HTML parser's tokenization stage as follows, switching on the context element:
-    // - title
-    // - textarea
-    if (context_element.local_name().is_one_of(HTML::TagNames::title, HTML::TagNames::textarea)) {
-        // Switch the tokenizer to the RCDATA state.
-        parser->m_tokenizer.switch_to({}, HTMLTokenizer::State::RCDATA);
-    }
-    // - style
-    // - xmp
-    // - iframe
-    // - noembed
-    // - noframes
-    else if (context_element.local_name().is_one_of(HTML::TagNames::style, HTML::TagNames::xmp, HTML::TagNames::iframe, HTML::TagNames::noembed, HTML::TagNames::noframes)) {
-        // Switch the tokenizer to the RAWTEXT state.
-        parser->m_tokenizer.switch_to({}, HTMLTokenizer::State::RAWTEXT);
-    }
-    // - script
-    else if (context_element.local_name().is_one_of(HTML::TagNames::script)) {
-        // Switch the tokenizer to the script data state.
-        parser->m_tokenizer.switch_to({}, HTMLTokenizer::State::ScriptData);
-    }
-    // - noscript
-    else if (context_element.local_name().is_one_of(HTML::TagNames::noscript)) {
-        // If the scripting flag is enabled, switch the tokenizer to the RAWTEXT state. Otherwise, leave the tokenizer in the data state.
-        if (context_element.document().is_scripting_enabled())
-            parser->m_tokenizer.switch_to({}, HTMLTokenizer::State::RAWTEXT);
-    }
-    // - plaintext
-    else if (context_element.local_name().is_one_of(HTML::TagNames::plaintext)) {
-        // Switch the tokenizer to the PLAINTEXT state.
-        parser->m_tokenizer.switch_to({}, HTMLTokenizer::State::PLAINTEXT);
-    }
-    // Any other element
-    else {
-        // Leave the tokenizer in the data state.
-    }
+    // 6. Determine the tokenizer state based on the context element.
+    auto tokenizer_state = HTMLTokenizer::State::Data;
+    if (context_element.local_name().is_one_of(HTML::TagNames::title, HTML::TagNames::textarea))
+        tokenizer_state = HTMLTokenizer::State::RCDATA;
+    else if (context_element.local_name().is_one_of(HTML::TagNames::style, HTML::TagNames::xmp, HTML::TagNames::iframe, HTML::TagNames::noembed, HTML::TagNames::noframes))
+        tokenizer_state = HTMLTokenizer::State::RAWTEXT;
+    else if (context_element.local_name() == HTML::TagNames::script)
+        tokenizer_state = HTMLTokenizer::State::ScriptData;
+    else if (context_element.local_name() == HTML::TagNames::noscript && context_element.document().is_scripting_enabled())
+        tokenizer_state = HTMLTokenizer::State::RAWTEXT;
+    else if (context_element.local_name() == HTML::TagNames::plaintext)
+        tokenizer_state = HTMLTokenizer::State::PLAINTEXT;
 
     // 7. Let root be the result of creating an element given document, "html", and the HTML namespace.
     auto root = MUST(create_element(context_element.document(), HTML::TagNames::html, Namespace::HTML));
 
     // 8. Append root to document.
     MUST(temp_document->append_child(root));
+
+    // 13. Set the HTML parser's form element pointer to the nearest node to context that is a form element.
+    auto* form_element = context_element.first_ancestor_of_type<HTMLFormElement>();
+
+#ifdef ENABLE_RUST
+    if (rust_html_parser_enabled()) {
+        // 5. Create a new Rust HTML parser, and associate it with document.
+        //    We use a temporary C++ HTMLParser to decode the input to code points.
+        auto temp_parser = HTMLParser::create(*temp_document, markup, "utf-8"sv);
+        auto const& code_points = temp_parser->m_tokenizer.decoded_input();
+        auto* handle = rust_html_parser_create(temp_document.ptr(), code_points.data(), code_points.size(), context_element.document().is_scripting_enabled());
+
+        // Set context element (enables fragment parsing mode).
+        rust_html_parser_set_context_element(handle, &context_element);
+
+        // 6. Set the tokenizer state.
+        if (tokenizer_state != HTMLTokenizer::State::Data)
+            rust_html_parser_set_tokenizer_state(handle, static_cast<uint8_t>(tokenizer_state));
+
+        // 9. Push root onto the stack of open elements.
+        auto local_name_bytes = root->local_name().bytes();
+        rust_html_parser_push_element(handle, root.ptr(), local_name_bytes.data(), local_name_bytes.size(), 0 /* HTML namespace */);
+
+        // 10. If context is a template element, push "in template" onto the template insertion modes stack.
+        if (context_element.local_name() == HTML::TagNames::template_)
+            rust_html_parser_push_template_insertion_mode(handle);
+
+        // 12. Reset the parser's insertion mode appropriately.
+        rust_html_parser_reset_insertion_mode(handle);
+
+        // 13. Set the form element pointer.
+        if (form_element)
+            rust_html_parser_set_form_element(handle, form_element);
+
+        // 15. Run the parser.
+        rust_html_parser_run(handle);
+        rust_html_parser_destroy(handle);
+
+        // 16. Return root's children, in tree order.
+        Vector<GC::Root<DOM::Node>> children;
+        while (GC::Ptr<DOM::Node> child = root->first_child()) {
+            MUST(root->remove_child(*child));
+            context_element.document().adopt_node(*child);
+            children.append(GC::make_root(*child));
+        }
+        return children;
+    }
+#endif
+
+    // 5. Create a new C++ HTML parser, and associate it with document.
+    auto parser = HTMLParser::create(*temp_document, markup, "utf-8"sv);
+    parser->m_context_element = context_element;
+    parser->m_parsing_fragment = true;
+
+    // 6. Set the tokenizer state.
+    if (tokenizer_state != HTMLTokenizer::State::Data)
+        parser->m_tokenizer.switch_to({}, tokenizer_state);
 
     // 9. Set up the HTML parser's stack of open elements so that it contains just the single element root.
     parser->m_stack_of_open_elements.push(root);
@@ -4961,10 +4999,8 @@ WebIDL::ExceptionOr<Vector<GC::Root<DOM::Node>>> HTMLParser::parse_html_fragment
     // 12. Reset the parser's insertion mode appropriately.
     parser->reset_the_insertion_mode_appropriately();
 
-    // 13. Set the HTML parser's form element pointer to the nearest node to context that is a form element
-    //     (going straight up the ancestor chain, and including the element itself, if it is a form element), if any.
-    //     (If there is no such form element, the form element pointer keeps its initial value, null.)
-    parser->m_form_element = context_element.first_ancestor_of_type<HTMLFormElement>();
+    // 13. Set the form element pointer.
+    parser->m_form_element = form_element;
 
     // 14. Place the input into the input stream for the HTML parser just created. The encoding confidence is irrelevant.
     // 15. Start the HTML parser and let it run until it has consumed all the characters just inserted into the input stream.

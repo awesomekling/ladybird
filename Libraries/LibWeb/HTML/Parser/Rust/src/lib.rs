@@ -101,6 +101,53 @@ pub unsafe extern "C" fn rust_html_parser_set_form_element(
         .set_form_element(dom_bridge::DomHandle(form_element));
 }
 
+/// Push an element onto the parser's stack of open elements.
+///
+/// # Safety
+/// `handle` must be a valid pointer. `element` must be a valid DOM element pointer.
+/// `tag_name` must point to `tag_name_len` valid UTF-8 bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_push_element(
+    handle: *mut HtmlParserHandle,
+    element: *mut c_void,
+    tag_name: *const u8,
+    tag_name_len: usize,
+    namespace: u8,
+) {
+    let handle = unsafe { &mut *handle };
+    let name = std::str::from_utf8(unsafe { std::slice::from_raw_parts(tag_name, tag_name_len) })
+        .expect("invalid UTF-8 for tag name");
+    handle.parser.push_onto_open_elements(
+        dom_bridge::DomHandle(element),
+        name,
+        dom_bridge::DomNamespace::from_u8(namespace),
+    );
+}
+
+/// Push "in template" onto the stack of template insertion modes.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_push_template_insertion_mode(
+    handle: *mut HtmlParserHandle,
+) {
+    let handle = unsafe { &mut *handle };
+    handle
+        .parser
+        .push_template_insertion_mode(parser::InsertionMode::InTemplate);
+}
+
+/// Reset the parser's insertion mode appropriately.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_reset_insertion_mode(handle: *mut HtmlParserHandle) {
+    let handle = unsafe { &mut *handle };
+    handle.parser.reset_insertion_mode();
+}
+
 /// Run the Rust HTML parser.
 ///
 /// # Safety
