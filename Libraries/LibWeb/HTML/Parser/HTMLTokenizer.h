@@ -20,8 +20,6 @@
 
 namespace Web::HTML {
 
-class RustHTMLTokenizer;
-
 #define ENUMERATE_TOKENIZER_STATES                                        \
     __ENUMERATE_TOKENIZER_STATE(Data)                                     \
     __ENUMERATE_TOKENIZER_STATE(RCDATA)                                   \
@@ -226,8 +224,6 @@ private:
     bool m_aborted { false };
 
     Vector<HTMLToken::Position> m_source_positions;
-
-    RustHTMLTokenizer* m_rust_tokenizer { nullptr };
 };
 
 }
