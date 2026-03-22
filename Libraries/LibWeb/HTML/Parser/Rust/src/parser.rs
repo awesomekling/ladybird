@@ -548,9 +548,7 @@ impl HtmlParser {
         }
 
         // Post-creation setup (e.g., media element muted attribute, link element parser document).
-        unsafe {
-            crate::dom_bridge::html_parser_bridge_post_create_element(element.as_ptr());
-        }
+        element.post_create_element();
 
         // 15. Associate with form element if applicable.
         if let Some(form) = self.form_element {
@@ -1451,18 +1449,15 @@ impl HtmlParser {
                 let serializable = token.has_attribute("shadowrootserializable");
                 let delegates_focus = token.has_attribute("shadowrootdelegatesfocus");
 
-                let success = unsafe {
-                    crate::dom_bridge::html_parser_bridge_handle_declarative_shadow_template(
-                        template_element.as_ptr(),
-                        host_handle.as_ptr(),
-                        self.document.as_ptr(),
-                        mode.as_ptr(),
-                        mode.len(),
-                        clonable,
-                        serializable,
-                        delegates_focus,
-                    )
-                };
+                let success = DomHandle::handle_declarative_shadow_template(
+                    template_element,
+                    host_handle,
+                    self.document,
+                    mode,
+                    clonable,
+                    serializable,
+                    delegates_focus,
+                );
 
                 if !success {
                     // Shadow root attachment failed: insert the template at the
@@ -2365,9 +2360,7 @@ impl HtmlParser {
         if token.is_start_tag() && token.tag_name() == "table" {
             // If the Document is not set to quirks mode, and the stack of open elements
             // has a p element in button scope, then close a p element.
-            let in_quirks = unsafe {
-                crate::dom_bridge::html_parser_bridge_document_in_quirks_mode(self.document.as_ptr())
-            };
+            let in_quirks = DomHandle::document_in_quirks_mode(self.document);
             if !in_quirks && self.stack_of_open_elements.has_in_button_scope("p") {
                 self.close_a_p_element();
             }
@@ -2904,12 +2897,7 @@ impl HtmlParser {
             }
 
             // 19. Take all child nodes of furthestBlock and append them to the new element.
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_reparent_children(
-                    furthest_block_handle.as_ptr(),
-                    new_element.as_ptr(),
-                );
-            }
+            DomHandle::reparent_children(furthest_block_handle, new_element);
 
             // 20. Append the new element to furthestBlock.
             DomHandle::insert_before(furthest_block_handle, new_element, None);
@@ -3002,11 +2990,7 @@ impl HtmlParser {
             // At this stage, if the pending parsing-blocking script is not null
             // and script nesting level is zero, process pending scripts.
             if self.script_nesting_level == 0 {
-                unsafe {
-                    crate::dom_bridge::html_parser_bridge_process_pending_scripts(
-                        self.document.as_ptr(),
-                    );
-                }
+                DomHandle::process_pending_scripts(self.document);
             }
             return;
         }
@@ -4311,28 +4295,18 @@ impl HtmlParser {
 
     /// Visit all DOM handles for garbage collection.
     pub fn visit_dom_handles(&self, visitor: *mut std::ffi::c_void) {
-        unsafe {
-            crate::dom_bridge::html_parser_bridge_visit_node(visitor, self.document.as_ptr());
-        }
+        DomHandle::visit_node(visitor, self.document);
         if let Some(head) = self.head_element {
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_visit_node(visitor, head.as_ptr());
-            }
+            DomHandle::visit_node(visitor, head);
         }
         if let Some(form) = self.form_element {
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_visit_node(visitor, form.as_ptr());
-            }
+            DomHandle::visit_node(visitor, form);
         }
         if let Some(ctx) = self.context_element {
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_visit_node(visitor, ctx.as_ptr());
-            }
+            DomHandle::visit_node(visitor, ctx);
         }
         if let Some(char_node) = self.character_insertion_node {
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_visit_node(visitor, char_node.as_ptr());
-            }
+            DomHandle::visit_node(visitor, char_node);
         }
         self.stack_of_open_elements.visit_dom_handles(visitor);
         self.list_of_active_formatting_elements

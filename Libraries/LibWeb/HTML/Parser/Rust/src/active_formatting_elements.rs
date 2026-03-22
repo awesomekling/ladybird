@@ -221,9 +221,7 @@ impl ListOfActiveFormattingElements {
     pub fn visit_dom_handles(&self, visitor: *mut std::ffi::c_void) {
         for entry in &self.entries {
             if let FormattingEntry::Element { handle, .. } = entry {
-                unsafe {
-                    crate::dom_bridge::html_parser_bridge_visit_node(visitor, handle.as_ptr());
-                }
+                crate::dom_bridge::DomHandle::visit_node(visitor, *handle);
             }
         }
     }

@@ -70,9 +70,7 @@ impl StackOfOpenElements {
         if let Some(ref e) = entry {
             // Notify the C++ side that an element was popped.
             // This is needed for option elements (maybe_clone_into_selectedcontent).
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_element_popped(e.handle.as_ptr());
-            }
+            e.handle.element_popped();
         }
         entry
     }
@@ -399,9 +397,7 @@ impl StackOfOpenElements {
     /// Call the visitor for each DOM handle in the stack.
     pub fn visit_dom_handles(&self, visitor: *mut std::ffi::c_void) {
         for entry in &self.elements {
-            unsafe {
-                crate::dom_bridge::html_parser_bridge_visit_node(visitor, entry.handle.as_ptr());
-            }
+            crate::dom_bridge::DomHandle::visit_node(visitor, entry.handle);
         }
     }
 }

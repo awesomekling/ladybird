@@ -485,12 +485,15 @@ impl DomHandle {
     }
 
     pub fn local_name(self) -> String {
+        let mut ptr: *const u8 = std::ptr::null();
+        let mut len: usize = 0;
         unsafe {
-            let mut ptr: *const u8 = std::ptr::null();
-            let mut len: usize = 0;
             html_parser_bridge_element_local_name(self.as_ptr(), &mut ptr, &mut len);
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)).to_string()
         }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+        std::str::from_utf8(bytes)
+            .expect("C++ bridge returned invalid UTF-8 for local_name")
+            .to_string()
     }
 
     pub fn namespace(self) -> DomNamespace {
@@ -535,6 +538,63 @@ impl DomHandle {
     pub fn set_svg_script_parser_inserted(self) {
         unsafe {
             html_parser_bridge_set_svg_script_parser_inserted(self.as_ptr());
+        }
+    }
+
+    pub fn post_create_element(self) {
+        unsafe {
+            html_parser_bridge_post_create_element(self.as_ptr());
+        }
+    }
+
+    pub fn reparent_children(from: DomHandle, to: DomHandle) {
+        unsafe {
+            html_parser_bridge_reparent_children(from.as_ptr(), to.as_ptr());
+        }
+    }
+
+    pub fn document_in_quirks_mode(document: DomHandle) -> bool {
+        unsafe { html_parser_bridge_document_in_quirks_mode(document.as_ptr()) }
+    }
+
+    pub fn process_pending_scripts(document: DomHandle) {
+        unsafe {
+            html_parser_bridge_process_pending_scripts(document.as_ptr());
+        }
+    }
+
+    pub fn handle_declarative_shadow_template(
+        template_element: DomHandle,
+        host_element: DomHandle,
+        document: DomHandle,
+        shadowrootmode: &str,
+        shadowrootclonable: bool,
+        shadowrootserializable: bool,
+        shadowrootdelegatesfocus: bool,
+    ) -> bool {
+        unsafe {
+            html_parser_bridge_handle_declarative_shadow_template(
+                template_element.as_ptr(),
+                host_element.as_ptr(),
+                document.as_ptr(),
+                shadowrootmode.as_ptr(),
+                shadowrootmode.len(),
+                shadowrootclonable,
+                shadowrootserializable,
+                shadowrootdelegatesfocus,
+            )
+        }
+    }
+
+    pub fn element_popped(self) {
+        unsafe {
+            html_parser_bridge_element_popped(self.as_ptr());
+        }
+    }
+
+    pub fn visit_node(visitor: *mut c_void, handle: DomHandle) {
+        unsafe {
+            html_parser_bridge_visit_node(visitor, handle.as_ptr());
         }
     }
 }

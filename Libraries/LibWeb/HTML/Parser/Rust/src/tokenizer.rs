@@ -92,6 +92,19 @@ pub enum State {
     NumericCharacterReferenceEnd,
 }
 
+impl State {
+    /// Convert a u8 to a State, returning None if the value is out of range.
+    pub fn from_u8(value: u8) -> Option<State> {
+        if value <= State::NumericCharacterReferenceEnd as u8 {
+            // SAFETY: State is #[repr(u8)] with sequential values starting at 0,
+            // and we've verified value is within the valid range.
+            Some(unsafe { std::mem::transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+
 /// The HTML tokenizer state machine.
 ///
 /// Implements the WHATWG HTML tokenizer specification (section 13.2.5).

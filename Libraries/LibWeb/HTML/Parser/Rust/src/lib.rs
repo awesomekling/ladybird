@@ -381,7 +381,7 @@ pub unsafe extern "C" fn rust_html_tokenizer_switch_state(
     state: u8,
 ) {
     let handle = unsafe { &mut *handle };
-    let state: State = unsafe { std::mem::transmute(state) };
+    let state = State::from_u8(state).expect("invalid tokenizer state");
     handle.tokenizer.switch_to(state);
 }
 
@@ -489,7 +489,8 @@ pub unsafe extern "C" fn rust_html_tokenizer_set_last_start_tag_name(
     let name = if ptr.is_null() || len == 0 {
         ""
     } else {
-        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) }
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) })
+            .expect("C++ bridge returned invalid UTF-8 for last_start_tag_name")
     };
     handle.tokenizer.set_last_start_tag(name);
 }
