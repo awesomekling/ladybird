@@ -73,8 +73,8 @@ void rust_html_parser_destroy(void* handle);
 
 static bool rust_html_parser_enabled()
 {
-    static bool const enabled = getenv("LIBWEB_USE_RUST_PARSER") != nullptr;
-    return enabled;
+    static bool const disabled = getenv("USE_CPP_PARSER") != nullptr;
+    return !disabled;
 }
 #endif
 
