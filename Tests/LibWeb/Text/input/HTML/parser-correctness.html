@@ -203,5 +203,23 @@ test(() => {
             println("FAIL: adoption agency furthest block");
         }
     }
+
+    // Test 14: Fragment parsing with SVG context element
+    // innerHTML on an SVG element should parse children in the SVG namespace.
+    {
+        let svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.innerHTML = "<rect width='10' height='10'/><text>hi</text>";
+        let rect = svg.querySelector("rect");
+        let text = svg.querySelector("text");
+        if (rect && text
+            && rect.namespaceURI === "http://www.w3.org/2000/svg"
+            && text.namespaceURI === "http://www.w3.org/2000/svg") {
+            println("PASS: fragment parsing SVG context");
+        } else {
+            println("FAIL: fragment parsing SVG context"
+                + " rect_ns=" + (rect ? rect.namespaceURI : "null")
+                + " text_ns=" + (text ? text.namespaceURI : "null"));
+        }
+    }
 });
 </script>

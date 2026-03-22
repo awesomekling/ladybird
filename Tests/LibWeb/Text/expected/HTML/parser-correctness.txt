@@ -11,3 +11,4 @@ PASS: declarative shadow DOM (not applicable in innerHTML)
 PASS: noahs ark clause
 PASS: table context clearing
 PASS: adoption agency furthest block
+PASS: fragment parsing SVG context

@@ -73,6 +73,8 @@ pub struct HtmlParser {
     head_element: Option<DomHandle>,
     form_element: Option<DomHandle>,
     context_element: Option<DomHandle>,
+    /// Cached StackEntry for the context element (for adjusted_current_node in fragment parsing).
+    context_element_entry: Option<StackEntry>,
 
     // https://html.spec.whatwg.org/multipage/parsing.html#pending-table-character-tokens
     pending_table_character_tokens: Vec<Token>,
@@ -121,6 +123,7 @@ impl HtmlParser {
             head_element: None,
             form_element: None,
             context_element: None,
+            context_element_entry: None,
             pending_table_character_tokens: Vec::new(),
             character_insertion_node: None,
             character_insertion_builder: String::new(),
@@ -136,6 +139,17 @@ impl HtmlParser {
             script_nesting_level: 0,
             reprocess: false,
         }
+    }
+
+    /// Set up the parser for the HTML fragment parsing algorithm.
+    pub fn set_context_element(&mut self, context_element: DomHandle) {
+        self.parsing_fragment = true;
+        self.context_element = Some(context_element);
+        self.context_element_entry = Some(StackEntry::new(
+            context_element,
+            context_element.local_name(),
+            context_element.namespace(),
+        ));
     }
 
     // =======================================================================
@@ -307,9 +321,9 @@ impl HtmlParser {
         // HTML fragment parsing algorithm and the stack of open elements has only one element in it
         // (fragment case); otherwise, the adjusted current node is the current node.
         if self.parsing_fragment && self.stack_of_open_elements.len() == 1 {
-            // In fragment case, we'd return the context element.
-            // For now, return the current node.
-            return self.stack_of_open_elements.current_node();
+            if let Some(ref entry) = self.context_element_entry {
+                return Some(entry);
+            }
         }
         self.stack_of_open_elements.current_node()
     }
