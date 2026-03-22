@@ -51,7 +51,6 @@ struct AdjustedInsertionLocation {
 
 /// The HTML parser.
 /// https://html.spec.whatwg.org/multipage/parsing.html#the-html-parser
-#[allow(dead_code)]
 pub struct HtmlParser {
     // The tokenizer.
     pub tokenizer: HtmlTokenizer,
@@ -95,10 +94,6 @@ pub struct HtmlParser {
     parsing_fragment: bool,
     /// https://html.spec.whatwg.org/multipage/parsing.html#scripting-flag
     scripting_enabled: bool,
-    /// Whether parser was invoked via document.write().
-    invoked_via_document_write: bool,
-    /// Whether the parser has been aborted.
-    aborted: bool,
     /// https://html.spec.whatwg.org/multipage/parsing.html#parser-pause-flag
     parser_pause_flag: bool,
     /// Whether we should stop parsing.
@@ -133,8 +128,6 @@ impl HtmlParser {
             frameset_ok: true,
             parsing_fragment: false,
             scripting_enabled,
-            invoked_via_document_write: false,
-            aborted: false,
             parser_pause_flag: false,
             stop_parsing: false,
             script_nesting_level: 0,
