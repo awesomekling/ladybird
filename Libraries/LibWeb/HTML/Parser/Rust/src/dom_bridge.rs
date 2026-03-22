@@ -13,8 +13,8 @@ use std::ffi::c_void;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DomHandle(pub *mut c_void);
 
-unsafe impl Send for DomHandle {}
-unsafe impl Sync for DomHandle {}
+// NOTE: DomHandle wraps a raw C++ DOM pointer that is NOT thread-safe.
+// We do not implement Send or Sync — all parsing is single-threaded.
 
 impl DomHandle {
     pub fn null() -> Self {
