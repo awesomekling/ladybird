@@ -6,6 +6,7 @@ pub mod dom_bridge;
 pub mod entities;
 pub mod parser;
 pub mod stack_of_open_elements;
+pub mod tag_names;
 pub mod token;
 pub mod tokenizer;
 
