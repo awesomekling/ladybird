@@ -11,7 +11,7 @@ use crate::active_formatting_elements::{FormattingEntry, ListOfActiveFormattingE
 use crate::dom_bridge::{DomHandle, DomNamespace, QuirksMode};
 use crate::stack_of_open_elements::{is_special_tag, StackEntry, StackOfOpenElements};
 use crate::tag_names::{attrs, tags};
-use crate::token::{Token, TokenPayload, TokenType};
+use crate::token::{TagData, Token, TokenKind};
 use crate::tokenizer::{HtmlTokenizer, State as TokenizerState};
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#insertion-mode
@@ -197,7 +197,7 @@ impl HtmlParser {
 
             if self.next_line_feed_can_be_ignored {
                 self.next_line_feed_can_be_ignored = false;
-                if token.is_character() && token.code_point == '\n' as u32 {
+                if token.is_character() && token.code_point() == '\n' as u32 {
                     continue;
                 }
             }
@@ -234,7 +234,7 @@ impl HtmlParser {
             // and move on to the next one. (Newlines at the start of pre/textarea/listing elements are ignored.)
             if self.next_line_feed_can_be_ignored {
                 self.next_line_feed_can_be_ignored = false;
-                if token.is_character() && token.code_point == '\n' as u32 {
+                if token.is_character() && token.code_point() == '\n' as u32 {
                     continue;
                 }
             }
@@ -665,13 +665,11 @@ impl HtmlParser {
     /// Helper to create a synthetic start tag token.
     fn make_start_tag_token(tag_name: &str) -> Token {
         Token {
-            token_type: TokenType::StartTag,
-            code_point: 0,
-            payload: TokenPayload::Tag {
+            kind: TokenKind::StartTag(TagData {
                 tag_name: tag_name.to_string(),
                 self_closing: false,
                 attributes: Vec::new(),
-            },
+            }),
             start_position: Default::default(),
             end_position: Default::default(),
         }
@@ -1236,7 +1234,7 @@ impl HtmlParser {
         //    U+000C FORM FEED (FF), U+000D CARRIAGE RETURN (CR), or U+0020 SPACE
         if token.is_parser_whitespace() {
             // Insert the character.
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -1553,7 +1551,7 @@ impl HtmlParser {
         // -> A character token that is one of U+0009, U+000A, U+000C, U+000D, or U+0020
         if token.is_parser_whitespace() {
             // Insert the character.
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -1669,7 +1667,7 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody
     fn handle_in_body(&mut self, token: &Token) {
         // -> A character token that is U+0000 NULL
-        if token.is_character() && token.code_point == 0 {
+        if token.is_character() && token.code_point() == 0 {
             // Parse error. Ignore the token.
             return;
         }
@@ -1679,7 +1677,7 @@ impl HtmlParser {
             // Reconstruct the active formatting elements, if any.
             self.reconstruct_the_active_formatting_elements();
             // Insert the character.
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -1688,7 +1686,7 @@ impl HtmlParser {
             // Reconstruct the active formatting elements, if any.
             self.reconstruct_the_active_formatting_elements();
             // Insert the character.
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             // Set the frameset-ok flag to "not ok".
             self.frameset_ok = false;
             return;
@@ -2870,7 +2868,7 @@ impl HtmlParser {
         // -> A character token
         if token.is_character() {
             // Insert the character.
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -3227,7 +3225,7 @@ impl HtmlParser {
     fn handle_in_table_text(&mut self, token: &Token) {
         if token.is_character() {
             // -> A character token that is U+0000 NULL
-            if token.code_point == 0 {
+            if token.code_point() == 0 {
                 // Parse error. Ignore the token.
                 return;
             }
@@ -3256,7 +3254,7 @@ impl HtmlParser {
         } else {
             // Otherwise, insert the characters.
             for pending_token in &pending {
-                self.insert_character(pending_token.code_point);
+                self.insert_character(pending_token.code_point());
             }
         }
 
@@ -3345,7 +3343,7 @@ impl HtmlParser {
     fn handle_in_column_group(&mut self, token: &Token) {
         // -> A character token that is one of U+0009, U+000A, U+000C, U+000D, or U+0020
         if token.is_parser_whitespace() {
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -3682,14 +3680,14 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inselect
     fn handle_in_select(&mut self, token: &Token) {
         // -> A character token that is U+0000 NULL
-        if token.is_character() && token.code_point == 0 {
+        if token.is_character() && token.code_point() == 0 {
             // Parse error. Ignore the token.
             return;
         }
 
         // -> Any other character token
         if token.is_character() {
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -4040,7 +4038,7 @@ impl HtmlParser {
     fn handle_in_frameset(&mut self, token: &Token) {
         // -> A character token that is one of U+0009, U+000A, U+000C, U+000D, or U+0020
         if token.is_parser_whitespace() {
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
 
@@ -4112,7 +4110,7 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-afterframeset
     fn handle_after_frameset(&mut self, token: &Token) {
         if token.is_parser_whitespace() {
-            self.insert_character(token.code_point);
+            self.insert_character(token.code_point());
             return;
         }
         if token.is_comment() {
@@ -4278,11 +4276,11 @@ impl HtmlParser {
         }
 
         if token.is_character() {
-            if token.code_point == 0 {
+            if token.code_point() == 0 {
                 // Replace with U+FFFD.
                 self.insert_character(0xFFFD);
             } else {
-                self.insert_character(token.code_point);
+                self.insert_character(token.code_point());
                 if !token.is_parser_whitespace() {
                     self.frameset_ok = false;
                 }

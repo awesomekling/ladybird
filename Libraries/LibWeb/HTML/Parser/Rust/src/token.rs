@@ -31,140 +31,168 @@ pub struct DoctypeData {
     pub force_quirks: bool,
 }
 
-/// The type of an HTML token.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum TokenType {
-    Invalid = 0,
-    Doctype = 1,
-    StartTag = 2,
-    EndTag = 3,
-    Comment = 4,
-    Character = 5,
-    EndOfFile = 6,
+/// Tag-specific data shared between start and end tag tokens.
+#[derive(Clone, Debug)]
+pub struct TagData {
+    pub tag_name: String,
+    pub self_closing: bool,
+    pub attributes: Vec<Attribute>,
 }
 
-impl Default for TokenType {
-    fn default() -> Self {
-        TokenType::Invalid
+impl TagData {
+    pub fn new() -> Self {
+        TagData {
+            tag_name: String::new(),
+            self_closing: false,
+            attributes: Vec::new(),
+        }
     }
 }
 
-/// Type-specific data for an HTML token.
-#[derive(Clone, Debug)]
-pub enum TokenPayload {
-    None,
-    Tag {
-        tag_name: String,
-        self_closing: bool,
-        attributes: Vec<Attribute>,
-    },
-    Comment(String),
-    Doctype(Box<DoctypeData>),
+impl Default for TagData {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-impl Default for TokenPayload {
-    fn default() -> Self {
-        TokenPayload::None
+/// The type-specific data of an HTML token.
+#[derive(Clone, Debug)]
+pub enum TokenKind {
+    Character(u32),
+    StartTag(TagData),
+    EndTag(TagData),
+    Comment(String),
+    Doctype(Box<DoctypeData>),
+    EndOfFile,
+}
+
+impl TokenKind {
+    pub fn new_start_tag() -> Self {
+        TokenKind::StartTag(TagData::new())
+    }
+
+    pub fn new_end_tag() -> Self {
+        TokenKind::EndTag(TagData::new())
+    }
+
+    pub fn new_comment() -> Self {
+        TokenKind::Comment(String::new())
+    }
+
+    pub fn new_doctype() -> Self {
+        TokenKind::Doctype(Box::new(DoctypeData::default()))
     }
 }
 
 /// An HTML token produced by the tokenizer.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Token {
-    pub token_type: TokenType,
-    pub code_point: u32,
-    pub payload: TokenPayload,
+    pub kind: TokenKind,
     pub start_position: Position,
     pub end_position: Position,
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Token {
+            kind: TokenKind::EndOfFile,
+            start_position: Position::default(),
+            end_position: Position::default(),
+        }
+    }
 }
 
 impl Token {
     pub fn new_character(code_point: u32) -> Self {
         Token {
-            token_type: TokenType::Character,
-            code_point,
+            kind: TokenKind::Character(code_point),
             ..Default::default()
         }
     }
 
     pub fn new_eof() -> Self {
         Token {
-            token_type: TokenType::EndOfFile,
+            kind: TokenKind::EndOfFile,
             ..Default::default()
         }
     }
 
     pub fn is_start_tag(&self) -> bool {
-        self.token_type == TokenType::StartTag
+        matches!(self.kind, TokenKind::StartTag(_))
     }
 
     pub fn is_end_tag(&self) -> bool {
-        self.token_type == TokenType::EndTag
+        matches!(self.kind, TokenKind::EndTag(_))
     }
 
     pub fn is_character(&self) -> bool {
-        self.token_type == TokenType::Character
+        matches!(self.kind, TokenKind::Character(_))
     }
 
     pub fn is_comment(&self) -> bool {
-        self.token_type == TokenType::Comment
+        matches!(self.kind, TokenKind::Comment(_))
     }
 
     pub fn is_doctype(&self) -> bool {
-        self.token_type == TokenType::Doctype
+        matches!(self.kind, TokenKind::Doctype(_))
     }
 
     pub fn is_eof(&self) -> bool {
-        self.token_type == TokenType::EndOfFile
+        matches!(self.kind, TokenKind::EndOfFile)
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parser-whitespace
     /// ASCII whitespace tokens: U+0009 CHARACTER TABULATION, U+000A LINE FEED (LF),
     /// U+000C FORM FEED (FF), U+000D CARRIAGE RETURN (CR), U+0020 SPACE
     pub fn is_parser_whitespace(&self) -> bool {
-        self.token_type == TokenType::Character
-            && matches!(self.code_point, 0x0009 | 0x000A | 0x000C | 0x000D | 0x0020)
+        matches!(self.kind, TokenKind::Character(cp) if matches!(cp, 0x0009 | 0x000A | 0x000C | 0x000D | 0x0020))
+    }
+
+    pub fn code_point(&self) -> u32 {
+        match self.kind {
+            TokenKind::Character(cp) => cp,
+            _ => 0,
+        }
     }
 
     pub fn tag_name(&self) -> &str {
-        match &self.payload {
-            TokenPayload::Tag { tag_name, .. } => tag_name,
+        match &self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => &d.tag_name,
             _ => "",
         }
     }
 
     pub fn tag_name_mut(&mut self) -> &mut String {
-        match &mut self.payload {
-            TokenPayload::Tag { tag_name, .. } => tag_name,
+        match &mut self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => &mut d.tag_name,
             _ => panic!("tag_name_mut called on non-tag token"),
         }
     }
 
     pub fn set_self_closing(&mut self, value: bool) {
-        match &mut self.payload {
-            TokenPayload::Tag { self_closing, .. } => *self_closing = value,
+        match &mut self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => d.self_closing = value,
             _ => panic!("set_self_closing called on non-tag token"),
         }
     }
 
     pub fn is_self_closing(&self) -> bool {
-        match &self.payload {
-            TokenPayload::Tag { self_closing, .. } => *self_closing,
+        match &self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => d.self_closing,
             _ => false,
         }
     }
 
     pub fn attributes(&self) -> &[Attribute] {
-        match &self.payload {
-            TokenPayload::Tag { attributes, .. } => attributes,
+        match &self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => &d.attributes,
             _ => &[],
         }
     }
 
     pub fn attributes_mut(&mut self) -> &mut Vec<Attribute> {
-        match &mut self.payload {
-            TokenPayload::Tag { attributes, .. } => attributes,
+        match &mut self.kind {
+            TokenKind::StartTag(d) | TokenKind::EndTag(d) => &mut d.attributes,
             _ => panic!("attributes_mut called on non-tag token"),
         }
     }
@@ -181,29 +209,29 @@ impl Token {
     }
 
     pub fn comment_data(&self) -> &str {
-        match &self.payload {
-            TokenPayload::Comment(s) => s,
+        match &self.kind {
+            TokenKind::Comment(s) => s,
             _ => "",
         }
     }
 
     pub fn set_comment_data(&mut self, data: String) {
-        match &mut self.payload {
-            TokenPayload::Comment(s) => *s = data,
+        match &mut self.kind {
+            TokenKind::Comment(s) => *s = data,
             _ => panic!("set_comment_data called on non-comment token"),
         }
     }
 
     pub fn doctype_data(&self) -> &DoctypeData {
-        match &self.payload {
-            TokenPayload::Doctype(dd) => dd,
+        match &self.kind {
+            TokenKind::Doctype(dd) => dd,
             _ => panic!("doctype_data called on non-doctype token"),
         }
     }
 
     pub fn doctype_data_mut(&mut self) -> &mut DoctypeData {
-        match &mut self.payload {
-            TokenPayload::Doctype(dd) => dd,
+        match &mut self.kind {
+            TokenKind::Doctype(dd) => dd,
             _ => panic!("doctype_data_mut called on non-doctype token"),
         }
     }

@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 
 use crate::entities::NamedCharacterReferenceMatcher;
-use crate::token::{Attribute, DoctypeData, Position, Token, TokenPayload, TokenType};
+use crate::token::{Attribute, DoctypeData, Position, Token, TokenKind};
 
 /// Tokenizer states per the WHATWG HTML spec section 13.2.5.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -393,32 +393,21 @@ impl HtmlTokenizer {
         std::mem::take(&mut self.current_builder)
     }
 
-    fn create_new_token(&mut self, token_type: TokenType) {
-        let payload = match token_type {
-            TokenType::StartTag | TokenType::EndTag => TokenPayload::Tag {
-                tag_name: String::new(),
-                self_closing: false,
-                attributes: Vec::new(),
-            },
-            TokenType::Comment => TokenPayload::Comment(String::new()),
-            TokenType::Doctype => TokenPayload::Doctype(Box::new(DoctypeData::default())),
-            _ => TokenPayload::None,
-        };
-        let pos = match token_type {
-            TokenType::StartTag | TokenType::EndTag => self.nth_last_position(1),
+    fn create_new_token(&mut self, kind: TokenKind) {
+        self.current_builder.clear();
+        let pos = match &kind {
+            TokenKind::StartTag(_) | TokenKind::EndTag(_) => self.nth_last_position(1),
             _ => self.nth_last_position(0),
         };
         self.current_token = Token {
-            token_type,
-            code_point: 0,
-            payload,
+            kind,
             start_position: pos,
             end_position: Position::default(),
         };
     }
 
     fn current_end_tag_token_is_appropriate(&self) -> bool {
-        if self.current_token.token_type != TokenType::EndTag {
+        if !self.current_token.is_end_tag() {
             return false;
         }
         match &self.last_emitted_start_tag_name {
@@ -440,14 +429,13 @@ impl HtmlTokenizer {
         // token_idx: 0 = current_token, 1+ = queued_tokens index
         // For simplicity, we handle position setting here.
         if token_idx == 0 {
-            if self.current_token.token_type == TokenType::StartTag {
+            if self.current_token.is_start_tag() {
                 self.last_emitted_start_tag_name =
                     Some(self.current_token.tag_name().to_string());
             }
-            let is_start_or_end_tag = self.current_token.token_type == TokenType::StartTag
-                || self.current_token.token_type == TokenType::EndTag;
+            let is_tag = self.current_token.is_start_tag() || self.current_token.is_end_tag();
             self.current_token.end_position =
-                self.nth_last_position(if is_start_or_end_tag { 1 } else { 0 });
+                self.nth_last_position(if is_tag { 1 } else { 0 });
         }
     }
 
@@ -473,14 +461,14 @@ impl HtmlTokenizer {
             return;
         }
         self.has_emitted_eof = true;
-        self.create_new_token(TokenType::EndOfFile);
+        self.create_new_token(TokenKind::EndOfFile);
         self.emit_current_token();
     }
 
     fn emit_current_token_followed_by_eof(&mut self) {
         self.emit_current_token();
         self.has_emitted_eof = true;
-        self.create_new_token(TokenType::EndOfFile);
+        self.create_new_token(TokenKind::EndOfFile);
         self.emit_current_token();
     }
 
@@ -698,13 +686,13 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::StartTag);
+                        self.create_new_token(TokenKind::new_start_tag());
                         self.reconsume(State::TagName);
                         continue;
                     }
                     Some(0x3F) => {
                         // '?' - parse error
-                        self.create_new_token(TokenType::Comment);
+                        self.create_new_token(TokenKind::new_comment());
                         self.current_token.start_position = self.nth_last_position(2);
                         self.reconsume(State::BogusComment);
                         continue;
@@ -728,7 +716,7 @@ impl HtmlTokenizer {
                 // 13.2.5.7 End tag open state
                 State::EndTagOpen => match current_input_character {
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::EndTag);
+                        self.create_new_token(TokenKind::new_end_tag());
                         self.reconsume(State::TagName);
                         continue;
                     }
@@ -748,7 +736,7 @@ impl HtmlTokenizer {
                     }
                     Some(_) => {
                         // parse error
-                        self.create_new_token(TokenType::Comment);
+                        self.create_new_token(TokenKind::new_comment());
                         self.reconsume(State::BogusComment);
                         continue;
                     }
@@ -1096,7 +1084,7 @@ impl HtmlTokenizer {
 
                     match self.consume_next_if_match_exact("--") {
                         Some(true) => {
-                            self.create_new_token(TokenType::Comment);
+                            self.create_new_token(TokenKind::new_comment());
                             self.current_token.start_position = self.nth_last_position(3);
                             self.state = State::CommentStart;
                             continue;
@@ -1117,7 +1105,7 @@ impl HtmlTokenizer {
                             if self.cdata_allowed {
                                 self.state = State::CDATASection;
                             } else {
-                                self.create_new_token(TokenType::Comment);
+                                self.create_new_token(TokenKind::new_comment());
                                 self.current_builder.push_str("[CDATA[");
                                 self.state = State::BogusComment;
                             }
@@ -1127,7 +1115,7 @@ impl HtmlTokenizer {
                         _ => {}
                     }
                     // parse error
-                    self.create_new_token(TokenType::Comment);
+                    self.create_new_token(TokenKind::new_comment());
                     self.state = State::BogusComment;
                     continue;
                 }
@@ -1340,7 +1328,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     None => {
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
@@ -1364,7 +1352,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(cp) if is_ascii_upper_alpha(cp) => {
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
@@ -1377,7 +1365,7 @@ impl HtmlTokenizer {
                         continue;
                     }
                     Some(0x00) => {
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
@@ -1390,7 +1378,7 @@ impl HtmlTokenizer {
                     }
                     Some(0x3E) => {
                         // parse error
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
@@ -1403,7 +1391,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     None => {
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             force_quirks: true,
                             missing_name: true,
@@ -1415,7 +1403,7 @@ impl HtmlTokenizer {
                         return self.queued_tokens.pop_front();
                     }
                     Some(cp) => {
-                        self.create_new_token(TokenType::Doctype);
+                        self.create_new_token(TokenKind::new_doctype());
                         *self.current_token.doctype_data_mut() = DoctypeData {
                             missing_name: false,
                             missing_public_identifier: true,
@@ -2341,7 +2329,7 @@ impl HtmlTokenizer {
                 // RCDATA end tag open state
                 State::RCDATAEndTagOpen => match current_input_character {
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::EndTag);
+                        self.create_new_token(TokenKind::new_end_tag());
                         self.reconsume(State::RCDATAEndTagName);
                         continue;
                     }
@@ -2382,7 +2370,7 @@ impl HtmlTokenizer {
                 // RAWTEXT end tag open state
                 State::RAWTEXTEndTagOpen => match current_input_character {
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::EndTag);
+                        self.create_new_token(TokenKind::new_end_tag());
                         self.reconsume(State::RAWTEXTEndTagName);
                         continue;
                     }
@@ -2434,7 +2422,7 @@ impl HtmlTokenizer {
                 // Script data end tag open state
                 State::ScriptDataEndTagOpen => match current_input_character {
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::EndTag);
+                        self.create_new_token(TokenKind::new_end_tag());
                         self.reconsume(State::ScriptDataEndTagName);
                         continue;
                     }
@@ -2582,7 +2570,7 @@ impl HtmlTokenizer {
                 // Script data escaped end tag open state
                 State::ScriptDataEscapedEndTagOpen => match current_input_character {
                     Some(cp) if is_ascii_alpha(cp) => {
-                        self.create_new_token(TokenType::EndTag);
+                        self.create_new_token(TokenKind::new_end_tag());
                         self.reconsume(State::ScriptDataEscapedEndTagName);
                         continue;
                     }
