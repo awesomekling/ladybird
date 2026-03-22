@@ -95,32 +95,26 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn is_start_tag(&self) -> bool {
         self.token_type == TokenType::StartTag
     }
 
-    #[inline(always)]
     pub fn is_end_tag(&self) -> bool {
         self.token_type == TokenType::EndTag
     }
 
-    #[inline(always)]
     pub fn is_character(&self) -> bool {
         self.token_type == TokenType::Character
     }
 
-    #[inline(always)]
     pub fn is_comment(&self) -> bool {
         self.token_type == TokenType::Comment
     }
 
-    #[inline(always)]
     pub fn is_doctype(&self) -> bool {
         self.token_type == TokenType::Doctype
     }
 
-    #[inline(always)]
     pub fn is_eof(&self) -> bool {
         self.token_type == TokenType::EndOfFile
     }
@@ -128,13 +122,11 @@ impl Token {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parser-whitespace
     /// ASCII whitespace tokens: U+0009 CHARACTER TABULATION, U+000A LINE FEED (LF),
     /// U+000C FORM FEED (FF), U+000D CARRIAGE RETURN (CR), U+0020 SPACE
-    #[inline(always)]
     pub fn is_parser_whitespace(&self) -> bool {
         self.token_type == TokenType::Character
             && matches!(self.code_point, 0x0009 | 0x000A | 0x000C | 0x000D | 0x0020)
     }
 
-    #[inline(always)]
     pub fn tag_name(&self) -> &str {
         match &self.payload {
             TokenPayload::Tag { tag_name, .. } => tag_name,
@@ -142,7 +134,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn tag_name_mut(&mut self) -> &mut String {
         match &mut self.payload {
             TokenPayload::Tag { tag_name, .. } => tag_name,
@@ -150,7 +141,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn set_self_closing(&mut self, value: bool) {
         match &mut self.payload {
             TokenPayload::Tag { self_closing, .. } => *self_closing = value,
@@ -158,7 +148,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn is_self_closing(&self) -> bool {
         match &self.payload {
             TokenPayload::Tag { self_closing, .. } => *self_closing,
@@ -166,7 +155,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn attributes(&self) -> &[Attribute] {
         match &self.payload {
             TokenPayload::Tag { attributes, .. } => attributes,
@@ -174,7 +162,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn attributes_mut(&mut self) -> &mut Vec<Attribute> {
         match &mut self.payload {
             TokenPayload::Tag { attributes, .. } => attributes,
@@ -182,12 +169,10 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn has_attribute(&self, name: &str) -> bool {
         self.attributes().iter().any(|a| a.local_name == name)
     }
 
-    #[inline(always)]
     pub fn get_attribute(&self, name: &str) -> Option<&str> {
         self.attributes()
             .iter()
@@ -195,7 +180,6 @@ impl Token {
             .map(|a| a.value.as_str())
     }
 
-    #[inline(always)]
     pub fn comment_data(&self) -> &str {
         match &self.payload {
             TokenPayload::Comment(s) => s,
@@ -203,7 +187,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn set_comment_data(&mut self, data: String) {
         match &mut self.payload {
             TokenPayload::Comment(s) => *s = data,
@@ -211,7 +194,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn doctype_data(&self) -> &DoctypeData {
         match &self.payload {
             TokenPayload::Doctype(dd) => dd,
@@ -219,7 +201,6 @@ impl Token {
         }
     }
 
-    #[inline(always)]
     pub fn doctype_data_mut(&mut self) -> &mut DoctypeData {
         match &mut self.payload {
             TokenPayload::Doctype(dd) => dd,
