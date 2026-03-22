@@ -4184,8 +4184,7 @@ impl HtmlParser {
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
     fn process_using_the_rules_for_foreign_content(&mut self, token: &Token) {
-        // TODO: Full foreign content implementation
-        // For now, handle the basic break-out cases.
+        // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
         if token.is_start_tag() {
             let tag = token.tag_name();
             // If the token is one of the "break-out" tags, process using HTML rules.
