@@ -7,6 +7,7 @@
 //! when it has that element in scope using a list of element types.
 
 use crate::dom_bridge::{DomHandle, DomNamespace};
+use crate::tag_names::tags;
 
 /// An entry in the stack of open elements.
 /// We cache the tag name and namespace to avoid FFI calls during scope checks.
@@ -126,7 +127,7 @@ impl StackOfOpenElements {
     }
 
     pub fn contains_template_element(&self) -> bool {
-        self.contains_tag("template")
+        self.contains_tag(tags::TEMPLATE)
     }
 
     /// Pop elements until an element with the given tag name has been popped.
@@ -267,7 +268,7 @@ impl StackOfOpenElements {
                 return true;
             }
             if entry.namespace == DomNamespace::HTML
-                && (entry.tag_name == "optgroup" || entry.tag_name == "option")
+                && (entry.tag_name == tags::OPTGROUP || entry.tag_name == tags::OPTION)
             {
                 continue;
             }
