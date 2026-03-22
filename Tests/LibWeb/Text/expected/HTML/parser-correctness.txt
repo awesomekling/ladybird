@@ -8,3 +8,5 @@ PASS: fragment select context ignores nested select
 PASS: fragment reset insertion mode
 PASS: SVG foreign content
 PASS: declarative shadow DOM (not applicable in innerHTML)
+PASS: noahs ark clause
+PASS: table context clearing

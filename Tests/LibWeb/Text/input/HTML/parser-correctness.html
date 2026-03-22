@@ -145,5 +145,45 @@ test(() => {
             println("PASS: declarative shadow DOM (not applicable in innerHTML)");
         }
     }
+
+    // Test 11: Noah's Ark clause limits formatting elements to 3
+    // When a 4th identical formatting element is pushed, the earliest should be evicted.
+    // This results in a specific nesting structure.
+    {
+        let div = document.createElement("div");
+        div.innerHTML = "<b><b><b><b>text</b></b></b></b>";
+        // With Noah's Ark, the 4th <b> evicts the 1st from the formatting list.
+        // After reconstruction, we should get nested <b> elements.
+        let bolds = div.querySelectorAll("b");
+        // The key invariant: the text should be wrapped in <b> elements and
+        // the innermost <b> should contain "text".
+        let textFound = false;
+        for (let i = 0; i < bolds.length; i++) {
+            if (bolds[i].textContent === "text") {
+                textFound = true;
+                break;
+            }
+        }
+        if (bolds.length >= 3 && textFound) {
+            println("PASS: noahs ark clause");
+        } else {
+            println("FAIL: noahs ark clause - bolds=" + bolds.length + " textFound=" + textFound);
+        }
+    }
+
+    // Test 12: Table context clearing with nested elements
+    // Elements outside the expected table context should be properly popped.
+    {
+        let div = document.createElement("div");
+        div.innerHTML = "<table><tbody><tr><td>cell</td></tr></tbody></table>";
+        let td = div.querySelector("td");
+        let tr = div.querySelector("tr");
+        let tbody = div.querySelector("tbody");
+        if (td && tr && tbody && td.parentNode === tr && tr.parentNode === tbody) {
+            println("PASS: table context clearing");
+        } else {
+            println("FAIL: table context clearing");
+        }
+    }
 });
 </script>

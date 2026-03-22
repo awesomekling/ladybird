@@ -787,6 +787,7 @@ impl HtmlParser {
             entries[index] = FormattingEntry::Element {
                 handle: new_element,
                 tag_name,
+                namespace: DomNamespace::HTML,
                 token,
             };
 
@@ -2236,6 +2237,7 @@ impl HtmlParser {
             self.list_of_active_formatting_elements.add(
                 element,
                 token.tag_name().to_string(),
+                DomNamespace::HTML,
                 token.clone(),
             );
             return;
@@ -2264,6 +2266,7 @@ impl HtmlParser {
             self.list_of_active_formatting_elements.add(
                 element,
                 token.tag_name().to_string(),
+                DomNamespace::HTML,
                 token.clone(),
             );
             return;
@@ -2281,6 +2284,7 @@ impl HtmlParser {
             self.list_of_active_formatting_elements.add(
                 element,
                 "nobr".to_string(),
+                DomNamespace::HTML,
                 token.clone(),
             );
             return;
@@ -2829,6 +2833,7 @@ impl HtmlParser {
                     node_handle,
                     new_element,
                     tag_name.clone(),
+                    DomNamespace::HTML,
                     token_clone.clone(),
                 );
                 self.stack_of_open_elements.replace(
@@ -2904,6 +2909,7 @@ impl HtmlParser {
                 bookmark,
                 new_element,
                 tag_name.clone(),
+                DomNamespace::HTML,
                 token_clone,
             );
 

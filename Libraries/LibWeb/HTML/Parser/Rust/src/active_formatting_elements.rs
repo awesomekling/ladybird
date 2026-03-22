@@ -5,7 +5,7 @@
 //!
 //! The list of active formatting elements is used to handle mis-nested formatting element tags.
 
-use crate::dom_bridge::DomHandle;
+use crate::dom_bridge::{DomHandle, DomNamespace};
 use crate::token::Token;
 
 /// An entry in the list of active formatting elements.
@@ -19,6 +19,7 @@ pub enum FormattingEntry {
     Element {
         handle: DomHandle,
         tag_name: String,
+        namespace: DomNamespace,
         token: Token,
     },
 }
@@ -76,7 +77,7 @@ impl ListOfActiveFormattingElements {
     /// https://html.spec.whatwg.org/multipage/parsing.html#push-onto-the-list-of-active-formatting-elements
     /// When the steps below require the UA to push onto the list of active formatting elements
     /// an element element, the UA must perform the following steps:
-    pub fn add(&mut self, handle: DomHandle, tag_name: String, token: Token) {
+    pub fn add(&mut self, handle: DomHandle, tag_name: String, namespace: DomNamespace, token: Token) {
         // 1. If there are already three elements in the list of active formatting elements after
         //    the last marker, if any, or anywhere in the list if there is no marker, that have the
         //    same tag name, namespace, and attributes as element, then remove the earliest such
@@ -94,11 +95,14 @@ impl ListOfActiveFormattingElements {
             }
             if let FormattingEntry::Element {
                 tag_name: ref entry_tag,
+                namespace: ref entry_namespace,
                 token: ref entry_token,
                 ..
             } = self.entries[i]
             {
-                if entry_tag == &tag_name && tokens_have_same_attributes(entry_token, new_attributes)
+                if entry_tag == &tag_name
+                    && *entry_namespace == namespace
+                    && tokens_have_same_attributes(entry_token, new_attributes)
                 {
                     count += 1;
                     earliest_match_index = Some(i);
@@ -116,6 +120,7 @@ impl ListOfActiveFormattingElements {
         self.entries.push(FormattingEntry::Element {
             handle,
             tag_name,
+            namespace,
             token,
         });
     }
@@ -139,12 +144,14 @@ impl ListOfActiveFormattingElements {
         old_handle: DomHandle,
         new_handle: DomHandle,
         new_tag_name: String,
+        new_namespace: DomNamespace,
         new_token: Token,
     ) {
         if let Some(pos) = self.entries.iter().position(|e| e.handle() == Some(old_handle)) {
             self.entries[pos] = FormattingEntry::Element {
                 handle: new_handle,
                 tag_name: new_tag_name,
+                namespace: new_namespace,
                 token: new_token,
             };
         }
@@ -196,6 +203,7 @@ impl ListOfActiveFormattingElements {
         index: usize,
         handle: DomHandle,
         tag_name: String,
+        namespace: DomNamespace,
         token: Token,
     ) {
         self.entries.insert(
@@ -203,6 +211,7 @@ impl ListOfActiveFormattingElements {
             FormattingEntry::Element {
                 handle,
                 tag_name,
+                namespace,
                 token,
             },
         );
