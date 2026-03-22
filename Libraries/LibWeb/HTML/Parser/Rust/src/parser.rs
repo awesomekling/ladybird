@@ -10,6 +10,7 @@
 use crate::active_formatting_elements::{FormattingEntry, ListOfActiveFormattingElements};
 use crate::dom_bridge::{DomHandle, DomNamespace, QuirksMode};
 use crate::stack_of_open_elements::{is_special_tag, StackEntry, StackOfOpenElements};
+use crate::tag_names::{attrs, tags};
 use crate::token::{Token, TokenPayload, TokenType};
 use crate::tokenizer::{HtmlTokenizer, State as TokenizerState};
 
@@ -233,7 +234,7 @@ impl HtmlParser {
         // We must flush character insertions first so option content is up-to-date.
         self.flush_character_insertions();
         while let Some(entry) = self.stack_of_open_elements.current_node() {
-            if entry.namespace == DomNamespace::HTML && entry.tag_name == "option" {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == tags::OPTION {
                 self.stack_of_open_elements.pop();
             } else {
                 self.stack_of_open_elements.elements_mut().pop();
@@ -261,13 +262,13 @@ impl HtmlParser {
                 || self.adjusted_current_node_namespace() == Some(DomNamespace::HTML)
                 || (self.adjusted_current_node_is_mathml_text_integration_point()
                     && token.is_start_tag()
-                    && token.tag_name() != "mglyph"
-                    && token.tag_name() != "malignmark")
+                    && token.tag_name() != tags::MGLYPH
+                    && token.tag_name() != tags::MALIGNMARK)
                 || (self.adjusted_current_node_is_mathml_text_integration_point()
                     && token.is_character())
                 || (self.adjusted_current_node_is_mathml_annotation_xml()
                     && token.is_start_tag()
-                    && token.tag_name() == "svg")
+                    && token.tag_name() == tags::SVG)
                 || (self.adjusted_current_node_is_html_integration_point()
                     && (token.is_start_tag() || token.is_character()))
                 || token.is_eof()
@@ -350,7 +351,7 @@ impl HtmlParser {
     /// Check if the adjusted current node is a MathML annotation-xml element.
     fn adjusted_current_node_is_mathml_annotation_xml(&self) -> bool {
         if let Some(node) = self.adjusted_current_node() {
-            node.namespace == DomNamespace::MathML && node.tag_name == "annotation-xml"
+            node.namespace == DomNamespace::MathML && node.tag_name == tags::ANNOTATION_XML
         } else {
             false
         }
@@ -363,7 +364,7 @@ impl HtmlParser {
             // "encoding" whose value was an ASCII case-insensitive match for "text/html" or
             // "application/xhtml+xml".
             // NOTE: We check the element's actual encoding attribute here.
-            if node.namespace == DomNamespace::MathML && node.tag_name == "annotation-xml" {
+            if node.namespace == DomNamespace::MathML && node.tag_name == tags::ANNOTATION_XML {
                 // Check the cached encoding attribute from the start tag token.
                 if let Some(ref encoding) = node.encoding_attr {
                     if encoding.eq_ignore_ascii_case("text/html")
@@ -425,11 +426,11 @@ impl HtmlParser {
             // 1. Let last template be the last template element in the stack of open elements, if any.
             let last_template = self
                 .stack_of_open_elements
-                .last_element_with_tag_name("template");
+                .last_element_with_tag_name(tags::TEMPLATE);
             // 2. Let last table be the last table element in the stack of open elements, if any.
             let last_table = self
                 .stack_of_open_elements
-                .last_element_with_tag_name("table");
+                .last_element_with_tag_name(tags::TABLE);
 
             // 3. If there is a last template and either there is no last table,
             //    or there is one, but last template is lower (more recently added) than last table
@@ -493,7 +494,7 @@ impl HtmlParser {
             .iter()
             .find(|e| e.handle == adjusted.parent)
         {
-            if entry.namespace == DomNamespace::HTML && entry.tag_name == "template" {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == tags::TEMPLATE {
                 adjusted = AdjustedInsertionLocation {
                     parent: entry.handle.template_contents(),
                     insert_before_sibling: None,
@@ -534,7 +535,7 @@ impl HtmlParser {
                 }
             }
             // Adjust MathML attribute names.
-            if namespace == DomNamespace::MathML && attr.local_name == "definitionurl" {
+            if namespace == DomNamespace::MathML && attr.local_name == attrs::DEFINITIONURL {
                 element.append_attribute("definitionURL", &attr.value);
                 continue;
             }
@@ -567,8 +568,8 @@ impl HtmlParser {
         let tag_name = token.tag_name().to_string();
 
         // Cache encoding attribute for MathML annotation-xml (needed for HTML integration point check).
-        let encoding_attr = if namespace == DomNamespace::MathML && tag_name == "annotation-xml" {
-            token.get_attribute("encoding").map(|s| s.to_string())
+        let encoding_attr = if namespace == DomNamespace::MathML && tag_name == tags::ANNOTATION_XML {
+            token.get_attribute(attrs::ENCODING).map(|s| s.to_string())
         } else {
             None
         };
@@ -595,7 +596,7 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
     fn create_element_for(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
         // 5. Let is be the value of the "is" attribute in token, if such an attribute exists.
-        let is_value = token.get_attribute("is");
+        let is_value = token.get_attribute(attrs::IS);
         DomHandle::create_element(self.document, token.tag_name(), namespace, is_value)
     }
 
@@ -693,7 +694,7 @@ impl HtmlParser {
         // 2. If the current node is not a p element, then this is a parse error.
         // (We just log and continue.)
         // 3. Pop elements from the stack of open elements until a p element has been popped.
-        self.stack_of_open_elements.pop_until_tag_name_popped("p");
+        self.stack_of_open_elements.pop_until_tag_name_popped(tags::P);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#generic-raw-text-element-parsing-algorithm
@@ -844,7 +845,7 @@ impl HtmlParser {
 
             if ns == DomNamespace::HTML {
                 // 4. If node is a select element, run these substeps:
-                if tag == "select" {
+                if tag == tags::SELECT {
                     if !last {
                         // Walk ancestors to check for table/template.
                         let mut ancestor_idx = node_index;
@@ -855,10 +856,10 @@ impl HtmlParser {
                             ancestor_idx -= 1;
                             let ancestor = self.stack_of_open_elements.entry_at(ancestor_idx);
                             if ancestor.namespace == DomNamespace::HTML {
-                                if ancestor.tag_name == "template" {
+                                if ancestor.tag_name == tags::TEMPLATE {
                                     break;
                                 }
-                                if ancestor.tag_name == "table" {
+                                if ancestor.tag_name == tags::TABLE {
                                     self.insertion_mode = InsertionMode::InSelectInTable;
                                     return;
                                 }
@@ -870,13 +871,13 @@ impl HtmlParser {
                 }
 
                 // 5. If node is a td or th element and last is false, ...
-                if (tag == "td" || tag == "th") && !last {
+                if (tag == tags::TD || tag == tags::TH) && !last {
                     self.insertion_mode = InsertionMode::InCell;
                     return;
                 }
 
                 // 6. If node is a tr element, ...
-                if tag == "tr" {
+                if tag == tags::TR {
                     self.insertion_mode = InsertionMode::InRow;
                     return;
                 }
@@ -888,25 +889,25 @@ impl HtmlParser {
                 }
 
                 // 8. If node is a caption element, ...
-                if tag == "caption" {
+                if tag == tags::CAPTION {
                     self.insertion_mode = InsertionMode::InCaption;
                     return;
                 }
 
                 // 9. If node is a colgroup element, ...
-                if tag == "colgroup" {
+                if tag == tags::COLGROUP {
                     self.insertion_mode = InsertionMode::InColumnGroup;
                     return;
                 }
 
                 // 10. If node is a table element, ...
-                if tag == "table" {
+                if tag == tags::TABLE {
                     self.insertion_mode = InsertionMode::InTable;
                     return;
                 }
 
                 // 11. If node is a template element, ...
-                if tag == "template" {
+                if tag == tags::TEMPLATE {
                     self.insertion_mode = *self
                         .stack_of_template_insertion_modes
                         .last()
@@ -915,25 +916,25 @@ impl HtmlParser {
                 }
 
                 // 12. If node is a head element and last is false, ...
-                if tag == "head" && !last {
+                if tag == tags::HEAD && !last {
                     self.insertion_mode = InsertionMode::InHead;
                     return;
                 }
 
                 // 13. If node is a body element, ...
-                if tag == "body" {
+                if tag == tags::BODY {
                     self.insertion_mode = InsertionMode::InBody;
                     return;
                 }
 
                 // 14. If node is a frameset element, ...
-                if tag == "frameset" {
+                if tag == tags::FRAMESET {
                     self.insertion_mode = InsertionMode::InFrameset;
                     return;
                 }
 
                 // 15. If node is an html element, ...
-                if tag == "html" {
+                if tag == tags::HTML {
                     if self.head_element.is_none() {
                         self.insertion_mode = InsertionMode::BeforeHead;
                     } else {
@@ -970,7 +971,7 @@ impl HtmlParser {
         }
 
         // NOTE: The tokenizer puts the name into lower case for us.
-        if doctype.name != "html" {
+        if doctype.name != tags::HTML {
             return QuirksMode::Yes;
         }
 
@@ -1148,7 +1149,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Create an element for the token in the HTML namespace, with the Document as the
             // intended parent. Append it to the Document object. Put this element in the stack
             // of open elements.
@@ -1160,7 +1161,7 @@ impl HtmlParser {
             DomHandle::insert_before(doc_node, element, None);
             self.stack_of_open_elements.push(StackEntry::new(
                 element,
-                "html".to_string(),
+                tags::HTML.to_string(),
                 DomNamespace::HTML,
             ));
 
@@ -1189,7 +1190,7 @@ impl HtmlParser {
         DomHandle::insert_before(doc_node, element, None);
         self.stack_of_open_elements.push(StackEntry::new(
             element,
-            "html".to_string(),
+            tags::HTML.to_string(),
             DomNamespace::HTML,
         ));
 
@@ -1221,14 +1222,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> A start tag whose tag name is "head"
-        if token.is_start_tag() && token.tag_name() == "head" {
+        if token.is_start_tag() && token.tag_name() == tags::HEAD {
             // Insert an HTML element for the token.
             let element = self.insert_html_element(token);
 
@@ -1291,7 +1292,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
@@ -1312,7 +1313,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "meta"
-        if token.is_start_tag() && token.tag_name() == "meta" {
+        if token.is_start_tag() && token.tag_name() == tags::META {
             // Insert an HTML element for the token. Immediately pop the current node off the stack.
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -1321,7 +1322,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "title"
-        if token.is_start_tag() && token.tag_name() == "title" {
+        if token.is_start_tag() && token.tag_name() == tags::TITLE {
             // Follow the generic RCDATA element parsing algorithm.
             self.parse_generic_rcdata_element(token);
             return;
@@ -1330,7 +1331,7 @@ impl HtmlParser {
         // -> A start tag whose tag name is "noscript", if the scripting flag is enabled
         // -> A start tag whose tag name is one of: "noframes", "style"
         if token.is_start_tag()
-            && ((token.tag_name() == "noscript" && self.scripting_enabled)
+            && ((token.tag_name() == tags::NOSCRIPT && self.scripting_enabled)
                 || matches!(token.tag_name(), "noframes" | "style"))
         {
             // Follow the generic raw text element parsing algorithm.
@@ -1339,7 +1340,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "noscript", if the scripting flag is disabled
-        if token.is_start_tag() && token.tag_name() == "noscript" && !self.scripting_enabled {
+        if token.is_start_tag() && token.tag_name() == tags::NOSCRIPT && !self.scripting_enabled {
             // Insert an HTML element for the token.
             self.insert_html_element(token);
             // Switch the insertion mode to "in head noscript".
@@ -1348,7 +1349,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "script"
-        if token.is_start_tag() && token.tag_name() == "script" {
+        if token.is_start_tag() && token.tag_name() == tags::SCRIPT {
             // 1. Let the adjusted insertion location be the appropriate place for inserting a node.
             let adjusted = self.find_appropriate_place_for_inserting_node(None);
 
@@ -1374,7 +1375,7 @@ impl HtmlParser {
             // 7. Push the element onto the stack of open elements.
             self.stack_of_open_elements.push(StackEntry::new(
                 element,
-                "script".to_string(),
+                tags::SCRIPT.to_string(),
                 DomNamespace::HTML,
             ));
 
@@ -1390,7 +1391,7 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "head"
-        if token.is_end_tag() && token.tag_name() == "head" {
+        if token.is_end_tag() && token.tag_name() == tags::HEAD {
             // Pop the current node (which will be the head element) off the stack.
             self.stack_of_open_elements.pop();
 
@@ -1405,7 +1406,7 @@ impl HtmlParser {
             // (Fall through.)
         }
         // -> A start tag whose tag name is "template"
-        else if token.is_start_tag() && token.tag_name() == "template" {
+        else if token.is_start_tag() && token.tag_name() == tags::TEMPLATE {
             // Insert a marker at the end of the list of active formatting elements.
             self.list_of_active_formatting_elements.add_marker();
 
@@ -1420,7 +1421,7 @@ impl HtmlParser {
                 .push(InsertionMode::InTemplate);
 
             // Check for declarative shadow root (shadowrootmode attribute).
-            let shadowrootmode = token.get_attribute("shadowrootmode");
+            let shadowrootmode = token.get_attribute(attrs::SHADOWROOTMODE);
             let has_valid_shadowrootmode = shadowrootmode
                 .is_some_and(|m| m == "open" || m == "closed");
 
@@ -1445,9 +1446,9 @@ impl HtmlParser {
                     self.insert_foreign_element(token, DomNamespace::HTML, true);
 
                 let mode = shadowrootmode.unwrap();
-                let clonable = token.has_attribute("shadowrootclonable");
-                let serializable = token.has_attribute("shadowrootserializable");
-                let delegates_focus = token.has_attribute("shadowrootdelegatesfocus");
+                let clonable = token.has_attribute(attrs::SHADOWROOTCLONABLE);
+                let serializable = token.has_attribute(attrs::SHADOWROOTSERIALIZABLE);
+                let delegates_focus = token.has_attribute(attrs::SHADOWROOTDELEGATESFOCUS);
 
                 let success = DomHandle::handle_declarative_shadow_template(
                     template_element,
@@ -1469,7 +1470,7 @@ impl HtmlParser {
             return;
         }
         // -> An end tag whose tag name is "template"
-        else if token.is_end_tag() && token.tag_name() == "template" {
+        else if token.is_end_tag() && token.tag_name() == tags::TEMPLATE {
             // If there is no template element on the stack of open elements, then this is a
             // parse error; ignore the token.
             if !self.stack_of_open_elements.contains_template_element() {
@@ -1484,7 +1485,7 @@ impl HtmlParser {
 
             // 3. Pop elements from the stack until a template element has been popped.
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("template");
+                .pop_until_tag_name_popped(tags::TEMPLATE);
 
             // 4. Clear the list of active formatting elements up to the last marker.
             self.list_of_active_formatting_elements
@@ -1499,7 +1500,7 @@ impl HtmlParser {
         }
         // -> A start tag whose tag name is "head"
         // -> Any other end tag
-        else if (token.is_start_tag() && token.tag_name() == "head") || token.is_end_tag() {
+        else if (token.is_start_tag() && token.tag_name() == tags::HEAD) || token.is_end_tag() {
             // Parse error. Ignore the token.
             return;
         }
@@ -1524,14 +1525,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> An end tag whose tag name is "noscript"
-        if token.is_end_tag() && token.tag_name() == "noscript" {
+        if token.is_end_tag() && token.tag_name() == tags::NOSCRIPT {
             // Pop the current node (which will be a noscript element) from the stack.
             self.stack_of_open_elements.pop();
 
@@ -1558,7 +1559,7 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "br"
-        if token.is_end_tag() && token.tag_name() == "br" {
+        if token.is_end_tag() && token.tag_name() == tags::BR {
             // Act as described in the "anything else" entry below.
             // (Fall through.)
         }
@@ -1608,14 +1609,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> A start tag whose tag name is "body"
-        if token.is_start_tag() && token.tag_name() == "body" {
+        if token.is_start_tag() && token.tag_name() == tags::BODY {
             // Insert an HTML element for the token.
             self.insert_html_element(token);
 
@@ -1628,7 +1629,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "frameset"
-        if token.is_start_tag() && token.tag_name() == "frameset" {
+        if token.is_start_tag() && token.tag_name() == tags::FRAMESET {
             // Insert an HTML element for the token.
             self.insert_html_element(token);
 
@@ -1659,7 +1660,7 @@ impl HtmlParser {
             if let Some(head) = self.head_element {
                 self.stack_of_open_elements.push(StackEntry::new(
                     head,
-                    "head".to_string(),
+                    tags::HEAD.to_string(),
                     DomNamespace::HTML,
                 ));
             }
@@ -1673,7 +1674,7 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "template"
-        if token.is_end_tag() && token.tag_name() == "template" {
+        if token.is_end_tag() && token.tag_name() == tags::TEMPLATE {
             // Process the token using the rules for the "in head" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
@@ -1686,7 +1687,7 @@ impl HtmlParser {
         }
         // -> A start tag whose tag name is "head"
         // -> Any other end tag
-        else if (token.is_start_tag() && token.tag_name() == "head") || token.is_end_tag() {
+        else if (token.is_start_tag() && token.tag_name() == tags::HEAD) || token.is_end_tag() {
             // Parse error. Ignore the token.
             return;
         }
@@ -1745,7 +1746,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Parse error.
             // If there is a template element on the stack of open elements, then ignore the token.
             if self.stack_of_open_elements.contains_template_element() {
@@ -1781,7 +1782,7 @@ impl HtmlParser {
                     | "template"
                     | "title"
             ))
-            || (token.is_end_tag() && token.tag_name() == "template")
+            || (token.is_end_tag() && token.tag_name() == tags::TEMPLATE)
         {
             // Process the token using the rules for the "in head" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InHead, token);
@@ -1789,7 +1790,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "body"
-        if token.is_start_tag() && token.tag_name() == "body" {
+        if token.is_start_tag() && token.tag_name() == tags::BODY {
             // Parse error.
             // If the stack of open elements has only one node on it, or if the second element on
             // the stack is not a body element, ignore the token. (fragment case)
@@ -1797,7 +1798,7 @@ impl HtmlParser {
                 return;
             }
             if let Some(second) = self.stack_of_open_elements.get(1) {
-                if !second.is_html_element("body") {
+                if !second.is_html_element(tags::BODY) {
                     return;
                 }
             }
@@ -1819,13 +1820,13 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "frameset"
-        if token.is_start_tag() && token.tag_name() == "frameset" {
+        if token.is_start_tag() && token.tag_name() == tags::FRAMESET {
             // Parse error.
             if self.stack_of_open_elements.len() <= 1 {
                 return;
             }
             if let Some(second) = self.stack_of_open_elements.get(1) {
-                if !second.is_html_element("body") {
+                if !second.is_html_element(tags::BODY) {
                     return;
                 }
             }
@@ -1863,10 +1864,10 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "body"
-        if token.is_end_tag() && token.tag_name() == "body" {
+        if token.is_end_tag() && token.tag_name() == tags::BODY {
             // If the stack of open elements does not have a body element in scope, this is a
             // parse error; ignore the token.
-            if !self.stack_of_open_elements.has_in_scope("body") {
+            if !self.stack_of_open_elements.has_in_scope(tags::BODY) {
                 return;
             }
             // Switch the insertion mode to "after body".
@@ -1875,10 +1876,10 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "html"
-        if token.is_end_tag() && token.tag_name() == "html" {
+        if token.is_end_tag() && token.tag_name() == tags::HTML {
             // If the stack of open elements does not have a body element in scope, this is a
             // parse error; ignore the token.
-            if !self.stack_of_open_elements.has_in_scope("body") {
+            if !self.stack_of_open_elements.has_in_scope(tags::BODY) {
                 return;
             }
             // Switch the insertion mode to "after body".
@@ -1923,7 +1924,7 @@ impl HtmlParser {
             )
         {
             // If the stack of open elements has a p element in button scope, then close a p element.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // Insert an HTML element for the token.
@@ -1939,7 +1940,7 @@ impl HtmlParser {
             )
         {
             // If the stack of open elements has a p element in button scope, then close a p element.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // If the current node is an HTML element whose tag name is one of "h1"-"h6",
@@ -1962,7 +1963,7 @@ impl HtmlParser {
         // -> A start tag whose tag name is one of: "pre", "listing"
         if token.is_start_tag() && matches!(token.tag_name(), "pre" | "listing") {
             // If the stack of open elements has a p element in button scope, then close a p element.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // Insert an HTML element for the token.
@@ -1975,7 +1976,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "form"
-        if token.is_start_tag() && token.tag_name() == "form" {
+        if token.is_start_tag() && token.tag_name() == tags::FORM {
             // If the form element pointer is not null, and there is no template element on the
             // stack of open elements, then this is a parse error; ignore the token.
             if self.form_element.is_some()
@@ -1984,7 +1985,7 @@ impl HtmlParser {
                 return;
             }
             // If the stack of open elements has a p element in button scope, then close a p element.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // Insert an HTML element for the token.
@@ -1997,7 +1998,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "li"
-        if token.is_start_tag() && token.tag_name() == "li" {
+        if token.is_start_tag() && token.tag_name() == tags::LI {
             // 1. Set the frameset-ok flag to "not ok".
             self.frameset_ok = false;
 
@@ -2005,12 +2006,12 @@ impl HtmlParser {
             for i in (0..self.stack_of_open_elements.len()).rev() {
                 let entry = self.stack_of_open_elements.entry_at(i);
                 // 3. Loop: If node is an li element, then run these substeps:
-                if entry.is_html_element("li") {
+                if entry.is_html_element(tags::LI) {
                     // Generate implied end tags, except for li elements.
                     self.stack_of_open_elements
                         .generate_implied_end_tags(Some("li"));
                     // Pop elements until an li element has been popped.
-                    self.stack_of_open_elements.pop_until_tag_name_popped("li");
+                    self.stack_of_open_elements.pop_until_tag_name_popped(tags::LI);
                     break;
                 }
                 // If node is in the special category, but not an address, div, or p element,
@@ -2023,7 +2024,7 @@ impl HtmlParser {
             }
 
             // If the stack of open elements has a p element in button scope, close a p element.
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // Insert an HTML element for the token.
@@ -2038,18 +2039,18 @@ impl HtmlParser {
 
             for i in (0..self.stack_of_open_elements.len()).rev() {
                 let entry = self.stack_of_open_elements.entry_at(i);
-                if entry.is_html_element("dd") {
+                if entry.is_html_element(tags::DD) {
                     self.stack_of_open_elements
                         .generate_implied_end_tags(Some("dd"));
                     self.stack_of_open_elements
-                        .pop_until_tag_name_popped("dd");
+                        .pop_until_tag_name_popped(tags::DD);
                     break;
                 }
-                if entry.is_html_element("dt") {
+                if entry.is_html_element(tags::DT) {
                     self.stack_of_open_elements
                         .generate_implied_end_tags(Some("dt"));
                     self.stack_of_open_elements
-                        .pop_until_tag_name_popped("dt");
+                        .pop_until_tag_name_popped(tags::DT);
                     break;
                 }
                 if is_special_tag(&entry.tag_name, entry.namespace)
@@ -2059,7 +2060,7 @@ impl HtmlParser {
                 }
             }
 
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             self.insert_html_element(token);
@@ -2067,8 +2068,8 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "plaintext"
-        if token.is_start_tag() && token.tag_name() == "plaintext" {
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+        if token.is_start_tag() && token.tag_name() == tags::PLAINTEXT {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             self.insert_html_element(token);
@@ -2077,13 +2078,13 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "button"
-        if token.is_start_tag() && token.tag_name() == "button" {
-            if self.stack_of_open_elements.has_in_scope("button") {
+        if token.is_start_tag() && token.tag_name() == tags::BUTTON {
+            if self.stack_of_open_elements.has_in_scope(tags::BUTTON) {
                 // Parse error.
                 self.stack_of_open_elements
                     .generate_implied_end_tags(None);
                 self.stack_of_open_elements
-                    .pop_until_tag_name_popped("button");
+                    .pop_until_tag_name_popped(tags::BUTTON);
             }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
@@ -2144,7 +2145,7 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "form"
-        if token.is_end_tag() && token.tag_name() == "form" {
+        if token.is_end_tag() && token.tag_name() == tags::FORM {
             if !self.stack_of_open_elements.contains_template_element() {
                 let node = self.form_element.take();
                 if node.is_none() {
@@ -2158,20 +2159,20 @@ impl HtmlParser {
                     .generate_implied_end_tags(None);
                 self.stack_of_open_elements.remove(node);
             } else {
-                if !self.stack_of_open_elements.has_in_scope("form") {
+                if !self.stack_of_open_elements.has_in_scope(tags::FORM) {
                     return;
                 }
                 self.stack_of_open_elements
                     .generate_implied_end_tags(None);
                 self.stack_of_open_elements
-                    .pop_until_tag_name_popped("form");
+                    .pop_until_tag_name_popped(tags::FORM);
             }
             return;
         }
 
         // -> An end tag whose tag name is "p"
-        if token.is_end_tag() && token.tag_name() == "p" {
-            if !self.stack_of_open_elements.has_in_button_scope("p") {
+        if token.is_end_tag() && token.tag_name() == tags::P {
+            if !self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 // Parse error.
                 let p_token = Self::make_start_tag_token("p");
                 self.insert_html_element(&p_token);
@@ -2181,14 +2182,14 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "li"
-        if token.is_end_tag() && token.tag_name() == "li" {
-            if !self.stack_of_open_elements.has_in_list_item_scope("li") {
+        if token.is_end_tag() && token.tag_name() == tags::LI {
+            if !self.stack_of_open_elements.has_in_list_item_scope(tags::LI) {
                 return;
             }
             self.stack_of_open_elements
                 .generate_implied_end_tags(Some("li"));
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("li");
+                .pop_until_tag_name_popped(tags::LI);
             return;
         }
 
@@ -2211,24 +2212,24 @@ impl HtmlParser {
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
             )
         {
-            if !self.stack_of_open_elements.has_in_scope("h1")
-                && !self.stack_of_open_elements.has_in_scope("h2")
-                && !self.stack_of_open_elements.has_in_scope("h3")
-                && !self.stack_of_open_elements.has_in_scope("h4")
-                && !self.stack_of_open_elements.has_in_scope("h5")
-                && !self.stack_of_open_elements.has_in_scope("h6")
+            if !self.stack_of_open_elements.has_in_scope(tags::H1)
+                && !self.stack_of_open_elements.has_in_scope(tags::H2)
+                && !self.stack_of_open_elements.has_in_scope(tags::H3)
+                && !self.stack_of_open_elements.has_in_scope(tags::H4)
+                && !self.stack_of_open_elements.has_in_scope(tags::H5)
+                && !self.stack_of_open_elements.has_in_scope(tags::H6)
             {
                 return;
             }
             self.stack_of_open_elements
                 .generate_implied_end_tags(None);
             self.stack_of_open_elements
-                .pop_until_one_of_tag_names_popped(&["h1", "h2", "h3", "h4", "h5", "h6"]);
+                .pop_until_one_of_tag_names_popped(&[tags::H1, tags::H2, tags::H3, tags::H4, tags::H5, tags::H6]);
             return;
         }
 
         // -> A start tag whose tag name is "a"
-        if token.is_start_tag() && token.tag_name() == "a" {
+        if token.is_start_tag() && token.tag_name() == tags::A {
             // If the list of active formatting elements contains an a element between the end of
             // the list and the last marker on the list (or the start of the list if there is no marker),
             // then this is a parse error.
@@ -2288,9 +2289,9 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "nobr"
-        if token.is_start_tag() && token.tag_name() == "nobr" {
+        if token.is_start_tag() && token.tag_name() == tags::NOBR {
             self.reconstruct_the_active_formatting_elements();
-            if self.stack_of_open_elements.has_in_scope("nobr") {
+            if self.stack_of_open_elements.has_in_scope(tags::NOBR) {
                 // Parse error.
                 self.run_the_adoption_agency_algorithm(token);
                 self.reconstruct_the_active_formatting_elements();
@@ -2298,7 +2299,7 @@ impl HtmlParser {
             let element = self.insert_html_element(token);
             self.list_of_active_formatting_elements.add(
                 element,
-                "nobr".to_string(),
+                tags::NOBR.to_string(),
                 DomNamespace::HTML,
                 token.clone(),
             );
@@ -2357,11 +2358,11 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "table"
-        if token.is_start_tag() && token.tag_name() == "table" {
+        if token.is_start_tag() && token.tag_name() == tags::TABLE {
             // If the Document is not set to quirks mode, and the stack of open elements
             // has a p element in button scope, then close a p element.
             let in_quirks = DomHandle::document_in_quirks_mode(self.document);
-            if !in_quirks && self.stack_of_open_elements.has_in_button_scope("p") {
+            if !in_quirks && self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             self.insert_html_element(token);
@@ -2372,7 +2373,7 @@ impl HtmlParser {
 
         // -> An end tag whose tag name is "br"
         // (Parse error. Drop attributes, treat as start tag.)
-        if token.is_end_tag() && token.tag_name() == "br" {
+        if token.is_end_tag() && token.tag_name() == tags::BR {
             self.reconstruct_the_active_formatting_elements();
             let br_token = Self::make_start_tag_token("br");
             self.insert_html_element(&br_token);
@@ -2396,21 +2397,21 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "input"
-        if token.is_start_tag() && token.tag_name() == "input" {
+        if token.is_start_tag() && token.tag_name() == tags::INPUT {
             // If the parser was created as part of the HTML fragment parsing algorithm and
             // the context element is a select element, ignore the token.
             if self.parsing_fragment
                 && self
                     .context_element
-                    .is_some_and(|ctx| ctx.local_name() == "select")
+                    .is_some_and(|ctx| ctx.local_name() == tags::SELECT)
             {
                 return;
             }
             // If the stack of open elements has a select element in scope:
-            if self.stack_of_open_elements.has_in_scope("select") {
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
                 // Pop elements until a select element has been popped.
                 self.stack_of_open_elements
-                    .pop_until_tag_name_popped("select");
+                    .pop_until_tag_name_popped(tags::SELECT);
             }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
@@ -2419,7 +2420,7 @@ impl HtmlParser {
             // but that attribute's value is not an ASCII case-insensitive match for "hidden",
             // then set the frameset-ok flag to "not ok".
             let is_hidden = token
-                .get_attribute("type")
+                .get_attribute(attrs::TYPE)
                 .is_some_and(|v| v.eq_ignore_ascii_case("hidden"));
             if !is_hidden {
                 self.frameset_ok = false;
@@ -2437,12 +2438,12 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "hr"
-        if token.is_start_tag() && token.tag_name() == "hr" {
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+        if token.is_start_tag() && token.tag_name() == tags::HR {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             // If the stack of open elements has a select element in scope:
-            if self.stack_of_open_elements.has_in_scope("select") {
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
                 self.stack_of_open_elements
                     .generate_implied_end_tags(None);
             }
@@ -2453,17 +2454,17 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "image"
-        if token.is_start_tag() && token.tag_name() == "image" {
+        if token.is_start_tag() && token.tag_name() == tags::IMAGE {
             // Parse error. Change the token's tag name to "img" and reprocess it.
             // (We create a new token with the corrected name.)
             let mut corrected = token.clone();
-            *corrected.tag_name_mut() = "img".to_string();
+            *corrected.tag_name_mut() = tags::IMG.to_string();
             self.process_using_the_rules_for(InsertionMode::InBody, &corrected);
             return;
         }
 
         // -> A start tag whose tag name is "textarea"
-        if token.is_start_tag() && token.tag_name() == "textarea" {
+        if token.is_start_tag() && token.tag_name() == tags::TEXTAREA {
             self.insert_html_element(token);
             self.next_line_feed_can_be_ignored = true;
             self.tokenizer.switch_to(TokenizerState::RCDATA);
@@ -2474,8 +2475,8 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "xmp"
-        if token.is_start_tag() && token.tag_name() == "xmp" {
-            if self.stack_of_open_elements.has_in_button_scope("p") {
+        if token.is_start_tag() && token.tag_name() == tags::XMP {
+            if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
             }
             self.reconstruct_the_active_formatting_elements();
@@ -2485,7 +2486,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "iframe"
-        if token.is_start_tag() && token.tag_name() == "iframe" {
+        if token.is_start_tag() && token.tag_name() == tags::IFRAME {
             self.frameset_ok = false;
             self.parse_generic_raw_text_element(token);
             return;
@@ -2494,29 +2495,29 @@ impl HtmlParser {
         // -> A start tag whose tag name is "noembed"
         // -> A start tag whose tag name is "noscript", if the scripting flag is enabled
         if token.is_start_tag()
-            && (token.tag_name() == "noembed"
-                || (token.tag_name() == "noscript" && self.scripting_enabled))
+            && (token.tag_name() == tags::NOEMBED
+                || (token.tag_name() == tags::NOSCRIPT && self.scripting_enabled))
         {
             self.parse_generic_raw_text_element(token);
             return;
         }
 
         // -> A start tag whose tag name is "select"
-        if token.is_start_tag() && token.tag_name() == "select" {
+        if token.is_start_tag() && token.tag_name() == tags::SELECT {
             // If the parser was created as part of the HTML fragment parsing algorithm and
             // the context element is a select element, ignore the token.
             if self.parsing_fragment
                 && self
                     .context_element
-                    .is_some_and(|ctx| ctx.local_name() == "select")
+                    .is_some_and(|ctx| ctx.local_name() == tags::SELECT)
             {
                 // Parse error. Ignore the token.
             }
             // If the stack of open elements has a select element in scope:
-            else if self.stack_of_open_elements.has_in_scope("select") {
+            else if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
                 // Parse error. Pop elements until a select element has been popped.
                 self.stack_of_open_elements
-                    .pop_until_tag_name_popped("select");
+                    .pop_until_tag_name_popped(tags::SELECT);
             } else {
                 // No select in scope: create select normally.
                 self.reconstruct_the_active_formatting_elements();
@@ -2527,15 +2528,15 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "option"
-        if token.is_start_tag() && token.tag_name() == "option" {
-            if self.stack_of_open_elements.has_in_scope("select") {
+        if token.is_start_tag() && token.tag_name() == tags::OPTION {
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
                 // Generate implied end tags except for optgroup elements.
                 self.stack_of_open_elements
                     .generate_implied_end_tags(Some("optgroup"));
             } else if self
                 .stack_of_open_elements
                 .current_node()
-                .is_some_and(|n| n.is_html_element("option"))
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
             {
                 self.stack_of_open_elements.pop();
             }
@@ -2545,14 +2546,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "optgroup"
-        if token.is_start_tag() && token.tag_name() == "optgroup" {
-            if self.stack_of_open_elements.has_in_scope("select") {
+        if token.is_start_tag() && token.tag_name() == tags::OPTGROUP {
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
                 // Generate implied end tags.
                 self.stack_of_open_elements.generate_implied_end_tags(None);
             } else if self
                 .stack_of_open_elements
                 .current_node()
-                .is_some_and(|n| n.is_html_element("option"))
+                .is_some_and(|n| n.is_html_element(tags::OPTION))
             {
                 self.stack_of_open_elements.pop();
             }
@@ -2563,7 +2564,7 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is one of: "rb", "rtc"
         if token.is_start_tag() && matches!(token.tag_name(), "rb" | "rtc") {
-            if self.stack_of_open_elements.has_in_scope("ruby") {
+            if self.stack_of_open_elements.has_in_scope(tags::RUBY) {
                 self.stack_of_open_elements
                     .generate_implied_end_tags(None);
             }
@@ -2573,7 +2574,7 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is one of: "rp", "rt"
         if token.is_start_tag() && matches!(token.tag_name(), "rp" | "rt") {
-            if self.stack_of_open_elements.has_in_scope("ruby") {
+            if self.stack_of_open_elements.has_in_scope(tags::RUBY) {
                 self.stack_of_open_elements
                     .generate_implied_end_tags(Some("rtc"));
             }
@@ -2582,7 +2583,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "math"
-        if token.is_start_tag() && token.tag_name() == "math" {
+        if token.is_start_tag() && token.tag_name() == tags::MATH {
             self.reconstruct_the_active_formatting_elements();
             // NOTE: MathML and foreign attribute adjustment is done in insert_foreign_element.
             self.insert_foreign_element(token, DomNamespace::MathML, false);
@@ -2593,7 +2594,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "svg"
-        if token.is_start_tag() && token.tag_name() == "svg" {
+        if token.is_start_tag() && token.tag_name() == tags::SVG {
             self.reconstruct_the_active_formatting_elements();
             // NOTE: SVG tag/attribute and foreign attribute adjustment is done in insert_foreign_element.
             self.insert_foreign_element(token, DomNamespace::SVG, false);
@@ -2955,7 +2956,7 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "script"
-        if token.is_end_tag() && token.tag_name() == "script" {
+        if token.is_end_tag() && token.tag_name() == tags::SCRIPT {
             // Pop the current node off the stack (which will be the script element).
             let script_entry = self.stack_of_open_elements.pop();
 
@@ -3031,14 +3032,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> An end tag whose tag name is "html"
-        if token.is_end_tag() && token.tag_name() == "html" {
+        if token.is_end_tag() && token.tag_name() == tags::HTML {
             // If the parser was created as part of the HTML fragment parsing algorithm, this is
             // a parse error; ignore the token. (fragment case)
             if self.parsing_fragment {
@@ -3078,7 +3079,7 @@ impl HtmlParser {
         // -> A start tag whose tag name is "html"
         if token.is_doctype()
             || token.is_parser_whitespace()
-            || (token.is_start_tag() && token.tag_name() == "html")
+            || (token.is_start_tag() && token.tag_name() == tags::HTML)
         {
             // Process the token using the rules for the "in body" insertion mode.
             self.process_using_the_rules_for(InsertionMode::InBody, token);
@@ -3138,7 +3139,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "caption"
-        if token.is_start_tag() && token.tag_name() == "caption" {
+        if token.is_start_tag() && token.tag_name() == tags::CAPTION {
             // Clear the stack back to a table context.
             self.stack_of_open_elements.clear_back_to_table_context();
             // Insert a marker at the end of the list of active formatting elements.
@@ -3150,7 +3151,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "colgroup"
-        if token.is_start_tag() && token.tag_name() == "colgroup" {
+        if token.is_start_tag() && token.tag_name() == tags::COLGROUP {
             self.stack_of_open_elements.clear_back_to_table_context();
             self.insert_html_element(token);
             self.insertion_mode = InsertionMode::InColumnGroup;
@@ -3158,7 +3159,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "col"
-        if token.is_start_tag() && token.tag_name() == "col" {
+        if token.is_start_tag() && token.tag_name() == tags::COL {
             self.stack_of_open_elements.clear_back_to_table_context();
             let colgroup_token = Self::make_start_tag_token("colgroup");
             self.insert_html_element(&colgroup_token);
@@ -3190,26 +3191,26 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "table"
-        if token.is_start_tag() && token.tag_name() == "table" {
+        if token.is_start_tag() && token.tag_name() == tags::TABLE {
             // Parse error.
-            if !self.stack_of_open_elements.has_in_table_scope("table") {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TABLE) {
                 return;
             }
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("table");
+                .pop_until_tag_name_popped(tags::TABLE);
             self.reset_the_insertion_mode_appropriately();
             self.reprocess_token();
             return;
         }
 
         // -> An end tag whose tag name is "table"
-        if token.is_end_tag() && token.tag_name() == "table" {
-            if !self.stack_of_open_elements.has_in_table_scope("table") {
+        if token.is_end_tag() && token.tag_name() == tags::TABLE {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TABLE) {
                 // Parse error. Ignore the token.
                 return;
             }
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("table");
+                .pop_until_tag_name_popped(tags::TABLE);
             self.reset_the_insertion_mode_appropriately();
             return;
         }
@@ -3240,16 +3241,16 @@ impl HtmlParser {
         // -> An end tag whose tag name is "template"
         if (token.is_start_tag()
             && matches!(token.tag_name(), "style" | "script" | "template"))
-            || (token.is_end_tag() && token.tag_name() == "template")
+            || (token.is_end_tag() && token.tag_name() == tags::TEMPLATE)
         {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
 
         // -> A start tag whose tag name is "input"
-        if token.is_start_tag() && token.tag_name() == "input" {
+        if token.is_start_tag() && token.tag_name() == tags::INPUT {
             let is_hidden = token
-                .get_attribute("type")
+                .get_attribute(attrs::TYPE)
                 .is_some_and(|v| v.eq_ignore_ascii_case("hidden"));
             if !is_hidden {
                 // Act as described in the "anything else" entry below.
@@ -3265,7 +3266,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "form"
-        if token.is_start_tag() && token.tag_name() == "form" {
+        if token.is_start_tag() && token.tag_name() == tags::FORM {
             // Parse error.
             if self.form_element.is_some()
                 || self.stack_of_open_elements.contains_template_element()
@@ -3336,15 +3337,15 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-incaption
     fn handle_in_caption(&mut self, token: &Token) {
         // -> An end tag whose tag name is "caption"
-        if token.is_end_tag() && token.tag_name() == "caption" {
-            if !self.stack_of_open_elements.has_in_table_scope("caption") {
+        if token.is_end_tag() && token.tag_name() == tags::CAPTION {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::CAPTION) {
                 // Parse error. Ignore the token. (fragment case)
                 return;
             }
             self.stack_of_open_elements
                 .generate_implied_end_tags(None);
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("caption");
+                .pop_until_tag_name_popped(tags::CAPTION);
             self.list_of_active_formatting_elements
                 .clear_up_to_last_marker();
             self.insertion_mode = InsertionMode::InTable;
@@ -3367,16 +3368,16 @@ impl HtmlParser {
                     | "thead"
                     | "tr"
             ))
-            || (token.is_end_tag() && token.tag_name() == "table")
+            || (token.is_end_tag() && token.tag_name() == tags::TABLE)
         {
-            if !self.stack_of_open_elements.has_in_table_scope("caption") {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::CAPTION) {
                 // Parse error. Ignore the token. (fragment case)
                 return;
             }
             self.stack_of_open_elements
                 .generate_implied_end_tags(None);
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("caption");
+                .pop_until_tag_name_popped(tags::CAPTION);
             self.list_of_active_formatting_elements
                 .clear_up_to_last_marker();
             self.insertion_mode = InsertionMode::InTable;
@@ -3430,22 +3431,22 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> A start tag whose tag name is "col"
-        if token.is_start_tag() && token.tag_name() == "col" {
+        if token.is_start_tag() && token.tag_name() == tags::COL {
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
             return;
         }
 
         // -> An end tag whose tag name is "colgroup"
-        if token.is_end_tag() && token.tag_name() == "colgroup" {
+        if token.is_end_tag() && token.tag_name() == tags::COLGROUP {
             if let Some(current) = self.stack_of_open_elements.current_node() {
-                if !(current.namespace == DomNamespace::HTML && current.tag_name == "colgroup") {
+                if !(current.namespace == DomNamespace::HTML && current.tag_name == tags::COLGROUP) {
                     // Parse error. Ignore the token.
                     return;
                 }
@@ -3456,14 +3457,14 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "col"
-        if token.is_end_tag() && token.tag_name() == "col" {
+        if token.is_end_tag() && token.tag_name() == tags::COL {
             // Parse error. Ignore the token.
             return;
         }
 
         // -> A start tag whose tag name is "template"
         // -> An end tag whose tag name is "template"
-        if (token.is_start_tag() || token.is_end_tag()) && token.tag_name() == "template" {
+        if (token.is_start_tag() || token.is_end_tag()) && token.tag_name() == tags::TEMPLATE {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
@@ -3476,7 +3477,7 @@ impl HtmlParser {
 
         // -> Anything else
         if let Some(current) = self.stack_of_open_elements.current_node() {
-            if !(current.namespace == DomNamespace::HTML && current.tag_name == "colgroup") {
+            if !(current.namespace == DomNamespace::HTML && current.tag_name == tags::COLGROUP) {
                 // Parse error. Ignore the token.
                 return;
             }
@@ -3489,7 +3490,7 @@ impl HtmlParser {
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intbody
     fn handle_in_table_body(&mut self, token: &Token) {
         // -> A start tag whose tag name is "tr"
-        if token.is_start_tag() && token.tag_name() == "tr" {
+        if token.is_start_tag() && token.tag_name() == tags::TR {
             self.stack_of_open_elements
                 .clear_back_to_table_body_context();
             self.insert_html_element(token);
@@ -3535,11 +3536,11 @@ impl HtmlParser {
                 token.tag_name(),
                 "caption" | "col" | "colgroup" | "tbody" | "tfoot" | "thead"
             ))
-            || (token.is_end_tag() && token.tag_name() == "table")
+            || (token.is_end_tag() && token.tag_name() == tags::TABLE)
         {
-            if !self.stack_of_open_elements.has_in_table_scope("tbody")
-                && !self.stack_of_open_elements.has_in_table_scope("thead")
-                && !self.stack_of_open_elements.has_in_table_scope("tfoot")
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TBODY)
+                && !self.stack_of_open_elements.has_in_table_scope(tags::THEAD)
+                && !self.stack_of_open_elements.has_in_table_scope(tags::TFOOT)
             {
                 // Parse error. Ignore the token.
                 return;
@@ -3581,8 +3582,8 @@ impl HtmlParser {
         }
 
         // -> An end tag whose tag name is "tr"
-        if token.is_end_tag() && token.tag_name() == "tr" {
-            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+        if token.is_end_tag() && token.tag_name() == tags::TR {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TR) {
                 // Parse error. Ignore the token.
                 return;
             }
@@ -3601,9 +3602,9 @@ impl HtmlParser {
                 token.tag_name(),
                 "caption" | "col" | "colgroup" | "tbody" | "tfoot" | "thead" | "tr"
             ))
-            || (token.is_end_tag() && token.tag_name() == "table")
+            || (token.is_end_tag() && token.tag_name() == tags::TABLE)
         {
-            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TR) {
                 // Parse error. Ignore the token.
                 return;
             }
@@ -3626,7 +3627,7 @@ impl HtmlParser {
                 // Parse error. Ignore the token.
                 return;
             }
-            if !self.stack_of_open_elements.has_in_table_scope("tr") {
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TR) {
                 return;
             }
             self.stack_of_open_elements
@@ -3659,7 +3660,7 @@ impl HtmlParser {
             .generate_implied_end_tags(None);
         // Pop elements until a td or th element has been popped.
         self.stack_of_open_elements
-            .pop_until_one_of_tag_names_popped(&["td", "th"]);
+            .pop_until_one_of_tag_names_popped(&[tags::TD, tags::TH]);
         self.list_of_active_formatting_elements
             .clear_up_to_last_marker();
         self.insertion_mode = InsertionMode::InRow;
@@ -3702,8 +3703,8 @@ impl HtmlParser {
                     | "tr"
             )
         {
-            if !self.stack_of_open_elements.has_in_table_scope("td")
-                && !self.stack_of_open_elements.has_in_table_scope("th")
+            if !self.stack_of_open_elements.has_in_table_scope(tags::TD)
+                && !self.stack_of_open_elements.has_in_table_scope(tags::TH)
             {
                 // Parse error. Ignore the token. (fragment case)
                 return;
@@ -3764,7 +3765,7 @@ impl HtmlParser {
         {
             // Parse error. Pop elements until a select element has been popped.
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("select");
+                .pop_until_tag_name_popped(tags::SELECT);
             self.reset_the_insertion_mode_appropriately();
             self.reprocess_token();
             return;
@@ -3786,7 +3787,7 @@ impl HtmlParser {
                 return;
             }
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("select");
+                .pop_until_tag_name_popped(tags::SELECT);
             self.reset_the_insertion_mode_appropriately();
             self.reprocess_token();
             return;
@@ -3821,7 +3822,7 @@ impl HtmlParser {
                     | "template"
                     | "title"
             ))
-            || (token.is_end_tag() && token.tag_name() == "template")
+            || (token.is_end_tag() && token.tag_name() == tags::TEMPLATE)
         {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
@@ -3843,7 +3844,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "col"
-        if token.is_start_tag() && token.tag_name() == "col" {
+        if token.is_start_tag() && token.tag_name() == tags::COL {
             self.stack_of_template_insertion_modes.pop();
             self.stack_of_template_insertion_modes
                 .push(InsertionMode::InColumnGroup);
@@ -3853,7 +3854,7 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "tr"
-        if token.is_start_tag() && token.tag_name() == "tr" {
+        if token.is_start_tag() && token.tag_name() == tags::TR {
             self.stack_of_template_insertion_modes.pop();
             self.stack_of_template_insertion_modes
                 .push(InsertionMode::InTableBody);
@@ -3896,7 +3897,7 @@ impl HtmlParser {
             }
             // Parse error.
             self.stack_of_open_elements
-                .pop_until_tag_name_popped("template");
+                .pop_until_tag_name_popped(tags::TEMPLATE);
             self.list_of_active_formatting_elements
                 .clear_up_to_last_marker();
             self.stack_of_template_insertion_modes.pop();
@@ -3925,19 +3926,19 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
 
         // -> A start tag whose tag name is "frameset"
-        if token.is_start_tag() && token.tag_name() == "frameset" {
+        if token.is_start_tag() && token.tag_name() == tags::FRAMESET {
             self.insert_html_element(token);
             return;
         }
 
         // -> An end tag whose tag name is "frameset"
-        if token.is_end_tag() && token.tag_name() == "frameset" {
+        if token.is_end_tag() && token.tag_name() == tags::FRAMESET {
             // If the current node is the root html element, parse error; ignore the token.
             if self.stack_of_open_elements.len() == 1 {
                 return;
@@ -3947,7 +3948,7 @@ impl HtmlParser {
             if !self.parsing_fragment {
                 if let Some(current) = self.stack_of_open_elements.current_node() {
                     if !(current.namespace == DomNamespace::HTML
-                        && current.tag_name == "frameset")
+                        && current.tag_name == tags::FRAMESET)
                     {
                         self.insertion_mode = InsertionMode::AfterFrameset;
                     }
@@ -3957,14 +3958,14 @@ impl HtmlParser {
         }
 
         // -> A start tag whose tag name is "frame"
-        if token.is_start_tag() && token.tag_name() == "frame" {
+        if token.is_start_tag() && token.tag_name() == tags::FRAME {
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
             return;
         }
 
         // -> A start tag whose tag name is "noframes"
-        if token.is_start_tag() && token.tag_name() == "noframes" {
+        if token.is_start_tag() && token.tag_name() == tags::NOFRAMES {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
@@ -3991,15 +3992,15 @@ impl HtmlParser {
         if token.is_doctype() {
             return;
         }
-        if token.is_start_tag() && token.tag_name() == "html" {
+        if token.is_start_tag() && token.tag_name() == tags::HTML {
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
         }
-        if token.is_end_tag() && token.tag_name() == "html" {
+        if token.is_end_tag() && token.tag_name() == tags::HTML {
             self.insertion_mode = InsertionMode::AfterAfterFrameset;
             return;
         }
-        if token.is_start_tag() && token.tag_name() == "noframes" {
+        if token.is_start_tag() && token.tag_name() == tags::NOFRAMES {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
@@ -4020,7 +4021,7 @@ impl HtmlParser {
         }
         if token.is_doctype()
             || token.is_parser_whitespace()
-            || (token.is_start_tag() && token.tag_name() == "html")
+            || (token.is_start_tag() && token.tag_name() == tags::HTML)
         {
             self.process_using_the_rules_for(InsertionMode::InBody, token);
             return;
@@ -4029,7 +4030,7 @@ impl HtmlParser {
             self.stop_parsing();
             return;
         }
-        if token.is_start_tag() && token.tag_name() == "noframes" {
+        if token.is_start_tag() && token.tag_name() == tags::NOFRAMES {
             self.process_using_the_rules_for(InsertionMode::InHead, token);
             return;
         }
@@ -4122,10 +4123,10 @@ impl HtmlParser {
                     | "u"
                     | "ul"
                     | "var"
-            ) || (tag == "font"
-                && (token.has_attribute("color")
-                    || token.has_attribute("face")
-                    || token.has_attribute("size")))
+            ) || (tag == tags::FONT
+                && (token.has_attribute(attrs::COLOR)
+                    || token.has_attribute(attrs::FACE)
+                    || token.has_attribute(attrs::SIZE)))
             {
                 // Parse error. Pop an element from the stack of open elements, and then keep
                 // popping more elements from the stack of open elements until the current node
@@ -4197,7 +4198,7 @@ impl HtmlParser {
 
             // AD-HOC: Mark SVG script elements as parser-inserted so they don't
             // execute prematurely when text content is added.
-            if namespace == DomNamespace::SVG && token.tag_name() == "script" {
+            if namespace == DomNamespace::SVG && token.tag_name() == tags::SCRIPT {
                 if let Some(current) = self.stack_of_open_elements.current_node() {
                     current.handle.set_svg_script_parser_inserted();
                 }
@@ -4205,7 +4206,7 @@ impl HtmlParser {
 
             if token.is_self_closing() {
                 // If self-closing SVG script, handle as if </script> end tag.
-                if namespace == DomNamespace::SVG && token.tag_name() == "script" {
+                if namespace == DomNamespace::SVG && token.tag_name() == tags::SCRIPT {
                     self.run_svg_script_end_tag_steps();
                 } else {
                     self.stack_of_open_elements.pop();
@@ -4234,9 +4235,9 @@ impl HtmlParser {
         if token.is_end_tag() {
             // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
             // -> An end tag whose tag name is "script", if the current node is an SVG script element
-            if token.tag_name() == "script" {
+            if token.tag_name() == tags::SCRIPT {
                 if let Some(current) = self.stack_of_open_elements.current_node() {
-                    if current.namespace == DomNamespace::SVG && current.tag_name == "script" {
+                    if current.namespace == DomNamespace::SVG && current.tag_name == tags::SCRIPT {
                         self.run_svg_script_end_tag_steps();
                         return;
                     }
@@ -4405,7 +4406,7 @@ fn is_html_integration_point(entry: &StackEntry) -> bool {
     // A MathML annotation-xml element whose start tag token had an attribute with the name
     // "encoding" whose value was an ASCII case-insensitive match for "text/html" or
     // "application/xhtml+xml".
-    if entry.namespace == DomNamespace::MathML && entry.tag_name == "annotation-xml" {
+    if entry.namespace == DomNamespace::MathML && entry.tag_name == tags::ANNOTATION_XML {
         if let Some(ref encoding) = entry.encoding_attr {
             if encoding.eq_ignore_ascii_case("text/html")
                 || encoding.eq_ignore_ascii_case("application/xhtml+xml")

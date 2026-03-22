@@ -24,6 +24,7 @@ pub mod tags {
     pub const DT: &str = "dt";
     pub const FONT: &str = "font";
     pub const FORM: &str = "form";
+    pub const FRAME: &str = "frame";
     pub const FRAMESET: &str = "frameset";
     pub const H1: &str = "h1";
     pub const H2: &str = "h2";
@@ -77,6 +78,7 @@ pub mod tags {
 /// Attribute name constants used in the parser.
 pub mod attrs {
     pub const COLOR: &str = "color";
+    pub const DEFINITIONURL: &str = "definitionurl";
     pub const ENCODING: &str = "encoding";
     pub const FACE: &str = "face";
     pub const IS: &str = "is";
