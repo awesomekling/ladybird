@@ -55,6 +55,52 @@ pub unsafe extern "C" fn rust_html_parser_create(
     Box::into_raw(handle)
 }
 
+/// Set the context element for fragment parsing.
+///
+/// # Safety
+/// `handle` must be a valid pointer from `rust_html_parser_create`.
+/// `context_element` must be a valid pointer to a C++ DOM::Element.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_set_context_element(
+    handle: *mut HtmlParserHandle,
+    context_element: *mut c_void,
+) {
+    let handle = unsafe { &mut *handle };
+    handle
+        .parser
+        .set_context_element(dom_bridge::DomHandle(context_element));
+}
+
+/// Set the tokenizer state.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_set_tokenizer_state(
+    handle: *mut HtmlParserHandle,
+    state: u8,
+) {
+    let handle = unsafe { &mut *handle };
+    let state = State::from_u8(state).expect("invalid tokenizer state");
+    handle.parser.tokenizer.switch_to(state);
+}
+
+/// Set the form element for fragment parsing.
+///
+/// # Safety
+/// `handle` must be a valid pointer.
+/// `form_element` must be a valid pointer to a C++ DOM::HTMLFormElement.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_html_parser_set_form_element(
+    handle: *mut HtmlParserHandle,
+    form_element: *mut c_void,
+) {
+    let handle = unsafe { &mut *handle };
+    handle
+        .parser
+        .set_form_element(dom_bridge::DomHandle(form_element));
+}
+
 /// Run the Rust HTML parser.
 ///
 /// # Safety
