@@ -17,11 +17,7 @@ pub struct DomHandle(pub *mut c_void);
 // We do not implement Send or Sync — all parsing is single-threaded.
 
 impl DomHandle {
-    pub fn null() -> Self {
-        DomHandle(std::ptr::null_mut())
-    }
-
-    pub fn is_null(self) -> bool {
+    fn is_null(self) -> bool {
         self.0.is_null()
     }
 
@@ -63,18 +59,6 @@ pub enum QuirksMode {
     No = 0,
     Limited = 1,
     Yes = 2,
-}
-
-/// Attribute pair for passing to C++ element creation.
-#[repr(C)]
-pub struct BridgeAttribute {
-    pub name_ptr: *const u8,
-    pub name_len: usize,
-    pub value_ptr: *const u8,
-    pub value_len: usize,
-    pub namespace: u8, // DomNamespace value, or 0xFF for no namespace
-    pub prefix_ptr: *const u8,
-    pub prefix_len: usize,
 }
 
 unsafe extern "C" {
@@ -348,18 +332,6 @@ impl DomHandle {
         }
     }
 
-    pub fn set_attribute(self, name: &str, value: &str) {
-        unsafe {
-            html_parser_bridge_set_attribute(
-                self.as_ptr(),
-                name.as_ptr(),
-                name.len(),
-                value.as_ptr(),
-                value.len(),
-            );
-        }
-    }
-
     pub fn set_attribute_ns(
         self,
         namespace: DomNamespace,
@@ -499,10 +471,6 @@ impl DomHandle {
     pub fn namespace(self) -> DomNamespace {
         let ns = unsafe { html_parser_bridge_element_namespace(self.as_ptr()) };
         DomNamespace::from_u8(ns)
-    }
-
-    pub fn is_element(self) -> bool {
-        unsafe { html_parser_bridge_is_element(self.as_ptr()) }
     }
 
     pub fn template_contents(self) -> DomHandle {

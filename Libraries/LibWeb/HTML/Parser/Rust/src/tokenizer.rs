@@ -126,7 +126,6 @@ pub struct HtmlTokenizer {
     insertion_point: Option<usize>,
     old_insertion_point: Option<usize>,
     explicit_eof_inserted: bool,
-    blocked: bool,
     stop_at_insertion_point: bool,
     cdata_allowed: bool,
     entity_matcher: NamedCharacterReferenceMatcher,
@@ -246,7 +245,6 @@ impl HtmlTokenizer {
             insertion_point: None,
             old_insertion_point: None,
             explicit_eof_inserted: false,
-            blocked: false,
             stop_at_insertion_point: false,
             cdata_allowed: false,
             entity_matcher: NamedCharacterReferenceMatcher::new(),
@@ -256,11 +254,6 @@ impl HtmlTokenizer {
     /// Set the tokenizer state.
     pub fn switch_to(&mut self, state: State) {
         self.state = state;
-    }
-
-    /// Set the last emitted start tag name (for RCDATA/ScriptData end tag matching).
-    pub fn set_last_start_tag(&mut self, name: &str) {
-        self.last_emitted_start_tag_name = Some(name.to_string());
     }
 
     // -- Insertion point management --
@@ -291,14 +284,6 @@ impl HtmlTokenizer {
             self.input.splice(ip..ip, code_points.iter().copied());
             self.insertion_point = Some(ip + code_points.len());
         }
-    }
-
-    pub fn set_blocked(&mut self, blocked: bool) {
-        self.blocked = blocked;
-    }
-
-    pub fn is_blocked(&self) -> bool {
-        self.blocked
     }
 
     pub fn insert_eof(&mut self) {

@@ -260,23 +260,6 @@ impl StackOfOpenElements {
         self.has_in_specific_scope(tag, &ScopeMarkers::Table)
     }
 
-    /// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-select-scope
-    pub fn has_in_select_scope(&self, tag: &str) -> bool {
-        // The select scope is inverted: everything except <optgroup> and <option> are scope markers.
-        for entry in self.elements.iter().rev() {
-            if entry.namespace == DomNamespace::HTML && entry.tag_name == tag {
-                return true;
-            }
-            if entry.namespace == DomNamespace::HTML
-                && (entry.tag_name == tags::OPTGROUP || entry.tag_name == tags::OPTION)
-            {
-                continue;
-            }
-            return false;
-        }
-        false
-    }
-
     // -----------------------------------------------------------------------
     // Implied end tags
     // https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
@@ -354,20 +337,6 @@ impl StackOfOpenElements {
     // Special tag classification
     // https://html.spec.whatwg.org/multipage/parsing.html#special
     // -----------------------------------------------------------------------
-
-    /// Find the topmost special node below the given element on the stack.
-    /// "Below" means closer to the current node (higher index in the stack).
-    /// "Topmost" means closest to the given element.
-    pub fn topmost_special_node_below(&self, handle: DomHandle) -> Option<&StackEntry> {
-        let pos = self.elements.iter().position(|e| e.handle == handle)?;
-        // Search from pos+1 toward the current node, returning the first special node found.
-        for i in (pos + 1)..self.elements.len() {
-            if is_special_tag(&self.elements[i].tag_name, self.elements[i].namespace) {
-                return Some(&self.elements[i]);
-            }
-        }
-        None
-    }
 
     // -----------------------------------------------------------------------
     // GC integration
