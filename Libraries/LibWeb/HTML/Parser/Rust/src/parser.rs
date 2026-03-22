@@ -475,35 +475,8 @@ impl HtmlParser {
         let adjusted = self.find_appropriate_place_for_inserting_node(None);
 
         // 2. Let element be the result of creating an element for the token in the given namespace.
-        let element = self.create_element_for(token, namespace);
-
-        // https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
         // 11. Append each attribute in the given token to element.
-        // NOTE: Using append_attribute ensures first attribute wins (per spec).
-        for attr in token.attributes() {
-            // https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes
-            // Adjust foreign attributes only for elements in foreign (non-HTML) namespaces.
-            if namespace != DomNamespace::HTML {
-                if let Some((ns, prefix, local_name)) =
-                    adjust_foreign_attribute(&attr.local_name)
-                {
-                    element.set_attribute_ns(ns, prefix, local_name, &attr.value);
-                    continue;
-                }
-            }
-            // Adjust MathML attribute names.
-            if namespace == DomNamespace::MathML && attr.local_name == attrs::DEFINITIONURL {
-                element.append_attribute("definitionURL", &attr.value);
-                continue;
-            }
-            // Adjust SVG attribute names if we're in the SVG namespace.
-            if namespace == DomNamespace::SVG {
-                let adjusted_name = adjust_svg_attribute_name(&attr.local_name);
-                element.append_attribute(adjusted_name, &attr.value);
-            } else {
-                element.append_attribute(&attr.local_name, &attr.value);
-            }
-        }
+        let element = self.create_element_for_token_in_namespace(token, namespace);
 
         // Post-creation setup (e.g., media element muted attribute, link element parser document).
         element.post_create_element();
@@ -550,15 +523,48 @@ impl HtmlParser {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
-    fn create_element_for(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
-        // 5. Let is be the value of the "is" attribute in token, if such an attribute exists.
+    /// Create an element and append all attributes, adjusting foreign/SVG/MathML attribute
+    /// names when the namespace is not HTML.
+    fn create_element_for_token_in_namespace(
+        &self,
+        token: &Token,
+        namespace: DomNamespace,
+    ) -> DomHandle {
         let is_value = token.get_attribute(attrs::IS);
-        DomHandle::create_element(self.document, token.tag_name(), namespace, is_value)
+        let element = DomHandle::create_element(self.document, token.tag_name(), namespace, is_value);
+
+        for attr in token.attributes() {
+            // https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes
+            if namespace != DomNamespace::HTML {
+                if let Some((ns, prefix, local_name)) =
+                    adjust_foreign_attribute(&attr.local_name)
+                {
+                    element.set_attribute_ns(ns, prefix, local_name, &attr.value);
+                    continue;
+                }
+            }
+            // https://html.spec.whatwg.org/multipage/parsing.html#adjust-mathml-attributes
+            if namespace == DomNamespace::MathML && attr.local_name == attrs::DEFINITIONURL {
+                element.append_attribute("definitionURL", &attr.value);
+                continue;
+            }
+            // https://html.spec.whatwg.org/multipage/parsing.html#adjust-svg-attributes
+            if namespace == DomNamespace::SVG {
+                element.append_attribute(adjust_svg_attribute_name(&attr.local_name), &attr.value);
+            } else {
+                element.append_attribute(&attr.local_name, &attr.value);
+            }
+        }
+
+        element
     }
 
-    /// Create an element for the token and append all its attributes.
+    /// Create an element for the token and append all its attributes (HTML namespace shorthand).
     fn create_element_for_token(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
-        let element = self.create_element_for(token, namespace);
+        // For HTML elements, no attribute name adjustment is needed.
+        debug_assert!(namespace == DomNamespace::HTML);
+        let is_value = token.get_attribute(attrs::IS);
+        let element = DomHandle::create_element(self.document, token.tag_name(), namespace, is_value);
         for attr in token.attributes() {
             element.append_attribute(&attr.local_name, &attr.value);
         }
