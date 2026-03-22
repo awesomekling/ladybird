@@ -561,11 +561,19 @@ impl HtmlParser {
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
-    /// https://html.spec.whatwg.org/multipage/parsing.html#create-an-element-for-the-token
     fn create_element_for(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
         // 5. Let is be the value of the "is" attribute in token, if such an attribute exists.
         let is_value = token.get_attribute(attrs::IS);
         DomHandle::create_element(self.document, token.tag_name(), namespace, is_value)
+    }
+
+    /// Create an element for the token and append all its attributes.
+    fn create_element_for_token(&self, token: &Token, namespace: DomNamespace) -> DomHandle {
+        let element = self.create_element_for(token, namespace);
+        for attr in token.attributes() {
+            element.append_attribute(&attr.local_name, &attr.value);
+        }
+        element
     }
 
     /// Insert a node at an adjusted insertion location.
@@ -1090,10 +1098,7 @@ impl HtmlParser {
             // Create an element for the token in the HTML namespace, with the Document as the
             // intended parent. Append it to the Document object. Put this element in the stack
             // of open elements.
-            let element = self.create_element_for(token, DomNamespace::HTML);
-            for attr in token.attributes() {
-                element.append_attribute(&attr.local_name, &attr.value);
-            }
+            let element = self.create_element_for_token(token, DomNamespace::HTML);
             let doc_node = DomHandle::document_node(self.document);
             DomHandle::insert_before(doc_node, element, None);
             self.stack_of_open_elements.push(StackEntry::new(
@@ -1291,10 +1296,7 @@ impl HtmlParser {
             let adjusted = self.find_appropriate_place_for_inserting_node(None);
 
             // 2. Create an element for the token in the HTML namespace.
-            let element = self.create_element_for(token, DomNamespace::HTML);
-            for attr in token.attributes() {
-                element.append_attribute(&attr.local_name, &attr.value);
-            }
+            let element = self.create_element_for_token(token, DomNamespace::HTML);
 
             // 3. Set the element's parser document to the Document, and set the element's
             //    force async to false.
@@ -2744,10 +2746,7 @@ impl HtmlParser {
                     entry.token().unwrap().clone()
                 };
                 let tag_name = token_clone.tag_name().to_string();
-                let new_element = self.create_element_for(&token_clone, DomNamespace::HTML);
-                for attr in token_clone.attributes() {
-                    new_element.append_attribute(&attr.local_name, &attr.value);
-                }
+                let new_element = self.create_element_for_token(&token_clone, DomNamespace::HTML);
 
                 self.list_of_active_formatting_elements.replace(
                     node_handle,
@@ -2798,10 +2797,7 @@ impl HtmlParser {
                 return false;
             };
 
-            let new_element = self.create_element_for(&token_clone, DomNamespace::HTML);
-            for attr in token_clone.attributes() {
-                new_element.append_attribute(&attr.local_name, &attr.value);
-            }
+            let new_element = self.create_element_for_token(&token_clone, DomNamespace::HTML);
 
             // 19. Take all child nodes of furthestBlock and append them to the new element.
             DomHandle::reparent_children(furthest_block_handle, new_element);
