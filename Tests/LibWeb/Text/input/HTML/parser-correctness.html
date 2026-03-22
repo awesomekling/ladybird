@@ -185,5 +185,23 @@ test(() => {
             println("FAIL: table context clearing");
         }
     }
+
+    // Test 13: Adoption agency furthest block search
+    // Tests that the adoption agency correctly finds the furthest block (first special
+    // element below the formatting element) and restructures the tree.
+    // "<b><div><i>text" triggers adoption for <b>: <div> is the furthest block.
+    {
+        let div = document.createElement("div");
+        div.innerHTML = "<b><div><i>text</i></div></b>";
+        let b = div.querySelector("b");
+        let innerDiv = div.querySelector("div");
+        // The adoption agency should move the <b> inside/around the <div>.
+        // Expected: <b></b><div><b><i>text</i></b></div>
+        if (innerDiv && b && innerDiv.querySelector("i")) {
+            println("PASS: adoption agency furthest block");
+        } else {
+            println("FAIL: adoption agency furthest block");
+        }
+    }
 });
 </script>

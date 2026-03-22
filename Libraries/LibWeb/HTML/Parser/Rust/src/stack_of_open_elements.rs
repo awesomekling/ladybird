@@ -378,11 +378,13 @@ impl StackOfOpenElements {
     // https://html.spec.whatwg.org/multipage/parsing.html#special
     // -----------------------------------------------------------------------
 
-    /// Find the topmost special node below the given element.
+    /// Find the topmost special node below the given element on the stack.
+    /// "Below" means closer to the current node (higher index in the stack).
+    /// "Topmost" means closest to the given element.
     pub fn topmost_special_node_below(&self, handle: DomHandle) -> Option<&StackEntry> {
         let pos = self.elements.iter().position(|e| e.handle == handle)?;
-        // Search from pos-1 down to 0, returning the topmost (closest to pos) special node.
-        for i in (0..pos).rev() {
+        // Search from pos+1 toward the current node, returning the first special node found.
+        for i in (pos + 1)..self.elements.len() {
             if is_special_tag(&self.elements[i].tag_name, self.elements[i].namespace) {
                 return Some(&self.elements[i]);
             }
