@@ -32,8 +32,6 @@ pub enum InsertionMode {
     InTableBody,
     InRow,
     InCell,
-    InSelect,
-    InSelectInTable,
     InTemplate,
     AfterBody,
     InFrameset,
@@ -295,8 +293,6 @@ impl HtmlParser {
             InsertionMode::InTableBody => self.handle_in_table_body(token),
             InsertionMode::InRow => self.handle_in_row(token),
             InsertionMode::InCell => self.handle_in_cell(token),
-            InsertionMode::InSelect => self.handle_in_select(token),
-            InsertionMode::InSelectInTable => self.handle_in_select_in_table(token),
             InsertionMode::InTemplate => self.handle_in_template(token),
             InsertionMode::AfterBody => self.handle_after_body(token),
             InsertionMode::InFrameset => self.handle_in_frameset(token),
@@ -811,32 +807,6 @@ impl HtmlParser {
             let tag = tag.as_str();
 
             if ns == DomNamespace::HTML {
-                // 4. If node is a select element, run these substeps:
-                if tag == tags::SELECT {
-                    if !last {
-                        // Walk ancestors to check for table/template.
-                        let mut ancestor_idx = node_index;
-                        loop {
-                            if ancestor_idx == 0 {
-                                break;
-                            }
-                            ancestor_idx -= 1;
-                            let ancestor = self.stack_of_open_elements.entry_at(ancestor_idx);
-                            if ancestor.namespace == DomNamespace::HTML {
-                                if ancestor.tag_name == tags::TEMPLATE {
-                                    break;
-                                }
-                                if ancestor.tag_name == tags::TABLE {
-                                    self.insertion_mode = InsertionMode::InSelectInTable;
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    self.insertion_mode = InsertionMode::InSelect;
-                    return;
-                }
-
                 // 5. If node is a td or th element and last is false, ...
                 if (tag == tags::TD || tag == tags::TH) && !last {
                     self.insertion_mode = InsertionMode::InCell;
@@ -2027,7 +1997,7 @@ impl HtmlParser {
         // -> An end tag whose tag name is one of: "address", "article", "aside", "blockquote",
         //    "button", "center", "details", "dialog", "dir", "div", "dl", "fieldset",
         //    "figcaption", "figure", "footer", "header", "hgroup", "listing", "main", "menu",
-        //    "nav", "ol", "pre", "search", "section", "summary", "ul"
+        //    "nav", "ol", "pre", "search", "section", "select", "summary", "ul"
         if token.is_end_tag()
             && matches!(
                 token.tag_name(),
@@ -2056,6 +2026,7 @@ impl HtmlParser {
                     | "pre"
                     | "search"
                     | "section"
+                    | "select"
                     | "summary"
                     | "ul"
             )
@@ -2329,6 +2300,19 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "input"
         if token.is_start_tag() && token.tag_name() == tags::INPUT {
+            // If the parser was created as part of the HTML fragment parsing algorithm (fragment case)
+            // and the context element passed to that algorithm is a select element:
+            if self.parsing_fragment
+                && self.context_element_entry.as_ref().is_some_and(|e| e.is_html_element(tags::SELECT))
+            {
+                // Parse error. Ignore the token. Return.
+                return;
+            }
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
+                // Parse error. Pop elements until a select element has been popped.
+                self.stack_of_open_elements.pop_until_tag_name_popped(tags::SELECT);
+            }
             self.reconstruct_the_active_formatting_elements();
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2357,6 +2341,11 @@ impl HtmlParser {
         if token.is_start_tag() && token.tag_name() == tags::HR {
             if self.stack_of_open_elements.has_in_button_scope(tags::P) {
                 self.close_a_p_element();
+            }
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
+                // Generate implied end tags.
+                self.stack_of_open_elements.generate_implied_end_tags(None);
             }
             self.insert_html_element(token);
             self.stack_of_open_elements.pop();
@@ -2415,29 +2404,38 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "select"
         if token.is_start_tag() && token.tag_name() == tags::SELECT {
-            self.reconstruct_the_active_formatting_elements();
-            self.insert_html_element(token);
-            self.frameset_ok = false;
-            // If the insertion mode is one of "in table", "in caption", "in table body",
-            // "in row", or "in cell", switch to "in select in table".
-            if matches!(
-                self.insertion_mode,
-                InsertionMode::InTable
-                    | InsertionMode::InCaption
-                    | InsertionMode::InTableBody
-                    | InsertionMode::InRow
-                    | InsertionMode::InCell
-            ) {
-                self.insertion_mode = InsertionMode::InSelectInTable;
+            // If the parser was created as part of the HTML fragment parsing algorithm (fragment case)
+            // and the context element passed to that algorithm is a select element:
+            if self.parsing_fragment
+                && self.context_element_entry.as_ref().is_some_and(|e| e.is_html_element(tags::SELECT))
+            {
+                // Parse error. Ignore the token.
+                return;
+            }
+            // Otherwise, if the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
+                // Parse error. Pop elements from the stack until a select element has been popped.
+                self.stack_of_open_elements.pop_until_tag_name_popped(tags::SELECT);
             } else {
-                self.insertion_mode = InsertionMode::InSelect;
+                // Otherwise: reconstruct the active formatting elements, if any.
+                self.reconstruct_the_active_formatting_elements();
+                // Insert an HTML element for the token.
+                self.insert_html_element(token);
+                // Set the frameset-ok flag to "not ok".
+                self.frameset_ok = false;
             }
             return;
         }
 
         // -> A start tag whose tag name is "option"
         if token.is_start_tag() && token.tag_name() == tags::OPTION {
-            if self
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
+                // Generate implied end tags except for optgroup elements.
+                self.stack_of_open_elements.generate_implied_end_tags(Some(tags::OPTGROUP));
+            }
+            // Otherwise, if the current node is an option element, then pop the current node.
+            else if self
                 .stack_of_open_elements
                 .current_node()
                 .is_some_and(|n| n.is_html_element(tags::OPTION))
@@ -2451,7 +2449,13 @@ impl HtmlParser {
 
         // -> A start tag whose tag name is "optgroup"
         if token.is_start_tag() && token.tag_name() == tags::OPTGROUP {
-            if self
+            // If the stack of open elements has a select element in scope:
+            if self.stack_of_open_elements.has_in_scope(tags::SELECT) {
+                // Generate implied end tags.
+                self.stack_of_open_elements.generate_implied_end_tags(None);
+            }
+            // Otherwise, if the current node is an option element, then pop the current node.
+            else if self
                 .stack_of_open_elements
                 .current_node()
                 .is_some_and(|n| n.is_html_element(tags::OPTION))
@@ -3641,254 +3645,6 @@ impl HtmlParser {
 
         // -> Anything else
         self.process_using_the_rules_for(InsertionMode::InBody, token);
-    }
-
-    /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inselect
-    fn handle_in_select(&mut self, token: &Token) {
-        // -> A character token that is U+0000 NULL
-        if token.is_character() && token.code_point() == 0 {
-            // Parse error. Ignore the token.
-            return;
-        }
-
-        // -> Any other character token
-        if token.is_character() {
-            self.insert_character(token.code_point());
-            return;
-        }
-
-        // -> A comment token
-        if token.is_comment() {
-            self.insert_comment(token);
-            return;
-        }
-
-        // -> A DOCTYPE token
-        if token.is_doctype() {
-            // Parse error. Ignore the token.
-            return;
-        }
-
-        // -> A start tag whose tag name is "html"
-        if token.is_start_tag() && token.tag_name() == tags::HTML {
-            self.process_using_the_rules_for(InsertionMode::InBody, token);
-            return;
-        }
-
-        // -> A start tag whose tag name is "option"
-        if token.is_start_tag() && token.tag_name() == tags::OPTION {
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTION))
-            {
-                self.stack_of_open_elements.pop();
-            }
-            self.insert_html_element(token);
-            return;
-        }
-
-        // -> A start tag whose tag name is "optgroup"
-        if token.is_start_tag() && token.tag_name() == tags::OPTGROUP {
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTION))
-            {
-                self.stack_of_open_elements.pop();
-            }
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
-            {
-                self.stack_of_open_elements.pop();
-            }
-            self.insert_html_element(token);
-            return;
-        }
-
-        // -> A start tag whose tag name is "hr"
-        if token.is_start_tag() && token.tag_name() == tags::HR {
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTION))
-            {
-                self.stack_of_open_elements.pop();
-            }
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
-            {
-                self.stack_of_open_elements.pop();
-            }
-            self.insert_html_element(token);
-            self.stack_of_open_elements.pop();
-            return;
-        }
-
-        // -> An end tag whose tag name is "optgroup"
-        if token.is_end_tag() && token.tag_name() == tags::OPTGROUP {
-            // First, if the current node is an option element, and the node immediately before
-            // it in the stack of open elements is an optgroup element, then pop the current node.
-            let should_pop_option = if let Some(current) = self.stack_of_open_elements.current_node()
-            {
-                if current.is_html_element(tags::OPTION) {
-                    let len = self.stack_of_open_elements.len();
-                    len >= 2
-                        && self
-                            .stack_of_open_elements
-                            .get(len - 2)
-                            .is_some_and(|e| e.is_html_element(tags::OPTGROUP))
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if should_pop_option {
-                self.stack_of_open_elements.pop();
-            }
-
-            // If the current node is an optgroup element, then pop that node.
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTGROUP))
-            {
-                self.stack_of_open_elements.pop();
-            } else {
-                // Parse error. Ignore the token.
-            }
-            return;
-        }
-
-        // -> An end tag whose tag name is "option"
-        if token.is_end_tag() && token.tag_name() == tags::OPTION {
-            if self
-                .stack_of_open_elements
-                .current_node()
-                .is_some_and(|n| n.is_html_element(tags::OPTION))
-            {
-                self.stack_of_open_elements.pop();
-            } else {
-                // Parse error. Ignore the token.
-            }
-            return;
-        }
-
-        // -> An end tag whose tag name is "select"
-        if token.is_end_tag() && token.tag_name() == tags::SELECT {
-            if !self
-                .stack_of_open_elements
-                .has_in_select_scope(tags::SELECT)
-            {
-                // Parse error. Ignore the token. (fragment case)
-                return;
-            }
-            self.stack_of_open_elements
-                .pop_until_tag_name_popped(tags::SELECT);
-            self.reset_the_insertion_mode_appropriately();
-            return;
-        }
-
-        // -> A start tag whose tag name is "select"
-        if token.is_start_tag() && token.tag_name() == tags::SELECT {
-            // Parse error.
-            if !self
-                .stack_of_open_elements
-                .has_in_select_scope(tags::SELECT)
-            {
-                // Ignore the token. (fragment case)
-                return;
-            }
-            self.stack_of_open_elements
-                .pop_until_tag_name_popped(tags::SELECT);
-            self.reset_the_insertion_mode_appropriately();
-            return;
-        }
-
-        // -> A start tag whose tag name is one of: "input", "keygen", "textarea"
-        if token.is_start_tag()
-            && matches!(token.tag_name(), "input" | "keygen" | "textarea")
-        {
-            // Parse error.
-            if !self
-                .stack_of_open_elements
-                .has_in_select_scope(tags::SELECT)
-            {
-                // Ignore the token. (fragment case)
-                return;
-            }
-            self.stack_of_open_elements
-                .pop_until_tag_name_popped(tags::SELECT);
-            self.reset_the_insertion_mode_appropriately();
-            self.reprocess_token();
-            return;
-        }
-
-        // -> A start tag whose tag name is one of: "script", "template"
-        // -> An end tag whose tag name is "template"
-        if (token.is_start_tag() && matches!(token.tag_name(), "script" | "template"))
-            || (token.is_end_tag() && token.tag_name() == tags::TEMPLATE)
-        {
-            self.process_using_the_rules_for(InsertionMode::InHead, token);
-            return;
-        }
-
-        // -> An end-of-file token
-        if token.is_eof() {
-            self.process_using_the_rules_for(InsertionMode::InBody, token);
-            return;
-        }
-
-        // -> Anything else
-        // Parse error. Ignore the token.
-    }
-
-    fn handle_in_select_in_table(&mut self, token: &Token) {
-        // -> A start tag whose tag name is one of: "caption", "table", "tbody", "tfoot",
-        //    "thead", "tr", "td", "th"
-        if token.is_start_tag()
-            && matches!(
-                token.tag_name(),
-                "caption" | "table" | "tbody" | "tfoot" | "thead" | "tr" | "td" | "th"
-            )
-        {
-            // Parse error. Pop elements until a select element has been popped.
-            self.stack_of_open_elements
-                .pop_until_tag_name_popped(tags::SELECT);
-            self.reset_the_insertion_mode_appropriately();
-            self.reprocess_token();
-            return;
-        }
-
-        // -> An end tag whose tag name is one of: "caption", "table", "tbody", "tfoot",
-        //    "thead", "tr", "td", "th"
-        if token.is_end_tag()
-            && matches!(
-                token.tag_name(),
-                "caption" | "table" | "tbody" | "tfoot" | "thead" | "tr" | "td" | "th"
-            )
-        {
-            if !self
-                .stack_of_open_elements
-                .has_in_table_scope(token.tag_name())
-            {
-                // Parse error. Ignore the token.
-                return;
-            }
-            self.stack_of_open_elements
-                .pop_until_tag_name_popped(tags::SELECT);
-            self.reset_the_insertion_mode_appropriately();
-            self.reprocess_token();
-            return;
-        }
-
-        // -> Anything else: process using the rules for InSelect.
-        self.process_using_the_rules_for(InsertionMode::InSelect, token);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intemplate
