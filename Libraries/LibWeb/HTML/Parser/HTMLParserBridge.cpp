@@ -328,6 +328,14 @@ void html_parser_bridge_setup_script_element(void* element_ptr, void* document_p
     }
 }
 
+void html_parser_bridge_set_script_already_started(void* element_ptr)
+{
+    auto& element = *static_cast<Web::DOM::Element*>(element_ptr);
+    if (auto* script = as_if<Web::HTML::HTMLScriptElement>(&element)) {
+        Web::HTML::HTMLParser::set_script_already_started(*script);
+    }
+}
+
 void html_parser_bridge_post_create_element(void* element_ptr)
 {
     auto& element = *static_cast<Web::DOM::Element*>(element_ptr);

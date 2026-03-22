@@ -221,5 +221,19 @@ test(() => {
                 + " text_ns=" + (text ? text.namespaceURI : "null"));
         }
     }
+
+    // Test 15: Script elements in fragment parsing should not execute
+    // innerHTML should set already_started=true on script elements, preventing execution.
+    {
+        window.__scriptExecuted = false;
+        let div = document.createElement("div");
+        div.innerHTML = "<script>window.__scriptExecuted = true;<\/script>";
+        let script = div.querySelector("script");
+        if (script && !window.__scriptExecuted) {
+            println("PASS: script not executed in fragment");
+        } else {
+            println("FAIL: script not executed in fragment - executed=" + window.__scriptExecuted);
+        }
+    }
 });
 </script>

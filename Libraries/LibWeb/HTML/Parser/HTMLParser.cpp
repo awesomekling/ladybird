@@ -5033,6 +5033,11 @@ void HTMLParser::mark_svg_script_as_parser_inserted(SVG::SVGScriptElement& scrip
     script.set_parser_inserted(Badge<HTMLParser> {});
 }
 
+void HTMLParser::set_script_already_started(HTMLScriptElement& script)
+{
+    script.set_already_started(Badge<HTMLParser> {}, true);
+}
+
 GC::Ref<DOM::Element> HTMLParser::create_element_for_rust_parser(DOM::Document& document, FlyString const& local_name, Optional<FlyString> const& namespace_, Optional<String> const& is_value, GC::Ptr<CustomElementDefinition> definition)
 {
     bool will_execute_script = definition != nullptr;

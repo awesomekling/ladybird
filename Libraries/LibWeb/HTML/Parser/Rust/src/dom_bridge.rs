@@ -270,6 +270,9 @@ unsafe extern "C" {
         document: *mut c_void,
     );
 
+    /// Set already_started on a script element (fragment case).
+    pub fn html_parser_bridge_set_script_already_started(element: *mut c_void);
+
     /// Move all children of `from` node to `to` node.
     pub fn html_parser_bridge_reparent_children(from: *mut c_void, to: *mut c_void);
 
@@ -520,6 +523,12 @@ impl DomHandle {
     pub fn setup_script_element(self, document: DomHandle) {
         unsafe {
             html_parser_bridge_setup_script_element(self.as_ptr(), document.as_ptr());
+        }
+    }
+
+    pub fn set_script_already_started(self) {
+        unsafe {
+            html_parser_bridge_set_script_already_started(self.as_ptr());
         }
     }
 

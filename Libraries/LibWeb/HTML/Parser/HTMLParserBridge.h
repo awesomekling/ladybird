@@ -83,6 +83,9 @@ bool html_parser_bridge_allow_declarative_shadow_roots(void* document_ptr);
 /// Mark an SVG script element as parser-inserted.
 void html_parser_bridge_set_svg_script_parser_inserted(void* element_ptr);
 
+/// Set already_started on a script element (fragment case).
+void html_parser_bridge_set_script_already_started(void* element_ptr);
+
 /// Check if the parser cannot change the document mode (e.g., iframe srcdoc).
 bool html_parser_bridge_parser_cannot_change_the_mode(void* document_ptr);
 

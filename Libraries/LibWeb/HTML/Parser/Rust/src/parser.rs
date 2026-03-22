@@ -1364,6 +1364,12 @@ impl HtmlParser {
             //    force async to false.
             element.setup_script_element(self.document);
 
+            // 4. If the parser was created as part of the HTML fragment parsing algorithm,
+            //    then set the script element's already started to true. (fragment case)
+            if self.parsing_fragment {
+                element.set_script_already_started();
+            }
+
             // 6. Insert the newly created element at the adjusted insertion location.
             self.insert_at_adjusted_location(element, &adjusted);
 
