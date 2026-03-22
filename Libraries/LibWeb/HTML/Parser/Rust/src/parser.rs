@@ -185,46 +185,36 @@ impl HtmlParser {
     /// Run the parser, stopping at the tokenizer's insertion point.
     /// Used for document.write() re-entrant parsing.
     pub fn run_stop_at_insertion_point(&mut self) {
-        self.stop_parsing = false;
-
-        loop {
-            let cdata_allowed = self.adjusted_current_node_namespace()
-                .is_some_and(|ns| ns != DomNamespace::HTML);
-            let token = match self.tokenizer.next_token(true, cdata_allowed) {
-                Some(t) => t,
-                None => break,
-            };
-
-            if self.next_line_feed_can_be_ignored {
-                self.next_line_feed_can_be_ignored = false;
-                if token.is_character() && token.code_point() == '\n' as u32 {
-                    continue;
-                }
-            }
-
-            self.process_token(&token);
-
-            if token.is_eof() && self.tokenizer.is_eof_inserted() {
-                break;
-            }
-
-            if self.stop_parsing {
-                break;
-            }
-        }
-
-        self.flush_character_insertions();
+        self.run_parsing_loop(true);
     }
 
     /// Run the parser.
     /// https://html.spec.whatwg.org/multipage/parsing.html#tree-construction
     pub fn run(&mut self) {
+        self.run_parsing_loop(false);
+
+        // https://html.spec.whatwg.org/multipage/parsing.html#the-end
+        // 4. Pop all the nodes off the stack of open elements.
+        // Call element_popped only for option elements (needed for selectedcontent cloning).
+        // We must flush character insertions first so option content is up-to-date.
+        self.flush_character_insertions();
+        while let Some(entry) = self.stack_of_open_elements.current_node() {
+            if entry.namespace == DomNamespace::HTML && entry.tag_name == tags::OPTION {
+                self.stack_of_open_elements.pop();
+            } else {
+                self.stack_of_open_elements.elements_mut().pop();
+            }
+        }
+    }
+
+    /// Core parsing loop shared by run() and run_stop_at_insertion_point().
+    fn run_parsing_loop(&mut self, stop_at_insertion_point: bool) {
         self.stop_parsing = false;
 
         loop {
             let cdata_allowed = self.adjusted_current_node_namespace()
                 .is_some_and(|ns| ns != DomNamespace::HTML);
-            let token = match self.tokenizer.next_token(false, cdata_allowed) {
+            let token = match self.tokenizer.next_token(stop_at_insertion_point, cdata_allowed) {
                 Some(t) => t,
                 None => break,
             };
@@ -251,19 +241,6 @@ impl HtmlParser {
         }
 
         self.flush_character_insertions();
-
-        // https://html.spec.whatwg.org/multipage/parsing.html#the-end
-        // 4. Pop all the nodes off the stack of open elements.
-        // Call element_popped only for option elements (needed for selectedcontent cloning).
-        // We must flush character insertions first so option content is up-to-date.
-        self.flush_character_insertions();
-        while let Some(entry) = self.stack_of_open_elements.current_node() {
-            if entry.namespace == DomNamespace::HTML && entry.tag_name == tags::OPTION {
-                self.stack_of_open_elements.pop();
-            } else {
-                self.stack_of_open_elements.elements_mut().pop();
-            }
-        }
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#tree-construction-dispatcher
