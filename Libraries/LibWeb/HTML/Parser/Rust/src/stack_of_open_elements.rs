@@ -342,7 +342,7 @@ impl StackOfOpenElements {
             {
                 break;
             }
-            self.elements.pop();
+            self.pop();
         }
     }
 
@@ -357,7 +357,7 @@ impl StackOfOpenElements {
             {
                 break;
             }
-            self.elements.pop();
+            self.pop();
         }
     }
 
@@ -369,7 +369,7 @@ impl StackOfOpenElements {
             {
                 break;
             }
-            self.elements.pop();
+            self.pop();
         }
     }
 
