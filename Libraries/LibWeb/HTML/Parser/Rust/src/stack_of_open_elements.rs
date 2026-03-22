@@ -284,41 +284,31 @@ impl StackOfOpenElements {
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#generate-implied-end-tags
     pub fn generate_implied_end_tags(&mut self, exception: Option<&str>) {
-        loop {
-            let should_pop = if let Some(entry) = self.elements.last() {
-                if entry.namespace != DomNamespace::HTML {
-                    false
-                } else if let Some(exc) = exception {
-                    if entry.tag_name == exc {
-                        false
-                    } else {
-                        is_implied_end_tag(&entry.tag_name)
-                    }
-                } else {
-                    is_implied_end_tag(&entry.tag_name)
-                }
-            } else {
-                false
-            };
-            if should_pop {
-                self.pop();
-            } else {
-                break;
-            }
-        }
+        self.pop_while_html_tag_matches(|tag| is_implied_end_tag(tag), exception);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#generate-all-implied-end-tags-thoroughly
     pub fn generate_all_implied_end_tags_thoroughly(&mut self) {
+        self.pop_while_html_tag_matches(|tag| is_thorough_implied_end_tag(tag), None);
+    }
+
+    /// Pop HTML elements off the stack while the predicate matches the current node's tag name.
+    /// Optionally skip popping if the tag matches the exception.
+    fn pop_while_html_tag_matches(
+        &mut self,
+        predicate: impl Fn(&str) -> bool,
+        exception: Option<&str>,
+    ) {
         loop {
-            let should_pop = if let Some(entry) = self.elements.last() {
-                if entry.namespace != DomNamespace::HTML {
-                    false
-                } else {
-                    is_thorough_implied_end_tag(&entry.tag_name)
+            let should_pop = match self.elements.last() {
+                Some(entry) if entry.namespace == DomNamespace::HTML => {
+                    if exception.is_some_and(|exc| entry.tag_name == exc) {
+                        false
+                    } else {
+                        predicate(&entry.tag_name)
+                    }
                 }
-            } else {
-                false
+                _ => false,
             };
             if should_pop {
                 self.pop();
@@ -335,36 +325,24 @@ impl StackOfOpenElements {
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-context
     pub fn clear_back_to_table_context(&mut self) {
-        while let Some(entry) = self.elements.last() {
-            if entry.namespace == DomNamespace::HTML
-                && matches!(entry.tag_name.as_str(), "table" | "template" | "html")
-            {
-                break;
-            }
-            self.pop();
-        }
+        self.clear_back_to_context(&["table", "template", "html"]);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-body-context
     pub fn clear_back_to_table_body_context(&mut self) {
-        while let Some(entry) = self.elements.last() {
-            if entry.namespace == DomNamespace::HTML
-                && matches!(
-                    entry.tag_name.as_str(),
-                    "tbody" | "tfoot" | "thead" | "template" | "html"
-                )
-            {
-                break;
-            }
-            self.pop();
-        }
+        self.clear_back_to_context(&["tbody", "tfoot", "thead", "template", "html"]);
     }
 
     /// https://html.spec.whatwg.org/multipage/parsing.html#clear-the-stack-back-to-a-table-row-context
     pub fn clear_back_to_table_row_context(&mut self) {
+        self.clear_back_to_context(&["tr", "template", "html"]);
+    }
+
+    /// Pop elements until the current node is an HTML element with one of the given tag names.
+    fn clear_back_to_context(&mut self, context_tags: &[&str]) {
         while let Some(entry) = self.elements.last() {
             if entry.namespace == DomNamespace::HTML
-                && matches!(entry.tag_name.as_str(), "tr" | "template" | "html")
+                && context_tags.contains(&entry.tag_name.as_str())
             {
                 break;
             }
@@ -414,54 +392,28 @@ enum ScopeMarkers {
     Table,
 }
 
+/// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
+/// The base set of HTML scope markers shared by default, list-item, and button scopes.
+fn is_base_html_scope_marker(tag: &str) -> bool {
+    matches!(
+        tag,
+        "applet" | "caption" | "html" | "table" | "td" | "th"
+            | "marquee" | "object" | "select" | "template"
+    )
+}
+
 fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
     match entry.namespace {
         DomNamespace::HTML => match markers {
-            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
-            ScopeMarkers::Default => matches!(
-                entry.tag_name.as_str(),
-                "applet"
-                    | "caption"
-                    | "html"
-                    | "table"
-                    | "td"
-                    | "th"
-                    | "marquee"
-                    | "object"
-                    | "select"
-                    | "template"
-            ),
-            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-list-item-scope
-            ScopeMarkers::ListItem => matches!(
-                entry.tag_name.as_str(),
-                "applet"
-                    | "caption"
-                    | "html"
-                    | "table"
-                    | "td"
-                    | "th"
-                    | "marquee"
-                    | "object"
-                    | "select"
-                    | "template"
-                    | "ol"
-                    | "ul"
-            ),
-            // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-button-scope
-            ScopeMarkers::Button => matches!(
-                entry.tag_name.as_str(),
-                "applet"
-                    | "caption"
-                    | "html"
-                    | "table"
-                    | "td"
-                    | "th"
-                    | "marquee"
-                    | "object"
-                    | "select"
-                    | "template"
-                    | "button"
-            ),
+            ScopeMarkers::Default => is_base_html_scope_marker(&entry.tag_name),
+            ScopeMarkers::ListItem => {
+                is_base_html_scope_marker(&entry.tag_name)
+                    || matches!(entry.tag_name.as_str(), "ol" | "ul")
+            }
+            ScopeMarkers::Button => {
+                is_base_html_scope_marker(&entry.tag_name)
+                    || entry.tag_name == "button"
+            }
             // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-table-scope
             // NOTE: Table scope only has HTML element markers, no MathML/SVG markers.
             ScopeMarkers::Table => matches!(
@@ -470,7 +422,6 @@ fn is_scope_marker(entry: &StackEntry, markers: &ScopeMarkers) -> bool {
             ),
         },
         // MathML and SVG scope markers only apply to non-table scope types.
-        // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-scope
         DomNamespace::MathML if !matches!(markers, ScopeMarkers::Table) => matches!(
             entry.tag_name.as_str(),
             "mi" | "mo" | "mn" | "ms" | "mtext" | "annotation-xml"
@@ -497,27 +448,11 @@ fn is_implied_end_tag(tag: &str) -> bool {
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#generate-all-implied-end-tags-thoroughly
 fn is_thorough_implied_end_tag(tag: &str) -> bool {
-    matches!(
-        tag,
-        "caption"
-            | "colgroup"
-            | "dd"
-            | "dt"
-            | "li"
-            | "optgroup"
-            | "option"
-            | "p"
-            | "rb"
-            | "rp"
-            | "rt"
-            | "rtc"
-            | "tbody"
-            | "td"
-            | "tfoot"
-            | "th"
-            | "thead"
-            | "tr"
-    )
+    is_implied_end_tag(tag)
+        || matches!(
+            tag,
+            "caption" | "colgroup" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr"
+        )
 }
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#special
